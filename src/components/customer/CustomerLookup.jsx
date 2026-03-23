@@ -468,56 +468,55 @@ export default function CustomerLookup({
 
   return (
     <div className="space-y-4">
-      <Card className="border-gray-700 bg-gradient-to-br from-gray-800 to-gray-900">
-        <CardContent className="pt-6">
-          <div className="flex gap-3">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 z-10 h-5 w-5 -translate-y-1/2 text-white" />
-              <Input
-                ref={searchInputRef}
-                value={customerNumber}
-                onChange={(e) => setCustomerNumber(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder="Enter customer number or name..."
-                className="h-12 border-2 border-white/30 bg-gray-950 pl-11 text-white"
-              />
-              {showSuggestions && suggestions.length > 0 && (
-                <div className="absolute left-0 right-0 top-full mt-2 rounded-lg border bg-gray-900">
-                  {suggestions.map((s, idx) => (
-                    <button
-                      key={s.record.id ?? idx}
-                      onClick={() => handleSuggestionClick(s)}
-                      className={cn(
-                        "w-full border-b border-gray-800 px-4 py-3 text-left",
-                        idx === selectedSuggestionIndex
-                          ? "bg-gray-700"
-                          : "hover:bg-gray-800"
-                      )}
-                    >
-                      <div className="text-white">{s.customerName}</div>
-                      <div className="text-xs text-gray-400">
-                        #{s.customerNumber}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <Button
-              onClick={() => handleLookup()}
-              disabled={loading}
-              className="bg-white text-black"
-            >
-              {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Search className="h-4 w-4" />
-              )}
-            </Button>
+      <div className="relative overflow-hidden rounded-xl border border-slate-700/50 bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 p-5 shadow-xl">
+        {/* subtle top accent line */}
+        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
+        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Customer Lookup</p>
+        <div className="flex gap-2.5">
+          <div className="relative flex-1">
+            <Search className="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <Input
+              ref={searchInputRef}
+              value={customerNumber}
+              onChange={(e) => setCustomerNumber(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Customer number or name…"
+              className="h-11 border border-slate-600/60 bg-slate-950/70 pl-10 text-white placeholder:text-slate-500 focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-20 mt-1.5 rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+                {suggestions.map((s, idx) => (
+                  <button
+                    key={s.record.id ?? idx}
+                    onClick={() => handleSuggestionClick(s)}
+                    className={cn(
+                      "w-full border-b border-slate-800/60 px-4 py-2.5 text-left last:border-0 transition-colors",
+                      idx === selectedSuggestionIndex
+                        ? "bg-indigo-600/30 text-white"
+                        : "hover:bg-slate-800/70 text-slate-200"
+                    )}
+                  >
+                    <div className="text-sm font-medium">{s.customerName}</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">#{s.customerNumber}</div>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+
+          <Button
+            onClick={() => handleLookup()}
+            disabled={loading}
+            className="h-11 px-5 bg-indigo-600 hover:bg-indigo-500 text-white border-0 rounded-lg shadow-md shadow-indigo-900/40 transition-all"
+          >
+            {loading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Search className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
+      </div>
 
       <Dialog
         open={isModalOpen}

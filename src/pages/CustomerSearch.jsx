@@ -111,49 +111,69 @@ export default function CustomerSearch() {
 
             {/* Flag Stats */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-             <div 
-               onClick={() => handleFlagClick("red")}
-               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-rose-500 transition-all"
-             >
-               <div className="flex items-center gap-2">
-                 <div className="p-1.5 bg-rose-900/30 rounded-lg">
-                   <Flag className="w-3.5 h-3.5 text-rose-400" />
-                 </div>
-                 <div>
-                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Red Flags</p>
-                   <p className="text-xl font-bold text-[var(--text-primary)]">{redFlagged.length}</p>
-                 </div>
-               </div>
-             </div>
-             <div 
-               onClick={() => handleFlagClick("green")}
-               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-emerald-500 transition-all"
-             >
-               <div className="flex items-center gap-2">
-                 <div className="p-1.5 bg-emerald-900/30 rounded-lg">
-                   <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
-                 </div>
-                 <div>
-                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Green Flags</p>
-                   <p className="text-xl font-bold text-[var(--text-primary)]">{greenFlagged.length}</p>
-                 </div>
-               </div>
-             </div>
-             <div 
-               onClick={() => handleFlagClick("orange")}
-               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-amber-500 transition-all"
-             >
-               <div className="flex items-center gap-2">
-                 <div className="p-1.5 bg-amber-900/30 rounded-lg">
-                   <Flag className="w-3.5 h-3.5 text-amber-400" />
-                 </div>
-                 <div>
-                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Orange Flags</p>
-                   <p className="text-xl font-bold text-[var(--text-primary)]">{orangeFlagged.length}</p>
-                 </div>
-               </div>
-             </div>
-             </div>
+              {/* Red */}
+              <div
+                onClick={() => handleFlagClick("red")}
+                className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-900/30 hover:-translate-y-0.5"
+              >
+                <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold text-rose-400/70 uppercase tracking-widest mb-2">Critical</p>
+                    <p className="text-3xl font-extrabold text-white leading-none">{redFlagged.length}</p>
+                    <p className="text-xs text-rose-300/60 mt-1.5">Red Flagged</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/20">
+                    <Flag className="w-4 h-4 text-rose-400" />
+                  </div>
+                </div>
+                <div className="mt-3 h-0.5 rounded-full bg-rose-500/20">
+                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redFlagged.length > 0 ? "100%" : "0%" }} />
+                </div>
+              </div>
+
+              {/* Orange */}
+              <div
+                onClick={() => handleFlagClick("orange")}
+                className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-900/30 hover:-translate-y-0.5"
+              >
+                <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-2">Attention</p>
+                    <p className="text-3xl font-extrabold text-white leading-none">{orangeFlagged.length}</p>
+                    <p className="text-xs text-amber-300/60 mt-1.5">Orange Flagged</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/20">
+                    <AlertCircle className="w-4 h-4 text-amber-400" />
+                  </div>
+                </div>
+                <div className="mt-3 h-0.5 rounded-full bg-amber-500/20">
+                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeFlagged.length > 0 ? "100%" : "0%" }} />
+                </div>
+              </div>
+
+              {/* Green */}
+              <div
+                onClick={() => handleFlagClick("green")}
+                className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-900/30 hover:-translate-y-0.5"
+              >
+                <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-2">Approved</p>
+                    <p className="text-3xl font-extrabold text-white leading-none">{greenFlagged.length}</p>
+                    <p className="text-xs text-emerald-300/60 mt-1.5">Green Flagged</p>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/20">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                  </div>
+                </div>
+                <div className="mt-3 h-0.5 rounded-full bg-emerald-500/20">
+                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenFlagged.length > 0 ? "100%" : "0%" }} />
+                </div>
+              </div>
+            </div>
 
             {/* Flagged Customers Modal */}
             <FlaggedCustomersModal
