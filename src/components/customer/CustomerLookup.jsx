@@ -70,15 +70,33 @@ function flattenRecord(record) {
       record.last_unpaid_invoice_1 || record.data?.last_unpaid_invoice_1,
     last_unpaid_invoice_1_amount:
       record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
-    last_unpaid_invoice_2:
-      record.last_unpaid_invoice_2 || record.data?.last_unpaid_invoice_2,
-    last_unpaid_invoice_2_amount:
-      record.last_unpaid_invoice_2_amount || record.data?.last_unpaid_invoice_2_amount,
-    last_unpaid_invoice_3:
-      record.last_unpaid_invoice_3 || record.data?.last_unpaid_invoice_3,
-    last_unpaid_invoice_3_amount:
-      record.last_unpaid_invoice_3_amount || record.data?.last_unpaid_invoice_3_amount,
+    last_unpaid_invoice_date:
+      record.last_unpaid_invoice_date || record.data?.last_unpaid_invoice_date,
   };
+}
+
+// Returns the numeric prefix of a customer number (e.g. "157OC" → "157", "157" → "157")
+function getNumericPrefix(custNum) {
+  const m = String(custNum || "").match(/^(\d+)/);
+  return m ? m[1] : null;
+}
+
+// True if the customer number is purely numeric (it's a parent)
+function isParentCustNum(custNum) {
+  return /^\d+$/.test(String(custNum || "").trim());
+}
+
+// Parse a numeric string to float, return 0 if invalid
+function parseAmount(val) {
+  if (!val || String(val).trim() === "") return 0;
+  const n = parseFloat(String(val).replace(/[^0-9.\-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+function formatAmount(val) {
+  const n = parseAmount(val);
+  if (n === 0) return "—";
+  return n.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 async function fetchLocalRecords() {
@@ -174,6 +192,7 @@ export default function CustomerLookup({
   const [customerNumber, setCustomerNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [customer, setCustomer] = useState(null);
+  const [subAccounts, setSubAccounts] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [flagReason, setFlagReason] = useState("");
   const [isUpdatingFlag, setIsUpdatingFlag] = useState(false);
@@ -188,6 +207,7 @@ export default function CustomerLookup({
 
   const closeAndReset = useCallback(() => {
     setCustomer(null);
+    setSubAccounts([]);
     setCustomerNumber("");
     setFlagReason("");
     setIsModalOpen(false);
@@ -342,6 +362,18 @@ export default function CustomerLookup({
       setFlagReason(record.flag_reason || "");
       setIsModalOpen(true);
       loadRecordHistory(record.id);
+
+      // If this is a parent account (purely numeric), find sub-accounts
+      const custNum = String(record.customer_number || "").trim();
+      if (isParentCustNum(custNum)) {
+        const children = freshRecords.filter((r) => {
+          const cn = String(r.customer_number || "").trim();
+          return cn !== custNum && getNumericPrefix(cn) === custNum;
+        });
+        setSubAccounts(children);
+      } else {
+        setSubAccounts([]);
+      }
 
       if (onRecordSelect) onRecordSelect(record);
       if (onLookupComplete) onLookupComplete(record);
@@ -532,108 +564,140 @@ export default function CustomerLookup({
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-gray-400" />
-                <h4 className="text-sm font-semibold text-gray-300">Age Analysis</h4>
-              </div>
+            {/* ── Age Analysis (with sub-accounts if parent) ── */}
+            {(() => {
+              const allAccounts = [
+                { label: String(customer?.customer_number || ""), record: customer, isMain: true },
+                ...subAccounts.map((r) => ({
+                  label: String(r.customer_number || ""),
+                  record: r,
+                  isMain: false,
+                })),
+              ];
 
-              {(() => {
-                const buckets = [
-                  { label: "Current", value: customer?.age_current },
-                  { label: "7 Days", value: customer?.age_7_days },
-                  { label: "14 Days", value: customer?.age_14_days },
-                  { label: "21+ Days", value: customer?.age_21_days },
-                ];
-                const hasAnyData = buckets.some((b) => b.value && b.value.trim() !== "");
+              const bucketKeys = [
+                { key: "age_current", label: "Current" },
+                { key: "age_7_days", label: "7 Days" },
+                { key: "age_14_days", label: "14 Days" },
+                { key: "age_21_days", label: "21+ Days" },
+              ];
 
-                if (!hasAnyData) {
-                  return <p className="text-sm text-gray-400">No age analysis data</p>;
-                }
+              const hasSubAccounts = subAccounts.length > 0;
 
-                return (
-                  <div className="grid grid-cols-4 gap-2">
-                    {buckets.map(({ label, value }) => {
-                      const display = value && value.trim() !== "" ? value : "—";
+              const totals = bucketKeys.reduce((acc, { key }) => {
+                acc[key] = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.[key]), 0);
+                return acc;
+              }, {});
+
+              return (
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Calendar className="h-4 w-4 text-gray-400" />
+                    <h4 className="text-sm font-semibold text-gray-300">Age Analysis</h4>
+                  </div>
+
+                  <div className="space-y-2">
+                    {/* Header row */}
+                    <div className="grid grid-cols-5 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                      <span>Account</span>
+                      <span className="text-right">Current</span>
+                      <span className="text-right">7 Days</span>
+                      <span className="text-right">14 Days</span>
+                      <span className="text-right">21+ Days</span>
+                    </div>
+
+                    {allAccounts.map(({ label, record: r, isMain }) => (
+                      <div
+                        key={label}
+                        className={cn(
+                          "grid grid-cols-5 gap-1 rounded-lg px-2 py-1.5",
+                          isMain ? "bg-gray-700" : "bg-gray-900"
+                        )}
+                      >
+                        <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
+                          {label}
+                        </span>
+                        {bucketKeys.map(({ key }) => (
+                          <span key={key} className={cn("text-xs text-right", parseAmount(r?.[key]) !== 0 ? "text-white" : "text-gray-600")}>
+                            {formatAmount(r?.[key])}
+                          </span>
+                        ))}
+                      </div>
+                    ))}
+
+                    {hasSubAccounts && (
+                      <div className="grid grid-cols-5 gap-1 rounded-lg border border-gray-600 bg-gray-800 px-2 py-1.5 mt-1">
+                        <span className="text-xs font-bold text-yellow-400">TOTAL</span>
+                        {bucketKeys.map(({ key }) => (
+                          <span key={key} className={cn("text-xs font-bold text-right", totals[key] !== 0 ? "text-yellow-300" : "text-gray-600")}>
+                            {formatAmount(String(totals[key]))}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* ── Last Unpaid Invoice (with sub-accounts if parent) ── */}
+            {(() => {
+              const allAccounts = [
+                { label: String(customer?.customer_number || ""), record: customer, isMain: true },
+                ...subAccounts.map((r) => ({
+                  label: String(r.customer_number || ""),
+                  record: r,
+                  isMain: false,
+                })),
+              ];
+
+              return (
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <Flag className="h-4 w-4 text-orange-400" />
+                    <h4 className="text-sm font-semibold text-gray-300">Last Unpaid Invoice</h4>
+                  </div>
+
+                  <div className="space-y-2">
+                    {/* Header */}
+                    <div className="grid grid-cols-4 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                      <span>Account</span>
+                      <span>Invoice No.</span>
+                      <span className="text-right">Amount</span>
+                      <span>Date</span>
+                    </div>
+
+                    {allAccounts.map(({ label, record: r, isMain }) => {
+                      const inv = r?.last_unpaid_invoice_1;
+                      const amt = r?.last_unpaid_invoice_1_amount;
+                      const date = r?.last_unpaid_invoice_date;
                       return (
                         <div
                           key={label}
-                          className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2"
+                          className={cn(
+                            "grid grid-cols-4 gap-1 rounded-lg px-2 py-1.5",
+                            isMain ? "bg-gray-700" : "bg-gray-900"
+                          )}
                         >
-                          <span className="mb-1 text-xs text-gray-500">{label}</span>
-                          <span
-                            className={cn(
-                              "text-sm font-semibold",
-                              display !== "—" ? "text-white" : "text-gray-600"
-                            )}
-                          >
-                            {display}
+                          <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
+                            {label}
+                          </span>
+                          <span className={cn("text-xs", inv ? "text-orange-300" : "text-gray-600")}>
+                            {inv || "—"}
+                          </span>
+                          <span className={cn("text-xs text-right", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
+                            {formatAmount(amt)}
+                          </span>
+                          <span className={cn("text-xs", date ? "text-gray-300" : "text-gray-600")}>
+                            {date || "—"}
                           </span>
                         </div>
                       );
                     })}
                   </div>
-                );
-              })()}
-            </div>
-
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
-              <div className="mb-3 flex items-center gap-2">
-                <Flag className="h-4 w-4 text-orange-400" />
-                <h4 className="text-sm font-semibold text-gray-300">
-                  Last Unpaid Invoices
-                </h4>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  {
-                    label: "Invoice 1",
-                    number: customer?.last_unpaid_invoice_1,
-                    amount: customer?.last_unpaid_invoice_1_amount,
-                  },
-                  {
-                    label: "Invoice 2",
-                    number: customer?.last_unpaid_invoice_2,
-                    amount: customer?.last_unpaid_invoice_2_amount,
-                  },
-                  {
-                    label: "Invoice 3",
-                    number: customer?.last_unpaid_invoice_3,
-                    amount: customer?.last_unpaid_invoice_3_amount,
-                  },
-                ].map(({ label, number, amount }) => (
-                  <div
-                    key={label}
-                    className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2 gap-1"
-                  >
-                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</span>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-gray-500">No.</span>
-                      <span
-                        className={cn(
-                          "text-sm font-medium",
-                          number && number.trim() !== "" ? "text-orange-300" : "text-gray-600"
-                        )}
-                      >
-                        {number && number.trim() !== "" ? number : "—"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] text-gray-500">Val.</span>
-                      <span
-                        className={cn(
-                          "text-xs",
-                          amount && amount.trim() !== "" ? "text-gray-200" : "text-gray-600"
-                        )}
-                      >
-                        {amount && amount.trim() !== "" ? amount : "—"}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+                </div>
+              );
+            })()}
 
             <div className="space-y-3 rounded-xl border border-gray-700 bg-gray-800 p-4">
               <div className="flex items-center justify-between">

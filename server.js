@@ -266,6 +266,7 @@ ensureColumn('datarecord', 'age_current', 'TEXT');
 ensureColumn('datarecord', 'age_7_days', 'TEXT');
 ensureColumn('datarecord', 'age_14_days', 'TEXT');
 ensureColumn('datarecord', 'age_21_days', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
@@ -473,6 +474,10 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
     },
     last_unpaid_invoice_3_amount: {
       fallbacks: ['last_unpaid_invoice_3_amount', 'LastUnpaidInvoice3Amount', 'LAST_UNPAID_INVOICE_3_AMOUNT'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_date: {
+      fallbacks: ['last_unpaid_invoice_date', 'LastUnpaidInvoiceDate', 'LAST_UNPAID_INVOICE_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate'],
       defaultMode: 'sync',
     },
     note: {
@@ -848,6 +853,7 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_2_amount = ?,
         last_unpaid_invoice_3 = ?,
         last_unpaid_invoice_3_amount = ?,
+        last_unpaid_invoice_date = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -880,9 +886,10 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_2_amount,
         last_unpaid_invoice_3,
         last_unpaid_invoice_3_amount,
+        last_unpaid_invoice_date,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // Shared write-rows helper used by both query mode and legacy table mode
@@ -894,7 +901,8 @@ async function runConnectionImport(connectionId) {
                local_fields, flag_color, flag_reason, flag_created_by, data,
                last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
                last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
-               last_unpaid_invoice_3, last_unpaid_invoice_3_amount
+               last_unpaid_invoice_3, last_unpaid_invoice_3_amount,
+               last_unpaid_invoice_date
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -957,6 +965,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_2_amount ?? existing.last_unpaid_invoice_2_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_3 ?? existing.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? existing.last_unpaid_invoice_3_amount ?? ''),
+              String(baseRecordData.last_unpaid_invoice_date ?? existing.last_unpaid_invoice_date ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -988,6 +997,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_2_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
+              String(baseRecordData.last_unpaid_invoice_date ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );

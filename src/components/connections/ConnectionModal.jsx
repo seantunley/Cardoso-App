@@ -52,10 +52,7 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "age_analysis", label: "Age Analysis (legacy combined)", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_2", label: "Invoice 2 — Number", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_2_amount", label: "Invoice 2 — Amount", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_3", label: "Invoice 3 — Number", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_3_amount", label: "Invoice 3 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_date", label: "Last Unpaid Invoice — Date", type: "text", isBuiltIn: true },
   { key: "note", label: "Note", type: "text", isBuiltIn: true },
   { key: "flag_color", label: "Flag Color", type: "text", isBuiltIn: true },
   { key: "flag_reason", label: "Flag Reason", type: "text", isBuiltIn: true },
@@ -426,7 +423,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 setQueryColumns([]);
                 setQueryPreview([]);
               }}
-              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTCUR AS age_current,\n  AMTDUE07 AS age_7_days,\n  AMTDUE14 AS age_14_days,\n  AMTDUE21 AS age_21_days,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTCUR AS age_current,\n  AMTDUE07 AS age_7_days,\n  AMTDUE14 AS age_14_days,\n  AMTDUE21 AS age_21_days,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
               rows={8}
               className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
             />
