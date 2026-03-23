@@ -9,6 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -16,25 +17,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Database, X, RefreshCcw } from "lucide-react";
+import { Loader2, Database, X, RefreshCcw, Play, Table } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Card } from "@/components/ui/card";
 import { toast } from "sonner";
 import FieldMappingBuilder from "./FieldMappingBuilder";
-import FieldMappingSuggestions from "./FieldMappingSuggestions";
 
 async function fetchLocalCustomFields() {
   const response = await fetch("/api/custom-fields", {
     method: "GET",
     credentials: "include",
   });
-
   const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(result.error || "Failed to load custom fields");
-  }
-
+  if (!response.ok) throw new Error(result.error || "Failed to load custom fields");
   return Array.isArray(result) ? result : [];
 }
 
@@ -43,26 +37,19 @@ async function runLocalImport(connectionId) {
     method: "POST",
     credentials: "include",
   });
-
   const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(result.error || "Import failed");
-  }
-
+  if (!response.ok) throw new Error(result.error || "Import failed");
   return result;
 }
 
 const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
-  // Age Analysis — 4 discrete buckets (recommended) plus legacy single-field fallback
   { key: "age_current", label: "Age Analysis — Current", type: "text", isBuiltIn: true },
   { key: "age_7_days", label: "Age Analysis — 7 Days", type: "text", isBuiltIn: true },
   { key: "age_14_days", label: "Age Analysis — 14 Days", type: "text", isBuiltIn: true },
   { key: "age_21_days", label: "Age Analysis — 21+ Days", type: "text", isBuiltIn: true },
   { key: "age_analysis", label: "Age Analysis (legacy combined)", type: "text", isBuiltIn: true },
-  // Last Unpaid Invoices
   { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_2", label: "Invoice 2 — Number", type: "text", isBuiltIn: true },
@@ -85,27 +72,27 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     database_name: "",
     username: "",
     password: "",
-    table_configs: [],
-    join_configuration: {},
-    field_mappings: {},
+    sync_query: "",
+    query_index_field: "",
+    query_field_mappings: {},
     status: "inactive",
   });
 
-  const [availableTables, setAvailableTables] = useState([]);
-  const [loadingTables, setLoadingTables] = useState(false);
-  const [availableFields, setAvailableFields] = useState({});
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
-  const [selectedTableForMapping, setSelectedTableForMapping] = useState(null);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [queryTestStatus, setQueryTestStatus] = useState(null); // null | 'testing' | 'ok' | 'error'
+  const [queryColumns, setQueryColumns] = useState([]);
+  const [queryPreview, setQueryPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [customLocalFields, setCustomLocalFields] = useState([]);
 
   const allLocalFields = [
     ...BUILT_IN_LOCAL_FIELDS,
-    ...customLocalFields.map((field) => ({
-      key: field.field_key,
-      label: field.label,
-      type: field.field_type,
-      options: field.options,
+    ...customLocalFields.map((f) => ({
+      key: f.field_key,
+      label: f.label,
+      type: f.field_type,
+      options: f.options,
       isBuiltIn: false,
     })),
   ];
@@ -114,63 +101,13 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     try {
       const fields = await fetchLocalCustomFields();
       setCustomLocalFields(fields);
-    } catch (error) {
-      console.error("Failed to load local custom fields:", error);
-    }
-  };
-
-  const loadExistingConnectionFields = async (conn) => {
-    if (!conn?.host || !conn?.database_name || !conn?.username) return;
-    if (!conn?.encrypted_password) return;
-
-    try {
-      setLoadingTables(true);
-
-      const response = await fetch("/api/test-connection", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          host: conn.host,
-          port: conn.port || 1433,
-          database_name: conn.database_name,
-          username: conn.username,
-          password: conn.encrypted_password,
-        }),
-      });
-
-      const text = await response.text();
-
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { message: text };
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || data.message || "Failed to load fields");
-      }
-
-      setAvailableTables(data.tables || []);
-      setAvailableFields(data.fields || {});
-
-      if (!selectedTableForMapping && data.tables?.length > 0) {
-        setSelectedTableForMapping(data.tables[0]);
-      }
-    } catch (error) {
-      console.error("Failed to load existing connection fields:", error);
-    } finally {
-      setLoadingTables(false);
+    } catch (err) {
+      console.error("Failed to load custom fields:", err);
     }
   };
 
   useEffect(() => {
-    if (open) {
-      loadCustomLocalFields();
-    }
+    if (open) loadCustomLocalFields();
   }, [open]);
 
   useEffect(() => {
@@ -182,52 +119,21 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         database_name: connection.database_name || "",
         username: connection.username || "",
         password: "",
-        table_configs:
-          typeof connection.table_configs === "string"
-            ? JSON.parse(connection.table_configs || "[]")
-            : connection.table_configs || [],
-        join_configuration:
-          typeof connection.join_configuration === "string"
-            ? JSON.parse(connection.join_configuration || "{}")
-            : connection.join_configuration || {},
-        field_mappings: (() => {
-          const raw = typeof connection.field_mappings === "string"
-            ? JSON.parse(connection.field_mappings || "{}")
-            : connection.field_mappings || {};
-          // Migrate legacy flat format { localKey: { sourceField } } to per-table
-          // Per-table format: { tableName: { localKey: { sourceField } } }
-          const isFlat = Object.keys(raw).length > 0 &&
-            Object.values(raw).some((v) => v && typeof v === "object" && v.sourceField);
-          if (isFlat) {
-            const tableConfigs = typeof connection.table_configs === "string"
-              ? JSON.parse(connection.table_configs || "[]")
-              : connection.table_configs || [];
-            // Assign flat mappings to all tables as a best-effort migration
-            const migrated = {};
-            for (const t of tableConfigs) {
-              migrated[t.table_name] = raw;
-            }
-            return migrated;
-          }
+        sync_query: connection.sync_query || "",
+        query_index_field: connection.query_index_field || "",
+        query_field_mappings: (() => {
+          const raw = typeof connection.query_field_mappings === "string"
+            ? JSON.parse(connection.query_field_mappings || "{}")
+            : connection.query_field_mappings || {};
           return raw;
         })(),
         status: connection.status || "inactive",
       });
-
-      if (connection.table_configs) {
-        const tableConfigs =
-          typeof connection.table_configs === "string"
-            ? JSON.parse(connection.table_configs)
-            : connection.table_configs;
-
-        setAvailableTables(tableConfigs.map((t) => t.table_name));
-
-        if (tableConfigs.length > 0) {
-          setSelectedTableForMapping(tableConfigs[0].table_name);
-        }
-      }
-
-      loadExistingConnectionFields(connection);
+      // Reset query test state when editing an existing connection
+      setQueryTestStatus(null);
+      setQueryColumns([]);
+      setQueryPreview([]);
+      setConnectionTestStatus(null);
     } else {
       setFormData({
         name: "",
@@ -236,15 +142,15 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         database_name: "",
         username: "",
         password: "",
-        table_configs: [],
-        join_configuration: {},
-        field_mappings: {},
+        sync_query: "",
+        query_index_field: "",
+        query_field_mappings: {},
         status: "inactive",
       });
-      setAvailableTables([]);
-      setAvailableFields({});
       setConnectionTestStatus(null);
-      setSelectedTableForMapping(null);
+      setQueryTestStatus(null);
+      setQueryColumns([]);
+      setQueryPreview([]);
     }
   }, [connection, open]);
 
@@ -255,7 +161,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       return;
     }
 
-    setLoadingTables(true);
+    setTestingConnection(true);
     setConnectionTestStatus(null);
 
     try {
@@ -272,125 +178,109 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         }),
       });
 
-      const text = await response.text();
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || data.message || "Test failed");
 
-      let data;
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { message: text };
-      }
-
-      if (!response.ok) {
-        throw new Error(data.error || data.message || "Test failed");
-      }
-
-      setAvailableTables(data.tables || []);
-      setAvailableFields(data.fields || {});
       setConnectionTestStatus("success");
-      toast.success(`Connected — ${data.tables?.length || 0} tables found`);
-
-      if (!selectedTableForMapping && data.tables?.length > 0) {
-        setSelectedTableForMapping(data.tables[0]);
-      }
+      toast.success("Connection successful");
     } catch (error) {
       setConnectionTestStatus("error");
-      toast.error(`Connection failed: ${error.message || "Unable to connect to database"}`);
+      toast.error(`Connection failed: ${error.message}`);
     } finally {
-      setLoadingTables(false);
+      setTestingConnection(false);
     }
   };
 
-  const addTableConfig = (tableName) => {
-    if (formData.table_configs.some((t) => t.table_name === tableName)) {
+  const handleTestQuery = async () => {
+    if (!formData.sync_query?.trim()) {
+      toast.error("Enter a SQL query first");
+      return;
+    }
+    const password = formData.password || connection?.encrypted_password;
+    if (!formData.host || !formData.database_name || !formData.username || !password) {
+      toast.error("Fill in connection details and test the connection first");
       return;
     }
 
-    setFormData({
-      ...formData,
-      table_configs: [
-        ...formData.table_configs,
-        {
-          table_name: tableName,
-          selected_fields: [],
-          index_field: "",
-        },
-      ],
-    });
-  };
+    setQueryTestStatus("testing");
+    setQueryColumns([]);
+    setQueryPreview([]);
 
-  const removeTableConfig = (tableName) => {
-    const nextMappings = { ...formData.field_mappings };
-    delete nextMappings[tableName];
-    setFormData({
-      ...formData,
-      table_configs: formData.table_configs.filter((t) => t.table_name !== tableName),
-      field_mappings: nextMappings,
-    });
-  };
+    try {
+      const response = await fetch("/api/test-query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          host: formData.host,
+          port: formData.port || 1433,
+          database_name: formData.database_name,
+          username: formData.username,
+          password,
+          query: formData.sync_query,
+        }),
+      });
 
-  const updateTableConfig = (tableName, updates) => {
-    setFormData({
-      ...formData,
-      table_configs: formData.table_configs.map((t) =>
-        t.table_name === tableName ? { ...t, ...updates } : t
-      ),
-    });
-  };
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Query failed");
 
-  const toggleField = (tableName, field) => {
-    const tableConfig = formData.table_configs.find((t) => t.table_name === tableName);
-    if (!tableConfig) return;
+      setQueryColumns(data.columns || []);
+      setQueryPreview(data.preview || []);
+      setQueryTestStatus("ok");
 
-    const hasField = tableConfig.selected_fields.includes(field);
+      // Auto-set index field if not already set and there's an obvious candidate
+      if (!formData.query_index_field && data.columns?.length > 0) {
+        const autoIndex = data.columns.find((c) =>
+          /^(id|custno|customer_?no|customer_?number|cust_?id|account_?no)$/i.test(c)
+        );
+        if (autoIndex) {
+          setFormData((prev) => ({ ...prev, query_index_field: autoIndex }));
+        }
+      }
 
-    updateTableConfig(tableName, {
-      selected_fields: hasField
-        ? tableConfig.selected_fields.filter((f) => f !== field)
-        : [...tableConfig.selected_fields, field],
-    });
+      toast.success(`Query OK — ${data.columns?.length || 0} columns, ${data.preview?.length || 0} preview rows`);
+    } catch (error) {
+      setQueryTestStatus("error");
+      toast.error(`Query failed: ${error.message}`);
+    }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (formData.table_configs.length === 0) {
-      toast.error("Please add at least one table");
+    if (!formData.sync_query?.trim()) {
+      toast.error("Please enter a SQL query");
       return;
     }
-
-    const missingIndex = formData.table_configs.find((t) => !t.index_field);
-    if (missingIndex) {
-      toast.error(`Please select index field for table: ${missingIndex.table_name}`);
+    if (!formData.query_index_field?.trim()) {
+      toast.error("Please specify the index column (unique row identifier)");
       return;
     }
 
     const dataToSave = {
-      ...formData,
-      encrypted_password: formData.password
-        ? formData.password
-        : connection?.encrypted_password || "",
-      table_configs: JSON.stringify(formData.table_configs),
-      join_configuration: JSON.stringify(formData.join_configuration),
-      field_mappings: JSON.stringify(formData.field_mappings || {}),
+      name: formData.name,
+      host: formData.host,
+      port: formData.port,
+      database_name: formData.database_name,
+      username: formData.username,
+      encrypted_password: formData.password || connection?.encrypted_password || "",
+      sync_query: formData.sync_query,
+      query_index_field: formData.query_index_field,
+      query_field_mappings: JSON.stringify(formData.query_field_mappings || {}),
+      status: formData.status,
     };
-
-    delete dataToSave.password;
 
     onSave(dataToSave, connection?.id);
   };
 
   const handleImport = async () => {
     if (!connection?.id) return;
-
     setIsImporting(true);
-
     try {
       const result = await runLocalImport(connection.id);
-      toast.success(result.message || `Import completed - ${result.imported || 0} records added`);
+      toast.success(result.message || `Sync completed — ${result.imported || 0} records`);
     } catch (e) {
-      console.error("Import failed:", e);
-      toast.error("Import failed: " + (e.message || "Unknown error"));
+      toast.error("Sync failed: " + (e.message || "Unknown error"));
     } finally {
       setIsImporting(false);
     }
@@ -409,13 +299,14 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 {connection ? "Edit Connection" : "New Connection"}
               </DialogTitle>
               <p className="text-sm text-gray-400 mt-0.5">
-                Configure your SQL database connection
+                Configure your SQL Server connection and sync query
               </p>
             </div>
           </div>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-5 py-4">
+          {/* ── Connection details ── */}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-300">Connection Name</Label>
             <Input
@@ -433,22 +324,18 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               <Input
                 value={formData.host}
                 onChange={(e) => setFormData({ ...formData, host: e.target.value })}
-                placeholder="localhost or IP address"
+                placeholder="localhost or IP"
                 className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-500"
                 required
               />
             </div>
-
             <div className="space-y-2">
               <Label className="text-sm font-medium text-gray-300">Port</Label>
               <Input
                 type="number"
                 value={formData.port}
                 onChange={(e) =>
-                  setFormData({
-                    ...formData,
-                    port: e.target.value === "" ? "" : parseInt(e.target.value, 10),
-                  })
+                  setFormData({ ...formData, port: e.target.value === "" ? "" : parseInt(e.target.value, 10) })
                 }
                 placeholder="1433"
                 className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-500"
@@ -467,7 +354,6 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 required
               />
             </div>
-
             <div className="space-y-2">
               <Label className="text-sm font-medium text-gray-300">Username</Label>
               <Input
@@ -495,11 +381,13 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             )}
           </div>
 
-          <div className="pt-4 border-t border-gray-800">
+          {/* ── Test connection ── */}
+          <div className="pt-2">
             <Button
               type="button"
               onClick={handleTestConnection}
-              disabled={loadingTables}
+              disabled={testingConnection}
+              variant="outline"
               className={`w-full ${
                 connectionTestStatus === "success"
                   ? "border-green-700 text-green-400 hover:bg-green-900/20"
@@ -508,209 +396,202 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                     : "border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
               }`}
             >
-              {loadingTables ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Testing Connection...
-                </>
+              {testingConnection ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Testing Connection...</>
               ) : connectionTestStatus === "success" ? (
-                <>
-                  <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Connection Successful
-                </>
+                <><span className="mr-2">✓</span>Connection Successful</>
               ) : connectionTestStatus === "error" ? (
-                <>
-                  <X className="w-4 h-4 mr-2" />
-                  Connection Failed
-                </>
+                <><X className="w-4 h-4 mr-2" />Connection Failed — Retry</>
               ) : (
-                <>
-                  <Database className="w-4 h-4 mr-2" />
-                  Test Connection & Load Tables
-                </>
+                <><Database className="w-4 h-4 mr-2" />Test Connection</>
               )}
             </Button>
           </div>
 
-          {availableTables.length > 0 && (
-            <div className="space-y-3 pt-4 border-t border-gray-800">
-              <Label className="text-gray-300">Available Tables - Click to Add</Label>
-              <div className="flex flex-wrap gap-2">
-                {availableTables.map((table) => {
-                  const isSelected = formData.table_configs.some((t) => t.table_name === table);
-
-                  return (
-                    <Button
-                      key={table}
-                      type="button"
-                      size="sm"
-                      variant={isSelected ? "default" : "outline"}
-                      className={
-                        isSelected
-                          ? "bg-white text-gray-900"
-                          : "border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-                      }
-                      onClick={() => {
-                        if (isSelected) {
-                          removeTableConfig(table);
-                        } else {
-                          addTableConfig(table);
-                        }
-                      }}
-                    >
-                      {table}
-                      {isSelected && <X className="w-3 h-3 ml-2" />}
-                    </Button>
-                  );
-                })}
-              </div>
+          {/* ── SQL Query ── */}
+          <div className="space-y-3 pt-4 border-t border-gray-800">
+            <div>
+              <Label className="text-sm font-medium text-gray-300">Sync Query</Label>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Write a SELECT query. Only the columns you select will be fetched.
+                Alias columns to skip manual mapping (e.g. <code className="text-gray-400">AMTDUE07 AS age_7_days</code>).
+              </p>
             </div>
-          )}
 
-          {formData.table_configs.length > 0 && (
-            <div className="space-y-4 pt-4 border-t border-gray-800">
-              <Label className="text-gray-300">Select Table for Field Mapping</Label>
-              <Select value={selectedTableForMapping || ""} onValueChange={setSelectedTableForMapping}>
+            <Textarea
+              value={formData.sync_query}
+              onChange={(e) => {
+                setFormData({ ...formData, sync_query: e.target.value });
+                setQueryTestStatus(null);
+                setQueryColumns([]);
+                setQueryPreview([]);
+              }}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTCUR AS age_current,\n  AMTDUE07 AS age_7_days,\n  AMTDUE14 AS age_14_days,\n  AMTDUE21 AS age_21_days,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              rows={8}
+              className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
+            />
+
+            <Button
+              type="button"
+              onClick={handleTestQuery}
+              disabled={queryTestStatus === "testing" || !formData.sync_query?.trim()}
+              variant="outline"
+              className={`w-full ${
+                queryTestStatus === "ok"
+                  ? "border-green-700 text-green-400 hover:bg-green-900/20"
+                  : queryTestStatus === "error"
+                    ? "border-red-700 text-red-400 hover:bg-red-900/20"
+                    : "border-blue-700 text-blue-300 hover:bg-blue-900/20"
+              }`}
+            >
+              {queryTestStatus === "testing" ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running Query...</>
+              ) : queryTestStatus === "ok" ? (
+                <><span className="mr-2">✓</span>Query OK — {queryColumns.length} columns detected</>
+              ) : queryTestStatus === "error" ? (
+                <><X className="w-4 h-4 mr-2" />Query Error — Fix and retry</>
+              ) : (
+                <><Play className="w-4 h-4 mr-2" />Test Query (preview 5 rows)</>
+              )}
+            </Button>
+          </div>
+
+          {/* ── Index field ── */}
+          {queryColumns.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-300">
+                Index Column <span className="text-red-400">*</span>
+              </Label>
+              <p className="text-xs text-gray-500">
+                The column that uniquely identifies each row (used to match records on re-sync).
+              </p>
+              <Select
+                value={formData.query_index_field}
+                onValueChange={(val) => setFormData({ ...formData, query_index_field: val })}
+              >
                 <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
-                  <SelectValue placeholder="Select a table" />
+                  <SelectValue placeholder="Select the unique key column" />
                 </SelectTrigger>
                 <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                  {formData.table_configs.map((tableConfig) => (
-                    <SelectItem key={tableConfig.table_name} value={tableConfig.table_name}>
-                      {tableConfig.table_name}
-                    </SelectItem>
+                  {queryColumns.map((col) => (
+                    <SelectItem key={col} value={col}>{col}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-
-              {selectedTableForMapping && availableFields[selectedTableForMapping] && (
-                <div className="space-y-4">
-                  <FieldMappingSuggestions
-                    sourceFields={availableFields[selectedTableForMapping] || []}
-                    localFields={allLocalFields}
-                    onApplySuggestions={(mappings) => {
-                      setFormData({
-                        ...formData,
-                        field_mappings: {
-                          ...formData.field_mappings,
-                          [selectedTableForMapping]: {
-                            ...(formData.field_mappings?.[selectedTableForMapping] || {}),
-                            ...mappings,
-                          },
-                        },
-                      });
-                    }}
-                    isLoading={loadingTables}
-                  />
-
-                  <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
-                    <FieldMappingBuilder
-                      fieldMappings={formData.field_mappings?.[selectedTableForMapping] || {}}
-                      availableFields={availableFields[selectedTableForMapping] || []}
-                      localFields={allLocalFields}
-                      onMappingsChange={(mappings) => {
-                        setFormData({
-                          ...formData,
-                          field_mappings: {
-                            ...formData.field_mappings,
-                            [selectedTableForMapping]: mappings,
-                          },
-                        });
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
-          {formData.table_configs.length > 0 && (
-            <div className="space-y-4 pt-4 border-t border-gray-800">
-              <Label className="text-gray-300">
-                Table Configuration ({formData.table_configs.length} selected)
-              </Label>
+          {/* Manual index field input if query hasn't been tested yet but editing existing */}
+          {queryColumns.length === 0 && formData.query_index_field && (
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-300">Index Column</Label>
+              <Input
+                value={formData.query_index_field}
+                onChange={(e) => setFormData({ ...formData, query_index_field: e.target.value })}
+                placeholder="e.g. CUSTNO"
+                className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-500"
+              />
+              <p className="text-xs text-gray-400">Run "Test Query" to pick from a dropdown instead.</p>
+            </div>
+          )}
 
-              <div className="space-y-3 max-h-96 overflow-y-auto pr-2">
-                {formData.table_configs.map((tableConfig) => {
-                  const fields = availableFields[tableConfig.table_name] || [];
-
-                  return (
-                    <Card key={tableConfig.table_name} className="p-4 border-gray-700 bg-gray-800">
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <h4 className="font-semibold text-white">{tableConfig.table_name}</h4>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => removeTableConfig(tableConfig.table_name)}
-                            className="text-gray-400 hover:text-white hover:bg-gray-700"
+          {/* ── Preview table ── */}
+          {queryPreview.length > 0 && (
+            <div className="space-y-2 pt-2 border-t border-gray-800">
+              <div className="flex items-center gap-2">
+                <Table className="w-4 h-4 text-gray-400" />
+                <Label className="text-gray-300">Preview (first {queryPreview.length} rows)</Label>
+              </div>
+              <div className="overflow-x-auto rounded-lg border border-gray-700">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-gray-800">
+                    <tr>
+                      {queryColumns.map((col) => (
+                        <th
+                          key={col}
+                          className="px-3 py-2 text-left text-gray-400 font-medium whitespace-nowrap border-b border-gray-700"
+                        >
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {queryPreview.map((row, i) => (
+                      <tr key={i} className={i % 2 === 0 ? "bg-gray-900" : "bg-gray-850"}>
+                        {queryColumns.map((col) => (
+                          <td
+                            key={col}
+                            className="px-3 py-1.5 text-gray-300 whitespace-nowrap max-w-[160px] truncate"
+                            title={String(row[col] ?? "")}
                           >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-xs text-gray-400">Index/Primary Key Field *</Label>
-                          <Select
-                            value={tableConfig.index_field}
-                            onValueChange={(val) =>
-                              updateTableConfig(tableConfig.table_name, { index_field: val })
-                            }
-                          >
-                            <SelectTrigger className="h-9 bg-gray-900 border-gray-700 text-gray-100">
-                              <SelectValue placeholder="Select index field for joins" />
-                            </SelectTrigger>
-                            <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                              {fields.map((field) => (
-                                <SelectItem key={field} value={field}>
-                                  {field}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-
-                        <div className="space-y-2">
-                          <Label className="text-xs text-gray-400">Fields to Import</Label>
-                          <div className="flex flex-wrap gap-2 p-3 bg-gray-900 rounded-lg border border-gray-700">
-                            {fields.map((field) => {
-                              const isSelected = tableConfig.selected_fields.includes(field);
-
-                              return (
-                                <Badge
-                                  key={field}
-                                  variant={isSelected ? "default" : "outline"}
-                                  className={`cursor-pointer transition-colors ${
-                                    isSelected
-                                      ? "bg-white text-gray-900"
-                                      : "border-gray-700 text-gray-300 hover:bg-gray-800"
-                                  }`}
-                                  onClick={() => toggleField(tableConfig.table_name, field)}
-                                >
-                                  {field}
-                                </Badge>
-                              );
-                            })}
-                          </div>
-                          <p className="text-xs text-gray-400">
-                            {tableConfig.selected_fields.length} fields selected
-                          </p>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
+                            {row[col] !== null && row[col] !== undefined ? String(row[col]) : (
+                              <span className="text-gray-600 italic">null</span>
+                            )}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
+          {/* ── Field Mappings ── */}
+          {queryColumns.length > 0 && (
+            <div className="space-y-3 pt-4 border-t border-gray-800">
+              <div>
+                <Label className="text-gray-300">Field Mappings</Label>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Map SQL columns to local fields. Columns aliased to a local field name (e.g.{" "}
+                  <code className="text-gray-400">age_7_days</code>) are auto-mapped on sync —
+                  no manual mapping needed for those.
+                </p>
+              </div>
+
+              <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
+                <FieldMappingBuilder
+                  fieldMappings={formData.query_field_mappings || {}}
+                  availableFields={queryColumns}
+                  localFields={allLocalFields}
+                  onMappingsChange={(mappings) =>
+                    setFormData({ ...formData, query_field_mappings: mappings })
+                  }
+                />
+              </div>
+
+              {/* Quick auto-map button */}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white"
+                onClick={() => {
+                  // Auto-map any column whose name exactly matches a local field key
+                  const autoMappings = { ...formData.query_field_mappings };
+                  for (const col of queryColumns) {
+                    const localField = allLocalFields.find((f) => f.key === col);
+                    if (localField && !autoMappings[col]) {
+                      autoMappings[col] = {
+                        sourceField: col,
+                        label: localField.label,
+                        type: localField.type,
+                        isCustom: !localField.isBuiltIn,
+                        mode: "sync",
+                      };
+                    }
+                  }
+                  setFormData({ ...formData, query_field_mappings: autoMappings });
+                  toast.success("Auto-mapped matching column names");
+                }}
+              >
+                Auto-map matching column names
+              </Button>
+            </div>
+          )}
+
+          {/* ── Status ── */}
           <div className="space-y-2 pt-4 border-t border-gray-800">
             <Label className="text-sm font-medium text-gray-300">Status</Label>
             <Select
@@ -755,15 +636,9 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 className="bg-blue-600 hover:bg-blue-700 text-white"
               >
                 {isImporting ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Syncing...
-                  </>
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing...</>
                 ) : (
-                  <>
-                    <RefreshCcw className="w-4 h-4 mr-2" />
-                    Sync Now
-                  </>
+                  <><RefreshCcw className="w-4 h-4 mr-2" />Sync Now</>
                 )}
               </Button>
             )}

@@ -266,6 +266,10 @@ ensureColumn('datarecord', 'age_current', 'TEXT');
 ensureColumn('datarecord', 'age_7_days', 'TEXT');
 ensureColumn('datarecord', 'age_14_days', 'TEXT');
 ensureColumn('datarecord', 'age_21_days', 'TEXT');
+// Query-mode columns
+ensureColumn('databaseconnection', 'sync_query', 'TEXT');
+ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
+ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 
 // Migrate field_mappings from legacy flat format to per-table format
 // Legacy: { localKey: { sourceField, ... } }
@@ -805,12 +809,14 @@ async function runConnectionImport(connectionId) {
 
     pool = await sql.connect(sqlConfig);
 
+    // ── Query mode (new) vs legacy table-config mode ──────────────────────────
+    const syncQuery = connConfig.sync_query ? connConfig.sync_query.trim() : null;
+    const queryIndexField = connConfig.query_index_field ? connConfig.query_index_field.trim() : null;
+    const queryFieldMappings = parseJsonSafely(connConfig.query_field_mappings, {});
+
+    // Legacy fallback
     const tableConfigs = parseJsonSafely(connConfig.table_configs, []);
     const allFieldMappings = parseJsonSafely(connConfig.field_mappings, {});
-
-    // Detect whether field_mappings is per-table { tableName: { mappings } }
-    // or legacy flat { localKey: { sourceField, ... } }.
-    // Per-table format: every value is a plain object whose sub-values are mapping objects.
     const isPerTableMappings = Object.keys(allFieldMappings).length > 0 &&
       Object.values(allFieldMappings).every(
         (v) => v && typeof v === 'object' && !v.sourceField
@@ -879,35 +885,8 @@ async function runConnectionImport(connectionId) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    for (const config of tableConfigs) {
-      const { table_name, selected_fields = [], index_field } = config;
-      if (!table_name) continue;
-
-      // Resolve field mappings for THIS table only to avoid cross-table column injection
-      const fieldMappings = isPerTableMappings
-        ? (allFieldMappings[table_name] || {})
-        : allFieldMappings; // legacy flat format — apply to all tables for backward compat
-
-      let fields = '*';
-
-      if (Array.isArray(selected_fields) && selected_fields.length > 0) {
-        const mappedSourceFields = Object.values(fieldMappings)
-          .map((m) => m?.sourceField)
-          .filter(Boolean);
-
-        const uniqueFields = [...new Set([
-          ...selected_fields,
-          ...(index_field ? [index_field] : []),
-          ...mappedSourceFields,
-        ])];
-
-        fields = uniqueFields.map((field) => `[${field}]`).join(', ');
-      }
-
-      const query = `SELECT ${fields} FROM [${table_name}]`;
-      const result = await pool.request().query(query);
-      const rows = result.recordset || [];
-
+    // Shared write-rows helper used by both query mode and legacy table mode
+    const runWriteRows = (rows, sourceName, mappings, indexField) => {
       const existingRows = db.prepare(`
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
@@ -918,7 +897,7 @@ async function runConnectionImport(connectionId) {
                last_unpaid_invoice_3, last_unpaid_invoice_3_amount
         FROM datarecord
         WHERE source_table = ?
-      `).all(table_name);
+      `).all(sourceName);
 
       const existingMap = new Map(
         existingRows.map((r) => [`${r.source_table}::${r.source_id}`, r])
@@ -926,7 +905,7 @@ async function runConnectionImport(connectionId) {
 
       const syncTimestamp = new Date().toISOString();
 
-      const writeRowsTransaction = db.transaction((rowsToWrite, tableName, mappings, indexField) => {
+      const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
             firstDefined(
@@ -937,20 +916,17 @@ async function runConnectionImport(connectionId) {
             )
           );
 
-          const existing = existingMap.get(`${tableName}::${String(sourceId || '')}`);
+          const existing = existingMap.get(`${sourceName}::${String(sourceId || '')}`);
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
           const dataJson = JSON.stringify(row);
 
           const existingLocalFields = parseJsonSafely(existing?.local_fields, {});
-          const mergedLocalFields = {
-            ...existingLocalFields,
-            ...dynamicLocalFieldsPatch,
-          };
+          const mergedLocalFields = { ...existingLocalFields, ...dynamicLocalFieldsPatch };
 
           const baseRecordData = sanitizeForSqlite({
             source_id: String(sourceId || ''),
-            source_table: tableName,
+            source_table: sourceName,
             data: dataJson,
             synced_at: syncTimestamp,
             created_by: 'import',
@@ -1019,8 +995,57 @@ async function runConnectionImport(connectionId) {
         }
       });
 
-      writeRowsTransaction(rows, table_name, fieldMappings, index_field);
-      importedCount += rows.length;
+      writeRowsTransaction(rows);
+    };
+
+    if (syncQuery) {
+      // ── QUERY MODE ─────────────────────────────────────────────────────────
+      if (!syncQuery.trim().toUpperCase().startsWith('SELECT')) {
+        throw new Error('sync_query must be a SELECT statement');
+      }
+      if (!queryIndexField) {
+        throw new Error('query_index_field is required for query mode');
+      }
+
+      const result = await pool.request().query(syncQuery);
+      const rows = result.recordset || [];
+
+      // Use the connection name as the logical source_table so existing records
+      // are keyed to this connection rather than a physical table name
+      const sourceName = `query::${connConfig.id}`;
+
+      runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
+      importedCount = rows.length;
+    } else {
+      // ── LEGACY TABLE MODE (backward compat) ────────────────────────────────
+      for (const config of tableConfigs) {
+        const { table_name, selected_fields = [], index_field } = config;
+        if (!table_name) continue;
+
+        const fieldMappings = isPerTableMappings
+          ? (allFieldMappings[table_name] || {})
+          : allFieldMappings;
+
+        let fields = '*';
+        if (Array.isArray(selected_fields) && selected_fields.length > 0) {
+          const mappedSourceFields = Object.values(fieldMappings)
+            .map((m) => m?.sourceField)
+            .filter(Boolean);
+          const uniqueFields = [...new Set([
+            ...selected_fields,
+            ...(index_field ? [index_field] : []),
+            ...mappedSourceFields,
+          ])];
+          fields = uniqueFields.map((field) => `[${field}]`).join(', ');
+        }
+
+        const query = `SELECT ${fields} FROM [${table_name}]`;
+        const result = await pool.request().query(query);
+        const rows = result.recordset || [];
+
+        runWriteRows(rows, table_name, fieldMappings, index_field);
+        importedCount += rows.length;
+      }
     }
 
     db.prepare(`
@@ -1600,6 +1625,65 @@ app.post(
           await pool.close();
         } catch {}
       }
+    }
+  }
+);
+
+// ==================== TEST QUERY ====================
+app.post(
+  '/api/test-query',
+  requireAuth,
+  requirePermission('can_access_connections'),
+  async (req, res) => {
+    const { host, port = 1433, database_name, username, password, query } = req.body;
+    let pool;
+
+    if (!host || !database_name || !username || !password) {
+      return res.status(400).json({ error: 'Missing connection credentials' });
+    }
+    if (!query || !query.trim()) {
+      return res.status(400).json({ error: 'No query provided' });
+    }
+
+    // Basic safety: only allow SELECT statements
+    const trimmed = query.trim().toUpperCase();
+    if (!trimmed.startsWith('SELECT')) {
+      return res.status(400).json({ error: 'Only SELECT queries are allowed' });
+    }
+
+    try {
+      pool = await sql.connect({
+        user: username,
+        password,
+        server: host,
+        database: database_name,
+        port: parseInt(port, 10),
+        options: { encrypt: false, trustServerCertificate: true },
+        requestTimeout: 30000,
+        connectionTimeout: 15000,
+      });
+
+      // Run with TOP 5 for preview — wrap the user query
+      const previewQuery = `SELECT TOP 5 * FROM (${query}) AS __preview__`;
+      const result = await pool.request().query(previewQuery);
+      const rows = result.recordset || [];
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : (result.recordsets?.[0] ? Object.keys(result.recordsets[0][0] || {}) : []);
+
+      // If we couldn't get columns from rows, get from recordset metadata
+      const columnsMeta = result.recordset?.columns
+        ? Object.keys(result.recordset.columns)
+        : columns;
+
+      res.json({
+        success: true,
+        columns: columnsMeta.length > 0 ? columnsMeta : columns,
+        preview: rows,
+      });
+    } catch (error) {
+      console.error('Test query error:', error);
+      res.status(500).json({ error: error.message || 'Query failed' });
+    } finally {
+      if (pool) { try { await pool.close(); } catch {} }
     }
   }
 );
