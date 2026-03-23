@@ -640,7 +640,7 @@ export default function CustomerLookup({
                 <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
                   <div className="mb-3 flex items-center gap-2">
                     <Flag className="h-4 w-4 text-orange-400" />
-                    <h4 className="text-sm font-semibold text-gray-300">Last Unpaid Invoice</h4>
+                    <h4 className="text-sm font-semibold text-gray-300">Last Invoice</h4>
                   </div>
 
                   <div className="space-y-2">

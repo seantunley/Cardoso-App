@@ -897,7 +897,6 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_3,
         last_unpaid_invoice_3_amount,
         last_unpaid_invoice_date,
-        outstanding_balance,
         note,
         synced_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -1011,7 +1010,6 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_date ?? ''),
-              String(baseRecordData.outstanding_balance ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
