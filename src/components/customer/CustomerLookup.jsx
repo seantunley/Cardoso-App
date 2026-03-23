@@ -97,8 +97,9 @@ function parseAmount(val) {
 
 function formatAmount(val) {
   const n = parseAmount(val);
-  if (n === 0) return "—";
-  return n.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  if (n === 0 && (val === undefined || val === null || String(val).trim() === "")) return "—";
+  const abs = Math.abs(n).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n < 0 ? `-R ${abs}` : `R ${abs}`;
 }
 
 async function fetchLocalRecords() {

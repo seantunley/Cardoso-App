@@ -438,7 +438,10 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
       defaultMode: 'sync',
     },
     outstanding_balance: {
-      fallbacks: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE', 'AMTDUE'],
+      fallbacks: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE',
+        'AMTDUE', 'AMTDUE1', 'AMTDUE1HC', 'AMTOUTSTANDING', 'OUTSTANDING', 'OutstandingAmt',
+        'outstanding_amt', 'balance_due', 'BalanceDue', 'BALANCEDUE', 'TotalDue', 'TOTALDUE',
+        'total_due', 'AmountDue', 'AMOUNTDUE', 'amount_due'],
       defaultMode: 'sync',
     },
     age_current: {
