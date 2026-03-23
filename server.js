@@ -12,7 +12,11 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
-const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-secret-in-env';
+const SESSION_SECRET = process.env.SESSION_SECRET;
+if (!SESSION_SECRET) {
+  console.error('❌ SESSION_SECRET environment variable is required. Set it in your .env file.');
+  process.exit(1);
+}
 
 app.use(
   cors({
@@ -29,7 +33,7 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false,
+      secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 1000 * 60 * 60 * 12,
     },
@@ -285,8 +289,9 @@ function parseJsonSafely(value, fallback = {}) {
 }
 
 function stringifyJsonSafely(value, fallback = '{}') {
+  if (value === undefined || value === null) return fallback;
   try {
-    return JSON.stringify(value ?? JSON.parse(fallback));
+    return JSON.stringify(value);
   } catch {
     return fallback;
   }
@@ -1014,6 +1019,28 @@ app.get('/api/auth/me', requireAuth, (req, res) => {
   res.json(req.currentUser);
 });
 
+app.put('/api/auth/me', requireAuth, async (req, res) => {
+  const { theme_preference } = req.body || {};
+  const allowedThemes = ['light', 'dark'];
+
+  if (theme_preference !== undefined && !allowedThemes.includes(theme_preference)) {
+    return res.status(400).json({ error: 'Invalid theme preference' });
+  }
+
+  try {
+    if (theme_preference !== undefined) {
+      db.prepare(`UPDATE "user" SET theme_preference = ? WHERE id = ?`)
+        .run(theme_preference, req.currentUser.id);
+    }
+
+    const updated = getUserById(req.currentUser.id);
+    res.json(sanitizeUser(updated));
+  } catch (error) {
+    console.error('Update me error:', error);
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 // ==================== CUSTOM FIELD CONFIG ROUTES ====================
 app.get(
   '/api/custom-fields',
@@ -1224,7 +1251,7 @@ app.get(
         WHERE resource_type = 'record'
           AND resource_id = ?
         ORDER BY datetime(created_date) DESC
-        LIMIT 2
+        LIMIT 50
       `).all(String(id));
 
       res.json(history);
@@ -1501,14 +1528,13 @@ app.get('/api/:table', requireAuth, (req, res) => {
     return res.status(access.status).json({ error: access.error });
   }
 
+  if (table === 'user') {
+    return res.status(403).json({ error: 'Restricted table' });
+  }
+
   try {
     const stmt = db.prepare(`SELECT * FROM "${table}"`);
     const rows = stmt.all();
-
-    if (table === 'user') {
-      return res.status(403).json({ error: 'Restricted table' });
-    }
-
     res.json(rows);
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
@@ -1527,14 +1553,13 @@ app.get('/api/:table/:id', requireAuth, (req, res) => {
     return res.status(access.status).json({ error: access.error });
   }
 
+  if (table === 'user') {
+    return res.status(403).json({ error: 'Restricted table' });
+  }
+
   try {
     const stmt = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`);
     const row = stmt.get(id);
-
-    if (table === 'user') {
-      return res.status(403).json({ error: 'Restricted table' });
-    }
-
     row ? res.json(row) : res.status(404).json({ error: 'Not found' });
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
@@ -1570,6 +1595,14 @@ app.post('/api/:table', requireAuth, (req, res) => {
     const columns = Object.keys(data);
     if (columns.length === 0) {
       return res.status(400).json({ error: 'No data provided' });
+    }
+
+    // Validate column names against actual schema to prevent injection
+    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const invalidCols = columns.filter((k) => !validColumns.has(k));
+    if (invalidCols.length > 0) {
+      return res.status(400).json({ error: `Invalid fields: ${invalidCols.join(', ')}` });
     }
 
     const placeholders = columns.map(() => '?').join(',');
@@ -1644,6 +1677,14 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     const keys = Object.keys(data);
     if (keys.length === 0) {
       return res.status(400).json({ error: 'No data provided' });
+    }
+
+    // Validate column names against actual schema to prevent injection
+    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const invalidKeys = keys.filter((k) => !validColumns.has(k));
+    if (invalidKeys.length > 0) {
+      return res.status(400).json({ error: `Invalid fields: ${invalidKeys.join(', ')}` });
     }
 
     const sets = keys.map((k) => `${k} = ?`).join(',');
@@ -1779,8 +1820,12 @@ async function runScheduledSyncCycle() {
   }
 }
 
-const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
-const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
+// Scheduled sync is handled by sync-worker.js to avoid dual-process SQLite contention.
+// If running without the worker, uncomment these lines:
+// const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
+// const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
+const weekdayHalfHourTask = { stop: () => {} };
+const weekdayFivePmTask = { stop: () => {} };
 
 // ==================== SHUTDOWN ====================
 function gracefulShutdown(signal) {

@@ -126,11 +126,13 @@ export default function Login() {
               Sign in
             </Button>
 
-            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-tertiary)] p-3 text-xs text-[var(--text-secondary)] space-y-1">
-              <p>Default local accounts:</p>
-              <p>Admin: admin@example.com / admin123</p>
-              <p>User: user@example.com / user123</p>
-            </div>
+            {import.meta.env.DEV && (
+              <div className="rounded-lg border border-yellow-800/40 bg-yellow-900/10 p-3 text-xs text-yellow-400/80 space-y-1">
+                <p className="font-semibold">Dev mode — default accounts:</p>
+                <p>Admin: admin@example.com / admin123</p>
+                <p>User: user@example.com / user123</p>
+              </div>
+            )}
           </form>
         </CardContent>
       </Card>

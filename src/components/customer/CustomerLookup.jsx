@@ -239,8 +239,9 @@ export default function CustomerLookup({
 
   useEffect(() => {
     if (!triggerLookup) return;
-    handleLookup();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    handleLookup(triggerLookup);
+  // We intentionally only re-run when triggerLookup changes, passing the value directly
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerLookup]);
 
   const fuzzyMatch = (str, pattern) => {
@@ -445,7 +446,7 @@ export default function CustomerLookup({
                 <div className="absolute left-0 right-0 top-full mt-2 rounded-lg border bg-gray-900">
                   {suggestions.map((s, idx) => (
                     <button
-                      key={idx}
+                      key={s.record.id ?? idx}
                       onClick={() => handleSuggestionClick(s)}
                       className={cn(
                         "w-full border-b border-gray-800 px-4 py-3 text-left",

@@ -122,6 +122,16 @@ export const base44 = {
       return readResponse(res, "Logout");
     },
 
+    updateMe: async (data) => {
+      const res = await fetch(`${API_BASE}/auth/me`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(data),
+      });
+      return readResponse(res, 'Update profile', data);
+    },
+
     register: async (data) => {
       const res = await fetch(`${API_BASE}/users`, {
         method: "POST",

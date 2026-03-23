@@ -56,8 +56,7 @@ export default function Records() {
       const now = new Date().toISOString();
 
       let flaggedCount = 0;
-      const allRecords = await base44.entities.DataRecord.list();
-      const targetRecords = allRecords.filter((r) => recordIds.includes(r.id));
+      const targetRecords = records.filter((r) => recordIds.includes(r.id));
 
       for (const record of targetRecords) {
         let parsedData = record.data;
@@ -97,68 +96,54 @@ export default function Records() {
   const checkAutoFlagRulesSync = (ageAnalysis, rules) => {
     if (!ageAnalysis) return null;
 
-    for (const rule of rules) {
-      const ageAnalysisLower = ageAnalysis.toLowerCase();
-
-      const checkCondition = (conditionType, conditionValue) => {
-        if (
-          ["greater_than", "less_than", "greater_or_equal", "less_or_equal"].includes(
-            conditionType
-          )
-        ) {
-          const numbersInAgeAnalysis =
-            ageAnalysis.match(/[+\-]?\d+/g)?.map((n) => parseInt(n, 10)) || [];
-          const threshold = parseFloat(conditionValue);
-
-          if (!isNaN(threshold) && numbersInAgeAnalysis.length > 0) {
-            for (const num of numbersInAgeAnalysis) {
-              switch (conditionType) {
-                case "greater_than":
-                  if (num > threshold) return true;
-                  break;
-                case "less_than":
-                  if (num < threshold) return true;
-                  break;
-                case "greater_or_equal":
-                  if (num >= threshold) return true;
-                  break;
-                case "less_or_equal":
-                  if (num <= threshold) return true;
-                  break;
-              }
+    const evaluateCondition = (conditionType, conditionValue, conditionValueSecondary) => {
+      if (['greater_than', 'less_than', 'greater_or_equal', 'less_or_equal'].includes(conditionType)) {
+        const numbersInAgeAnalysis = ageAnalysis.match(/[+\-]?\d+/g)?.map(n => parseInt(n, 10)) || [];
+        const threshold = parseFloat(conditionValue);
+        if (!isNaN(threshold) && numbersInAgeAnalysis.length > 0) {
+          for (const num of numbersInAgeAnalysis) {
+            switch (conditionType) {
+              case 'greater_than': if (num > threshold) return true; break;
+              case 'less_than': if (num < threshold) return true; break;
+              case 'greater_or_equal': if (num >= threshold) return true; break;
+              case 'less_or_equal': if (num <= threshold) return true; break;
             }
           }
-          return false;
-        } else {
-          const valueLower = conditionValue.toLowerCase();
-          switch (conditionType) {
-            case "contains":
-              return ageAnalysisLower.includes(valueLower);
-            case "equals":
-              return ageAnalysisLower === valueLower;
-            case "starts_with":
-              return ageAnalysisLower.startsWith(valueLower);
-            case "ends_with":
-              return ageAnalysisLower.endsWith(valueLower);
-            default:
-              return false;
-          }
         }
-      };
-
-      let matches = checkCondition(rule.condition_type, rule.condition_value);
-
-      if (
-        matches &&
-        rule.secondary_condition_type &&
-        rule.secondary_condition_type !== "none" &&
-        rule.secondary_condition_value
-      ) {
-        matches = checkCondition(
-          rule.secondary_condition_type,
-          rule.secondary_condition_value
-        );
+        return false;
+      } else if (conditionType === 'range_between') {
+        const numbers = ageAnalysis.match(/[+\-]?\d+/g)?.map(n => parseInt(n, 10)) || [];
+        const low = parseFloat(conditionValue);
+        const high = parseFloat(conditionValueSecondary);
+        return numbers.some(n => n >= low && n <= high);
+      } else {
+        const valueLower = String(conditionValue).toLowerCase();
+        const ageAnalysisLower = ageAnalysis.toLowerCase();
+        switch (conditionType) {
+          case 'contains': return ageAnalysisLower.includes(valueLower);
+          case 'equals': return ageAnalysisLower === valueLower;
+          case 'starts_with': return ageAnalysisLower.startsWith(valueLower);
+          case 'ends_with': return ageAnalysisLower.endsWith(valueLower);
+          default: return false;
+        }
       }
+    };
+
+    for (const rule of rules) {
+      let conditions = rule.conditions;
+      if (typeof conditions === 'string') {
+        try { conditions = JSON.parse(conditions); } catch { conditions = []; }
+      }
+      if (!Array.isArray(conditions) || conditions.length === 0) continue;
+
+      const logic = rule.logic || 'AND';
+      const results = conditions.map(c =>
+        evaluateCondition(c.condition_type, c.condition_value, c.condition_value_secondary)
+      );
+
+      const matches = logic === 'OR'
+        ? results.some(Boolean)
+        : results.every(Boolean);
 
       if (matches) {
         return {
@@ -220,12 +205,15 @@ export default function Records() {
       type: "application/json",
     });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "records-export.json";
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Records exported");
+    try {
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "records-export.json";
+      a.click();
+      toast.success("Records exported");
+    } finally {
+      URL.revokeObjectURL(url);
+    }
   };
 
   return (

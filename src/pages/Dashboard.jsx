@@ -6,12 +6,12 @@ import StatCard from "../components/dashboard/StatCard";
 export default function Dashboard() {
   const { data: connections = [] } = useQuery({
     queryKey: ["connections"],
-    queryFn: () => base44.entities.DatabaseConnection.list("-created_date"),
+    queryFn: () => base44.entities.DatabaseConnection.list(),
   });
 
   const { data: records = [] } = useQuery({
     queryKey: ["records"],
-    queryFn: () => base44.entities.DataRecord.list("-created_date", 1000),
+    queryFn: () => base44.entities.DataRecord.list(),
   });
 
   const totalRecords = records.length;

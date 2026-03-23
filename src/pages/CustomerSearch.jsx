@@ -30,7 +30,7 @@ export default function CustomerSearch() {
     queryFn: async () => {
       if (!currentUser) return [];
       const allConnections = await base44.entities.DatabaseConnection.list();
-      return allConnections.filter(conn => conn.created_by === currentUser.email);
+      return allConnections;
     },
     enabled: !!currentUser,
   });
