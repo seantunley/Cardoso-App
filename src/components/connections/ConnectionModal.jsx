@@ -178,10 +178,27 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           typeof connection.join_configuration === "string"
             ? JSON.parse(connection.join_configuration || "{}")
             : connection.join_configuration || {},
-        field_mappings:
-          typeof connection.field_mappings === "string"
+        field_mappings: (() => {
+          const raw = typeof connection.field_mappings === "string"
             ? JSON.parse(connection.field_mappings || "{}")
-            : connection.field_mappings || {},
+            : connection.field_mappings || {};
+          // Migrate legacy flat format { localKey: { sourceField } } to per-table
+          // Per-table format: { tableName: { localKey: { sourceField } } }
+          const isFlat = Object.keys(raw).length > 0 &&
+            Object.values(raw).some((v) => v && typeof v === "object" && v.sourceField);
+          if (isFlat) {
+            const tableConfigs = typeof connection.table_configs === "string"
+              ? JSON.parse(connection.table_configs || "[]")
+              : connection.table_configs || [];
+            // Assign flat mappings to all tables as a best-effort migration
+            const migrated = {};
+            for (const t of tableConfigs) {
+              migrated[t.table_name] = raw;
+            }
+            return migrated;
+          }
+          return raw;
+        })(),
         status: connection.status || "inactive",
       });
 
@@ -291,9 +308,12 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   };
 
   const removeTableConfig = (tableName) => {
+    const nextMappings = { ...formData.field_mappings };
+    delete nextMappings[tableName];
     setFormData({
       ...formData,
       table_configs: formData.table_configs.filter((t) => t.table_name !== tableName),
+      field_mappings: nextMappings,
     });
   };
 
@@ -565,7 +585,13 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                     onApplySuggestions={(mappings) => {
                       setFormData({
                         ...formData,
-                        field_mappings: { ...formData.field_mappings, ...mappings },
+                        field_mappings: {
+                          ...formData.field_mappings,
+                          [selectedTableForMapping]: {
+                            ...(formData.field_mappings?.[selectedTableForMapping] || {}),
+                            ...mappings,
+                          },
+                        },
                       });
                     }}
                     isLoading={loadingTables}
@@ -573,13 +599,16 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
 
                   <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
                     <FieldMappingBuilder
-                      fieldMappings={formData.field_mappings || {}}
+                      fieldMappings={formData.field_mappings?.[selectedTableForMapping] || {}}
                       availableFields={availableFields[selectedTableForMapping] || []}
                       localFields={allLocalFields}
                       onMappingsChange={(mappings) => {
                         setFormData({
                           ...formData,
-                          field_mappings: mappings,
+                          field_mappings: {
+                            ...formData.field_mappings,
+                            [selectedTableForMapping]: mappings,
+                          },
                         });
                       }}
                     />

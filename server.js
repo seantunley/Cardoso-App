@@ -720,7 +720,15 @@ async function runConnectionImport(connectionId) {
     pool = await sql.connect(sqlConfig);
 
     const tableConfigs = parseJsonSafely(connConfig.table_configs, []);
-    const fieldMappings = parseJsonSafely(connConfig.field_mappings, {});
+    const allFieldMappings = parseJsonSafely(connConfig.field_mappings, {});
+
+    // Detect whether field_mappings is per-table { tableName: { mappings } }
+    // or legacy flat { localKey: { sourceField, ... } }.
+    // Per-table format: every value is a plain object whose sub-values are mapping objects.
+    const isPerTableMappings = Object.keys(allFieldMappings).length > 0 &&
+      Object.values(allFieldMappings).every(
+        (v) => v && typeof v === 'object' && !v.sourceField
+      );
 
     let importedCount = 0;
 
@@ -780,6 +788,11 @@ async function runConnectionImport(connectionId) {
     for (const config of tableConfigs) {
       const { table_name, selected_fields = [], index_field } = config;
       if (!table_name) continue;
+
+      // Resolve field mappings for THIS table only to avoid cross-table column injection
+      const fieldMappings = isPerTableMappings
+        ? (allFieldMappings[table_name] || {})
+        : allFieldMappings; // legacy flat format — apply to all tables for backward compat
 
       let fields = '*';
 
