@@ -26,7 +26,7 @@ const permissionGroups = [
     category: "Administration",
     description: "Control management capabilities",
     permissions: [
-      { key: "can_manage_users", label: "User Management", description: "Invite users and manage permissions" },
+      { key: "can_manage_users", label: "User Management", description: "Create users and manage permissions" },
       { key: "can_manage_rules", label: "Rule Management", description: "Create and modify auto-flag rules" },
     ]
   },
@@ -91,6 +91,14 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
             </div>
           </div>
         </DialogHeader>
+
+        {user?.role === "admin" && (
+          <div className="mx-1 mb-2 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2">
+            <p className="text-xs text-amber-400">
+              Admins have full access by default. Per-permission toggles apply only to users with the <strong>User</strong> role.
+            </p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6 py-4 max-h-96 overflow-y-auto">
           <div className="space-y-3">

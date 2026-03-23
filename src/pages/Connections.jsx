@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
 import ConnectionStatus from "../components/connections/ConnectionStatus";
+import { hasPermission } from "@/lib/permissions";
 
 async function fetchLocalConnections() {
   const response = await fetch("/api/databaseconnection", {
@@ -104,6 +105,9 @@ export default function Connections() {
     queryKey: ["currentUser"],
     queryFn: () => base44.auth.me(),
   });
+
+  // Only admins can create/edit/delete connections; all connections-users can sync and view
+  const isAdmin = currentUser?.role === "admin";
 
   const {
     data: connections = [],
@@ -250,16 +254,18 @@ export default function Connections() {
               {isSyncingAll ? "Syncing..." : "Sync Now"}
             </Button>
 
-            <Button
-              onClick={() => {
-                setEditingConnection(null);
-                setModalOpen(true);
-              }}
-              className="bg-white hover:bg-gray-100 text-gray-900 shadow-lg shadow-white/10"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Connection
-            </Button>
+            {isAdmin && (
+              <Button
+                onClick={() => {
+                  setEditingConnection(null);
+                  setModalOpen(true);
+                }}
+                className="bg-white hover:bg-gray-100 text-gray-900 shadow-lg shadow-white/10"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                New Connection
+              </Button>
+            )}
           </div>
         </div>
 
@@ -289,15 +295,19 @@ export default function Connections() {
               No connections yet
             </h3>
             <p className="text-[var(--text-secondary)] mt-1 mb-6">
-              Add your first SQL database connection to start syncing data
+              {isAdmin
+                ? "Add your first SQL database connection to start syncing data"
+                : "No database connections have been configured yet. Contact an admin."}
             </p>
-            <Button
-              onClick={() => setModalOpen(true)}
-              className="bg-white hover:bg-gray-100 text-gray-900"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Connection
-            </Button>
+            {isAdmin && (
+              <Button
+                onClick={() => setModalOpen(true)}
+                className="bg-white hover:bg-gray-100 text-gray-900"
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                Add Connection
+              </Button>
+            )}
           </div>
         ) : (
           <div className="space-y-6">
@@ -325,8 +335,8 @@ export default function Connections() {
                   <ConnectionCard
                     connection={conn}
                     onSync={handleSync}
-                    onEdit={handleEdit}
-                    onDelete={handleDelete}
+                    onEdit={isAdmin ? handleEdit : null}
+                    onDelete={isAdmin ? handleDelete : null}
                     isSyncing={syncingId === conn.id}
                   />
                 </div>

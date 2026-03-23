@@ -14,6 +14,7 @@ import { Search, Filter, FileText, Download, Zap } from "lucide-react";
 import { toast } from "sonner";
 import RecordCard from "../components/records/RecordCard";
 import RecordEditModal from "../components/records/RecordEditModal";
+import { hasPermission } from "@/lib/permissions";
 
 export default function Records() {
   const queryClient = useQueryClient();
@@ -26,6 +27,9 @@ export default function Records() {
     queryKey: ["currentUser"],
     queryFn: () => base44.auth.me(),
   });
+
+  const canEditRecords = hasPermission(currentUser, "can_edit_records");
+  const canFlagRecords = hasPermission(currentUser, "can_flag_records");
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
@@ -323,8 +327,8 @@ export default function Records() {
                 <RecordCard
                   record={record}
                   customFields={customFields}
-                  onFlagChange={handleFlagChange}
-                  onEdit={setEditingRecord}
+                  onFlagChange={canFlagRecords ? handleFlagChange : null}
+                  onEdit={canEditRecords ? setEditingRecord : null}
                   isSelected={selectedRecords.has(record.id)}
                 />
               </div>

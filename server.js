@@ -732,6 +732,11 @@ function requirePermission(permissionKey) {
       return next();
     }
 
+    // Deny access if no permission key was specified (fail-closed)
+    if (!permissionKey) {
+      return res.status(403).json({ error: 'Permission denied' });
+    }
+
     if (!req.currentUser[permissionKey]) {
       return res.status(403).json({ error: 'Permission denied' });
     }

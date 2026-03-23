@@ -6,6 +6,7 @@ import AutoFlagRuleForm from "../components/settings/AutoFlagRuleForm";
 import { Plus, Zap, Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { hasPermission } from "@/lib/permissions";
 
 export default function Settings() {
   const queryClient = useQueryClient();
@@ -22,6 +23,7 @@ export default function Settings() {
   });
 
   const isAdmin = currentUser?.role === "admin";
+  const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
   const createRuleMutation = useMutation({
     mutationFn: (data) => base44.entities.AutoFlagRule.create(data),
@@ -95,8 +97,8 @@ export default function Settings() {
   });
 
   const handleRuleSave = (data, existingId) => {
-    if (!isAdmin) {
-      toast.error("Only admins can modify rules");
+    if (!canManageRules) {
+      toast.error("You do not have permission to modify rules");
       return;
     }
     if (existingId) {
@@ -107,8 +109,8 @@ export default function Settings() {
   };
 
   const handleRuleDelete = (id) => {
-    if (!isAdmin) {
-      toast.error("Only admins can delete rules");
+    if (!canManageRules) {
+      toast.error("You do not have permission to delete rules");
       return;
     }
     if (confirm("Delete this auto-flag rule?")) {
@@ -242,25 +244,27 @@ export default function Settings() {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button
-                onClick={() => applyRulesMutation.mutate()}
-                disabled={applyRulesMutation.isPending || autoFlagRules.length === 0}
-                variant="outline"
-                className="border-white text-gray-900 bg-white hover:bg-gray-100"
-              >
-                {applyRulesMutation.isPending ? (
-                  <>
-                    <span className="animate-spin mr-2">⏳</span>
-                    Applying...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-4 h-4 mr-2" />
-                    Apply Now
-                  </>
-                )}
-              </Button>
-              {isAdmin && (
+              {canManageRules && (
+                <Button
+                  onClick={() => applyRulesMutation.mutate()}
+                  disabled={applyRulesMutation.isPending || autoFlagRules.length === 0}
+                  variant="outline"
+                  className="border-white text-gray-900 bg-white hover:bg-gray-100"
+                >
+                  {applyRulesMutation.isPending ? (
+                    <>
+                      <span className="animate-spin mr-2">⏳</span>
+                      Applying...
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-4 h-4 mr-2" />
+                      Apply Now
+                    </>
+                  )}
+                </Button>
+              )}
+              {canManageRules && (
                 <Button
                   onClick={() => setShowNewRule(true)}
                   className="bg-white hover:bg-gray-100 text-gray-900"
@@ -272,12 +276,12 @@ export default function Settings() {
             </div>
           </div>
 
-          {showNewRule && isAdmin && (
+          {showNewRule && canManageRules && (
             <AutoFlagRuleForm
               onSave={handleRuleSave}
               onDelete={() => setShowNewRule(false)}
               isSaving={createRuleMutation.isPending}
-              isAdmin={isAdmin}
+              isAdmin={canManageRules}
             />
           )}
 
@@ -299,7 +303,7 @@ export default function Settings() {
                   onSave={handleRuleSave}
                   onDelete={handleRuleDelete}
                   isSaving={updateRuleMutation.isPending || deleteRuleMutation.isPending}
-                  isAdmin={isAdmin}
+                  isAdmin={canManageRules}
                 />
               ))}
               {autoFlagRules.length === 0 && !showNewRule && (

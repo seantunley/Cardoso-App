@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Trash2,
   KeyRound,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import CreateLocalUserModal from "../components/users/CreateLocalUserModal";
@@ -22,6 +23,8 @@ import ChangePasswordModal from "../components/users/ChangePasswordModal";
 export default function Users() {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
+
+  const isAdmin = currentUser?.role === "admin";
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingPermissionsUser, setEditingPermissionsUser] = useState(null);
@@ -117,12 +120,16 @@ export default function Users() {
   };
 
   const handleDeleteUser = async (user) => {
+    if (!isAdmin) {
+      toast.error("Only admins can delete users");
+      return;
+    }
     if (currentUser?.id === user.id) {
       toast.error("You cannot delete your own account");
       return;
     }
 
-    const confirmed = window.confirm(`Delete ${user.full_name || user.email}?`);
+    const confirmed = window.confirm(`Delete ${user.full_name || user.email}? This cannot be undone.`);
     if (!confirmed) return;
 
     await deleteUserMutation.mutateAsync(user.id);
@@ -130,6 +137,20 @@ export default function Users() {
 
   const activeUsers = users.filter((u) => u.is_active !== false);
   const adminCount = users.filter((u) => u.role === "admin").length;
+
+  // Non-admins should not be able to reach this page at all (nav is hidden),
+  // but guard the UI explicitly as a second layer of defence.
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <Lock className="w-12 h-12 text-[var(--text-tertiary)] mx-auto" />
+          <h3 className="text-lg font-medium text-[var(--text-primary)]">Access Denied</h3>
+          <p className="text-[var(--text-secondary)]">You do not have permission to manage users.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -140,7 +161,7 @@ export default function Users() {
               Users
             </h1>
             <p className="text-[var(--text-secondary)] mt-1">
-              {activeUsers.length} active users • {adminCount} admin{adminCount === 1 ? "" : "s"}
+              {activeUsers.length} active user{activeUsers.length === 1 ? "" : "s"} · {adminCount} admin{adminCount === 1 ? "" : "s"}
             </p>
           </div>
 
@@ -181,7 +202,7 @@ export default function Users() {
               No users found
             </h3>
             <p className="text-[var(--text-secondary)] mt-1 mb-6">
-              Create your first local user account
+              Create your first user account
             </p>
             <Button
               onClick={() => setCreateModalOpen(true)}
@@ -208,9 +229,13 @@ export default function Users() {
 
                         <Badge
                           variant="outline"
-                          className="border-[var(--border-color)] text-[var(--text-secondary)]"
+                          className={
+                            user.role === "admin"
+                              ? "border-purple-700 text-purple-400"
+                              : "border-[var(--border-color)] text-[var(--text-secondary)]"
+                          }
                         >
-                          {user.role}
+                          {user.role === "admin" ? "Admin" : "User"}
                         </Badge>
 
                         <Badge

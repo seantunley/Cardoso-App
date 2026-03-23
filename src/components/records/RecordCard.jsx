@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Flag, ChevronDown, ChevronUp, Edit2, MoreHorizontal } from "lucide-react";
+import { Flag, ChevronDown, ChevronUp, Edit2, Lock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -28,6 +28,9 @@ const flagLabels = {
 export default function RecordCard({ record, customFields, onFlagChange, onEdit, isSelected }) {
   const [expanded, setExpanded] = useState(false);
 
+  const canFlag = typeof onFlagChange === "function";
+  const canEdit = typeof onEdit === "function";
+
   return (
     <div className={cn("group bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-gray-800", isSelected ? "border-blue-500 bg-blue-900/10" : "border-gray-700 hover:border-gray-600")}>
       <div className="p-5">
@@ -43,35 +46,47 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
             </div>
             
             <div className="flex items-center gap-3">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    className={cn("border gap-2", flagColors[record.flag_color || "none"])}
-                  >
-                    <Flag className="w-3.5 h-3.5" />
-                    {flagLabels[record.flag_color || "none"]}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  {Object.entries(flagLabels).map(([key, label]) => (
-                    <DropdownMenuItem 
-                      key={key}
-                      onClick={() => onFlagChange(record.id, key)}
-                      className={cn("gap-2", record.flag_color === key && "bg-slate-100")}
+              {canFlag ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      className={cn("border gap-2", flagColors[record.flag_color || "none"])}
                     >
-                      <div className={cn("w-2 h-2 rounded-full", {
-                        "bg-slate-400": key === "none",
-                        "bg-red-500": key === "red",
-                        "bg-green-500": key === "green",
-                        "bg-orange-500": key === "orange",
-                      })} />
-                      {label}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      <Flag className="w-3.5 h-3.5" />
+                      {flagLabels[record.flag_color || "none"]}
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {Object.entries(flagLabels).map(([key, label]) => (
+                      <DropdownMenuItem 
+                        key={key}
+                        onClick={() => onFlagChange(record.id, key)}
+                        className={cn("gap-2", record.flag_color === key && "bg-slate-100")}
+                      >
+                        <div className={cn("w-2 h-2 rounded-full", {
+                          "bg-slate-400": key === "none",
+                          "bg-red-500": key === "red",
+                          "bg-green-500": key === "green",
+                          "bg-orange-500": key === "orange",
+                        })} />
+                        {label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : (
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs",
+                    flagColors[record.flag_color || "none"]
+                  )}
+                >
+                  <Flag className="w-3 h-3" />
+                  {flagLabels[record.flag_color || "none"]}
+                </span>
+              )}
 
               <span className="text-xs text-gray-400">
                 Synced {moment(record.synced_at || record.created_date).fromNow()}
@@ -80,9 +95,15 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={() => onEdit(record)}>
-              <Edit2 className="w-4 h-4 text-gray-400" />
-            </Button>
+            {canEdit ? (
+              <Button variant="ghost" size="icon" onClick={() => onEdit(record)}>
+                <Edit2 className="w-4 h-4 text-gray-400" />
+              </Button>
+            ) : (
+              <Button variant="ghost" size="icon" disabled title="No edit permission">
+                <Lock className="w-4 h-4 text-gray-600" />
+              </Button>
+            )}
             <Button 
               variant="ghost" 
               size="icon"

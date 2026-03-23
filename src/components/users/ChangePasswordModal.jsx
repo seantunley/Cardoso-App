@@ -34,8 +34,8 @@ export default function ChangePasswordModal({
     e.preventDefault();
     setError("");
 
-    if (!password || password.length < 6) {
-      setError("Password must be at least 6 characters");
+    if (!password || password.length < 8) {
+      setError("Password must be at least 8 characters");
       return;
     }
 
@@ -77,7 +77,7 @@ export default function ChangePasswordModal({
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Minimum 6 characters"
+              placeholder="Minimum 8 characters"
               className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
               required
             />

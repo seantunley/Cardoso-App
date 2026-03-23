@@ -84,12 +84,16 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
             <RefreshCw className={cn("w-4 h-4 mr-2", isSyncing && "animate-spin")} />
             {isSyncing ? "Syncing..." : "Sync Now"}
           </Button>
-          <Button variant="outline" size="icon" onClick={() => onEdit(connection)} className="border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white">
-            <Settings className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => onDelete(connection)} className="border-gray-700 text-rose-400 hover:text-rose-300 hover:bg-rose-900/20">
-            <Trash2 className="w-4 h-4" />
-          </Button>
+          {typeof onEdit === "function" && (
+            <Button variant="outline" size="icon" onClick={() => onEdit(connection)} className="border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white">
+              <Settings className="w-4 h-4" />
+            </Button>
+          )}
+          {typeof onDelete === "function" && (
+            <Button variant="outline" size="icon" onClick={() => onDelete(connection)} className="border-gray-700 text-rose-400 hover:text-rose-300 hover:bg-rose-900/20">
+              <Trash2 className="w-4 h-4" />
+            </Button>
+          )}
         </div>
       </div>
     </div>

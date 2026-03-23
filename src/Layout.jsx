@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { hasPermission } from "@/lib/permissions";
 
 const navItems = [
   { name: "Customer Search", icon: Database, page: "CustomerSearch", permission: "can_access_customer_search" },
@@ -31,15 +32,14 @@ export default function Layout({ children, currentPageName }) {
 
   const isAdmin = currentUser?.role === "admin";
 
-  const hasPermission = (item) => {
+  const canShowNavItem = (item) => {
     if (!currentUser) return false;
     if (item.adminOnly) return isAdmin;
-    if (isAdmin) return true;
-    if (!item.permission) return true;
-    return currentUser[item.permission] !== false;
+    // Use the shared hasPermission util which correctly handles falsy keys
+    return hasPermission(currentUser, item.permission);
   };
 
-  const visibleNavItems = navItems.filter(hasPermission);
+  const visibleNavItems = navItems.filter(canShowNavItem);
 
   const handleLogout = async () => {
     await logout(true);

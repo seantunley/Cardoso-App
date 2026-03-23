@@ -28,6 +28,7 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.password || formData.password.length < 8) return;
     await onCreate(formData);
     setFormData({ full_name: "", email: "", role: "user", password: "" });
   };
@@ -45,23 +46,50 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
                 Add User
               </DialogTitle>
               <p className="text-sm text-[var(--text-secondary)] mt-0.5">
-                An invitation email will be sent to the user
+                Create a local account with a username and password
               </p>
             </div>
           </div>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-5 py-4">
+        <form onSubmit={handleSubmit} className="space-y-4 py-4">
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-[var(--text-primary)]">Full Name</Label>
+            <Input
+              type="text"
+              value={formData.full_name}
+              onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
+              placeholder="Jane Smith"
+              className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+            />
+          </div>
+
           <div className="space-y-2">
             <Label className="text-sm font-medium text-[var(--text-primary)]">Email Address</Label>
             <Input
               type="email"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="email@example.com"
+              placeholder="jane@example.com"
               required
               className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-medium text-[var(--text-primary)]">Password</Label>
+            <Input
+              type="password"
+              value={formData.password}
+              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+              placeholder="Minimum 8 characters"
+              required
+              minLength={8}
+              className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+            />
+            {formData.password.length > 0 && formData.password.length < 8 && (
+              <p className="text-xs text-red-400">Password must be at least 8 characters</p>
+            )}
           </div>
 
           <div className="space-y-2">
@@ -83,13 +111,22 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
             </p>
           </div>
 
-          <DialogFooter className="pt-4">
-            <Button type="button" variant="outline" onClick={onClose} className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]">
+          <DialogFooter className="pt-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onClose}
+              className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+            >
               Cancel
             </Button>
-            <Button type="submit" disabled={isCreating} className="bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90">
+            <Button
+              type="submit"
+              disabled={isCreating || !formData.email || !formData.password || formData.password.length < 8}
+              className="bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90"
+            >
               {isCreating && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              Send Invitation
+              Create User
             </Button>
           </DialogFooter>
         </form>
