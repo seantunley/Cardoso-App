@@ -45,10 +45,11 @@ async function runLocalImport(connectionId) {
 const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
-  { key: "age_current", label: "Age Analysis — Current", type: "text", isBuiltIn: true },
-  { key: "age_7_days", label: "Age Analysis — 7 Days", type: "text", isBuiltIn: true },
-  { key: "age_14_days", label: "Age Analysis — 14 Days", type: "text", isBuiltIn: true },
-  { key: "age_21_days", label: "Age Analysis — 21+ Days", type: "text", isBuiltIn: true },
+  { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
+  { key: "age_current", label: "Age Analysis — Current (legacy)", type: "text", isBuiltIn: true },
+  { key: "age_7_days", label: "Age Analysis — 7 Days (legacy)", type: "text", isBuiltIn: true },
+  { key: "age_14_days", label: "Age Analysis — 14 Days (legacy)", type: "text", isBuiltIn: true },
+  { key: "age_21_days", label: "Age Analysis — 21+ Days (legacy)", type: "text", isBuiltIn: true },
   { key: "age_analysis", label: "Age Analysis (legacy combined)", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
@@ -423,7 +424,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 setQueryColumns([]);
                 setQueryPreview([]);
               }}
-              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTCUR AS age_current,\n  AMTDUE07 AS age_7_days,\n  AMTDUE14 AS age_14_days,\n  AMTDUE21 AS age_21_days,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
               rows={8}
               className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
             />

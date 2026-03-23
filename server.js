@@ -266,6 +266,7 @@ ensureColumn('datarecord', 'age_current', 'TEXT');
 ensureColumn('datarecord', 'age_7_days', 'TEXT');
 ensureColumn('datarecord', 'age_14_days', 'TEXT');
 ensureColumn('datarecord', 'age_21_days', 'TEXT');
+ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
@@ -434,6 +435,10 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
     },
     age_analysis: {
       fallbacks: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],
+      defaultMode: 'sync',
+    },
+    outstanding_balance: {
+      fallbacks: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE', 'AMTDUE'],
       defaultMode: 'sync',
     },
     age_current: {
@@ -840,6 +845,7 @@ async function runConnectionImport(connectionId) {
         age_7_days = ?,
         age_14_days = ?,
         age_21_days = ?,
+        outstanding_balance = ?,
         source_id = ?,
         source_table = ?,
         data = ?,
@@ -873,6 +879,7 @@ async function runConnectionImport(connectionId) {
         age_7_days,
         age_14_days,
         age_21_days,
+        outstanding_balance,
         source_id,
         source_table,
         data,
@@ -887,9 +894,10 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_3,
         last_unpaid_invoice_3_amount,
         last_unpaid_invoice_date,
+        outstanding_balance,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // Shared write-rows helper used by both query mode and legacy table mode
@@ -902,7 +910,7 @@ async function runConnectionImport(connectionId) {
                last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
                last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
                last_unpaid_invoice_3, last_unpaid_invoice_3_amount,
-               last_unpaid_invoice_date
+               last_unpaid_invoice_date, outstanding_balance
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -952,6 +960,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
               String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
               String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
+              String(baseRecordData.outstanding_balance ?? existing.outstanding_balance ?? ''),
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,
@@ -984,6 +993,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.age_7_days ?? ''),
               String(baseRecordData.age_14_days ?? ''),
               String(baseRecordData.age_21_days ?? ''),
+              String(baseRecordData.outstanding_balance ?? ''),
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,
@@ -998,6 +1008,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_date ?? ''),
+              String(baseRecordData.outstanding_balance ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );

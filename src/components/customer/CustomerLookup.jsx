@@ -72,6 +72,8 @@ function flattenRecord(record) {
       record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
     last_unpaid_invoice_date:
       record.last_unpaid_invoice_date || record.data?.last_unpaid_invoice_date,
+    outstanding_balance:
+      record.outstanding_balance || record.data?.outstanding_balance,
   };
 }
 
@@ -564,7 +566,7 @@ export default function CustomerLookup({
           </DialogHeader>
 
           <div className="space-y-6 pt-4">
-            {/* ── Age Analysis (with sub-accounts if parent) ── */}
+            {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
                 { label: String(customer?.customer_number || ""), record: customer, isMain: true },
@@ -575,64 +577,46 @@ export default function CustomerLookup({
                 })),
               ];
 
-              const bucketKeys = [
-                { key: "age_current", label: "Current" },
-                { key: "age_7_days", label: "7 Days" },
-                { key: "age_14_days", label: "14 Days" },
-                { key: "age_21_days", label: "21+ Days" },
-              ];
-
               const hasSubAccounts = subAccounts.length > 0;
-
-              const totals = bucketKeys.reduce((acc, { key }) => {
-                acc[key] = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.[key]), 0);
-                return acc;
-              }, {});
+              const grandTotal = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.outstanding_balance), 0);
 
               return (
                 <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
                   <div className="mb-3 flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-gray-400" />
-                    <h4 className="text-sm font-semibold text-gray-300">Age Analysis</h4>
+                    <h4 className="text-sm font-semibold text-gray-300">Outstanding Balance</h4>
                   </div>
 
                   <div className="space-y-2">
-                    {/* Header row */}
-                    <div className="grid grid-cols-5 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                    {/* Header */}
+                    <div className="grid grid-cols-2 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
                       <span>Account</span>
-                      <span className="text-right">Current</span>
-                      <span className="text-right">7 Days</span>
-                      <span className="text-right">14 Days</span>
-                      <span className="text-right">21+ Days</span>
+                      <span className="text-right">Balance</span>
                     </div>
 
                     {allAccounts.map(({ label, record: r, isMain }) => (
                       <div
                         key={label}
                         className={cn(
-                          "grid grid-cols-5 gap-1 rounded-lg px-2 py-1.5",
+                          "grid grid-cols-2 gap-1 rounded-lg px-2 py-1.5",
                           isMain ? "bg-gray-700" : "bg-gray-900"
                         )}
                       >
                         <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
                           {label}
                         </span>
-                        {bucketKeys.map(({ key }) => (
-                          <span key={key} className={cn("text-xs text-right", parseAmount(r?.[key]) !== 0 ? "text-white" : "text-gray-600")}>
-                            {formatAmount(r?.[key])}
-                          </span>
-                        ))}
+                        <span className={cn("text-xs text-right", parseAmount(r?.outstanding_balance) !== 0 ? "text-white" : "text-gray-600")}>
+                          {formatAmount(r?.outstanding_balance)}
+                        </span>
                       </div>
                     ))}
 
                     {hasSubAccounts && (
-                      <div className="grid grid-cols-5 gap-1 rounded-lg border border-gray-600 bg-gray-800 px-2 py-1.5 mt-1">
+                      <div className="grid grid-cols-2 gap-1 rounded-lg border border-gray-600 bg-gray-800 px-2 py-1.5 mt-1">
                         <span className="text-xs font-bold text-yellow-400">TOTAL</span>
-                        {bucketKeys.map(({ key }) => (
-                          <span key={key} className={cn("text-xs font-bold text-right", totals[key] !== 0 ? "text-yellow-300" : "text-gray-600")}>
-                            {formatAmount(String(totals[key]))}
-                          </span>
-                        ))}
+                        <span className={cn("text-xs font-bold text-right", grandTotal !== 0 ? "text-yellow-300" : "text-gray-600")}>
+                          {formatAmount(String(grandTotal))}
+                        </span>
                       </div>
                     )}
                   </div>
