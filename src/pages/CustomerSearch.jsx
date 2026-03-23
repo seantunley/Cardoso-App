@@ -205,40 +205,53 @@ export default function CustomerSearch() {
           </Card>
         )}
 
-        {/* Customer Lookup */}
-        <div className="ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10">
-          <CustomerLookup 
-            onRecordSelect={setSelectedRecord} 
-            triggerLookup={customerNumberToLookup}
-            onLookupComplete={() => setCustomerNumberToLookup("")}
-            selectedConnection={selectedConnection}
-          />
-        </div>
+        {/* Customer Lookup + Last Sync side by side */}
+        <div className="flex gap-3 items-stretch">
+          {/* Customer Lookup */}
+          <div className="flex-1 ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10 min-w-0">
+            <CustomerLookup 
+              onRecordSelect={setSelectedRecord} 
+              triggerLookup={customerNumberToLookup}
+              onLookupComplete={() => setCustomerNumberToLookup("")}
+              selectedConnection={selectedConnection}
+            />
+          </div>
 
-        {/* Last Sync Info */}
-        {selectedConnection && (
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <CardContent className="p-4">
-              <div className="flex items-center gap-2">
-                <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
-                <div>
-                  <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">Last Sync</p>
-                  {selectedConnection.last_sync ? (
-                    <p className="text-sm text-[var(--text-primary)] font-semibold">
-                      {new Date(selectedConnection.last_sync).toLocaleString("en-ZA", {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                        timeZone: "Africa/Johannesburg",
-                      })}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-gray-500">Never synced</p>
-                  )}
+          {/* Last Sync Info */}
+          {selectedConnection && (
+            <div className="flex-shrink-0 w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
+              <div className="flex items-center gap-2 mb-1.5">
+                <div className="p-1.5 rounded-md bg-indigo-500/20">
+                  <RefreshCw className="w-3 h-3 text-indigo-400" />
                 </div>
+                <p className="text-[10px] font-semibold text-indigo-300 uppercase tracking-widest">Last Sync</p>
               </div>
-            </CardContent>
-          </Card>
-        )}
+              {selectedConnection.last_sync ? (
+                <>
+                  <p className="text-sm font-bold text-white leading-tight">
+                    {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
+                      timeZone: "Africa/Johannesburg",
+                      day: "2-digit",
+                      month: "short",
+                      year: "numeric",
+                    })}
+                  </p>
+                  <p className="text-lg font-extrabold text-indigo-300 leading-tight">
+                    {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
+                      timeZone: "Africa/Johannesburg",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                      hour12: false,
+                    })}
+                  </p>
+                  <p className="text-[10px] text-indigo-400/70 mt-1">{selectedConnection.name}</p>
+                </>
+              ) : (
+                <p className="text-sm text-indigo-300/50">Never synced</p>
+              )}
+            </div>
+          )}
+        </div>
 
         {/* Info */}
         <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
