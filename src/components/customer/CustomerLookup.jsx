@@ -59,6 +59,10 @@ function flattenRecord(record) {
     customer_number: record.customer_number || record.data?.customer_number,
     customer_name: record.customer_name || record.data?.customer_name,
     age_analysis: record.age_analysis || record.data?.age_analysis,
+    age_current: record.age_current || record.data?.age_current,
+    age_7_days: record.age_7_days || record.data?.age_7_days,
+    age_14_days: record.age_14_days || record.data?.age_14_days,
+    age_21_days: record.age_21_days || record.data?.age_21_days,
     flag_color: record.flag_color || record.data?.flag_color || "none",
     flag_reason: record.flag_reason || record.data?.flag_reason || "",
     flag_created_by: record.flag_created_by || record.data?.flag_created_by || null,
@@ -534,41 +538,43 @@ export default function CustomerLookup({
                 <h4 className="text-sm font-semibold text-gray-300">Age Analysis</h4>
               </div>
 
-              {customer?.age_analysis ? (
-                (() => {
-                  const rValues = [
-                    ...customer.age_analysis.matchAll(/R\s*([\d,]+(?:\.\d+)?)/g),
-                  ];
-                  const buckets = ["Current", "7 Days", "14 Days", "21+ Days"];
+              {(() => {
+                const buckets = [
+                  { label: "Current", value: customer?.age_current },
+                  { label: "7 Days", value: customer?.age_7_days },
+                  { label: "14 Days", value: customer?.age_14_days },
+                  { label: "21+ Days", value: customer?.age_21_days },
+                ];
+                const hasAnyData = buckets.some((b) => b.value && b.value.trim() !== "");
 
-                  return (
-                    <div className="grid grid-cols-4 gap-2">
-                      {buckets.map((label, idx) => {
-                        const val = rValues[idx] ? `R${rValues[idx][1]}` : "—";
+                if (!hasAnyData) {
+                  return <p className="text-sm text-gray-400">No age analysis data</p>;
+                }
 
-                        return (
-                          <div
-                            key={label}
-                            className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2"
+                return (
+                  <div className="grid grid-cols-4 gap-2">
+                    {buckets.map(({ label, value }) => {
+                      const display = value && value.trim() !== "" ? value : "—";
+                      return (
+                        <div
+                          key={label}
+                          className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2"
+                        >
+                          <span className="mb-1 text-xs text-gray-500">{label}</span>
+                          <span
+                            className={cn(
+                              "text-sm font-semibold",
+                              display !== "—" ? "text-white" : "text-gray-600"
+                            )}
                           >
-                            <span className="mb-1 text-xs text-gray-500">{label}</span>
-                            <span
-                              className={cn(
-                                "text-sm font-semibold",
-                                val !== "—" ? "text-white" : "text-gray-600"
-                              )}
-                            >
-                              {val}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })()
-              ) : (
-                <p className="text-sm text-gray-400">No age analysis data</p>
-              )}
+                            {display}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
 
             <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
@@ -582,38 +588,48 @@ export default function CustomerLookup({
               <div className="grid grid-cols-3 gap-2">
                 {[
                   {
+                    label: "Invoice 1",
                     number: customer?.last_unpaid_invoice_1,
                     amount: customer?.last_unpaid_invoice_1_amount,
                   },
                   {
+                    label: "Invoice 2",
                     number: customer?.last_unpaid_invoice_2,
                     amount: customer?.last_unpaid_invoice_2_amount,
                   },
                   {
+                    label: "Invoice 3",
                     number: customer?.last_unpaid_invoice_3,
                     amount: customer?.last_unpaid_invoice_3_amount,
                   },
-                ].map(({ number, amount }, idx) => (
+                ].map(({ label, number, amount }) => (
                   <div
-                    key={idx}
-                    className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2"
+                    key={label}
+                    className="flex flex-col rounded-lg border border-gray-700 bg-gray-900 p-2 gap-1"
                   >
-                    <span
-                      className={cn(
-                        "text-sm font-medium",
-                        number ? "text-orange-300" : "text-gray-600"
-                      )}
-                    >
-                      {number || "—"}
-                    </span>
-                    <span
-                      className={cn(
-                        "mt-0.5 text-xs",
-                        amount ? "text-gray-300" : "text-gray-600"
-                      )}
-                    >
-                      {amount || "—"}
-                    </span>
+                    <span className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-500">No.</span>
+                      <span
+                        className={cn(
+                          "text-sm font-medium",
+                          number && number.trim() !== "" ? "text-orange-300" : "text-gray-600"
+                        )}
+                      >
+                        {number && number.trim() !== "" ? number : "—"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] text-gray-500">Val.</span>
+                      <span
+                        className={cn(
+                          "text-xs",
+                          amount && amount.trim() !== "" ? "text-gray-200" : "text-gray-600"
+                        )}
+                      >
+                        {amount && amount.trim() !== "" ? amount : "—"}
+                      </span>
+                    </div>
                   </div>
                 ))}
               </div>

@@ -90,6 +90,10 @@ db.exec(`
     customer_number TEXT,
     customer_name TEXT,
     age_analysis TEXT,
+    age_current TEXT,
+    age_7_days TEXT,
+    age_14_days TEXT,
+    age_21_days TEXT,
     source_id TEXT,
     source_table TEXT,
     data TEXT,
@@ -258,6 +262,10 @@ function ensureColumn(tableName, columnName, definition) {
 
 ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
 ensureColumn('databaseconnection', 'last_error', 'TEXT');
+ensureColumn('datarecord', 'age_current', 'TEXT');
+ensureColumn('datarecord', 'age_7_days', 'TEXT');
+ensureColumn('datarecord', 'age_14_days', 'TEXT');
+ensureColumn('datarecord', 'age_21_days', 'TEXT');
 
 // Migrate field_mappings from legacy flat format to per-table format
 // Legacy: { localKey: { sourceField, ... } }
@@ -421,6 +429,46 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
     },
     age_analysis: {
       fallbacks: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],
+      defaultMode: 'sync',
+    },
+    age_current: {
+      fallbacks: ['age_current', 'AgeCurrent', 'AGE_CURRENT', 'Current', 'CURRENT'],
+      defaultMode: 'sync',
+    },
+    age_7_days: {
+      fallbacks: ['age_7_days', 'Age7Days', 'AGE_7_DAYS', 'Age7', 'AMTDUE07'],
+      defaultMode: 'sync',
+    },
+    age_14_days: {
+      fallbacks: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],
+      defaultMode: 'sync',
+    },
+    age_21_days: {
+      fallbacks: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_1: {
+      fallbacks: ['last_unpaid_invoice_1', 'LastUnpaidInvoice1', 'LAST_UNPAID_INVOICE_1'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_1_amount: {
+      fallbacks: ['last_unpaid_invoice_1_amount', 'LastUnpaidInvoice1Amount', 'LAST_UNPAID_INVOICE_1_AMOUNT'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_2: {
+      fallbacks: ['last_unpaid_invoice_2', 'LastUnpaidInvoice2', 'LAST_UNPAID_INVOICE_2'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_2_amount: {
+      fallbacks: ['last_unpaid_invoice_2_amount', 'LastUnpaidInvoice2Amount', 'LAST_UNPAID_INVOICE_2_AMOUNT'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_3: {
+      fallbacks: ['last_unpaid_invoice_3', 'LastUnpaidInvoice3', 'LAST_UNPAID_INVOICE_3'],
+      defaultMode: 'sync',
+    },
+    last_unpaid_invoice_3_amount: {
+      fallbacks: ['last_unpaid_invoice_3_amount', 'LastUnpaidInvoice3Amount', 'LAST_UNPAID_INVOICE_3_AMOUNT'],
       defaultMode: 'sync',
     },
     note: {
@@ -777,6 +825,10 @@ async function runConnectionImport(connectionId) {
         customer_number = ?,
         customer_name = ?,
         age_analysis = ?,
+        age_current = ?,
+        age_7_days = ?,
+        age_14_days = ?,
+        age_21_days = ?,
         source_id = ?,
         source_table = ?,
         data = ?,
@@ -805,6 +857,10 @@ async function runConnectionImport(connectionId) {
         customer_number,
         customer_name,
         age_analysis,
+        age_current,
+        age_7_days,
+        age_14_days,
+        age_21_days,
         source_id,
         source_table,
         data,
@@ -820,7 +876,7 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_3_amount,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const config of tableConfigs) {
@@ -854,7 +910,8 @@ async function runConnectionImport(connectionId) {
 
       const existingRows = db.prepare(`
         SELECT id, source_id, source_table, customer_number, customer_name,
-               age_analysis, note, custom_field_1, custom_field_2, custom_field_3,
+               age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+               note, custom_field_1, custom_field_2, custom_field_3,
                local_fields, flag_color, flag_reason, flag_created_by, data,
                last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
                last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
@@ -885,15 +942,6 @@ async function runConnectionImport(connectionId) {
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
           const dataJson = JSON.stringify(row);
 
-          const invoiceFields = {
-            last_unpaid_invoice_1: String(row.last_unpaid_invoice_1 || row.LastUnpaidInvoice1 || ''),
-            last_unpaid_invoice_1_amount: String(row.last_unpaid_invoice_1_amount || row.LastUnpaidInvoice1Amount || ''),
-            last_unpaid_invoice_2: String(row.last_unpaid_invoice_2 || row.LastUnpaidInvoice2 || ''),
-            last_unpaid_invoice_2_amount: String(row.last_unpaid_invoice_2_amount || row.LastUnpaidInvoice2Amount || ''),
-            last_unpaid_invoice_3: String(row.last_unpaid_invoice_3 || row.LastUnpaidInvoice3 || ''),
-            last_unpaid_invoice_3_amount: String(row.last_unpaid_invoice_3_amount || row.LastUnpaidInvoice3Amount || ''),
-          };
-
           const existingLocalFields = parseJsonSafely(existing?.local_fields, {});
           const mergedLocalFields = {
             ...existingLocalFields,
@@ -907,7 +955,6 @@ async function runConnectionImport(connectionId) {
             synced_at: syncTimestamp,
             created_by: 'import',
             local_fields: stringifyJsonSafely(mergedLocalFields),
-            ...invoiceFields,
             ...mappedPatch,
           });
 
@@ -917,6 +964,10 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
               String(baseRecordData.customer_name ?? existing.customer_name ?? ''),
               String(baseRecordData.age_analysis ?? existing.age_analysis ?? ''),
+              String(baseRecordData.age_current ?? existing.age_current ?? ''),
+              String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
+              String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
+              String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,
@@ -924,12 +975,12 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? ''),
               String(baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? ''),
               String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
-              String(baseRecordData.last_unpaid_invoice_1 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
+              String(baseRecordData.last_unpaid_invoice_1 ?? existing.last_unpaid_invoice_1 ?? ''),
+              String(baseRecordData.last_unpaid_invoice_1_amount ?? existing.last_unpaid_invoice_1_amount ?? ''),
+              String(baseRecordData.last_unpaid_invoice_2 ?? existing.last_unpaid_invoice_2 ?? ''),
+              String(baseRecordData.last_unpaid_invoice_2_amount ?? existing.last_unpaid_invoice_2_amount ?? ''),
+              String(baseRecordData.last_unpaid_invoice_3 ?? existing.last_unpaid_invoice_3 ?? ''),
+              String(baseRecordData.last_unpaid_invoice_3_amount ?? existing.last_unpaid_invoice_3_amount ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -944,6 +995,10 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.customer_number ?? ''),
               String(baseRecordData.customer_name ?? ''),
               String(baseRecordData.age_analysis ?? ''),
+              String(baseRecordData.age_current ?? ''),
+              String(baseRecordData.age_7_days ?? ''),
+              String(baseRecordData.age_14_days ?? ''),
+              String(baseRecordData.age_21_days ?? ''),
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,

@@ -56,7 +56,19 @@ async function runLocalImport(connectionId) {
 const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
-  { key: "age_analysis", label: "Age Analysis", type: "text", isBuiltIn: true },
+  // Age Analysis — 4 discrete buckets (recommended) plus legacy single-field fallback
+  { key: "age_current", label: "Age Analysis — Current", type: "text", isBuiltIn: true },
+  { key: "age_7_days", label: "Age Analysis — 7 Days", type: "text", isBuiltIn: true },
+  { key: "age_14_days", label: "Age Analysis — 14 Days", type: "text", isBuiltIn: true },
+  { key: "age_21_days", label: "Age Analysis — 21+ Days", type: "text", isBuiltIn: true },
+  { key: "age_analysis", label: "Age Analysis (legacy combined)", type: "text", isBuiltIn: true },
+  // Last Unpaid Invoices
+  { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_2", label: "Invoice 2 — Number", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_2_amount", label: "Invoice 2 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_3", label: "Invoice 3 — Number", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_3_amount", label: "Invoice 3 — Amount", type: "text", isBuiltIn: true },
   { key: "note", label: "Note", type: "text", isBuiltIn: true },
   { key: "flag_color", label: "Flag Color", type: "text", isBuiltIn: true },
   { key: "flag_reason", label: "Flag Reason", type: "text", isBuiltIn: true },
