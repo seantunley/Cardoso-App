@@ -1000,8 +1000,13 @@ async function runConnectionImport(connectionId) {
 
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
-      if (!syncQuery.trim().toUpperCase().startsWith('SELECT')) {
-        throw new Error('sync_query must be a SELECT statement');
+      const syncQueryStripped = syncQuery
+        .replace(/--[^\n]*/g, '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .trim()
+        .toUpperCase();
+      if (!syncQueryStripped.startsWith('SELECT') && !syncQueryStripped.startsWith('WITH')) {
+        throw new Error('sync_query must be a SELECT or CTE (WITH ...) statement');
       }
       if (!queryIndexField) {
         throw new Error('query_index_field is required for query mode');
@@ -1645,10 +1650,15 @@ app.post(
       return res.status(400).json({ error: 'No query provided' });
     }
 
-    // Basic safety: only allow SELECT statements
-    const trimmed = query.trim().toUpperCase();
-    if (!trimmed.startsWith('SELECT')) {
-      return res.status(400).json({ error: 'Only SELECT queries are allowed' });
+    // Basic safety: only allow SELECT/CTE/comment-prefixed queries
+    // Strip leading comments (-- lines and /* */ blocks) before checking
+    const strippedForCheck = query
+      .replace(/--[^\n]*/g, '')        // remove -- comments
+      .replace(/\/\*[\s\S]*?\*\//g, '') // remove /* */ blocks
+      .trim()
+      .toUpperCase();
+    if (!strippedForCheck.startsWith('SELECT') && !strippedForCheck.startsWith('WITH')) {
+      return res.status(400).json({ error: 'Only SELECT or CTE (WITH ...) queries are allowed' });
     }
 
     try {
