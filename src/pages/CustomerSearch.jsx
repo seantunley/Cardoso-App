@@ -1,0 +1,299 @@
+import { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
+import { Card, CardContent } from "@/components/ui/card";
+import { AlertCircle, Database, Flag, CheckCircle, XCircle, Shield } from "lucide-react";
+import CustomerLookup from "../components/customer/CustomerLookup";
+import StatCard from "../components/dashboard/StatCard";
+import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
+import ActivityLogModal from "../components/customer/ActivityLogModal";
+import { Button } from "@/components/ui/button";
+import { History } from "lucide-react";
+
+export default function CustomerSearch() {
+  const queryClient = useQueryClient();
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [flagModalOpen, setFlagModalOpen] = useState(false);
+  const [selectedFlagColor, setSelectedFlagColor] = useState(null);
+  const [activityLogOpen, setActivityLogOpen] = useState(false);
+  const [customerNumberToLookup, setCustomerNumberToLookup] = useState("");
+
+  const { data: currentUser } = useQuery({
+    queryKey: ["currentUser"],
+    queryFn: () => base44.auth.me(),
+  });
+
+  const [selectedConnectionId, setSelectedConnectionId] = useState(null);
+
+  const { data: connections = [] } = useQuery({
+    queryKey: ["connections", currentUser?.email],
+    queryFn: async () => {
+      if (!currentUser) return [];
+      const allConnections = await base44.entities.DatabaseConnection.list();
+      return allConnections.filter(conn => conn.created_by === currentUser.email);
+    },
+    enabled: !!currentUser,
+  });
+
+  // Auto-select first active connection if none selected
+  useEffect(() => {
+    if (connections.length > 0 && !selectedConnectionId) {
+      const activeConnection = connections.find(c => c.status === "active");
+      setSelectedConnectionId(activeConnection?.id || connections[0]?.id || null);
+    }
+  }, [connections, selectedConnectionId]);
+
+  const { data: records = [] } = useQuery({
+    queryKey: ["records"],
+    queryFn: () => base44.entities.DataRecord.list("-created_date", 1000),
+  });
+
+  useEffect(() => {
+    const unsubscribe = base44.entities.DataRecord.subscribe((event) => {
+      if (["create", "update"].includes(event.type)) {
+        queryClient.invalidateQueries({ queryKey: ["records"] });
+      }
+    });
+    return unsubscribe;
+  }, [queryClient]);
+
+  const activeConnections = connections.filter(c => c.status === "active");
+  const selectedConnection = connections.find(c => c.id === selectedConnectionId);
+  
+  // Calculate flag stats
+  const redFlagged = records.filter((r) => r.flag_color === "red");
+  const greenFlagged = records.filter((r) => r.flag_color === "green");
+  const orangeFlagged = records.filter((r) => r.flag_color === "orange");
+
+  const handleFlagClick = (flagColor) => {
+    setSelectedFlagColor(flagColor);
+    setFlagModalOpen(true);
+  };
+
+  const handleCustomerClickFromModal = (customer) => {
+    const customerNumber = customer.customer_number || customer.data?.customer_number;
+    setCustomerNumberToLookup(customerNumber);
+    setFlagModalOpen(false);
+  };
+
+  const getFlaggedCustomers = () => {
+    if (selectedFlagColor === "red") return redFlagged;
+    if (selectedFlagColor === "green") return greenFlagged;
+    if (selectedFlagColor === "orange") return orangeFlagged;
+    return [];
+  };
+
+  return (
+     <div className="min-h-screen bg-[var(--bg-primary)]">
+       <div className="max-w-4xl mx-auto p-4 lg:p-6 space-y-4">
+         {/* Header */}
+         <div className="flex items-start justify-between gap-4">
+           <div>
+             <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">
+               Customer Search
+             </h1>
+             <p className="text-sm text-[var(--text-secondary)] mt-1">
+               Look up customers by number from your SQL database
+             </p>
+           </div>
+           {currentUser?.role === "admin" && (
+             <Button
+               onClick={() => setActivityLogOpen(true)}
+               variant="outline"
+               size="sm"
+               className="flex items-center gap-2 bg-[var(--bg-secondary)] border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+             >
+              <History className="w-4 h-4" />
+              Activity Log
+            </Button>
+          )}
+        </div>
+
+            {/* Flag Stats */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+             <div 
+               onClick={() => handleFlagClick("red")}
+               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-rose-500 transition-all"
+             >
+               <div className="flex items-center gap-2">
+                 <div className="p-1.5 bg-rose-900/30 rounded-lg">
+                   <Flag className="w-3.5 h-3.5 text-rose-400" />
+                 </div>
+                 <div>
+                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Red Flags</p>
+                   <p className="text-xl font-bold text-[var(--text-primary)]">{redFlagged.length}</p>
+                 </div>
+               </div>
+             </div>
+             <div 
+               onClick={() => handleFlagClick("green")}
+               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-emerald-500 transition-all"
+             >
+               <div className="flex items-center gap-2">
+                 <div className="p-1.5 bg-emerald-900/30 rounded-lg">
+                   <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
+                 </div>
+                 <div>
+                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Green Flags</p>
+                   <p className="text-xl font-bold text-[var(--text-primary)]">{greenFlagged.length}</p>
+                 </div>
+               </div>
+             </div>
+             <div 
+               onClick={() => handleFlagClick("orange")}
+               className="bg-[var(--bg-secondary)] rounded-lg border border-[var(--border-color)] p-3 cursor-pointer hover:shadow-md hover:border-amber-500 transition-all"
+             >
+               <div className="flex items-center gap-2">
+                 <div className="p-1.5 bg-amber-900/30 rounded-lg">
+                   <Flag className="w-3.5 h-3.5 text-amber-400" />
+                 </div>
+                 <div>
+                   <p className="text-[10px] text-[var(--text-secondary)] uppercase tracking-wide">Orange Flags</p>
+                   <p className="text-xl font-bold text-[var(--text-primary)]">{orangeFlagged.length}</p>
+                 </div>
+               </div>
+             </div>
+             </div>
+
+            {/* Flagged Customers Modal */}
+            <FlaggedCustomersModal
+              flagColor={selectedFlagColor}
+              customers={getFlaggedCustomers()}
+              open={flagModalOpen}
+              onClose={() => setFlagModalOpen(false)}
+              onCustomerClick={handleCustomerClickFromModal}
+            />
+
+            {/* Activity Log Modal */}
+            <ActivityLogModal
+              open={activityLogOpen}
+              onClose={() => setActivityLogOpen(false)}
+            />
+
+        {/* Connection Selector */}
+        {connections.length > 1 && (
+          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <CardContent className="p-4">
+              <div className="space-y-2">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Select Database Connection</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {connections.map((conn) => (
+                    <button
+                      key={conn.id}
+                      onClick={() => setSelectedConnectionId(conn.id)}
+                      className={`p-2.5 rounded-lg border-2 transition-all text-left ${
+                        selectedConnectionId === conn.id
+                          ? "border-[var(--text-primary)] bg-[var(--text-primary)]/10 ring-1 ring-[var(--text-primary)]/20"
+                          : "border-[var(--border-color)] hover:border-[var(--border-color)]/70 hover:bg-[var(--bg-tertiary)]/50"
+                      }`}
+                    >
+                      <p className="font-medium text-[var(--text-primary)] text-xs">{conn.name}</p>
+                      <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{conn.database_name}</p>
+                      <div className="flex items-center gap-1.5 mt-1.5">
+                        <div className={`w-1.5 h-1.5 rounded-full ${
+                          conn.status === "active" ? "bg-green-500" : 
+                          conn.status === "error" ? "bg-red-500" : 
+                          "bg-gray-500"
+                        }`} />
+                        <span className="text-[10px] text-gray-400 capitalize">{conn.status}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Customer Lookup */}
+        <div className="ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10">
+          <CustomerLookup 
+            onRecordSelect={setSelectedRecord} 
+            triggerLookup={customerNumberToLookup}
+            onLookupComplete={() => setCustomerNumberToLookup("")}
+            selectedConnection={selectedConnection}
+          />
+        </div>
+
+        {/* Info */}
+        <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">How it works</h3>
+            <ul className="text-xs text-[var(--text-secondary)] space-y-1.5">
+              <li className="flex items-start gap-1.5">
+                <span className="text-[var(--text-tertiary)]">•</span>
+                <span>Enter a customer number to search the SQL database</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-gray-500">•</span>
+                <span>View customer name and age analysis information</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-gray-500">•</span>
+                <span>Flag customers with <span className="font-medium text-red-400">Red</span>, <span className="font-medium text-green-400">Green</span>, or <span className="font-medium text-orange-400">Orange</span> tags</span>
+              </li>
+              <li className="flex items-start gap-1.5">
+                <span className="text-gray-500">•</span>
+                <span className="text-[10px] text-gray-400">Note: For live SQL connections, enable Backend Functions in your app settings and configure a SQL connector backend function</span>
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
+
+        {/* Security Notice */}
+        <Card className="border-emerald-700 bg-emerald-900/20">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-2">
+              <div className="p-1.5 bg-emerald-900/30 rounded-lg">
+                <Shield className="w-3.5 h-3.5 text-emerald-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-emerald-400 text-xs mb-1">Data Security & Privacy</h3>
+                <ul className="text-[10px] text-emerald-300/80 space-y-0.5">
+                  <li>• All database passwords are encrypted and stored securely</li>
+                  <li>• Your data is isolated - each branch only sees their own records</li>
+                  <li>• Imported data is used solely for this application and not shared</li>
+                  <li>• Row-level security ensures data privacy between users</li>
+                </ul>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Connection Status Banner */}
+        {activeConnections.length === 0 && (
+          <Card className="border-amber-700 bg-amber-900/20">
+            <CardContent className="p-3">
+              <div className="flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-amber-400">No Active SQL Connections</h3>
+                  <p className="text-xs text-amber-300/80 mt-0.5">
+                    To enable live SQL lookups, configure an active database connection in the Dashboard.
+                    For full backend integration, enable Backend Functions in app settings.
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {activeConnections.length > 0 && (
+          <Card className="border-blue-700 bg-blue-900/20">
+            <CardContent className="p-3">
+              <div className="flex items-start gap-2">
+                <Database className="w-4 h-4 text-blue-400 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-blue-400">Connected to SQL Database</h3>
+                  <p className="text-xs text-blue-300/80 mt-0.5">
+                    {activeConnections[0].name} • {activeConnections[0].database_name}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
