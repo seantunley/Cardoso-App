@@ -46,9 +46,12 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_date", label: "Last Unpaid Invoice — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_1", label: "Last Invoice — Number", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_1_amount", label: "Last Invoice — Amount", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_date", label: "Last Invoice — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_number", label: "Last Receipt — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_amount", label: "Last Receipt — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_date", label: "Last Receipt — Date", type: "text", isBuiltIn: true },
   { key: "note", label: "Note", type: "text", isBuiltIn: true },
   { key: "flag_color", label: "Flag Color", type: "text", isBuiltIn: true },
   { key: "flag_reason", label: "Flag Reason", type: "text", isBuiltIn: true },
@@ -419,7 +422,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 setQueryColumns([]);
                 setQueryPreview([]);
               }}
-              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date,\n  RECNO1 AS last_receipt_number,\n  RECAMT1 AS last_receipt_amount,\n  RECDATE1 AS last_receipt_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
               rows={8}
               className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
             />

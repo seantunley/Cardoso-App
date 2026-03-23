@@ -21,6 +21,7 @@ import {
   Shield,
   Trash2,
   History,
+  CheckCircle,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { toast } from "sonner";
@@ -72,6 +73,12 @@ function flattenRecord(record) {
       record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
     last_unpaid_invoice_date:
       record.last_unpaid_invoice_date || record.data?.last_unpaid_invoice_date,
+    last_receipt_number:
+      record.last_receipt_number || record.data?.last_receipt_number,
+    last_receipt_amount:
+      record.last_receipt_amount || record.data?.last_receipt_amount,
+    last_receipt_date:
+      record.last_receipt_date || record.data?.last_receipt_date,
     outstanding_balance:
       record.outstanding_balance || record.data?.outstanding_balance,
   };
@@ -635,50 +642,74 @@ export default function CustomerLookup({
                 })),
               ];
 
-              return (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
+              // Shared table renderer for invoice and receipt blocks
+              const renderTransactionTable = ({ title, icon: Icon, iconColor, accounts, getFields }) => (
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4 flex-1 min-w-0">
                   <div className="mb-3 flex items-center gap-2">
-                    <Flag className="h-4 w-4 text-orange-400" />
-                    <h4 className="text-sm font-semibold text-gray-300">Last Invoice</h4>
+                    <Icon className={cn("h-4 w-4", iconColor)} />
+                    <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
                   </div>
-
-                  <div className="space-y-2">
-                    {/* Header */}
-                    <div className="grid grid-cols-4 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                  <div className="space-y-1.5">
+                    <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
                       <span>Account</span>
-                      <span>Invoice No.</span>
-                      <span className="text-right">Amount</span>
-                      <span>Date</span>
+                      <span>No.</span>
+                      <span className="text-right">Amt &nbsp; Date</span>
                     </div>
-
-                    {allAccounts.map(({ label, record: r, isMain }) => {
-                      const inv = r?.last_unpaid_invoice_1;
-                      const amt = r?.last_unpaid_invoice_1_amount;
-                      const date = r?.last_unpaid_invoice_date;
+                    {accounts.map(({ label, record: r, isMain }) => {
+                      const { ref, amt, date } = getFields(r);
                       return (
                         <div
                           key={label}
                           className={cn(
-                            "grid grid-cols-4 gap-1 rounded-lg px-2 py-1.5",
+                            "grid grid-cols-3 gap-1 rounded-lg px-2 py-1.5",
                             isMain ? "bg-gray-700" : "bg-gray-900"
                           )}
                         >
                           <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
                             {label}
                           </span>
-                          <span className={cn("text-xs", inv ? "text-orange-300" : "text-gray-600")}>
-                            {inv || "—"}
+                          <span className={cn("text-xs truncate", ref ? iconColor : "text-gray-600")}>
+                            {ref || "—"}
                           </span>
-                          <span className={cn("text-xs text-right", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
-                            {formatAmount(amt)}
-                          </span>
-                          <span className={cn("text-xs", date ? "text-gray-300" : "text-gray-600")}>
-                            {date || "—"}
-                          </span>
+                          <div className="flex items-center justify-end gap-1.5 min-w-0">
+                            <span className={cn("text-xs font-medium whitespace-nowrap", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
+                              {formatAmount(amt)}
+                            </span>
+                            <span className={cn("text-[10px] whitespace-nowrap", date ? "text-gray-400" : "text-gray-600")}>
+                              {date || "—"}
+                            </span>
+                          </div>
                         </div>
                       );
                     })}
                   </div>
+                </div>
+              );
+
+              return (
+                <div className="flex gap-3">
+                  {renderTransactionTable({
+                    title: "Last Invoice",
+                    icon: Flag,
+                    iconColor: "text-orange-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_unpaid_invoice_1,
+                      amt: r?.last_unpaid_invoice_1_amount,
+                      date: r?.last_unpaid_invoice_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Last Receipt",
+                    icon: CheckCircle,
+                    iconColor: "text-emerald-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_receipt_number,
+                      amt: r?.last_receipt_amount,
+                      date: r?.last_receipt_date,
+                    }),
+                  })}
                 </div>
               );
             })()}

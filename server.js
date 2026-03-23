@@ -268,6 +268,9 @@ ensureColumn('datarecord', 'age_14_days', 'TEXT');
 ensureColumn('datarecord', 'age_21_days', 'TEXT');
 ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_number', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_amount', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
@@ -486,6 +489,18 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
     },
     last_unpaid_invoice_date: {
       fallbacks: ['last_unpaid_invoice_date', 'LastUnpaidInvoiceDate', 'LAST_UNPAID_INVOICE_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate'],
+      defaultMode: 'sync',
+    },
+    last_receipt_number: {
+      fallbacks: ['last_receipt_number', 'LastReceiptNumber', 'LAST_RECEIPT_NUMBER', 'ReceiptNo', 'RECNO', 'LastReceiptNo'],
+      defaultMode: 'sync',
+    },
+    last_receipt_amount: {
+      fallbacks: ['last_receipt_amount', 'LastReceiptAmount', 'LAST_RECEIPT_AMOUNT', 'ReceiptAmount', 'RECAMT', 'LastReceiptAmt'],
+      defaultMode: 'sync',
+    },
+    last_receipt_date: {
+      fallbacks: ['last_receipt_date', 'LastReceiptDate', 'LAST_RECEIPT_DATE', 'ReceiptDate', 'RECDATE', 'LastReceiptDate'],
       defaultMode: 'sync',
     },
     note: {
@@ -863,6 +878,9 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_3 = ?,
         last_unpaid_invoice_3_amount = ?,
         last_unpaid_invoice_date = ?,
+        last_receipt_number = ?,
+        last_receipt_amount = ?,
+        last_receipt_date = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -897,9 +915,12 @@ async function runConnectionImport(connectionId) {
         last_unpaid_invoice_3,
         last_unpaid_invoice_3_amount,
         last_unpaid_invoice_date,
+        last_receipt_number,
+        last_receipt_amount,
+        last_receipt_date,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     // Shared write-rows helper used by both query mode and legacy table mode
@@ -912,7 +933,8 @@ async function runConnectionImport(connectionId) {
                last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
                last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
                last_unpaid_invoice_3, last_unpaid_invoice_3_amount,
-               last_unpaid_invoice_date, outstanding_balance
+               last_unpaid_invoice_date, outstanding_balance,
+               last_receipt_number, last_receipt_amount, last_receipt_date
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -977,6 +999,9 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_3 ?? existing.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? existing.last_unpaid_invoice_3_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_date ?? existing.last_unpaid_invoice_date ?? ''),
+              String(baseRecordData.last_receipt_number ?? existing.last_receipt_number ?? ''),
+              String(baseRecordData.last_receipt_amount ?? existing.last_receipt_amount ?? ''),
+              String(baseRecordData.last_receipt_date ?? existing.last_receipt_date ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -1010,6 +1035,9 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_unpaid_invoice_3 ?? ''),
               String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
               String(baseRecordData.last_unpaid_invoice_date ?? ''),
+              String(baseRecordData.last_receipt_number ?? ''),
+              String(baseRecordData.last_receipt_amount ?? ''),
+              String(baseRecordData.last_receipt_date ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
