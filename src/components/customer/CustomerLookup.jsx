@@ -651,7 +651,7 @@ export default function CustomerLookup({
                   </div>
                   <div className="space-y-1.5">
                     {/* 4 cols: Account | No. | Amount | Date */}
-                    <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                    <div className="grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1.3fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1">
                       <span>Account</span>
                       <span>No.</span>
                       <span>Amount</span>
@@ -663,7 +663,7 @@ export default function CustomerLookup({
                         <div
                           key={label}
                           className={cn(
-                            "grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,1.1fr)_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1.5",
+                            "grid grid-cols-[minmax(0,0.9fr)_minmax(0,1.6fr)_minmax(0,0.8fr)_minmax(0,1.3fr)] gap-2 rounded-lg px-2 py-1.5",
                             isMain ? "bg-gray-700" : "bg-gray-900"
                           )}
                         >
@@ -676,7 +676,7 @@ export default function CustomerLookup({
                           <span className={cn("text-xs font-medium truncate", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
                             {formatAmount(amt)}
                           </span>
-                          <span className={cn("text-xs truncate", date ? "text-gray-300" : "text-gray-600")}>
+                          <span className={cn("text-[11px] truncate", date ? "text-gray-300" : "text-gray-600")}>
                             {date || "—"}
                           </span>
                         </div>
