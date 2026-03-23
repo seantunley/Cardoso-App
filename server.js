@@ -1663,17 +1663,15 @@ app.post(
         connectionTimeout: 15000,
       });
 
-      // Inject TOP 5 directly after SELECT to avoid subquery wrapping issues
-      // (subquery breaks HAVING, ORDER BY, UNION etc.)
-      const previewQuery = query.replace(/^\s*SELECT\s+/i, 'SELECT TOP 5 ');
-      const result = await pool.request().query(previewQuery);
-      const rows = result.recordset || [];
-      const columns = rows.length > 0 ? Object.keys(rows[0]) : (result.recordsets?.[0] ? Object.keys(result.recordsets[0][0] || {}) : []);
-
-      // If we couldn't get columns from rows, get from recordset metadata
-      const columnsMeta = result.recordset?.columns
-        ? Object.keys(result.recordset.columns)
-        : columns;
+      // Run the full query and slice — avoids any SQL modification that breaks
+      // CTEs, comments, HAVING, ORDER BY, UNION, etc.
+      const result = await pool.request().query(query);
+      const allRows = result.recordset || [];
+      const rows = allRows.slice(0, 5);
+      const columns = rows.length > 0
+        ? Object.keys(rows[0])
+        : (result.recordset?.columns ? Object.keys(result.recordset.columns) : []);
+      const columnsMeta = columns;
 
       res.json({
         success: true,
