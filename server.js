@@ -1077,9 +1077,9 @@ async function runConnectionImport(connectionId) {
 
     db.prepare(`
       UPDATE databaseconnection
-      SET record_count = ?, last_sync = CURRENT_TIMESTAMP, last_error = NULL, updated_date = CURRENT_TIMESTAMP, status = 'active'
+      SET record_count = ?, last_sync = ?, last_error = NULL, updated_date = ?, status = 'active'
       WHERE id = ?
-    `).run(importedCount, connectionId);
+    `).run(importedCount, new Date().toISOString(), new Date().toISOString(), connectionId);
 
     if (syncRunId) {
       db.prepare(`

@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Database, Flag, CheckCircle, XCircle, Shield } from "lucide-react";
+import { AlertCircle, Database, Flag, CheckCircle, XCircle, Shield, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import StatCard from "../components/dashboard/StatCard";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
@@ -214,6 +214,31 @@ export default function CustomerSearch() {
             selectedConnection={selectedConnection}
           />
         </div>
+
+        {/* Last Sync Info */}
+        {selectedConnection && (
+          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="w-3.5 h-3.5 text-gray-400" />
+                <div>
+                  <p className="text-xs text-gray-400 uppercase tracking-wide font-medium">Last Sync</p>
+                  {selectedConnection.last_sync ? (
+                    <p className="text-sm text-[var(--text-primary)] font-semibold">
+                      {new Date(selectedConnection.last_sync).toLocaleString("en-ZA", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                        timeZone: "Africa/Johannesburg",
+                      })}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-gray-500">Never synced</p>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Info */}
         <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">

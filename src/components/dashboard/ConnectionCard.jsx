@@ -64,7 +64,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide">Last Sync</p>
             <p className="text-sm font-medium text-gray-300 mt-1">
-              {connection.last_sync ? moment(connection.last_sync).fromNow() : "Never"}
+              {connection.last_sync ? moment.utc(connection.last_sync).local().fromNow() : "Never"}
             </p>
           </div>
           {connection.status === "error" && connection.last_error && (
