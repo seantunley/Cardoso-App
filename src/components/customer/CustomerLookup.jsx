@@ -650,10 +650,12 @@ export default function CustomerLookup({
                     <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
                   </div>
                   <div className="space-y-1.5">
-                    <div className="grid grid-cols-3 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
+                    {/* 4 cols: Account | No. | Amount | Date */}
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1">
                       <span>Account</span>
                       <span>No.</span>
-                      <span className="text-right">Amt &nbsp; Date</span>
+                      <span>Amount</span>
+                      <span>Date</span>
                     </div>
                     {accounts.map(({ label, record: r, isMain }) => {
                       const { ref, amt, date } = getFields(r);
@@ -661,7 +663,7 @@ export default function CustomerLookup({
                         <div
                           key={label}
                           className={cn(
-                            "grid grid-cols-3 gap-1 rounded-lg px-2 py-1.5",
+                            "grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1.5",
                             isMain ? "bg-gray-700" : "bg-gray-900"
                           )}
                         >
@@ -671,14 +673,12 @@ export default function CustomerLookup({
                           <span className={cn("text-xs truncate", ref ? iconColor : "text-gray-600")}>
                             {ref || "—"}
                           </span>
-                          <div className="flex items-center justify-end gap-1.5 min-w-0">
-                            <span className={cn("text-xs font-medium whitespace-nowrap", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
-                              {formatAmount(amt)}
-                            </span>
-                            <span className={cn("text-[10px] whitespace-nowrap", date ? "text-gray-400" : "text-gray-600")}>
-                              {date || "—"}
-                            </span>
-                          </div>
+                          <span className={cn("text-xs font-medium truncate", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
+                            {formatAmount(amt)}
+                          </span>
+                          <span className={cn("text-xs truncate", date ? "text-gray-300" : "text-gray-600")}>
+                            {date || "—"}
+                          </span>
                         </div>
                       );
                     })}
