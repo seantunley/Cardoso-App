@@ -329,6 +329,14 @@ function stringifyJsonSafely(value, fallback = '{}') {
   }
 }
 
+// Spread local_fields JSON into the top-level record object so clients can
+// access dynamic custom fields as record[field_key] instead of parsing JSON.
+function expandDataRecord(row) {
+  if (!row || typeof row !== 'object') return row;
+  const localFields = parseJsonSafely(row.local_fields, {});
+  return { ...row, ...localFields };
+}
+
 function normalizeFieldKey(input) {
   return String(input || '')
     .trim()
@@ -1580,7 +1588,8 @@ app.get('/api/:table', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare(`SELECT * FROM "${table}"`);
     const rows = stmt.all();
-    res.json(rows);
+    const output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
+    res.json(output);
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
   }
@@ -1605,7 +1614,8 @@ app.get('/api/:table/:id', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`);
     const row = stmt.get(id);
-    row ? res.json(row) : res.status(404).json({ error: 'Not found' });
+    if (!row) return res.status(404).json({ error: 'Not found' });
+    res.json(table === 'datarecord' ? expandDataRecord(row) : row);
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
   }

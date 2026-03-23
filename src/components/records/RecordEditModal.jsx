@@ -17,11 +17,20 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
 
   useEffect(() => {
     if (record) {
+      // Parse local_fields JSON so dynamic custom field values are accessible by key
+      let parsedLocalFields = {};
+      try {
+        parsedLocalFields = typeof record.local_fields === "string"
+          ? JSON.parse(record.local_fields || "{}")
+          : record.local_fields || {};
+      } catch {}
+
       setFormData({
         customer_name: record.customer_name || "",
         custom_field_1: record.custom_field_1 || "",
         custom_field_2: record.custom_field_2 || "",
         custom_field_3: record.custom_field_3 || "",
+        ...parsedLocalFields,
       });
     }
   }, [record]);
@@ -31,7 +40,38 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
   };
 
   const handleSave = () => {
-    onSave({ ...record, ...formData });
+    // Separate built-in fields from dynamic custom fields (those not in datarecord columns)
+    const builtInKeys = new Set([
+      "customer_name", "customer_number", "age_analysis", "note",
+      "custom_field_1", "custom_field_2", "custom_field_3",
+    ]);
+
+    const builtInChanges = {};
+    const dynamicChanges = {};
+
+    for (const [key, value] of Object.entries(formData)) {
+      if (builtInKeys.has(key)) {
+        builtInChanges[key] = value;
+      } else {
+        dynamicChanges[key] = value;
+      }
+    }
+
+    // Merge dynamic changes into existing local_fields
+    let existingLocalFields = {};
+    try {
+      existingLocalFields = typeof record.local_fields === "string"
+        ? JSON.parse(record.local_fields || "{}")
+        : record.local_fields || {};
+    } catch {}
+
+    const updatedLocalFields = { ...existingLocalFields, ...dynamicChanges };
+
+    onSave({
+      ...record,
+      ...builtInChanges,
+      local_fields: JSON.stringify(updatedLocalFields),
+    });
     onClose();
   };
 
