@@ -246,8 +246,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
 
     if (!formData.sync_query?.trim()) {
       toast.error("Please enter a SQL query");
@@ -306,7 +305,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           </div>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-5 py-4">
+        <div className="space-y-5 py-4">
           {/* ── Connection details ── */}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-300">Connection Name</Label>
@@ -621,7 +620,8 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </Button>
 
             <Button
-              type="submit"
+              type="button"
+              onClick={handleSubmit}
               disabled={isSaving}
               className="bg-white hover:bg-gray-100 text-gray-900"
             >
@@ -644,7 +644,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               </Button>
             )}
           </DialogFooter>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   );
