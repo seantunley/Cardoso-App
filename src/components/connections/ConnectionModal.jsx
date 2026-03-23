@@ -46,11 +46,6 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
-  { key: "age_current", label: "Age Analysis — Current (legacy)", type: "text", isBuiltIn: true },
-  { key: "age_7_days", label: "Age Analysis — 7 Days (legacy)", type: "text", isBuiltIn: true },
-  { key: "age_14_days", label: "Age Analysis — 14 Days (legacy)", type: "text", isBuiltIn: true },
-  { key: "age_21_days", label: "Age Analysis — 21+ Days (legacy)", type: "text", isBuiltIn: true },
-  { key: "age_analysis", label: "Age Analysis (legacy combined)", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Invoice 1 — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 — Amount", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_date", label: "Last Unpaid Invoice — Date", type: "text", isBuiltIn: true },
@@ -412,7 +407,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               <Label className="text-sm font-medium text-gray-300">Sync Query</Label>
               <p className="text-xs text-gray-500 mt-0.5">
                 Write a SELECT query. Only the columns you select will be fetched.
-                Alias columns to skip manual mapping (e.g. <code className="text-gray-400">AMTDUE07 AS age_7_days</code>).
+                Alias columns to skip manual mapping (e.g. <code className="text-gray-400">AMTDUE AS outstanding_balance</code>).
               </p>
             </div>
 
@@ -543,7 +538,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <Label className="text-gray-300">Field Mappings</Label>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Map SQL columns to local fields. Columns aliased to a local field name (e.g.{" "}
-                  <code className="text-gray-400">age_7_days</code>) are auto-mapped on sync —
+                  <code className="text-gray-400">outstanding_balance</code>) are auto-mapped on sync —
                   no manual mapping needed for those.
                 </p>
               </div>
