@@ -13,7 +13,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Edit2, Check, X, Plus, Trash2 } from "lucide-react";
+import { Edit2, Check, X, Plus, Trash2, Lock } from "lucide-react";
+import { hasPermission } from "@/lib/permissions";
 
 const BUILT_IN_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text" },
@@ -124,10 +125,12 @@ export default function FieldsPage() {
   const [newOptions, setNewOptions] = useState("");
   const [showCreateForm, setShowCreateForm] = useState(false);
 
-  useQuery({
+  const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => base44.auth.me(),
   });
+
+  const canAccessSettings = hasPermission(currentUser, "can_access_settings");
 
   const {
     data: customFields = [],
@@ -268,6 +271,18 @@ export default function FieldsPage() {
     object: "bg-gray-100 text-gray-800",
     select: "bg-pink-100 text-pink-800",
   };
+
+  if (currentUser && !canAccessSettings) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+        <div className="text-center space-y-3">
+          <Lock className="w-12 h-12 text-[var(--text-tertiary)] mx-auto" />
+          <h3 className="text-lg font-medium text-[var(--text-primary)]">Access Denied</h3>
+          <p className="text-[var(--text-secondary)]">You do not have permission to access field configuration.</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] p-6">
