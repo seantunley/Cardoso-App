@@ -67,6 +67,12 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
               {connection.last_sync ? moment(connection.last_sync).fromNow() : "Never"}
             </p>
           </div>
+          {connection.status === "error" && connection.last_error && (
+            <div className="col-span-2">
+              <p className="text-xs text-gray-500 uppercase tracking-wide">Error</p>
+              <p className="text-xs font-medium text-rose-400 mt-1 break-words">{connection.last_error}</p>
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

@@ -125,6 +125,7 @@ db.exec(`
     field_mappings TEXT,
     status TEXT CHECK(status IN ('active', 'inactive', 'error', 'testing')) DEFAULT 'inactive',
     last_sync TEXT,
+    last_error TEXT,
     record_count INTEGER DEFAULT 0,
     created_by TEXT,
     created_date TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -256,6 +257,7 @@ function ensureColumn(tableName, columnName, definition) {
 }
 
 ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
+ensureColumn('databaseconnection', 'last_error', 'TEXT');
 
 ensureColumn('user', 'password_hash', 'TEXT');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
@@ -917,7 +919,7 @@ async function runConnectionImport(connectionId) {
 
     db.prepare(`
       UPDATE databaseconnection
-      SET record_count = ?, last_sync = CURRENT_TIMESTAMP, updated_date = CURRENT_TIMESTAMP, status = 'active'
+      SET record_count = ?, last_sync = CURRENT_TIMESTAMP, last_error = NULL, updated_date = CURRENT_TIMESTAMP, status = 'active'
       WHERE id = ?
     `).run(importedCount, connectionId);
 
@@ -942,9 +944,9 @@ async function runConnectionImport(connectionId) {
     try {
       db.prepare(`
         UPDATE databaseconnection
-        SET status = 'error', updated_date = CURRENT_TIMESTAMP
+        SET status = 'error', last_error = ?, updated_date = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(connectionId);
+      `).run(error.message || 'Unknown error', connectionId);
     } catch {}
 
     try {
@@ -1872,8 +1874,8 @@ recoverAbandonedSyncs();
 
 ensureSeedUsers()
   .then(() => {
-    server = app.listen(PORT, () => {
-      console.log(`🚀 Local backend + SQLite running at http://localhost:${PORT}`);
+    server = app.listen(PORT, '0.0.0.0', () => {
+      console.log(`🚀 Local backend + SQLite running at http://0.0.0.0:${PORT}`);
     });
   })
   .catch((error) => {

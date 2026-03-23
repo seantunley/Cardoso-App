@@ -15,6 +15,7 @@ export default defineConfig({
     },
   },
   server: {
+    host: true, // bind to 0.0.0.0 so LAN devices can connect
     proxy: {
       '/api': {
         target: 'http://localhost:3001',
