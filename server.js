@@ -1663,8 +1663,9 @@ app.post(
         connectionTimeout: 15000,
       });
 
-      // Run with TOP 5 for preview — wrap the user query
-      const previewQuery = `SELECT TOP 5 * FROM (${query}) AS __preview__`;
+      // Inject TOP 5 directly after SELECT to avoid subquery wrapping issues
+      // (subquery breaks HAVING, ORDER BY, UNION etc.)
+      const previewQuery = query.replace(/^\s*SELECT\s+/i, 'SELECT TOP 5 ');
       const result = await pool.request().query(previewQuery);
       const rows = result.recordset || [];
       const columns = rows.length > 0 ? Object.keys(rows[0]) : (result.recordsets?.[0] ? Object.keys(result.recordsets[0][0] || {}) : []);
