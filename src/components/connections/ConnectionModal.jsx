@@ -221,8 +221,9 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || "Query failed");
+      let data;
+      try { data = await response.json(); } catch { data = {}; }
+      if (!response.ok) throw new Error(data.error || data.detail || `Server error ${response.status}`);
 
       setQueryColumns(data.columns || []);
       setQueryPreview(data.preview || []);

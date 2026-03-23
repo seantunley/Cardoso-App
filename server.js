@@ -1690,7 +1690,7 @@ app.post(
       });
     } catch (error) {
       console.error('Test query error:', error);
-      res.status(500).json({ error: error.message || 'Query failed' });
+      res.status(500).json({ error: error.message || 'Query failed', detail: error.originalError?.message || error.stack });
     } finally {
       if (pool) { try { await pool.close(); } catch {} }
     }
