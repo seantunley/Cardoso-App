@@ -500,7 +500,7 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
       defaultMode: 'sync',
     },
     last_receipt_date: {
-      fallbacks: ['last_receipt_date', 'LastReceiptDate', 'LAST_RECEIPT_DATE', 'ReceiptDate', 'RECDATE', 'LastReceiptDate'],
+      fallbacks: ['last_receipt_date', 'LastReceiptDate', 'LastReceiptIssuedDate', 'LAST_RECEIPT_DATE', 'ReceiptDate', 'RECDATE'],
       defaultMode: 'sync',
     },
     note: {
