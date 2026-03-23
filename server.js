@@ -259,6 +259,36 @@ function ensureColumn(tableName, columnName, definition) {
 ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
 ensureColumn('databaseconnection', 'last_error', 'TEXT');
 
+// Migrate field_mappings from legacy flat format to per-table format
+// Legacy: { localKey: { sourceField, ... } }
+// New:    { tableName: { localKey: { sourceField, ... } } }
+(function migrateFieldMappingsToPerTable() {
+  const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
+  for (const conn of connections) {
+    try {
+      const raw = JSON.parse(conn.field_mappings || '{}');
+      const isFlat = Object.keys(raw).length > 0 &&
+        Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
+      if (!isFlat) continue; // already per-table or empty
+
+      const tableConfigs = JSON.parse(conn.table_configs || '[]');
+      if (!tableConfigs.length) continue;
+
+      const migrated = {};
+      for (const t of tableConfigs) {
+        migrated[t.table_name] = raw;
+      }
+
+      db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
+        .run(JSON.stringify(migrated), conn.id);
+
+      console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
+    } catch (e) {
+      console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
+    }
+  }
+})();
+
 ensureColumn('user', 'password_hash', 'TEXT');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
