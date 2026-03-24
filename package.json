@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
     "server": "node server.js",
-	"sync-worker": "node sync-worker.js",
-	"dev:all": "concurrently \"npm run dev\" \"node sync-worker.js\"",
+
     "build": "vite build",
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",

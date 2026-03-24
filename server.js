@@ -2091,8 +2091,7 @@ async function runScheduledSyncCycle() {
   }
 }
 
-// Scheduled sync is handled by sync-worker.js to avoid dual-process SQLite contention.
-// If running without the worker, uncomment these lines:
+// Scheduled sync runs within the server process
 // const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
 // const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
 const weekdayHalfHourTask = { stop: () => {} };
