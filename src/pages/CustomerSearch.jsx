@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Database, Flag, CheckCircle, XCircle, Shield, RefreshCw } from "lucide-react";
+import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import StatCard from "../components/dashboard/StatCard";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
@@ -272,51 +272,6 @@ export default function CustomerSearch() {
             </div>
           )}
         </div>
-
-        {/* Info */}
-        <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
-          <CardContent className="p-4">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] mb-2">How it works</h3>
-            <ul className="text-xs text-[var(--text-secondary)] space-y-1.5">
-              <li className="flex items-start gap-1.5">
-                <span className="text-[var(--text-tertiary)]">•</span>
-                <span>Enter a customer number to search the SQL database</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-gray-500">•</span>
-                <span>View customer name and age analysis information</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-gray-500">•</span>
-                <span>Flag customers with <span className="font-medium text-red-400">Red</span>, <span className="font-medium text-green-400">Green</span>, or <span className="font-medium text-orange-400">Orange</span> tags</span>
-              </li>
-              <li className="flex items-start gap-1.5">
-                <span className="text-gray-500">•</span>
-                <span className="text-[10px] text-gray-400">Note: For live SQL connections, enable Backend Functions in your app settings and configure a SQL connector backend function</span>
-              </li>
-            </ul>
-          </CardContent>
-        </Card>
-
-        {/* Security Notice */}
-        <Card className="border-emerald-700 bg-emerald-900/20">
-          <CardContent className="p-4">
-            <div className="flex items-start gap-2">
-              <div className="p-1.5 bg-emerald-900/30 rounded-lg">
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
-              </div>
-              <div>
-                <h3 className="font-semibold text-emerald-400 text-xs mb-1">Data Security & Privacy</h3>
-                <ul className="text-[10px] text-emerald-300/80 space-y-0.5">
-                  <li>• All database passwords are encrypted and stored securely</li>
-                  <li>• Your data is isolated - each branch only sees their own records</li>
-                  <li>• Imported data is used solely for this application and not shared</li>
-                  <li>• Row-level security ensures data privacy between users</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (

@@ -9,6 +9,13 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  Search,
+  BarChart2,
+  ScrollText,
+  Link2,
+  Columns,
+  ShieldCheck,
+  ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -18,14 +25,14 @@ import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 
 const navItems = [
-  { name: "Customer Search", icon: Database, page: "CustomerSearch", permission: "can_access_customer_search" },
-  { name: "Reports", icon: FileText, page: "Reports", permission: "can_access_reports" },
-  { name: "Records", icon: FileText, page: "Records", permission: "can_access_records" },
-  { name: "Connections", icon: LayoutDashboard, page: "Connections", permission: "can_access_connections" },
-  { name: "Fields", icon: Database, page: "Fields", permission: "can_access_settings" },
+  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search" },
+  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports" },
+  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records" },
+  { name: "Connections", icon: Link2, page: "Connections", permission: "can_access_connections" },
+  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings" },
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
-  { name: "Audit Log", icon: FileText, page: "AuditLog", adminOnly: true },
+  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -82,12 +89,12 @@ export default function Layout({ children, currentPageName }) {
         <div className="border-b border-border p-6">
           <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
             <div className="rounded-xl bg-primary p-2 text-primary-foreground">
-              <Database className="h-5 w-5" />
+              <ShieldCheck className="h-5 w-5" />
             </div>
             {!isCollapsed && (
               <div>
-                <h1 className="font-bold text-foreground">DataSync</h1>
-                <p className="text-xs text-muted-foreground">SQL Data Manager</p>
+                <h1 className="font-bold text-foreground">Cardoso</h1>
+                <p className="text-xs text-muted-foreground">Customer Manager</p>
               </div>
             )}
           </div>
@@ -174,9 +181,9 @@ export default function Layout({ children, currentPageName }) {
       <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
         <div className="flex items-center gap-2">
           <div className="rounded-lg bg-primary p-1.5 text-primary-foreground">
-            <Database className="h-4 w-4" />
+            <ShieldCheck className="h-4 w-4" />
           </div>
-          <span className="font-bold text-foreground">DataSync</span>
+          <span className="font-bold text-foreground">Cardoso</span>
         </div>
       </header>
 
