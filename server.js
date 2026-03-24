@@ -6,6 +6,8 @@ import cron from 'node-cron';
 import Database from 'better-sqlite3';
 import sql from 'mssql';
 import dotenv from 'dotenv';
+import path from 'path';
+import fs from 'fs';
 
 dotenv.config();
 
@@ -40,7 +42,10 @@ app.use(
   })
 );
 
-const dbPath = process.env.DB_PATH || './my-local-app.db';
+const dbPath = process.env.DB_PATH || './database/cardoso.db';
+// Ensure database directory exists
+const dbDir = path.dirname(dbPath);
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 const db = new Database(dbPath);
 
 db.pragma('journal_mode = WAL');

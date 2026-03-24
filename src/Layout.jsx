@@ -94,7 +94,7 @@ export default function Layout({ children, currentPageName }) {
             {!isCollapsed && (
               <div>
                 <h1 className="font-bold text-foreground">Cardoso</h1>
-                <p className="text-xs text-muted-foreground">Customer Manager</p>
+                <p className="text-xs text-muted-foreground">Cigarettes</p>
               </div>
             )}
           </div>

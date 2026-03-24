@@ -64,7 +64,7 @@ export default function Login() {
           </div>
           <div className="text-center">
             <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Cardoso</h1>
-            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Customer Manager</p>
+            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Cigarettes</p>
           </div>
         </div>
 
