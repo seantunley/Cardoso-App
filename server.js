@@ -818,7 +818,9 @@ function checkTableAccess(req, table, method) {
 
   switch (table) {
     case 'datarecord':
-      if (!user.can_access_records) {
+      // can_access_customer_search grants read access (used by CustomerSearch page)
+      // can_access_records grants full read + edit access (Records management page)
+      if (!user.can_access_records && !user.can_access_customer_search) {
         return { ok: false, status: 403, error: 'No access to records' };
       }
       if (!readOnly && !user.can_edit_records) {
