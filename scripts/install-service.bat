@@ -1,8 +1,9 @@
 @echo off
 :: Run this once to install Cardoso as a Windows service
 :: Requires: NSSM (https://nssm.cc) in PATH or same folder
+:: App must be cloned/extracted to: C:\Cardoso Customer App
 
-set APP_DIR=%~dp0..
+set APP_DIR=C:\Cardoso Customer App
 set SERVICE_NAME=CardosoCigarettes
 set NODE_PATH=node
 

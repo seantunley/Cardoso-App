@@ -2,7 +2,7 @@
 :: Run this whenever you want to deploy a new version from GitHub
 :: Pull latest code, rebuild frontend, restart service
 
-set APP_DIR=%~dp0..
+set APP_DIR=C:\Cardoso Customer App
 set SERVICE_NAME=CardosoCigarettes
 
 echo === Cardoso Update Script ===

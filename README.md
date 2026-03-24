@@ -19,9 +19,9 @@ Before you begin, make sure the following are installed on your machine:
 ## Development Setup
 
 ```bash
-# 1. Clone the repo
-git clone https://github.com/seantunley/Cardoso-App.git
-cd Cardoso-App
+# 1. Clone the repo into the required folder
+git clone https://github.com/seantunley/Cardoso-App.git "C:\Cardoso Customer App"
+cd "C:\Cardoso Customer App"
 
 # 2. Install dependencies
 npm install
@@ -52,6 +52,8 @@ To run as a Windows service, use the provided NSSM scripts in `scripts/`:
 - `install-service.bat` — installs and starts the service
 - `update.bat` — pulls latest changes and restarts the service
 - `uninstall-service.bat` — removes the service
+
+> ⚠️ The scripts expect the app to live at `C:\Cardoso Customer App`. Clone there or the paths will break.
 
 ---
 
