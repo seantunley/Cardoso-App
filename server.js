@@ -1639,6 +1639,44 @@ app.put('/api/users/:id/permissions', requireAuth, requireAdmin, (req, res) => {
   }
 });
 
+app.put('/api/users/:id/profile', requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { full_name, email } = req.body;
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Invalid email format' });
+    }
+
+    const existing = getUserById(id);
+    if (!existing) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    // Check email not already taken by another user
+    const emailTaken = db.prepare('SELECT id FROM "user" WHERE lower(email) = ? AND id != ?').get(normalizedEmail, id);
+    if (emailTaken) {
+      return res.status(409).json({ error: 'Email already in use by another account' });
+    }
+
+    db.prepare('UPDATE "user" SET email = ?, full_name = ? WHERE id = ?')
+      .run(normalizedEmail, (full_name || '').trim(), id);
+
+    const updated = getUserById(id);
+    res.json(sanitizeUser(updated));
+  } catch (err) {
+    console.error('Update profile error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.put('/api/users/:id/password', requireAuth, requireSelfOrAdmin, async (req, res) => {
   const { id } = req.params;
   const { password } = req.body || {};

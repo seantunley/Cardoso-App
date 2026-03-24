@@ -14,11 +14,13 @@ import {
   Trash2,
   KeyRound,
   Lock,
+  Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
 import CreateLocalUserModal from "../components/users/CreateLocalUserModal";
 import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
+import EditUserModal from "../components/users/EditUserModal";
 
 export default function Users() {
   const queryClient = useQueryClient();
@@ -29,6 +31,7 @@ export default function Users() {
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingPermissionsUser, setEditingPermissionsUser] = useState(null);
   const [passwordUser, setPasswordUser] = useState(null);
+  const [editingUser, setEditingUser] = useState(null);
 
   const {
     data: users = [],
@@ -267,6 +270,15 @@ export default function Users() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <Button
                         variant="outline"
+                        onClick={() => setEditingUser(user)}
+                        className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
+                      >
+                        <Pencil className="w-4 h-4 mr-2" />
+                        Edit
+                      </Button>
+
+                      <Button
+                        variant="outline"
                         onClick={() => setEditingPermissionsUser(user)}
                         className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
                       >
@@ -326,6 +338,18 @@ export default function Users() {
           onClose={() => setPasswordUser(null)}
           onSave={handleChangePassword}
           isSaving={updatePasswordMutation.isPending}
+        />
+
+        <EditUserModal
+          user={editingUser}
+          open={!!editingUser}
+          onClose={() => setEditingUser(null)}
+          onSave={(updated) => {
+            queryClient.setQueryData(["users"], (old) =>
+              old ? old.map((u) => (u.id === updated.id ? updated : u)) : old
+            );
+            toast.success("User updated");
+          }}
         />
       </div>
     </div>
