@@ -2191,8 +2191,6 @@ async function runScheduledSyncCycle() {
 // Scheduled sync runs within the server process
 const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
 const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
-const weekdayHalfHourTask = { stop: () => {} };
-const weekdayFivePmTask = { stop: () => {} };
 
 // ==================== SHUTDOWN ====================
 function gracefulShutdown(signal) {
