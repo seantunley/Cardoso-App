@@ -38,19 +38,19 @@ const flagColors = {
     bg: "bg-red-100",
     text: "text-red-700",
     border: "border-red-200",
-    label: "Red Flag",
+    label: "Red",
   },
   green: {
     bg: "bg-green-100",
     text: "text-green-700",
     border: "border-green-200",
-    label: "Green Flag",
+    label: "Green",
   },
   orange: {
     bg: "bg-orange-100",
     text: "text-orange-700",
     border: "border-orange-200",
-    label: "Orange Flag",
+    label: "Orange",
   },
 };
 
@@ -736,7 +736,7 @@ export default function CustomerLookup({
                     </p>
                   )}
 
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-col gap-1.5">
                     {Object.entries(flagColors)
                       .filter(([key]) => key !== "none")
                       .map(([key, config]) => (
@@ -747,7 +747,7 @@ export default function CustomerLookup({
                           onClick={() => handleFlagChange(key)}
                           disabled={!canModifyFlag() || isUpdatingFlag}
                           className={cn(
-                            "border-2 transition-all",
+                            "w-full justify-start border-2 transition-all",
                             customer?.flag_color === key
                               ? `${config.bg} ${config.text} ${config.border}`
                               : "border-gray-600 text-gray-300 hover:bg-gray-700"
@@ -771,17 +771,17 @@ export default function CustomerLookup({
                         size="sm"
                         onClick={() => handleFlagChange("none")}
                         disabled={isUpdatingFlag}
-                        className="border-2 border-gray-600 text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
+                        className="w-full justify-start border-2 border-gray-600 text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
                       >
                         <Trash2 className="mr-2 h-3 w-3" />
-                        Remove Flag
+                        Remove
                       </Button>
                     )}
                   </div>
                 </div>
 
                 {/* Right: last 2 actions */}
-                <div className="w-48 shrink-0 rounded-lg border border-gray-700 bg-gray-900 p-2">
+                <div className="flex-1 rounded-lg border border-gray-700 bg-gray-900 p-2">
                   <div className="mb-2 flex items-center gap-1.5">
                     <History className="h-3.5 w-3.5 text-gray-400" />
                     <p className="text-xs font-medium text-gray-300">Last 2 actions</p>
