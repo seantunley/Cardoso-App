@@ -8,6 +8,10 @@ import sql from 'mssql';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import { createRequire } from 'module';
+import rateLimit from 'express-rate-limit';
+
+const require = createRequire(import.meta.url);
 
 dotenv.config();
 
@@ -19,6 +23,14 @@ const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   console.error('❌ SESSION_SECRET environment variable is required. Set it in your .env file.');
+  process.exit(1);
+}
+if (SESSION_SECRET === 'change-me-to-a-long-random-string') {
+  console.error('FATAL: SESSION_SECRET is set to the example value. Please generate a real secret in .env');
+  process.exit(1);
+}
+if (SESSION_SECRET.length < 32) {
+  console.error('FATAL: SESSION_SECRET must be at least 32 characters long.');
   process.exit(1);
 }
 
@@ -37,19 +49,34 @@ if (IS_PRODUCTION) {
 }
 app.use(express.json());
 
+const SQLiteStore = require('connect-sqlite3')(session);
+
 app.use(
   session({
+    store: new SQLiteStore({
+      db: 'sessions.db',
+      dir: path.dirname(process.env.DB_PATH || './database/cardoso.db'),
+      table: 'sessions',
+    }),
     secret: SESSION_SECRET,
     resave: false,
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
+      sameSite: 'strict',
       maxAge: 1000 * 60 * 60 * 12,
     },
   })
 );
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 20, // 20 attempts per IP per window
+  message: { error: 'Too many login attempts. Please try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 const dbPath = process.env.DB_PATH || './database/cardoso.db';
 // Ensure database directory exists
@@ -636,6 +663,12 @@ function sanitizeUser(user) {
   };
 }
 
+function sanitizeConnection(conn) {
+  if (!conn) return null;
+  const { encrypted_password, ...safe } = conn;
+  return safe;
+}
+
 function getUserById(id) {
   return db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(id);
 }
@@ -662,7 +695,7 @@ async function ensureSeedUsers() {
   const userDefaults = defaultPermissionsForRole('user');
 
   if (!admin) {
-    const hash = await bcrypt.hash('admin123', 10);
+    const hash = await bcrypt.hash('admin123', 12);
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
@@ -685,13 +718,15 @@ async function ensureSeedUsers() {
       adminDefaults.can_edit_records ? 1 : 0,
       adminDefaults.can_flag_records ? 1 : 0
     );
+    console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
   } else if (!admin.password_hash) {
-    const hash = await bcrypt.hash('admin123', 10);
+    const hash = await bcrypt.hash('admin123', 12);
     db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(hash, admin.id);
+    console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
   }
 
   if (!normal) {
-    const hash = await bcrypt.hash('user123', 10);
+    const hash = await bcrypt.hash('user123', 12);
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
@@ -715,7 +750,7 @@ async function ensureSeedUsers() {
       userDefaults.can_flag_records ? 1 : 0
     );
   } else if (!normal.password_hash) {
-    const hash = await bcrypt.hash('user123', 10);
+    const hash = await bcrypt.hash('user123', 12);
     db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(hash, normal.id);
   }
 }
@@ -1098,9 +1133,15 @@ async function runConnectionImport(connectionId) {
       importedCount = rows.length;
     } else {
       // ── LEGACY TABLE MODE (backward compat) ────────────────────────────────
+      const SAFE_IDENTIFIER = /^[a-zA-Z0-9_ ]+$/;
+
       for (const config of tableConfigs) {
         const { table_name, selected_fields = [], index_field } = config;
         if (!table_name) continue;
+
+        if (!SAFE_IDENTIFIER.test(table_name)) {
+          throw new Error(`Invalid table name: ${table_name}`);
+        }
 
         const fieldMappings = isPerTableMappings
           ? (allFieldMappings[table_name] || {})
@@ -1116,6 +1157,11 @@ async function runConnectionImport(connectionId) {
             ...(index_field ? [index_field] : []),
             ...mappedSourceFields,
           ])];
+          for (const field of uniqueFields) {
+            if (!SAFE_IDENTIFIER.test(field)) {
+              throw new Error(`Invalid field name: ${field}`);
+            }
+          }
           fields = uniqueFields.map((field) => `[${field}]`).join(', ');
         }
 
@@ -1187,7 +1233,7 @@ async function runConnectionImport(connectionId) {
 }
 
 // ==================== AUTH ROUTES ====================
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
 
   if (!email || !password) {
@@ -1509,7 +1555,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     }
 
     const defaults = defaultPermissionsForRole(role);
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
 
     const info = db.prepare(`
       INSERT INTO "user" (
@@ -1597,8 +1643,8 @@ app.put('/api/users/:id/password', requireAuth, requireSelfOrAdmin, async (req, 
   const { id } = req.params;
   const { password } = req.body || {};
 
-  if (!password || String(password).length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  if (!password || String(password).length < 8) {
+    return res.status(400).json({ error: 'Password must be at least 8 characters' });
   }
 
   try {
@@ -1607,7 +1653,7 @@ app.put('/api/users/:id/password', requireAuth, requireSelfOrAdmin, async (req, 
       return res.status(404).json({ error: 'User not found' });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
+    const passwordHash = await bcrypt.hash(password, 12);
     db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(passwordHash, id);
 
     res.json({ success: true });
@@ -1681,13 +1727,9 @@ app.post(
 
       const fields = {};
       for (const table of tables) {
-        const safeTable = table.replace(/'/g, "''");
-        const columnsResult = await pool.request().query(`
-          SELECT COLUMN_NAME
-          FROM INFORMATION_SCHEMA.COLUMNS
-          WHERE TABLE_NAME = '${safeTable}'
-          ORDER BY ORDINAL_POSITION
-        `);
+        const columnsResult = await pool.request()
+          .input('tableName', sql.VarChar(128), table)
+          .query(`SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = @tableName ORDER BY ORDINAL_POSITION`);
         fields[table] = columnsResult.recordset.map((r) => r.COLUMN_NAME);
       }
 
@@ -1813,7 +1855,8 @@ app.get('/api/:table', requireAuth, (req, res) => {
   try {
     const stmt = db.prepare(`SELECT * FROM "${table}"`);
     const rows = stmt.all();
-    const output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
+    let output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
+    if (table === 'databaseconnection') output = output.map(sanitizeConnection);
     res.json(output);
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
@@ -1840,7 +1883,9 @@ app.get('/api/:table/:id', requireAuth, (req, res) => {
     const stmt = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`);
     const row = stmt.get(id);
     if (!row) return res.status(404).json({ error: 'Not found' });
-    res.json(table === 'datarecord' ? expandDataRecord(row) : row);
+    let output = table === 'datarecord' ? expandDataRecord(row) : row;
+    if (table === 'databaseconnection') output = sanitizeConnection(output);
+    res.json(output);
   } catch {
     res.status(404).json({ error: `Table "${table}" not found` });
   }
