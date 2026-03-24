@@ -63,8 +63,8 @@ export default function Login() {
             <ShieldCheck className="w-8 h-8 text-indigo-400" />
           </div>
           <div className="text-center">
-            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Cardoso</h1>
-            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Cigarettes</p>
+            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Cardoso Cigarettes</h1>
+            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Customer Manager</p>
           </div>
         </div>
 
