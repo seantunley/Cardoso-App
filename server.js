@@ -827,8 +827,10 @@ function checkTableAccess(req, table, method) {
       return { ok: true };
 
     case 'databaseconnection':
-      if (!user.can_access_connections) {
-        return { ok: false, status: 403, error: 'No access to connections' };
+      // All authenticated users can read connections (sync status is global)
+      // Only users with can_access_connections can create/edit/delete
+      if (!readOnly && !user.can_access_connections) {
+        return { ok: false, status: 403, error: 'No permission to modify connections' };
       }
       return { ok: true };
 

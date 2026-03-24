@@ -28,7 +28,7 @@ const navItems = [
   { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search" },
   { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports" },
   { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records" },
-  { name: "Connections", icon: Link2, page: "Connections", permission: "can_access_connections" },
+  { name: "Connections", icon: Link2, page: "Connections" },
   { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings" },
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
