@@ -36,7 +36,7 @@ if (SESSION_SECRET.length < 32) {
 
 // In production, serve React build and allow same-origin requests
 if (IS_PRODUCTION) {
-  const distPath = path.join(__dirname, 'dist');
+  const distPath = path.resolve(__dirname, 'dist');
   app.use(express.static(distPath));
   app.use(cors({ origin: false, credentials: true }));
 } else {
@@ -2231,7 +2231,7 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
-      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     }
   });
 }
