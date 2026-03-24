@@ -464,6 +464,7 @@ export default function CustomerLookup({
         )
       );
 
+      setFlagReason("");
       await loadRecordHistory(customer.id);
       toast.success("Flag updated");
     } catch (error) {
