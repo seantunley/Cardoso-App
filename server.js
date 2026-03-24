@@ -8,12 +8,67 @@ import sql from 'mssql';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
 import { createRequire } from 'module';
 import rateLimit from 'express-rate-limit';
 
 const require = createRequire(import.meta.url);
 
 dotenv.config();
+
+// ==================== AES-256-GCM ENCRYPTION HELPERS ====================
+function getEncryptionKey() {
+  const raw = process.env.ENCRYPTION_KEY || '';
+  if (!raw) return null;
+  if (raw.length !== 64) {
+    console.warn('⚠️  ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes). Password encryption disabled.');
+    return null;
+  }
+  try {
+    return Buffer.from(raw, 'hex');
+  } catch {
+    console.warn('⚠️  ENCRYPTION_KEY is not valid hex. Password encryption disabled.');
+    return null;
+  }
+}
+
+// Returns 'iv:authTag:ciphertext' (all hex) or plaintext if no key
+function encryptPassword(plaintext) {
+  const key = getEncryptionKey();
+  if (!key || !plaintext) return plaintext;
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(String(plaintext), 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return `${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted.toString('hex')}`;
+}
+
+// Detects encrypted format (3 hex segments) and decrypts; falls back to plaintext
+function decryptPassword(stored) {
+  if (!stored) return stored;
+  const parts = stored.split(':');
+  if (parts.length !== 3) return stored; // plaintext
+  const key = getEncryptionKey();
+  if (!key) return stored; // no key, return as-is (connection will fail if truly encrypted)
+  try {
+    const iv = Buffer.from(parts[0], 'hex');
+    const authTag = Buffer.from(parts[1], 'hex');
+    const ciphertext = Buffer.from(parts[2], 'hex');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    return decipher.update(ciphertext) + decipher.final('utf8');
+  } catch {
+    console.warn('⚠️  Failed to decrypt password — returning stored value as-is');
+    return stored;
+  }
+}
+
+// Returns true if value looks like encrypted format
+function isEncryptedFormat(value) {
+  if (!value || typeof value !== 'string') return false;
+  const parts = value.split(':');
+  return parts.length === 3 && parts.every((p) => /^[0-9a-f]+$/i.test(p));
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -291,6 +346,30 @@ function ensureFlexibleCustomFieldConfigTable() {
 }
 
 ensureFlexibleCustomFieldConfigTable();
+
+// ==================== PASSWORD ENCRYPTION AUTO-MIGRATION ====================
+(function migrateUnencryptedPasswords() {
+  const key = getEncryptionKey();
+  if (!key) return; // ENCRYPTION_KEY not set — skip
+
+  const connections = db.prepare('SELECT id, encrypted_password FROM databaseconnection').all();
+  let migrated = 0;
+  for (const conn of connections) {
+    if (!conn.encrypted_password) continue;
+    if (isEncryptedFormat(conn.encrypted_password)) continue; // already encrypted
+    try {
+      const encrypted = encryptPassword(conn.encrypted_password);
+      db.prepare('UPDATE databaseconnection SET encrypted_password = ? WHERE id = ?')
+        .run(encrypted, conn.id);
+      migrated++;
+    } catch (e) {
+      console.error(`[migration] Failed to encrypt password for connection ${conn.id}:`, e.message);
+    }
+  }
+  if (migrated > 0) {
+    console.log(`🔐 Auto-migrated ${migrated} MSSQL password(s) to AES-256-GCM encryption`);
+  }
+})();
 
 // ==================== MIGRATIONS ====================
 function ensureColumn(tableName, columnName, definition) {
@@ -888,7 +967,7 @@ async function runConnectionImport(connectionId) {
 
     const sqlConfig = {
       user: connConfig.username,
-      password: connConfig.encrypted_password,
+      password: decryptPassword(connConfig.encrypted_password),
       server: connConfig.host,
       database: connConfig.database_name,
       port: parseInt(connConfig.port, 10),
@@ -1954,6 +2033,11 @@ app.post('/api/:table', requireAuth, (req, res) => {
     }
   }
 
+  // Encrypt MSSQL password before storing
+  if (table === 'databaseconnection' && data.encrypted_password) {
+    data.encrypted_password = encryptPassword(data.encrypted_password);
+  }
+
   try {
     const columns = Object.keys(data);
     if (columns.length === 0) {
@@ -2001,6 +2085,11 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     if (!allowedStatuses.has(data.status)) {
       return res.status(400).json({ error: `Invalid status: ${data.status}` });
     }
+  }
+
+  // Encrypt MSSQL password before storing
+  if (table === 'databaseconnection' && data.encrypted_password) {
+    data.encrypted_password = encryptPassword(data.encrypted_password);
   }
 
   try {
