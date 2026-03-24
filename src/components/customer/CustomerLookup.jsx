@@ -723,8 +723,9 @@ export default function CustomerLookup({
                 )}
               </div>
 
+              {/* Row 1: flag buttons (left) + last 2 actions (right) */}
               <div className="flex gap-3">
-                {/* Left: flag buttons + reason */}
+                {/* Left: flag buttons */}
                 <div className="flex flex-1 flex-col gap-2">
                   {customer?.flag_color !== "none" && customer?.flag_created_by && (
                     <p className="text-xs text-gray-400">
@@ -777,30 +778,6 @@ export default function CustomerLookup({
                       </Button>
                     )}
                   </div>
-
-                  {canModifyFlag() && (
-                    <div className="space-y-1">
-                      <Label className="text-xs text-gray-400">Reason (optional)</Label>
-                      <Textarea
-                        value={flagReason}
-                        onChange={(e) => setFlagReason(e.target.value)}
-                        placeholder="Add a reason..."
-                        className="h-14 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
-                        disabled={isUpdatingFlag}
-                      />
-                      {customer?.flag_color && customer.flag_color !== "none" && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
-                          disabled={isUpdatingFlag}
-                          onClick={() => handleFlagChange(customer.flag_color)}
-                        >
-                          Save Reason
-                        </Button>
-                      )}
-                    </div>
-                  )}
                 </div>
 
                 {/* Right: last 2 actions */}
@@ -833,6 +810,31 @@ export default function CustomerLookup({
                   )}
                 </div>
               </div>
+
+              {/* Row 2: reason block (full width, below) */}
+              {canModifyFlag() && (
+                <div className="space-y-1 pt-1">
+                  <Label className="text-xs text-gray-400">Reason (optional)</Label>
+                  <Textarea
+                    value={flagReason}
+                    onChange={(e) => setFlagReason(e.target.value)}
+                    placeholder="Add a reason..."
+                    className="h-14 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
+                    disabled={isUpdatingFlag}
+                  />
+                  {customer?.flag_color && customer.flag_color !== "none" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
+                      disabled={isUpdatingFlag}
+                      onClick={() => handleFlagChange(customer.flag_color)}
+                    >
+                      Save Reason
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </DialogContent>
