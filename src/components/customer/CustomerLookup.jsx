@@ -567,9 +567,6 @@ export default function CustomerLookup({
               </Badge>
             </DialogTitle>
 
-            <DialogDescription>
-              Customer details and flag management.
-            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6 pt-4 overflow-y-auto flex-1 pr-1">
