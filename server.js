@@ -777,7 +777,7 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function requirePermission(permissionKey) {
+function requirePermission(...permissionKeys) {
   return (req, res, next) => {
     if (!req.currentUser) {
       return res.status(401).json({ error: 'Not authenticated' });
@@ -788,11 +788,12 @@ function requirePermission(permissionKey) {
     }
 
     // Deny access if no permission key was specified (fail-closed)
-    if (!permissionKey) {
+    if (!permissionKeys.length) {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
-    if (!req.currentUser[permissionKey]) {
+    // Allow if user has ANY of the specified permissions (OR logic)
+    if (!permissionKeys.some(key => req.currentUser[key])) {
       return res.status(403).json({ error: 'Permission denied' });
     }
 
@@ -1483,7 +1484,7 @@ app.delete(
 app.get(
   '/api/datarecord/:id/history',
   requireAuth,
-  requirePermission('can_access_records'),
+  requirePermission('can_access_records', 'can_access_customer_search'),
   (req, res) => {
     const { id } = req.params;
 
