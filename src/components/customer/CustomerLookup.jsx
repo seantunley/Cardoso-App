@@ -726,7 +726,7 @@ export default function CustomerLookup({
               {/* Row 1: flag buttons (left) + last 2 actions (right) */}
               <div className="flex gap-3">
                 {/* Left: flag buttons */}
-                <div className="flex flex-1 flex-col gap-2">
+                <div className="flex w-20 shrink-0 flex-col gap-1">
                   {customer?.flag_color !== "none" && customer?.flag_created_by && (
                     <p className="text-xs text-gray-400">
                       Flagged by:{" "}
@@ -736,18 +736,17 @@ export default function CustomerLookup({
                     </p>
                   )}
 
-                  <div className="flex flex-col gap-1.5">
+                  <div className="flex flex-col gap-1">
                     {Object.entries(flagColors)
                       .filter(([key]) => key !== "none")
                       .map(([key, config]) => (
                         <Button
                           key={key}
                           variant="outline"
-                          size="sm"
                           onClick={() => handleFlagChange(key)}
                           disabled={!canModifyFlag() || isUpdatingFlag}
                           className={cn(
-                            "w-full justify-start border-2 transition-all",
+                            "h-6 w-full justify-start border px-1.5 text-[11px] transition-all",
                             customer?.flag_color === key
                               ? `${config.bg} ${config.text} ${config.border}`
                               : "border-gray-600 text-gray-300 hover:bg-gray-700"
@@ -755,7 +754,7 @@ export default function CustomerLookup({
                         >
                           <div
                             className={cn(
-                              "mr-2 h-3 w-3 rounded-full",
+                              "mr-1.5 h-2 w-2 shrink-0 rounded-full",
                               key === "red" && "bg-red-500",
                               key === "green" && "bg-green-500",
                               key === "orange" && "bg-orange-500"
@@ -768,12 +767,11 @@ export default function CustomerLookup({
                     {customer?.flag_color !== "none" && canModifyFlag() && (
                       <Button
                         variant="outline"
-                        size="sm"
                         onClick={() => handleFlagChange("none")}
                         disabled={isUpdatingFlag}
-                        className="w-full justify-start border-2 border-gray-600 text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
+                        className="h-6 w-full justify-start border border-gray-600 px-1.5 text-[11px] text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
                       >
-                        <Trash2 className="mr-2 h-3 w-3" />
+                        <Trash2 className="mr-1.5 h-2.5 w-2.5 shrink-0" />
                         Remove
                       </Button>
                     )}
