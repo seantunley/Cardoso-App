@@ -707,12 +707,11 @@ export default function CustomerLookup({
               );
             })()}
 
-            <div className="space-y-3 rounded-xl border border-gray-700 bg-gray-800 p-3">
-              <div className="flex items-center justify-between">
+            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+              <div className="mb-3 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
                   Flag Management
                 </h4>
-
                 {!canModifyFlag() && customer?.flag_color !== "none" && (
                   <Badge
                     variant="outline"
@@ -724,115 +723,116 @@ export default function CustomerLookup({
                 )}
               </div>
 
-              {customer?.flag_color !== "none" && customer?.flag_created_by && (
-                <div className="rounded-lg border border-gray-700 bg-gray-900 p-2">
-                  <p className="text-xs text-gray-400">
-                    Flagged by:{" "}
-                    <span className="font-medium text-gray-300">
-                      {customer.flag_created_by}
-                    </span>
-                  </p>
-                </div>
-              )}
+              <div className="flex gap-3">
+                {/* Left: flag buttons + reason */}
+                <div className="flex flex-1 flex-col gap-2">
+                  {customer?.flag_color !== "none" && customer?.flag_created_by && (
+                    <p className="text-xs text-gray-400">
+                      Flagged by:{" "}
+                      <span className="font-medium text-gray-300">
+                        {customer.flag_created_by}
+                      </span>
+                    </p>
+                  )}
 
-              <div className="rounded-lg border border-gray-700 bg-gray-900 p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <History className="h-4 w-4 text-gray-400" />
-                  <p className="text-xs font-medium text-gray-300">
-                    Last 2 actions on this record
-                  </p>
-                </div>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(flagColors)
+                      .filter(([key]) => key !== "none")
+                      .map(([key, config]) => (
+                        <Button
+                          key={key}
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleFlagChange(key)}
+                          disabled={!canModifyFlag() || isUpdatingFlag}
+                          className={cn(
+                            "border-2 transition-all",
+                            customer?.flag_color === key
+                              ? `${config.bg} ${config.text} ${config.border}`
+                              : "border-gray-600 text-gray-300 hover:bg-gray-700"
+                          )}
+                        >
+                          <div
+                            className={cn(
+                              "mr-2 h-3 w-3 rounded-full",
+                              key === "red" && "bg-red-500",
+                              key === "green" && "bg-green-500",
+                              key === "orange" && "bg-orange-500"
+                            )}
+                          />
+                          {customer?.flag_color === key ? "Active" : config.label}
+                        </Button>
+                      ))}
 
-                {historyLoading ? (
-                  <p className="text-xs text-gray-500">Loading history...</p>
-                ) : recordHistory.length === 0 ? (
-                  <p className="text-xs text-gray-500">No recent actions found</p>
-                ) : (
-                  <div className="space-y-2">
-                    {recordHistory.slice(0, 2).map((log) => (
-                      <div
-                        key={log.id}
-                        className="rounded-md border border-gray-800 bg-gray-950 p-2"
+                    {customer?.flag_color !== "none" && canModifyFlag() && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleFlagChange("none")}
+                        disabled={isUpdatingFlag}
+                        className="border-2 border-gray-600 text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
                       >
-                        <div className="text-xs font-medium text-gray-200">
-                          {formatHistoryAction(log)}
-                        </div>
-                        <div className="mt-1 text-[11px] text-gray-400">
-                          {formatHistoryDate(log.created_date)} ·{" "}
-                          {log.user_name || log.user_email || "Unknown"}
-                        </div>
-                      </div>
-                    ))}
+                        <Trash2 className="mr-2 h-3 w-3" />
+                        Remove Flag
+                      </Button>
+                    )}
                   </div>
-                )}
-              </div>
 
-              <div className="flex flex-wrap gap-2">
-                {Object.entries(flagColors)
-                  .filter(([key]) => key !== "none")
-                  .map(([key, config]) => (
-                    <Button
-                      key={key}
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleFlagChange(key)}
-                      disabled={!canModifyFlag() || isUpdatingFlag}
-                      className={cn(
-                        "border-2 transition-all",
-                        customer?.flag_color === key
-                          ? `${config.bg} ${config.text} ${config.border}`
-                          : "border-gray-600 text-gray-300 hover:bg-gray-700"
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "mr-2 h-3 w-3 rounded-full",
-                          key === "red" && "bg-red-500",
-                          key === "green" && "bg-green-500",
-                          key === "orange" && "bg-orange-500"
-                        )}
+                  {canModifyFlag() && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-400">Reason (optional)</Label>
+                      <Textarea
+                        value={flagReason}
+                        onChange={(e) => setFlagReason(e.target.value)}
+                        placeholder="Add a reason..."
+                        className="h-14 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
+                        disabled={isUpdatingFlag}
                       />
-                      {customer?.flag_color === key ? "Active" : config.label}
-                    </Button>
-                  ))}
-
-                {customer?.flag_color !== "none" && canModifyFlag() && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleFlagChange("none")}
-                    disabled={isUpdatingFlag}
-                    className="border-2 border-gray-600 text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
-                  >
-                    <Trash2 className="mr-2 h-3 w-3" />
-                    Remove Flag
-                  </Button>
-                )}
-              </div>
-
-              {canModifyFlag() && (
-                <div className="space-y-1">
-                  <Label className="text-xs text-gray-400">Reason (optional)</Label>
-                  <Textarea
-                    value={flagReason}
-                    onChange={(e) => setFlagReason(e.target.value)}
-                    placeholder="Add a reason..."
-                    className="h-16 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
-                    disabled={isUpdatingFlag}
-                  />
-                  {customer?.flag_color && customer.flag_color !== "none" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
-                      disabled={isUpdatingFlag}
-                      onClick={() => handleFlagChange(customer.flag_color)}
-                    >
-                      Save Reason
-                    </Button>
+                      {customer?.flag_color && customer.flag_color !== "none" && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
+                          disabled={isUpdatingFlag}
+                          onClick={() => handleFlagChange(customer.flag_color)}
+                        >
+                          Save Reason
+                        </Button>
+                      )}
+                    </div>
                   )}
                 </div>
-              )}
+
+                {/* Right: last 2 actions */}
+                <div className="w-48 shrink-0 rounded-lg border border-gray-700 bg-gray-900 p-2">
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <History className="h-3.5 w-3.5 text-gray-400" />
+                    <p className="text-xs font-medium text-gray-300">Last 2 actions</p>
+                  </div>
+                  {historyLoading ? (
+                    <p className="text-xs text-gray-500">Loading…</p>
+                  ) : recordHistory.length === 0 ? (
+                    <p className="text-xs text-gray-500">No recent actions</p>
+                  ) : (
+                    <div className="space-y-1.5">
+                      {recordHistory.slice(0, 2).map((log) => (
+                        <div
+                          key={log.id}
+                          className="rounded border border-gray-800 bg-gray-950 p-1.5"
+                        >
+                          <div className="text-xs font-medium leading-snug text-gray-200">
+                            {formatHistoryAction(log)}
+                          </div>
+                          <div className="mt-0.5 text-[11px] text-gray-400">
+                            {formatHistoryDate(log.created_date)} ·{" "}
+                            {log.user_name || log.user_email || "Unknown"}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </DialogContent>
