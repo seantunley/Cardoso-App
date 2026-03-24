@@ -1,4 +1,4 @@
-// src/api/base44Client.js
+// src/api/apiClient.js — Cardoso App API client
 
 const API_BASE = "/api";
 
@@ -24,7 +24,7 @@ async function readResponse(res, label, payload = null) {
   return data;
 }
 
-export const base44 = {
+export const api = {
   entities: new Proxy(
     {},
     {

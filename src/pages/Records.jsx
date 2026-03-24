@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,7 +25,7 @@ export default function Records() {
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
-    queryFn: () => base44.auth.me(),
+    queryFn: () => api.auth.me(),
   });
 
   const canEditRecords = hasPermission(currentUser, "can_edit_records");
@@ -35,18 +35,18 @@ export default function Records() {
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
     queryFn: async () => {
-      const allRecords = await base44.entities.DataRecord.list();
+      const allRecords = await api.entities.DataRecord.list();
       return allRecords;
     },
   });
 
   const { data: customFields = [] } = useQuery({
     queryKey: ["customFields"],
-    queryFn: () => base44.entities.CustomFieldConfig.list(),
+    queryFn: () => api.entities.CustomFieldConfig.list(),
   });
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.DataRecord.update(id, data),
+    mutationFn: ({ id, data }) => api.entities.DataRecord.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["records"] });
       setEditingRecord(null);
@@ -56,7 +56,7 @@ export default function Records() {
 
   const applyAutoFlagMutation = useMutation({
     mutationFn: async (recordIds) => {
-      const rules = await base44.entities.AutoFlagRule.list();
+      const rules = await api.entities.AutoFlagRule.list();
       const activeRules = rules.filter((r) => r.is_active);
       const now = new Date().toISOString();
 
@@ -79,13 +79,13 @@ export default function Records() {
         const autoFlag = checkAutoFlagRulesSync(ageAnalysis, activeRules);
 
         if (autoFlag && autoFlag.flag_color !== record.flag_color) {
-          await base44.entities.DataRecord.update(record.id, {
+          await api.entities.DataRecord.update(record.id, {
             ...autoFlag,
             last_checked: now,
           });
           flaggedCount++;
         } else {
-          await base44.entities.DataRecord.update(record.id, { last_checked: now });
+          await api.entities.DataRecord.update(record.id, { last_checked: now });
         }
       }
 

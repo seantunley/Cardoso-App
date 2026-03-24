@@ -5,14 +5,14 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { cn } from "@/lib/utils";
 
 export default function RecordEditModal({ open, onClose, record, onSave }) {
   const [formData, setFormData] = useState({});
   const { data: configs = [] } = useQuery({
     queryKey: ["customFieldConfigs"],
-    queryFn: () => base44.entities.CustomFieldConfig.list(),
+    queryFn: () => api.entities.CustomFieldConfig.list(),
   });
 
   useEffect(() => {

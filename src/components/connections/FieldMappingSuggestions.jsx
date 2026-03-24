@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -34,7 +34,10 @@ export default function FieldMappingSuggestions({
       const fieldsList = sourceFields.map(f => `${f} (type: unknown)`).join(", ");
       const localFieldsList = DEFAULT_FIELDS.map(f => `${f.label} (${f.key})`).join(", ");
 
-      const result = await base44.integrations.Core.InvokeLLM({
+      // AI mapping suggestions require a connected LLM service (not yet configured).
+      throw new Error("AI mapping is not available in this deployment.");
+      /* eslint-disable no-unreachable */
+      const result = await api.integrations?.Core?.InvokeLLM({
         prompt: `Analyze these SQL database columns and suggest mappings to local database fields.
 
 SQL Columns: ${fieldsList}

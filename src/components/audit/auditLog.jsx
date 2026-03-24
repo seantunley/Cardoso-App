@@ -1,4 +1,4 @@
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 
 /**
  * Logs an action to the audit log
@@ -20,13 +20,13 @@ export async function logAction({
     let name = userName;
 
     if (!email || !name) {
-      const currentUser = await base44.auth.me();
+      const currentUser = await api.auth.me();
       email = email || currentUser?.email;
       name = name || currentUser?.full_name;
     }
 
     // Create audit log entry
-    await base44.entities.AuditLog.create({
+    await api.entities.AuditLog.create({
       action_type: actionType,
       resource_type: resourceType,
       resource_id: resourceId,

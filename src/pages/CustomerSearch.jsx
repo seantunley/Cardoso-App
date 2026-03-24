@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
@@ -20,7 +20,7 @@ export default function CustomerSearch() {
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
-    queryFn: () => base44.auth.me(),
+    queryFn: () => api.auth.me(),
   });
 
   const [selectedConnectionId, setSelectedConnectionId] = useState(null);
@@ -29,7 +29,7 @@ export default function CustomerSearch() {
     queryKey: ["connections", currentUser?.email],
     queryFn: async () => {
       if (!currentUser) return [];
-      const allConnections = await base44.entities.DatabaseConnection.list();
+      const allConnections = await api.entities.DatabaseConnection.list();
       return allConnections;
     },
     enabled: !!currentUser,
@@ -45,11 +45,11 @@ export default function CustomerSearch() {
 
   const { data: records = [] } = useQuery({
     queryKey: ["records"],
-    queryFn: () => base44.entities.DataRecord.list("-created_date", 1000),
+    queryFn: () => api.entities.DataRecord.list("-created_date", 1000),
   });
 
   useEffect(() => {
-    const unsubscribe = base44.entities.DataRecord.subscribe((event) => {
+    const unsubscribe = api.entities.DataRecord.subscribe((event) => {
       if (["create", "update"].includes(event.type)) {
         queryClient.invalidateQueries({ queryKey: ["records"] });
       }

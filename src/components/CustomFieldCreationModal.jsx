@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import {
   Dialog,
   DialogContent,
@@ -33,7 +33,7 @@ export default function CustomFieldCreationModal({
   const createFieldMutation = useMutation({
     mutationFn: async (data) => {
       const fieldKey = `custom_${data.name.toLowerCase().replace(/\s+/g, "_")}`;
-      return base44.entities.CustomFieldConfig.create({
+      return api.entities.CustomFieldConfig.create({
         field_key: fieldKey,
         label: data.name,
         field_type: data.type,

@@ -23,7 +23,7 @@ import {
   History,
   CheckCircle,
 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -262,7 +262,7 @@ export default function CustomerLookup({
   useEffect(() => {
     const fetchUser = async () => {
       try {
-        const user = await base44.auth.me();
+        const user = await api.auth.me();
         setCurrentUser(user);
       } catch (error) {
         console.error("Failed to fetch user:", error);

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import AutoFlagRuleForm from "../components/settings/AutoFlagRuleForm";
 import { Plus, Zap, Moon, Sun } from "lucide-react";
@@ -14,19 +14,19 @@ export default function Settings() {
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
-    queryFn: () => base44.auth.me(),
+    queryFn: () => api.auth.me(),
   });
 
   const { data: autoFlagRules = [], isLoading: rulesLoading } = useQuery({
     queryKey: ["autoFlagRules"],
-    queryFn: () => base44.entities.AutoFlagRule.list("-priority"),
+    queryFn: () => api.entities.AutoFlagRule.list("-priority"),
   });
 
   const isAdmin = currentUser?.role === "admin";
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
   const createRuleMutation = useMutation({
-    mutationFn: (data) => base44.entities.AutoFlagRule.create(data),
+    mutationFn: (data) => api.entities.AutoFlagRule.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] });
       toast.success("Auto-flag rule created");
@@ -35,7 +35,7 @@ export default function Settings() {
   });
 
   const updateRuleMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.AutoFlagRule.update(id, data),
+    mutationFn: ({ id, data }) => api.entities.AutoFlagRule.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] });
       toast.success("Auto-flag rule updated");
@@ -43,7 +43,7 @@ export default function Settings() {
   });
 
   const deleteRuleMutation = useMutation({
-    mutationFn: (id) => base44.entities.AutoFlagRule.delete(id),
+    mutationFn: (id) => api.entities.AutoFlagRule.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] });
       toast.success("Auto-flag rule deleted");
@@ -52,9 +52,9 @@ export default function Settings() {
 
   const applyRulesMutation = useMutation({
      mutationFn: async (recordIds = null) => {
-       const rules = await base44.entities.AutoFlagRule.list("-priority");
+       const rules = await api.entities.AutoFlagRule.list("-priority");
        const activeRules = rules.filter(r => r.is_active);
-       const allRecords = await base44.entities.DataRecord.list();
+       const allRecords = await api.entities.DataRecord.list();
        const records = recordIds ? allRecords.filter(r => recordIds.includes(r.id)) : allRecords;
 
        let flaggedCount = 0;
@@ -71,11 +71,11 @@ export default function Settings() {
 
          const autoFlag = checkAutoFlagRulesSync(ageAnalysis, activeRules);
          if (autoFlag && autoFlag.flag_color !== record.flag_color) {
-           await base44.entities.DataRecord.update(record.id, { ...autoFlag, last_checked: now });
+           await api.entities.DataRecord.update(record.id, { ...autoFlag, last_checked: now });
            flaggedCount++;
          } else {
            // Update last_checked even if no flag changed
-           await base44.entities.DataRecord.update(record.id, { last_checked: now });
+           await api.entities.DataRecord.update(record.id, { last_checked: now });
          }
        }
 
@@ -88,7 +88,7 @@ export default function Settings() {
    });
 
   const themeUpdateMutation = useMutation({
-    mutationFn: (theme) => base44.auth.updateMe({ theme_preference: theme }),
+    mutationFn: (theme) => api.auth.updateMe({ theme_preference: theme }),
     onSuccess: (_, theme) => {
       queryClient.invalidateQueries({ queryKey: ["currentUser"] });
       document.documentElement.setAttribute("data-theme", theme);

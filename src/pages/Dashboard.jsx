@@ -1,17 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { FileText, Database, Flag } from "lucide-react";
 import StatCard from "../components/dashboard/StatCard";
 
 export default function Dashboard() {
   const { data: connections = [] } = useQuery({
     queryKey: ["connections"],
-    queryFn: () => base44.entities.DatabaseConnection.list(),
+    queryFn: () => api.entities.DatabaseConnection.list(),
   });
 
   const { data: records = [] } = useQuery({
     queryKey: ["records"],
-    queryFn: () => base44.entities.DataRecord.list(),
+    queryFn: () => api.entities.DataRecord.list(),
   });
 
   const totalRecords = records.length;

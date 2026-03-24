@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { base44 } from "@/api/base44Client";
+import { api } from "@/api/apiClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -41,7 +41,7 @@ export default function Users() {
   } = useQuery({
     queryKey: ["users"],
     queryFn: async () => {
-      return await base44.users.list();
+      return await api.users.list();
     },
     enabled: !!currentUser,
   });
@@ -54,7 +54,7 @@ export default function Users() {
         role: formData.role || "user",
         password: formData.password,
       };
-      return await base44.users.create(payload);
+      return await api.users.create(payload);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -68,7 +68,7 @@ export default function Users() {
 
   const updatePermissionsMutation = useMutation({
     mutationFn: async ({ id, permissions }) => {
-      return await base44.users.updatePermissions(id, permissions);
+      return await api.users.updatePermissions(id, permissions);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
@@ -82,7 +82,7 @@ export default function Users() {
 
   const updatePasswordMutation = useMutation({
     mutationFn: async ({ id, password }) => {
-      return await base44.users.updatePassword(id, password);
+      return await api.users.updatePassword(id, password);
     },
     onSuccess: () => {
       setPasswordUser(null);
@@ -95,7 +95,7 @@ export default function Users() {
 
   const deleteUserMutation = useMutation({
     mutationFn: async (id) => {
-      return await base44.users.delete(id);
+      return await api.users.delete(id);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["users"] });

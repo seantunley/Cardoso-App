@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useAuth } from './AuthContext';
-import { base44 } from '@/api/base44Client';
+import { api } from '@/api/apiClient';
 import { pagesConfig } from '@/pages.config';
 
 export default function NavigationTracker() {
@@ -30,7 +30,7 @@ export default function NavigationTracker() {
 
         if (isAuthenticated && pageName) {
             // LOCAL: Use functions.call instead if appLogs not available
-            base44.functions.call('logUserInApp', { page: pageName }).catch(() => {
+            api.functions.call('logUserInApp', { page: pageName }).catch(() => {
                 // Silently fail - logging shouldn't break the app
             });
         }
