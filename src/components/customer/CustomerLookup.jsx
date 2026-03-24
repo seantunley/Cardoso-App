@@ -545,19 +545,16 @@ export default function CustomerLookup({
             (!customer?.flag_color || customer?.flag_color === "none") && "border-gray-700"
           )}
         >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-3">
-              <User className="h-5 w-5 text-gray-400" />
-              <div>
-                <div className="text-lg text-white">{customer?.customer_name}</div>
-                <div className="text-sm text-gray-400">
-                  Customer #{customer?.customer_number}
-                </div>
+          <DialogHeader className="pb-0">
+            <DialogTitle className="flex items-center gap-2">
+              <User className="h-4 w-4 text-gray-400 shrink-0" />
+              <div className="leading-tight">
+                <div className="text-base text-white leading-none">{customer?.customer_name}</div>
+                <div className="text-xs text-gray-400 mt-0.5">Customer #{customer?.customer_number}</div>
               </div>
-
               <Badge
                 className={cn(
-                  "ml-auto border",
+                  "ml-auto border text-xs",
                   flagColors[customer?.flag_color || "none"].bg,
                   flagColors[customer?.flag_color || "none"].text
                 )}
@@ -566,10 +563,9 @@ export default function CustomerLookup({
                 {flagColors[customer?.flag_color || "none"].label}
               </Badge>
             </DialogTitle>
-
           </DialogHeader>
 
-          <div className="space-y-6 pt-4 overflow-y-auto flex-1 pr-1">
+          <div className="space-y-4 pt-2 overflow-y-auto flex-1 pr-1">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -585,8 +581,8 @@ export default function CustomerLookup({
               const grandTotal = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.outstanding_balance), 0);
 
               return (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4">
-                  <div className="mb-3 flex items-center gap-2">
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+                  <div className="mb-2 flex items-center gap-2">
                     <Calendar className="h-4 w-4 text-gray-400" />
                     <h4 className="text-sm font-semibold text-gray-300">Outstanding Balance</h4>
                   </div>
@@ -641,8 +637,8 @@ export default function CustomerLookup({
 
               // Shared table renderer for invoice and receipt blocks
               const renderTransactionTable = ({ title, icon: Icon, iconColor, accounts, getFields }) => (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-4 flex-1 min-w-0">
-                  <div className="mb-3 flex items-center gap-2">
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3 flex-1 min-w-0">
+                  <div className="mb-2 flex items-center gap-2">
                     <Icon className={cn("h-4 w-4", iconColor)} />
                     <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
                   </div>
@@ -711,7 +707,7 @@ export default function CustomerLookup({
               );
             })()}
 
-            <div className="space-y-3 rounded-xl border border-gray-700 bg-gray-800 p-4">
+            <div className="space-y-3 rounded-xl border border-gray-700 bg-gray-800 p-3">
               <div className="flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
                   Flag Management
