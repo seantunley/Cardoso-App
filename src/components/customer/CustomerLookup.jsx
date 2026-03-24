@@ -726,8 +726,8 @@ export default function CustomerLookup({
               {/* Row 1: flag buttons (left) + last 2 actions (right) */}
               <div className="flex gap-3">
                 {/* Left: flag buttons */}
-                <div className="flex w-24 shrink-0 flex-col gap-1">
-                  <div className="flex flex-col gap-1">
+                <div className="flex w-24 shrink-0 flex-col">
+                  <div className="flex h-full flex-col justify-between">
                     {Object.entries(flagColors)
                       .filter(([key]) => key !== "none")
                       .map(([key, config]) => (
@@ -763,7 +763,7 @@ export default function CustomerLookup({
                         className="h-7 w-full justify-start border border-gray-600 px-2 text-xs text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
                       >
                         <Trash2 className="mr-1.5 h-3 w-3 shrink-0" />
-                        Clear
+                        Remove
                       </Button>
                     )}
                   </div>
