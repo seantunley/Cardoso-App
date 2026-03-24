@@ -759,12 +759,12 @@ export default function CustomerLookup({
                         </Button>
                       ))}
 
-                    {customer?.flag_color !== "none" && canModifyFlag() && (
+                    {canModifyFlag() && (
                       <Button
                         variant="outline"
                         onClick={() => handleFlagChange("none")}
-                        disabled={isUpdatingFlag}
-                        className="h-7 w-full justify-start border border-gray-600 px-2 text-xs text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400"
+                        disabled={isUpdatingFlag || !customer?.flag_color || customer.flag_color === "none"}
+                        className="h-7 w-full justify-start border border-gray-600 px-2 text-xs text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Trash2 className="mr-1.5 h-3 w-3 shrink-0" />
                         Remove
