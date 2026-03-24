@@ -201,6 +201,7 @@ export default function CustomerLookup({
   onRecordSelect,
   triggerLookup,
   onLookupComplete,
+  onFlagChange,
 }) {
   const [customerNumber, setCustomerNumber] = useState("");
   const [loading, setLoading] = useState(false);
@@ -469,6 +470,7 @@ export default function CustomerLookup({
 
       await loadRecordHistory(customer.id);
       setFlagReason("");
+      if (onFlagChange) onFlagChange({ id: customer.id, ...updateData });
       toast.success("Flag updated");
     } catch (error) {
       toast.error(error.message || "Failed to update flag");
