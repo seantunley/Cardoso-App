@@ -2,9 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Loader2, Lock, Mail } from "lucide-react";
+import { Loader2, Lock, Mail, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,10 +13,7 @@ export default function Login() {
   const location = useLocation();
   const { login, isAuthenticated, isLoadingAuth, authError } = useAuth();
 
-  const [formData, setFormData] = useState({
-    email: "",
-    password: "",
-  });
+  const [formData, setFormData] = useState({ email: "", password: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState("");
 
@@ -31,16 +27,13 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLocalError("");
-
     if (!formData.email || !formData.password) {
       setLocalError("Please enter your email and password.");
       return;
     }
-
     try {
       setIsSubmitting(true);
       await login(formData.email, formData.password);
-
       const redirectTo = location.state?.from?.pathname || "/";
       navigate(redirectTo, { replace: true });
     } catch (error) {
@@ -63,47 +56,51 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center p-6">
-      <Card className="w-full max-w-md border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-xl">
-        <CardHeader className="space-y-2">
-          <CardTitle className="text-2xl text-[var(--text-primary)]">
-            Sign in
-          </CardTitle>
-          <p className="text-sm text-[var(--text-secondary)]">
-            Use your local account to access the application.
-          </p>
-        </CardHeader>
+      <div className="w-full max-w-sm">
+        {/* Logo / Brand */}
+        <div className="flex flex-col items-center mb-8 gap-3">
+          <div className="p-3 rounded-2xl bg-indigo-600/20 border border-indigo-500/30">
+            <ShieldCheck className="w-8 h-8 text-indigo-400" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">Cardoso</h1>
+            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Customer Manager</p>
+          </div>
+        </div>
 
-        <CardContent>
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label className="text-[var(--text-primary)]">Email</Label>
+        {/* Card */}
+        <div className="rounded-2xl border border-[var(--border-color)] bg-[var(--bg-secondary)] shadow-2xl p-7 space-y-5">
+          <div>
+            <h2 className="text-lg font-semibold text-[var(--text-primary)]">Welcome back</h2>
+            <p className="text-sm text-[var(--text-secondary)] mt-0.5">Sign in to your account</p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-sm text-[var(--text-primary)]">Email</Label>
               <div className="relative">
                 <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
                 <Input
                   type="email"
                   autoComplete="email"
                   value={formData.email}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, email: e.target.value }))
-                  }
-                  placeholder="admin@example.com"
-                  className="pl-10 bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                  onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="your@email.com"
+                  className="pl-10 bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:ring-indigo-500 focus:border-indigo-500"
                   required
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label className="text-[var(--text-primary)]">Password</Label>
+            <div className="space-y-1.5">
+              <Label className="text-sm text-[var(--text-primary)]">Password</Label>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
                 <Input
                   type="password"
                   autoComplete="current-password"
                   value={formData.password}
-                  onChange={(e) =>
-                    setFormData((prev) => ({ ...prev, password: e.target.value }))
-                  }
+                  onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
                   placeholder="Enter your password"
                   className="pl-10 bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
                   required
@@ -120,22 +117,14 @@ export default function Login() {
             <Button
               type="submit"
               disabled={isSubmitting}
-              className="w-full bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90"
+              className="w-full mt-1 bg-indigo-600 hover:bg-indigo-500 text-white font-medium py-2.5 rounded-lg transition-colors"
             >
               {isSubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Sign in
             </Button>
-
-            {import.meta.env.DEV && (
-              <div className="rounded-lg border border-yellow-800/40 bg-yellow-900/10 p-3 text-xs text-yellow-400/80 space-y-1">
-                <p className="font-semibold">Dev mode — default accounts:</p>
-                <p>Admin: admin@example.com / admin123</p>
-                <p>User: user@example.com / user123</p>
-              </div>
-            )}
           </form>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   );
 }
