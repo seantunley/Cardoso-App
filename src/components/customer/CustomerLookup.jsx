@@ -641,7 +641,7 @@ export default function CustomerLookup({
 
               // Shared table renderer for invoice and receipt blocks
               const renderTransactionTable = ({ title, icon: Icon, iconColor, accounts, getFields }) => (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3 flex-1 min-w-0">
+                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
                   <div className="mb-2 flex items-center gap-2">
                     <Icon className={cn("h-4 w-4", iconColor)} />
                     <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
@@ -684,7 +684,7 @@ export default function CustomerLookup({
               );
 
               return (
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-2">
                   {renderTransactionTable({
                     title: "Last Invoice",
                     icon: Flag,
