@@ -13,19 +13,28 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   console.error('❌ SESSION_SECRET environment variable is required. Set it in your .env file.');
   process.exit(1);
 }
 
-app.use(
-  cors({
-    origin: FRONTEND_ORIGIN,
-    credentials: true,
-  })
-);
+// In production, serve React build and allow same-origin requests
+if (IS_PRODUCTION) {
+  const distPath = path.join(__dirname, 'dist');
+  app.use(express.static(distPath));
+  app.use(cors({ origin: false, credentials: true }));
+} else {
+  app.use(
+    cors({
+      origin: FRONTEND_ORIGIN,
+      credentials: true,
+    })
+  );
+}
 app.use(express.json());
 
 app.use(
@@ -2136,6 +2145,15 @@ function gracefulShutdown(signal) {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// ==================== PRODUCTION SPA FALLBACK ====================
+if (IS_PRODUCTION) {
+  app.get('*', (req, res) => {
+    if (!req.path.startsWith('/api')) {
+      res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+    }
+  });
+}
 
 // ==================== STARTUP ====================
 recoverAbandonedSyncs();

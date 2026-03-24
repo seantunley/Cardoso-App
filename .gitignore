@@ -139,3 +139,7 @@ dist
 *.db
 *.db-shm
 *.db-wal
+
+# Service logs
+logs/
+*.log

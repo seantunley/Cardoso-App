@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
     "server": "node server.js",
-
     "build": "vite build",
+    "start": "cross-env NODE_ENV=production node server.js",
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
@@ -84,7 +84,8 @@
     "tailwindcss-animate": "^1.0.7",
     "three": "^0.171.0",
     "vaul": "^1.1.2",
-    "zod": "^3.24.2"
+    "zod": "^3.24.2",
+    "cross-env": "^7.0.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
