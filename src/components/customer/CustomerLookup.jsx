@@ -739,7 +739,7 @@ export default function CustomerLookup({
                 <div className="mb-2 flex items-center gap-2">
                   <History className="h-4 w-4 text-gray-400" />
                   <p className="text-xs font-medium text-gray-300">
-                    Last 3 actions on this record
+                    Last 2 actions on this record
                   </p>
                 </div>
 
@@ -749,7 +749,7 @@ export default function CustomerLookup({
                   <p className="text-xs text-gray-500">No recent actions found</p>
                 ) : (
                   <div className="space-y-2">
-                    {recordHistory.slice(0, 3).map((log) => (
+                    {recordHistory.slice(0, 2).map((log) => (
                       <div
                         key={log.id}
                         className="rounded-md border border-gray-800 bg-gray-950 p-2"
