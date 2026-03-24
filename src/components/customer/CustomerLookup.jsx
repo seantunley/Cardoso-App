@@ -168,8 +168,11 @@ function formatHistoryAction(log) {
 
       const from = parsed?.field_changes?.flag_color?.from ?? "none";
       const to = parsed?.field_changes?.flag_color?.to ?? "none";
+      const reason = parsed?.field_changes?.flag_reason?.to;
 
-      return `Flag changed ${from} → ${to}`;
+      let label = `Flag: ${from} → ${to}`;
+      if (reason) label += ` · "${reason}"`;
+      return label;
     } catch {
       return log.action_details || "Flag updated";
     }
