@@ -309,7 +309,8 @@ ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 ensureColumn('user', 'password_hash', 'TEXT');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
-ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
@@ -575,6 +576,7 @@ function defaultPermissionsForRole(role) {
     return {
       can_access_customer_search: true,
       can_access_records: true,
+      can_access_reports: true,
       can_access_connections: true,
       can_access_settings: true,
       can_manage_users: true,
@@ -586,7 +588,8 @@ function defaultPermissionsForRole(role) {
 
   return {
     can_access_customer_search: true,
-    can_access_records: true,
+    can_access_records: false,
+    can_access_reports: false,
     can_access_connections: false,
     can_access_settings: false,
     can_manage_users: false,
@@ -607,7 +610,8 @@ function sanitizeUser(user) {
     theme_preference: user.theme_preference,
     is_active: boolFromRow(user.is_active, true),
     can_access_customer_search: boolFromRow(user.can_access_customer_search, true),
-    can_access_records: boolFromRow(user.can_access_records, true),
+    can_access_records: boolFromRow(user.can_access_records, false),
+    can_access_reports: boolFromRow(user.can_access_reports, false),
     can_access_connections: boolFromRow(user.can_access_connections, false),
     can_access_settings: boolFromRow(user.can_access_settings, false),
     can_manage_users: boolFromRow(user.can_manage_users, false),
@@ -648,9 +652,9 @@ async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_records, can_access_connections, can_access_settings,
+        can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'admin@example.com',
       'Admin User',
@@ -659,6 +663,7 @@ async function ensureSeedUsers() {
       1,
       adminDefaults.can_access_customer_search ? 1 : 0,
       adminDefaults.can_access_records ? 1 : 0,
+      adminDefaults.can_access_reports ? 1 : 0,
       adminDefaults.can_access_connections ? 1 : 0,
       adminDefaults.can_access_settings ? 1 : 0,
       adminDefaults.can_manage_users ? 1 : 0,
@@ -676,9 +681,9 @@ async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_records, can_access_connections, can_access_settings,
+        can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'user@example.com',
       'Regular User',
@@ -687,6 +692,7 @@ async function ensureSeedUsers() {
       1,
       userDefaults.can_access_customer_search ? 1 : 0,
       userDefaults.can_access_records ? 1 : 0,
+      userDefaults.can_access_reports ? 1 : 0,
       userDefaults.can_access_connections ? 1 : 0,
       userDefaults.can_access_settings ? 1 : 0,
       userDefaults.can_manage_users ? 1 : 0,
@@ -1494,9 +1500,9 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     const info = db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_records, can_access_connections, can_access_settings,
+        can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       email.trim().toLowerCase(),
       full_name,
@@ -1505,6 +1511,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
       1,
       defaults.can_access_customer_search ? 1 : 0,
       defaults.can_access_records ? 1 : 0,
+      defaults.can_access_reports ? 1 : 0,
       defaults.can_access_connections ? 1 : 0,
       defaults.can_access_settings ? 1 : 0,
       defaults.can_manage_users ? 1 : 0,
@@ -1531,6 +1538,7 @@ app.put('/api/users/:id/permissions', requireAuth, requireAdmin, (req, res) => {
   const allowed = [
     'can_access_customer_search',
     'can_access_records',
+    'can_access_reports',
     'can_access_connections',
     'can_access_settings',
     'can_manage_users',

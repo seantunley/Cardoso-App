@@ -18,6 +18,7 @@ const permissionGroups = [
     permissions: [
       { key: "can_access_customer_search", label: "Customer Search", description: "Look up and view customer records" },
       { key: "can_access_records", label: "Records", description: "View and browse all data records" },
+      { key: "can_access_reports", label: "Reports", description: "View reports and analytics" },
       { key: "can_access_connections", label: "Connections", description: "Manage database connections" },
       { key: "can_access_settings", label: "Settings", description: "Configure auto-flag rules" },
     ]

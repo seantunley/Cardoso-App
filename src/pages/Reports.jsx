@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { hasPermission } from "@/lib/permissions";
+import { ShieldOff } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -53,7 +55,7 @@ export default function Reports() {
   const [sortColumn, setSortColumn] = useState(null);
   const [sortDirection, setSortDirection] = useState("asc");
 
-  useQuery({
+  const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => base44.auth.me(),
   });
@@ -65,8 +67,18 @@ export default function Reports() {
   } = useQuery({
     queryKey: ["reports-records"],
     queryFn: fetchLocalRecords,
-    enabled: true,
+    enabled: hasPermission(currentUser, "can_access_reports"),
   });
+
+  if (currentUser && !hasPermission(currentUser, "can_access_reports")) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 text-muted-foreground">
+        <ShieldOff className="w-12 h-12 text-muted-foreground/50" />
+        <p className="text-lg font-medium">Access Denied</p>
+        <p className="text-sm">You don't have permission to view Reports.</p>
+      </div>
+    );
+  }
 
   const extractAgeValue = (ageAnalysis) => {
     if (!ageAnalysis) return 0;

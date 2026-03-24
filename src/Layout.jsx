@@ -8,18 +8,20 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
+import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 
 const navItems = [
   { name: "Customer Search", icon: Database, page: "CustomerSearch", permission: "can_access_customer_search" },
-  { name: "Reports", icon: FileText, page: "Reports", permission: "can_access_records" },
-  { name: "Connections", icon: LayoutDashboard, page: "Connections", permission: "can_access_connections" },
+  { name: "Reports", icon: FileText, page: "Reports", permission: "can_access_reports" },
   { name: "Records", icon: FileText, page: "Records", permission: "can_access_records" },
+  { name: "Connections", icon: LayoutDashboard, page: "Connections", permission: "can_access_connections" },
   { name: "Fields", icon: Database, page: "Fields", permission: "can_access_settings" },
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
@@ -28,9 +30,32 @@ const navItems = [
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
   const { user: currentUser, logout } = useAuth();
 
   const isAdmin = currentUser?.role === "admin";
+
+  const handleChangePassword = async (userId, newPassword) => {
+    setIsSavingPassword(true);
+    try {
+      const res = await fetch(`/api/users/${userId}/password`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: newPassword }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to update password");
+      }
+      setChangePasswordOpen(false);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setIsSavingPassword(false);
+    }
+  };
 
   const canShowNavItem = (item) => {
     if (!currentUser) return false;
@@ -106,6 +131,17 @@ export default function Layout({ children, currentPageName }) {
 
         <div className="space-y-2 border-t border-border p-4">
           <Button
+            variant="ghost"
+            size={isCollapsed ? "icon" : "default"}
+            className={cn("w-full", !isCollapsed && "justify-start")}
+            onClick={() => setChangePasswordOpen(true)}
+            title={isCollapsed ? "Change Password" : undefined}
+          >
+            <KeyRound className="h-4 w-4" />
+            {!isCollapsed && <span className="ml-2">Change Password</span>}
+          </Button>
+
+          <Button
             variant="outline"
             size={isCollapsed ? "icon" : "default"}
             className={cn("w-full", !isCollapsed && "justify-start")}
@@ -171,6 +207,16 @@ export default function Layout({ children, currentPageName }) {
       >
         {children}
       </main>
+
+      {currentUser && (
+        <ChangePasswordModal
+          user={currentUser}
+          open={changePasswordOpen}
+          onClose={() => setChangePasswordOpen(false)}
+          onSave={handleChangePassword}
+          isSaving={isSavingPassword}
+        />
+      )}
     </div>
   );
 }

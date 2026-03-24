@@ -10,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Filter, FileText, Download, Zap } from "lucide-react";
+import { Search, Filter, FileText, Download, Zap, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import RecordCard from "../components/records/RecordCard";
 import RecordEditModal from "../components/records/RecordEditModal";
@@ -30,6 +30,7 @@ export default function Records() {
 
   const canEditRecords = hasPermission(currentUser, "can_edit_records");
   const canFlagRecords = hasPermission(currentUser, "can_flag_records");
+  const canAccessRecords = hasPermission(currentUser, "can_access_records");
 
   const { data: records = [], isLoading } = useQuery({
     queryKey: ["records"],
@@ -219,6 +220,16 @@ export default function Records() {
       URL.revokeObjectURL(url);
     }
   };
+
+  if (currentUser && !canAccessRecords) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen gap-4 text-muted-foreground">
+        <ShieldOff className="w-12 h-12 text-muted-foreground/50" />
+        <p className="text-lg font-medium">Access Denied</p>
+        <p className="text-sm">You don't have permission to view Records.</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
