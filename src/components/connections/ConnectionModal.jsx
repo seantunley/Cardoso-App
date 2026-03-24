@@ -17,7 +17,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, Database, X, RefreshCcw, Play, Table } from "lucide-react";
+import { Loader2, Database, X, RefreshCcw, Play, Table, Eye, EyeOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import FieldMappingBuilder from "./FieldMappingBuilder";
@@ -81,6 +81,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   const [queryPreview, setQueryPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [customLocalFields, setCustomLocalFields] = useState([]);
+  const [showPassword, setShowPassword] = useState(false);
 
   const allLocalFields = [
     ...BUILT_IN_LOCAL_FIELDS,
@@ -283,7 +284,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-700">
         <DialogHeader>
           <div className="flex items-center gap-3">
@@ -364,14 +365,20 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
 
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-300">Password</Label>
-            <Input
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              placeholder="••••••••"
-              className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-500"
-              required={!connection}
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="••••••••"
+                className="pr-10 bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-500"
+                required={!connection}
+              />
+              <button type="button" onClick={() => setShowPassword(v => !v)} tabIndex={-1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200">
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             {connection && (
               <p className="text-xs text-gray-400">Leave blank to keep existing password</p>
             )}

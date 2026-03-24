@@ -20,7 +20,7 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
   });
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="max-w-2xl max-h-[80vh] bg-gray-900 border-gray-700">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">

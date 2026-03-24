@@ -73,7 +73,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-md bg-[var(--bg-secondary)] border-[var(--border-color)]">
         <DialogHeader>
           <div className="flex items-center gap-3">

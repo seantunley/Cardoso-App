@@ -16,7 +16,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Loader2, UserPlus } from "lucide-react";
+import { Loader2, UserPlus, Eye, EyeOff } from "lucide-react";
 
 export default function CreateLocalUserModal({ open, onClose, onCreate, isCreating }) {
   const [formData, setFormData] = useState({
@@ -25,6 +25,7 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
     role: "user",
     password: "",
   });
+  const [showPassword, setShowPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -34,7 +35,7 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-md bg-[var(--bg-secondary)] border-[var(--border-color)]">
         <DialogHeader>
           <div className="flex items-center gap-3">
@@ -78,15 +79,21 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
 
           <div className="space-y-2">
             <Label className="text-sm font-medium text-[var(--text-primary)]">Password</Label>
-            <Input
-              type="password"
-              value={formData.password}
-              onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-              placeholder="Minimum 8 characters"
-              required
-              minLength={8}
-              className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
-            />
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                value={formData.password}
+                onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                placeholder="Minimum 8 characters"
+                required
+                minLength={8}
+                className="pr-10 bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+              />
+              <button type="button" onClick={() => setShowPassword(v => !v)} tabIndex={-1}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
+                {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+              </button>
+            </div>
             {formData.password.length > 0 && formData.password.length < 8 && (
               <p className="text-xs text-red-400">Password must be at least 8 characters</p>
             )}

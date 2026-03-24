@@ -533,9 +533,7 @@ export default function CustomerLookup({
 
       <Dialog
         open={isModalOpen}
-        onOpenChange={(open) => {
-          if (!open) closeAndReset();
-        }}
+        onOpenChange={() => {}}
       >
         <DialogContent
           onKeyDown={(e) => {
