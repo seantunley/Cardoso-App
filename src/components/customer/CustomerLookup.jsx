@@ -538,7 +538,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-2xl border-4 bg-gray-900",
+            "max-w-2xl border-4 bg-gray-900 max-h-[90vh] flex flex-col",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
@@ -572,7 +572,7 @@ export default function CustomerLookup({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-6 pt-4">
+          <div className="space-y-6 pt-4 overflow-y-auto flex-1 pr-1">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -827,6 +827,17 @@ export default function CustomerLookup({
                     className="h-16 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
                     disabled={isUpdatingFlag}
                   />
+                  {customer?.flag_color && customer.flag_color !== "none" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
+                      disabled={isUpdatingFlag}
+                      onClick={() => handleFlagChange(customer.flag_color)}
+                    >
+                      Save Reason
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
