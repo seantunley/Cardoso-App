@@ -177,7 +177,7 @@ export default function Layout({ children, currentPageName }) {
           </Button>
 
           {!isCollapsed && (
-            <p className="text-center text-[10px] text-muted-foreground/50 pt-1">v2026.1.0</p>
+            <p className="text-center text-[10px] text-muted-foreground/50 pt-1">v2026.1.1</p>
           )}
         </div>
       </aside>
