@@ -65,12 +65,12 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
           </div>
 
           <div className="space-y-2">
-            <Label className="text-sm font-medium text-[var(--text-primary)]">Email Address</Label>
+            <Label className="text-sm font-medium text-[var(--text-primary)]">Username</Label>
             <Input
-              type="email"
+              type="text"
               value={formData.email}
               onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              placeholder="jane@example.com"
+              placeholder="e.g. jsmith"
               required
               className="bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
             />

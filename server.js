@@ -1242,14 +1242,14 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const { email, password } = req.body || {};
 
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ error: 'Username and password are required' });
   }
 
   try {
     const user = db.prepare(`SELECT * FROM "user" WHERE lower(email) = lower(?)`).get(email);
 
     if (!user || !user.password_hash) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     if (!user.is_active) {
@@ -1258,7 +1258,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) {
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid username or password' });
     }
 
     req.session.userId = user.id;
@@ -1546,7 +1546,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
   } = req.body || {};
 
   if (!email || !password) {
-    return res.status(400).json({ error: 'Email and password are required' });
+    return res.status(400).json({ error: 'Username and password are required' });
   }
 
   if (!['admin', 'user'].includes(role)) {
@@ -1556,7 +1556,7 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
   try {
     const existing = db.prepare(`SELECT id FROM "user" WHERE lower(email) = lower(?)`).get(email);
     if (existing) {
-      return res.status(400).json({ error: 'A user with this email already exists' });
+      return res.status(400).json({ error: 'A user with this username already exists' });
     }
 
     const defaults = defaultPermissionsForRole(role);
@@ -1650,25 +1650,20 @@ app.put('/api/users/:id/profile', requireAuth, requireAdmin, async (req, res) =>
     const { full_name, email } = req.body;
 
     if (!email || !email.trim()) {
-      return res.status(400).json({ error: 'Email is required' });
+      return res.status(400).json({ error: 'Username is required' });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-
-    // Basic email format check
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-      return res.status(400).json({ error: 'Invalid email format' });
-    }
 
     const existing = getUserById(id);
     if (!existing) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // Check email not already taken by another user
+    // Check username not already taken by another user
     const emailTaken = db.prepare('SELECT id FROM "user" WHERE lower(email) = ? AND id != ?').get(normalizedEmail, id);
     if (emailTaken) {
-      return res.status(409).json({ error: 'Email already in use by another account' });
+      return res.status(409).json({ error: 'Username already in use by another account' });
     }
 
     db.prepare('UPDATE "user" SET email = ?, full_name = ? WHERE id = ?')

@@ -54,13 +54,13 @@ export default function EditUserModal({ user, open, onClose, onSave, isSaving })
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="edit_email">Login Email</Label>
+            <Label htmlFor="edit_email">Username</Label>
             <Input
               id="edit_email"
-              type="email"
+              type="text"
               value={form.email}
               onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
-              placeholder="jane@example.com"
+              placeholder="e.g. jsmith"
             />
           </div>
           {error && <p className="text-sm text-red-400">{error}</p>}
