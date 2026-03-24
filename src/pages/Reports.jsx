@@ -295,7 +295,7 @@ export default function Reports() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-[var(--text-primary)]">
-                R{totalAgeValue.toLocaleString()}
+                R{totalAgeValue.toLocaleString('en-US')}
               </div>
               <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
                 Sum of all age analysis values
@@ -312,7 +312,7 @@ export default function Reports() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-[var(--text-primary)]">
-                R{avgAgeValue.toLocaleString()}
+                R{avgAgeValue.toLocaleString('en-US')}
               </div>
               <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
                 Average per customer
@@ -343,7 +343,7 @@ export default function Reports() {
                 <YAxis
                   stroke="var(--text-secondary)"
                   tick={{ fill: "var(--text-secondary)", fontSize: 11 }}
-                  tickFormatter={(value) => `R${value.toLocaleString()}`}
+                  tickFormatter={(value) => `R${value.toLocaleString('en-US')}`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -352,7 +352,7 @@ export default function Reports() {
                     borderRadius: "8px",
                     color: "var(--text-primary)",
                   }}
-                  formatter={(value) => [`R${value.toLocaleString()}`, "Amount"]}
+                  formatter={(value) => [`R${value.toLocaleString('en-US')}`, "Amount"]}
                   labelStyle={{ color: "var(--text-primary)" }}
                   itemStyle={{ color: "var(--text-primary)" }}
                   cursor={{ fill: "rgba(255, 255, 255, 0.1)" }}
@@ -573,7 +573,7 @@ export default function Reports() {
                           {record.ageAnalysis || "N/A"}
                         </td>
                         <td className="px-3 py-2 text-right text-xs font-semibold text-[var(--text-primary)]">
-                          {record.ageValue > 0 ? record.ageValue.toLocaleString() : "-"}
+                          {record.ageValue > 0 ? record.ageValue.toLocaleString('en-US') : "-"}
                         </td>
                         <td className="px-3 py-2 text-center">
                           {record.flagColor && record.flagColor !== "none" ? (

@@ -31,7 +31,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           <StatCard
             title="Total Records"
-            value={totalRecords.toLocaleString()}
+            value={totalRecords.toLocaleString('en-US')}
             icon={FileText}
             color="blue"
           />

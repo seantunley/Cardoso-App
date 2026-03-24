@@ -59,7 +59,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide">Records</p>
-            <p className="text-sm font-medium text-gray-300 mt-1">{connection.record_count?.toLocaleString() || 0}</p>
+            <p className="text-sm font-medium text-gray-300 mt-1">{connection.record_count?.toLocaleString('en-US') || 0}</p>
           </div>
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide">Last Sync</p>
