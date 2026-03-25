@@ -40,7 +40,7 @@ export default function ActivityLogModal({ open, onClose }) {
   });
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[80vh] bg-gray-900 border-gray-700">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">

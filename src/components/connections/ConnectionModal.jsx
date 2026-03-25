@@ -284,7 +284,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-700">
         <DialogHeader>
           <div className="flex items-center gap-3">

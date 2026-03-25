@@ -69,7 +69,7 @@ export default function CustomFieldCreationModal({
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md bg-gray-900 border-gray-700">
         <DialogHeader>
           <DialogTitle className="text-white">Create Custom Field</DialogTitle>

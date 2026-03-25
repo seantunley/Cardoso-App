@@ -35,7 +35,7 @@ export default function CreateLocalUserModal({ open, onClose, onCreate, isCreati
   };
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md bg-[var(--bg-secondary)] border-[var(--border-color)]">
         <DialogHeader>
           <div className="flex items-center gap-3">

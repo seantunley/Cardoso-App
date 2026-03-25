@@ -147,7 +147,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
     }
   };
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
+    <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="bg-gray-900 border-gray-700 text-white">
         <DialogHeader>
           <DialogTitle>Edit Record</DialogTitle>
