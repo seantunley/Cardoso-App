@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
@@ -35,13 +35,53 @@ const navItems = [
   { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true },
 ];
 
+const APP_VERSION = "2026.1.1";
+
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
+  const [versionStatus, setVersionStatus] = useState({
+    currentVersion: APP_VERSION,
+    latestVersion: APP_VERSION,
+    updateAvailable: false,
+  });
   const { user: currentUser, logout } = useAuth();
 
   const isAdmin = currentUser?.role === "admin";
+
+  useEffect(() => {
+    if (!currentUser) return;
+
+    let isMounted = true;
+
+    const loadVersionStatus = async () => {
+      try {
+        const res = await fetch("/api/app-version-status", {
+          credentials: "include",
+        });
+
+        if (!res.ok) return;
+
+        const data = await res.json();
+        if (isMounted) {
+          setVersionStatus({
+            currentVersion: data.currentVersion || APP_VERSION,
+            latestVersion: data.latestVersion || APP_VERSION,
+            updateAvailable: Boolean(data.updateAvailable),
+          });
+        }
+      } catch {
+        // Silent fail — version badge should never break the app.
+      }
+    };
+
+    loadVersionStatus();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [currentUser]);
 
   const handleChangePassword = async (userId, newPassword) => {
     setIsSavingPassword(true);
@@ -177,7 +217,24 @@ export default function Layout({ children, currentPageName }) {
           </Button>
 
           {!isCollapsed && (
-            <p className="text-center text-[10px] text-muted-foreground/50 pt-1">v2026.1.1</p>
+            <div
+              className={cn(
+                "rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
+                versionStatus.updateAvailable
+                  ? "border-yellow-300 bg-yellow-100 text-yellow-900"
+                  : "border-transparent text-muted-foreground/50"
+              )}
+              title={
+                versionStatus.updateAvailable
+                  ? `New version available: v${versionStatus.latestVersion}`
+                  : `Current version: v${versionStatus.currentVersion}`
+              }
+            >
+              <p>v{versionStatus.currentVersion}</p>
+              {versionStatus.updateAvailable && (
+                <p className="font-medium">Update available</p>
+              )}
+            </div>
           )}
         </div>
       </aside>
