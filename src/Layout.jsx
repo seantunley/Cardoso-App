@@ -232,7 +232,10 @@ export default function Layout({ children, currentPageName }) {
             >
               <p>v{versionStatus.currentVersion}</p>
               {versionStatus.updateAvailable && (
-                <p className="font-medium">Update available</p>
+                <>
+                  <p className="font-medium">Update available</p>
+                  <p className="font-semibold">New: v{versionStatus.latestVersion}</p>
+                </>
               )}
             </div>
           )}
