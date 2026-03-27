@@ -152,8 +152,15 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   }, [connection, open]);
 
   const handleTestConnection = async () => {
-    if (!formData.host || !formData.database_name || !formData.username || !formData.password) {
-      toast.error("Please fill in all connection details including password");
+    // For new connections a password is required client-side; for existing ones the
+    // server can decrypt the stored password via connectionId.
+    if (!formData.host || !formData.database_name || !formData.username) {
+      toast.error("Please fill in host, database, and username");
+      setConnectionTestStatus("error");
+      return;
+    }
+    if (!connection?.id && !formData.password) {
+      toast.error("Please enter the password");
       setConnectionTestStatus("error");
       return;
     }
@@ -171,7 +178,8 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           port: formData.port || 1433,
           database_name: formData.database_name,
           username: formData.username,
-          password: formData.password,
+          ...(formData.password ? { password: formData.password } : {}),
+          ...(connection?.id ? { connectionId: connection.id } : {}),
         }),
       });
 
@@ -193,9 +201,12 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       toast.error("Enter a SQL query first");
       return;
     }
-    const password = formData.password || connection?.encrypted_password;
-    if (!formData.host || !formData.database_name || !formData.username || !password) {
-      toast.error("Fill in connection details and test the connection first");
+    if (!formData.host || !formData.database_name || !formData.username) {
+      toast.error("Fill in connection details first");
+      return;
+    }
+    if (!connection?.id && !formData.password) {
+      toast.error("Enter the password first");
       return;
     }
 
@@ -213,7 +224,8 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           port: formData.port || 1433,
           database_name: formData.database_name,
           username: formData.username,
-          password,
+          ...(formData.password ? { password: formData.password } : {}),
+          ...(connection?.id ? { connectionId: connection.id } : {}),
           query: formData.sync_query,
         }),
       });

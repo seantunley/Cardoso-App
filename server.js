@@ -1946,8 +1946,17 @@ app.post(
   requireAuth,
   requirePermission('can_access_connections'),
   async (req, res) => {
-    const { host, port = 1433, database_name, username, password } = req.body;
+    const { host, port = 1433, database_name, username, connectionId } = req.body;
+    let { password } = req.body;
     let pool;
+
+    // If no password supplied but a connectionId is, decrypt the stored one
+    if (!password && connectionId) {
+      const stored = db.prepare('SELECT encrypted_password FROM databaseconnection WHERE id = ?').get(connectionId);
+      if (stored?.encrypted_password) {
+        try { password = decryptPassword(stored.encrypted_password); } catch {}
+      }
+    }
 
     if (!host || !database_name || !username || !password) {
       return res.status(400).json({ error: 'Missing required fields' });
@@ -2013,8 +2022,17 @@ app.post(
   requireAuth,
   requirePermission('can_access_connections'),
   async (req, res) => {
-    const { host, port = 1433, database_name, username, password, query } = req.body;
+        const { host, port = 1433, database_name, username, query, connectionId } = req.body;
+    let { password } = req.body;
     let pool;
+
+    // If no password supplied but a connectionId is, decrypt the stored one
+    if (!password && connectionId) {
+      const stored = db.prepare('SELECT encrypted_password FROM databaseconnection WHERE id = ?').get(connectionId);
+      if (stored?.encrypted_password) {
+        try { password = decryptPassword(stored.encrypted_password); } catch {}
+      }
+    }
 
     if (!host || !database_name || !username || !password) {
       return res.status(400).json({ error: 'Missing connection credentials' });
