@@ -211,6 +211,8 @@ export default function CustomerLookup({
   const [flagReason, setFlagReason] = useState("");
   const [isUpdatingFlag, setIsUpdatingFlag] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [showRemovalModal, setShowRemovalModal] = useState(false);
+  const [removalReason, setRemovalReason] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [allRecords, setAllRecords] = useState([]);
@@ -477,6 +479,28 @@ export default function CustomerLookup({
     } finally {
       setIsUpdatingFlag(false);
     }
+  };
+
+  // Intercept Remove for orange/red — require a mandatory reason
+  const handleRemoveFlagClick = () => {
+    const color = customer?.flag_color;
+    if (color === "orange" || color === "red") {
+      setRemovalReason("");
+      setShowRemovalModal(true);
+    } else {
+      handleFlagChange("none");
+    }
+  };
+
+  const handleRemovalConfirm = async () => {
+    if (!removalReason.trim()) return;
+    setShowRemovalModal(false);
+    // Temporarily override flagReason so the removal audit entry carries the reason
+    const savedReason = flagReason;
+    setFlagReason(removalReason.trim());
+    await handleFlagChange("none");
+    setFlagReason(savedReason);
+    setRemovalReason("");
   };
 
   return (
@@ -764,7 +788,7 @@ export default function CustomerLookup({
                     {canModifyFlag() && (
                       <Button
                         variant="outline"
-                        onClick={() => handleFlagChange("none")}
+                        onClick={handleRemoveFlagClick}
                         disabled={isUpdatingFlag || !customer?.flag_color || customer.flag_color === "none"}
                         className="h-7 w-full justify-start border border-gray-600 px-2 text-xs text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400 disabled:opacity-40 disabled:cursor-not-allowed"
                       >
@@ -830,6 +854,67 @@ export default function CustomerLookup({
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      {/* ── Flag Removal Reason Modal ── */}
+      <Dialog open={showRemovalModal} onOpenChange={() => {}}>
+        <DialogContent
+          className="max-w-md bg-gray-900 border-rose-700 [&>button]:hidden"
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-white">
+              <Trash2 className="h-4 w-4 text-rose-400" />
+              Remove Flag — Reason Required
+            </DialogTitle>
+            <DialogDescription className="text-gray-400">
+              You are removing a{" "}
+              <span className={customer?.flag_color === "red" ? "font-semibold text-red-400" : "font-semibold text-orange-400"}>
+                {customer?.flag_color}
+              </span>{" "}
+              flag. A reason is mandatory before this can be completed.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 pt-1">
+            <div className="space-y-1.5">
+              <Label className="text-sm text-gray-300">
+                Removal reason <span className="text-rose-400">*</span>
+              </Label>
+              <Textarea
+                value={removalReason}
+                onChange={(e) => setRemovalReason(e.target.value)}
+                placeholder="Enter the reason for removing this flag…"
+                className="h-24 resize-none border-gray-700 bg-gray-800 text-sm text-gray-100 placeholder:text-gray-500 focus:border-rose-600"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-1">
+              <Button
+                variant="outline"
+                className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+                onClick={() => {
+                  setShowRemovalModal(false);
+                  setRemovalReason("");
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleRemovalConfirm}
+                disabled={!removalReason.trim() || isUpdatingFlag}
+                className="bg-rose-700 hover:bg-rose-600 text-white disabled:opacity-50"
+              >
+                {isUpdatingFlag ? (
+                  <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Removing…</>
+                ) : (
+                  <>Confirm Removal</>
+                )}
+              </Button>
             </div>
           </div>
         </DialogContent>
