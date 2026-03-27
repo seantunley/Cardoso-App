@@ -302,7 +302,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           </div>
         </DialogHeader>
 
-        <div className="flex-1 space-y-5 overflow-y-auto py-4 pr-1">
+        <div className="flex-1 min-h-0 space-y-5 overflow-y-auto py-4 pr-1">
           {/* ── Connection details ── */}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-300">Connection Name</Label>
