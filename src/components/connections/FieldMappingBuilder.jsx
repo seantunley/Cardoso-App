@@ -126,7 +126,7 @@ export default function FieldMappingBuilder({
             No field mappings yet. Create mappings below.
           </p>
         ) : (
-          <div className="max-h-72 space-y-2 overflow-y-auto">
+          <div className="space-y-2">
             {Object.entries(fieldMappings).map(([localKey, mapping]) => {
               const localField = existingFields.find((f) => f.key === localKey);
               const availableSourceOptions = getAvailableSourceFieldsForMapping(localKey);
@@ -172,7 +172,7 @@ export default function FieldMappingBuilder({
                     </Button>
                   </div>
 
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="grid grid-cols-2 gap-3">
                     <div>
                       <Label className="mb-1 block text-xs text-gray-400">
                         Source field
@@ -226,7 +226,7 @@ export default function FieldMappingBuilder({
         <div className="space-y-3 border-t border-gray-800 pt-4">
           <Label className="text-gray-300">Create New Mapping</Label>
 
-          <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+          <div className="grid grid-cols-3 gap-2">
             <Select value={selectedSourceField} onValueChange={setSelectedSourceField}>
               <SelectTrigger className="h-9 border-gray-700 bg-gray-900 text-sm text-white">
                 <SelectValue placeholder="Select SQL field" />

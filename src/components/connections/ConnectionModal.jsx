@@ -285,7 +285,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto bg-gray-900 border-gray-700">
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col overflow-hidden bg-gray-900 border-gray-700">
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 bg-gray-800 rounded-lg">
@@ -302,7 +302,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           </div>
         </DialogHeader>
 
-        <div className="space-y-5 py-4">
+        <div className="flex-1 space-y-5 overflow-y-auto py-4 pr-1">
           {/* ── Connection details ── */}
           <div className="space-y-2">
             <Label className="text-sm font-medium text-gray-300">Connection Name</Label>
@@ -553,16 +553,14 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 </p>
               </div>
 
-              <div className="p-4 bg-gray-800 rounded-lg border border-gray-700">
-                <FieldMappingBuilder
-                  fieldMappings={formData.query_field_mappings || {}}
-                  availableFields={queryColumns}
-                  localFields={allLocalFields}
-                  onMappingsChange={(mappings) =>
-                    setFormData({ ...formData, query_field_mappings: mappings })
-                  }
-                />
-              </div>
+              <FieldMappingBuilder
+                fieldMappings={formData.query_field_mappings || {}}
+                availableFields={queryColumns}
+                localFields={allLocalFields}
+                onMappingsChange={(mappings) =>
+                  setFormData({ ...formData, query_field_mappings: mappings })
+                }
+              />
 
               {/* Quick auto-map button */}
               <Button
@@ -612,42 +610,43 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </Select>
           </div>
 
-          <DialogFooter className="pt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onClose}
-              className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
-            >
-              Cancel
-            </Button>
-
-            <Button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSaving}
-              className="bg-white hover:bg-gray-100 text-gray-900"
-            >
-              {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-              {connection ? "Update" : "Create"} Connection
-            </Button>
-
-            {connection && (
-              <Button
-                type="button"
-                onClick={handleImport}
-                disabled={isImporting}
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                {isImporting ? (
-                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing...</>
-                ) : (
-                  <><RefreshCcw className="w-4 h-4 mr-2" />Sync Now</>
-                )}
-              </Button>
-            )}
-          </DialogFooter>
         </div>
+
+        <DialogFooter className="flex-shrink-0 border-t border-gray-800 pt-4">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onClose}
+            className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+          >
+            Cancel
+          </Button>
+
+          <Button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSaving}
+            className="bg-white hover:bg-gray-100 text-gray-900"
+          >
+            {isSaving && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+            {connection ? "Update" : "Create"} Connection
+          </Button>
+
+          {connection && (
+            <Button
+              type="button"
+              onClick={handleImport}
+              disabled={isImporting}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isImporting ? (
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing...</>
+              ) : (
+                <><RefreshCcw className="w-4 h-4 mr-2" />Sync Now</>
+              )}
+            </Button>
+          )}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
