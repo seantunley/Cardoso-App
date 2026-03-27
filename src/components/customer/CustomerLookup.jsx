@@ -442,7 +442,7 @@ export default function CustomerLookup({
     return false;
   };
 
-  const handleFlagChange = async (color) => {
+  const handleFlagChange = async (color, explicitReason) => {
     if (!customer || !currentUser) return;
 
     setIsUpdatingFlag(true);
@@ -450,7 +450,7 @@ export default function CustomerLookup({
     try {
       const updateData = {
         flag_color: color,
-        flag_reason: flagReason || "",
+        flag_reason: explicitReason !== undefined ? explicitReason : (flagReason || ""),
         flag_created_by: color !== "none" ? currentUser.email : null,
         auto_flagged: false,
       };
@@ -495,11 +495,7 @@ export default function CustomerLookup({
   const handleRemovalConfirm = async () => {
     if (!removalReason.trim()) return;
     setShowRemovalModal(false);
-    // Temporarily override flagReason so the removal audit entry carries the reason
-    const savedReason = flagReason;
-    setFlagReason(removalReason.trim());
-    await handleFlagChange("none");
-    setFlagReason(savedReason);
+    await handleFlagChange("none", removalReason.trim());
     setRemovalReason("");
   };
 
