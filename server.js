@@ -352,6 +352,14 @@ db.exec(`
     created_date TEXT DEFAULT CURRENT_TIMESTAMP
   );
 
+  CREATE TABLE IF NOT EXISTS login_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_email TEXT NOT NULL,
+    user_name TEXT,
+    ip_address TEXT,
+    logged_in_at TEXT DEFAULT CURRENT_TIMESTAMP
+  );
+
   CREATE TABLE IF NOT EXISTS "user" (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT NOT NULL UNIQUE,
@@ -1434,6 +1442,17 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
     req.session.userId = user.id;
 
+    try {
+      const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+      db.prepare(`INSERT INTO login_log (user_email, user_name, ip_address, logged_in_at) VALUES (?, ?, ?, datetime('now'))`).run(
+        user.email,
+        user.full_name || null,
+        ip
+      );
+    } catch (logErr) {
+      console.error('Failed to write login log:', logErr);
+    }
+
     res.json({
       success: true,
       user: sanitizeUser(user),
@@ -1706,6 +1725,22 @@ app.get(
     }
   }
 );
+
+// ==================== LOGIN LOG ROUTE ====================
+app.get('/api/login-logs', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, user_email, user_name, ip_address, logged_in_at
+      FROM login_log
+      ORDER BY logged_in_at DESC
+      LIMIT 500
+    `).all();
+    res.json(rows);
+  } catch (error) {
+    console.error('Login log error:', error);
+    res.status(500).json({ error: 'Failed to load login logs' });
+  }
+});
 
 // ==================== USER ROUTES ====================
 app.get('/api/users', requireAuth, requireAdmin, (req, res) => {
