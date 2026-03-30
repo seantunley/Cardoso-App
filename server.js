@@ -2212,6 +2212,239 @@ app.get('/api/reporting/health', requireReportingToken, (req, res) => {
 
 
 
+// ==================== HUB ETL ====================
+// Only active when HUB_MODE=true. Aggregates data from remote sites.
+
+if (process.env.HUB_MODE === 'true') {
+  // --- Hub tables ---
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS hub_sites (
+      id TEXT PRIMARY KEY,
+      slug TEXT,
+      name TEXT,
+      url TEXT,
+      last_seen TEXT,
+      last_kpis TEXT,
+      status TEXT DEFAULT 'unknown'
+    );
+    CREATE TABLE IF NOT EXISTS hub_records (
+      site_id TEXT,
+      record_id TEXT,
+      customer_number TEXT,
+      customer_name TEXT,
+      flag_color TEXT,
+      flag_reason TEXT,
+      updated_date TEXT,
+      synced_at TEXT,
+      PRIMARY KEY (site_id, record_id)
+    );
+    CREATE TABLE IF NOT EXISTS hub_sync_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      records_fetched INTEGER,
+      status TEXT,
+      error TEXT
+    );
+  `);
+
+  // --- Site registry from env ---
+  let HUB_SITES = [];
+  try {
+    HUB_SITES = JSON.parse(process.env.HUB_SITES || '[]');
+  } catch (e) {
+    console.error('[HUB] Invalid HUB_SITES JSON:', e.message);
+  }
+
+  // Upsert site registry into db
+  const upsertSite = db.prepare(`
+    INSERT INTO hub_sites (id, slug, name, url, status)
+    VALUES (@id, @slug, @name, @url, 'unknown')
+    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url
+  `);
+  for (const site of HUB_SITES) {
+    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url });
+  }
+
+  // --- ETL function ---
+  async function syncSite(site) {
+    const startedAt = new Date().toISOString();
+    let recordsFetched = 0;
+    let syncError = null;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+      const headers = { 'X-Reporting-Token': site.token };
+
+      // Health check
+      const healthRes = await fetch(`${site.url}/api/reporting/health`, { headers, signal: controller.signal });
+      clearTimeout(timeout);
+      if (!healthRes.ok) throw new Error(`Health check failed: ${healthRes.status}`);
+
+      // KPIs
+      const ctrl2 = new AbortController();
+      const t2 = setTimeout(() => ctrl2.abort(), 10000);
+      const kpisRes = await fetch(`${site.url}/api/reporting/kpis`, { headers, signal: ctrl2.signal });
+      clearTimeout(t2);
+      const kpis = kpisRes.ok ? await kpisRes.json() : null;
+
+      // Last sync for incremental pull
+      const lastSync = db.prepare(
+        `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status='ok' ORDER BY completed_at DESC LIMIT 1`
+      ).get(site.id);
+      const sinceParam = lastSync ? `?since=${encodeURIComponent(lastSync.completed_at)}` : '';
+
+      // Records
+      const ctrl3 = new AbortController();
+      const t3 = setTimeout(() => ctrl3.abort(), 10000);
+      const recRes = await fetch(`${site.url}/api/reporting/records${sinceParam}`, { headers, signal: ctrl3.signal });
+      clearTimeout(t3);
+      const recData = recRes.ok ? await recRes.json() : null;
+
+      // Upsert records
+      if (recData && recData.records) {
+        const upsertRec = db.prepare(`
+          INSERT INTO hub_records (site_id, record_id, customer_number, customer_name, flag_color, flag_reason, updated_date, synced_at)
+          VALUES (@site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @updated_date, @synced_at)
+          ON CONFLICT(site_id, record_id) DO UPDATE SET
+            customer_number=excluded.customer_number,
+            customer_name=excluded.customer_name,
+            flag_color=excluded.flag_color,
+            flag_reason=excluded.flag_reason,
+            updated_date=excluded.updated_date,
+            synced_at=excluded.synced_at
+        `);
+        const now = new Date().toISOString();
+        const insertMany = db.transaction((records) => {
+          for (const r of records) {
+            upsertRec.run({
+              site_id: site.id,
+              record_id: r.id,
+              customer_number: r.customer_number,
+              customer_name: r.customer_name,
+              flag_color: r.flag_color || 'none',
+              flag_reason: r.flag_reason || null,
+              updated_date: r.updated_date,
+              synced_at: now,
+            });
+          }
+        });
+        insertMany(recData.records);
+        recordsFetched = recData.records.length;
+      }
+
+      // Update hub_sites
+      db.prepare(`
+        UPDATE hub_sites SET last_seen=?, last_kpis=?, status='ok' WHERE id=?
+      `).run(new Date().toISOString(), kpis ? JSON.stringify(kpis) : null, site.id);
+
+    } catch (err) {
+      syncError = err.message;
+      db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
+      console.error(`[HUB] Sync error for ${site.slug}:`, err.message);
+    }
+
+    db.prepare(`
+      INSERT INTO hub_sync_log (site_id, started_at, completed_at, records_fetched, status, error)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, syncError ? 'error' : 'ok', syncError || null);
+
+    return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
+  }
+
+  async function syncAllSites() {
+    console.log(`[HUB] Syncing ${HUB_SITES.length} site(s)...`);
+    const results = await Promise.allSettled(HUB_SITES.map(syncSite));
+    results.forEach(r => {
+      if (r.status === 'fulfilled') {
+        console.log(`[HUB] ${r.value.site_slug}: ${r.value.records_fetched} records, error=${r.value.error || 'none'}`);
+      } else {
+        console.error('[HUB] Unexpected error:', r.reason);
+      }
+    });
+  }
+
+  // Startup sync after 10s delay
+  setTimeout(syncAllSites, 10000);
+  // Scheduled every 5 minutes
+  setInterval(syncAllSites, 5 * 60 * 1000);
+
+  // --- Hub API routes ---
+
+  // GET /api/hub/sites
+  app.get('/api/hub/sites', (req, res) => {
+    const sites = db.prepare('SELECT * FROM hub_sites').all();
+    res.json(sites.map(s => ({
+      ...s,
+      last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
+    })));
+  });
+
+  // GET /api/hub/records
+  app.get('/api/hub/records', (req, res) => {
+    const { site_id, flag_color, search } = req.query;
+    let query = 'SELECT * FROM hub_records WHERE 1=1';
+    const params = [];
+    if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
+    if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
+    if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    query += ' ORDER BY updated_date DESC LIMIT 500';
+    const rows = db.prepare(query).all(...params);
+    res.json({ count: rows.length, records: rows });
+  });
+
+  // GET /api/hub/kpis
+  app.get('/api/hub/kpis', (req, res) => {
+    const sites = db.prepare('SELECT * FROM hub_sites').all();
+    const totals = db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
+    const totalRecords = db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
+
+    const flagTotals = { none: 0, red: 0, orange: 0, green: 0 };
+    for (const row of totals) {
+      if (row.flag_color in flagTotals) flagTotals[row.flag_color] = row.count;
+    }
+
+    const perSite = sites.map(s => {
+      const kpis = s.last_kpis ? JSON.parse(s.last_kpis) : null;
+      return {
+        site_id: s.id,
+        site_slug: s.slug,
+        site_name: s.name,
+        status: s.status,
+        last_seen: s.last_seen,
+        kpis,
+      };
+    });
+
+    res.json({
+      total_records: totalRecords.count,
+      records_by_flag: flagTotals,
+      sites: perSite,
+      generated_at: new Date().toISOString(),
+    });
+  });
+
+  // GET /api/hub/sync-log
+  app.get('/api/hub/sync-log', (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const rows = db.prepare(
+      'SELECT * FROM hub_sync_log ORDER BY started_at DESC LIMIT ?'
+    ).all(limit);
+    res.json(rows);
+  });
+
+  // POST /api/hub/sync
+  app.post('/api/hub/sync', (req, res) => {
+    res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
+    syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
+  });
+
+  console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
+}
+
+
 // ==================== DYNAMIC CRUD ROUTES ====================
 app.get('/api/:table', requireAuth, (req, res) => {
   const { table } = req.params;
