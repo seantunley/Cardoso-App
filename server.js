@@ -1067,7 +1067,7 @@ async function runConnectionImport(connectionId) {
 
     const sqlConfig = {
       user: connConfig.username,
-      password: decryptPassword(connConfig.encrypted_password),
+      password: (() => { const _p = decryptPassword(connConfig.encrypted_password); console.log('[sync debug] stored len:', connConfig.encrypted_password?.length, 'decrypted len:', _p?.length, 'starts:', connConfig.encrypted_password?.substring(0,20)); return _p; })(),
       server: connConfig.host,
       database: connConfig.database_name,
       port: parseInt(connConfig.port, 10),
