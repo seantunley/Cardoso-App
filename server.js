@@ -2404,12 +2404,13 @@ if (process.env.HUB_MODE === 'true') {
   // GET /api/hub/records
   app.get('/api/hub/records', (req, res) => {
     const { site_id, flag_color, search } = req.query;
+    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
     let query = 'SELECT * FROM hub_records WHERE 1=1';
     const params = [];
     if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
     if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
     if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    query += ' ORDER BY updated_date DESC LIMIT 500';
+    query += ` ORDER BY updated_date DESC LIMIT ${limit}`;
     const rows = db.prepare(query).all(...params);
     res.json({ count: rows.length, records: rows });
   });
