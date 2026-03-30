@@ -2166,28 +2166,33 @@ app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
   });
 });
 
-// GET /api/reporting/records?since=ISO_DATE
+// GET /api/reporting/records?since=ISO_DATE&offset=0&limit=1000
 app.get('/api/reporting/records', requireReportingToken, (req, res) => {
   const since = req.query.since;
+  const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
+  const offset = parseInt(req.query.offset) || 0;
   let rows;
   if (since) {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
               updated_date, synced_at, source_table, source_id
-       FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT 1000`
-    ).all(since);
+       FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
+    ).all(since, limit, offset);
   } else {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
               updated_date, synced_at, source_table, source_id
-       FROM datarecord ORDER BY updated_date ASC LIMIT 1000`
-    ).all();
+       FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
+    ).all(limit, offset);
   }
   res.json({
     site_id: SITE_ID,
     site_slug: SITE_SLUG,
     since: since || null,
+    offset,
+    limit,
     count: rows.length,
+    has_more: rows.length === limit,
     records: rows,
   });
 });
@@ -2296,43 +2301,50 @@ if (process.env.HUB_MODE === 'true') {
       ).get(site.id);
       const sinceParam = lastSync ? `?since=${encodeURIComponent(lastSync.completed_at)}` : '';
 
-      // Records
-      const ctrl3 = new AbortController();
-      const t3 = setTimeout(() => ctrl3.abort(), 10000);
-      const recRes = await fetch(`${site.url}/api/reporting/records${sinceParam}`, { headers, signal: ctrl3.signal });
-      clearTimeout(t3);
-      const recData = recRes.ok ? await recRes.json() : null;
-
-      // Upsert records
-      if (recData && recData.records) {
-        const upsertRec = db.prepare(`
-          INSERT INTO hub_records (site_id, record_id, customer_number, customer_name, flag_color, flag_reason, updated_date, synced_at)
-          VALUES (@site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @updated_date, @synced_at)
-          ON CONFLICT(site_id, record_id) DO UPDATE SET
-            customer_number=excluded.customer_number,
-            customer_name=excluded.customer_name,
-            flag_color=excluded.flag_color,
-            flag_reason=excluded.flag_reason,
-            updated_date=excluded.updated_date,
-            synced_at=excluded.synced_at
-        `);
+      // Records — paginate until has_more is false
+      const upsertRec = db.prepare(`
+        INSERT INTO hub_records (site_id, record_id, customer_number, customer_name, flag_color, flag_reason, updated_date, synced_at)
+        VALUES (@site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @updated_date, @synced_at)
+        ON CONFLICT(site_id, record_id) DO UPDATE SET
+          customer_number=excluded.customer_number,
+          customer_name=excluded.customer_name,
+          flag_color=excluded.flag_color,
+          flag_reason=excluded.flag_reason,
+          updated_date=excluded.updated_date,
+          synced_at=excluded.synced_at
+      `);
+      const insertMany = db.transaction((records) => {
         const now = new Date().toISOString();
-        const insertMany = db.transaction((records) => {
-          for (const r of records) {
-            upsertRec.run({
-              site_id: site.id,
-              record_id: r.id,
-              customer_number: r.customer_number,
-              customer_name: r.customer_name,
-              flag_color: r.flag_color || 'none',
-              flag_reason: r.flag_reason || null,
-              updated_date: r.updated_date,
-              synced_at: now,
-            });
-          }
-        });
-        insertMany(recData.records);
-        recordsFetched = recData.records.length;
+        for (const r of records) {
+          upsertRec.run({
+            site_id: site.id,
+            record_id: r.id,
+            customer_number: r.customer_number,
+            customer_name: r.customer_name,
+            flag_color: r.flag_color || 'none',
+            flag_reason: r.flag_reason || null,
+            updated_date: r.updated_date,
+            synced_at: now,
+          });
+        }
+      });
+
+      let offset = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const ctrl3 = new AbortController();
+        const t3 = setTimeout(() => ctrl3.abort(), 10000);
+        const pageUrl = `${site.url}/api/reporting/records${sinceParam}${sinceParam ? '&' : '?'}offset=${offset}&limit=1000`;
+        const recRes = await fetch(pageUrl, { headers, signal: ctrl3.signal });
+        clearTimeout(t3);
+        if (!recRes.ok) break;
+        const recData = await recRes.json();
+        if (recData.records && recData.records.length > 0) {
+          insertMany(recData.records);
+          recordsFetched += recData.records.length;
+          offset += recData.records.length;
+        }
+        hasMore = recData.has_more === true;
       }
 
       // Update hub_sites
