@@ -71,8 +71,17 @@ function SiteCard({ site, onFlagClick }) {
       </div>
 
       {site.kpis ? (
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
 
+          {/* Total */}
+          <div className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <p className="text-[9px] font-semibold text-indigo-400/70 uppercase tracking-widest mb-1">Total</p>
+            <p className="text-2xl font-extrabold text-white leading-none">{total ?? "—"}</p>
+            <p className="text-[9px] text-indigo-300/60 mt-1">Records</p>
+            <div className="mt-2 h-0.5 rounded-full bg-indigo-500/20">
+              <div className="h-full rounded-full bg-indigo-500/60 w-full" />
+            </div>
+          </div>
           {/* Red */}
           <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
