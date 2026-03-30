@@ -311,7 +311,6 @@ function HubCustomerSearch({ sites }) {
             ))}
           </select>
           {loading && <Loader2 className="h-4 w-4 animate-spin self-center text-muted-foreground" />}
-          {!loading && <span className="text-xs text-muted-foreground self-center">{allRecords.length.toLocaleString()} records loaded</span>}
         </div>
 
         {/* Search input */}
