@@ -28,8 +28,11 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
               <Flag className={cn("w-5 h-5", config.text)} />
             </div>
             <div>
+              {siteName && (
+                <div className="text-xs font-bold text-white uppercase tracking-widest mb-0.5">{siteName}</div>
+              )}
               <div className="text-lg font-semibold text-white">
-                {config.label} Customers{siteName ? <span className="text-gray-400 font-normal"> — {siteName}</span> : ""}
+                {config.label} Customers
               </div>
               <div className="text-sm text-gray-400 font-normal">
                 {sortedCustomers.length} customer{sortedCustomers.length !== 1 ? 's' : ''}
