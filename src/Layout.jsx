@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   ClipboardList,
   Globe,
+  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ const navItems = [
   { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
   { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
+  { name: "Sync Log", icon: History, page: "HubSyncLog", hubOnly: true },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
   { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
 ];

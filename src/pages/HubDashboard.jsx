@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  RefreshCw, AlertCircle, CheckCircle2, Clock, Search,
+  RefreshCw, AlertCircle, Clock, Search,
   Building2, Wifi, WifiOff, Loader2, User, Flag, Shield,
   Trash2, History, CheckCircle, Calendar,
 } from "lucide-react";
@@ -344,63 +344,20 @@ function HubCustomerSearch({ sites }) {
   );
 }
 
-// ─── sync log ────────────────────────────────────────────────────────────────
-
-function SyncLog({ rows }) {
-  if (!rows.length) return null;
-  return (
-    <div>
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sync Log</h2>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              {["Site", "Status", "Records", "Started", "Note"].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0">
-                <td className="px-4 py-2.5 text-foreground">{row.site_slug}</td>
-                <td className="px-4 py-2.5">
-                  {row.status === "success" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-                   : row.status === "error"  ? <AlertCircle  className="h-4 w-4 text-red-500" />
-                   : <Clock className="h-4 w-4 text-muted-foreground" />}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground">{row.records_fetched ?? "—"}</td>
-                <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                  {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground text-xs max-w-[240px] truncate">{row.error_message || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function HubDashboard() {
   const [kpis, setKpis] = useState(null);
-  const [syncLog, setSyncLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
 
   const fetchAll = useCallback(async () => {
     try {
-      const [kpiRes, syncRes] = await Promise.all([
-        fetch("/api/hub/kpis",          { credentials: "include" }),
-        fetch("/api/hub/sync-log?limit=20", { credentials: "include" }),
-      ]);
+      const kpiRes = await fetch("/api/hub/kpis", { credentials: "include" });
       if (!kpiRes.ok) throw new Error("Hub API unavailable — is this the Head Office instance?");
       setKpis(await kpiRes.json());
-      if (syncRes.ok) setSyncLog(await syncRes.json());
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -464,8 +421,6 @@ export default function HubDashboard() {
       {/* Customer search */}
       <HubCustomerSearch sites={sites} />
 
-      {/* Sync log */}
-      <SyncLog rows={syncLog} />
     </div>
   );
 }
