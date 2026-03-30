@@ -480,6 +480,7 @@ export default function HubDashboard() {
         flagColor={flagModal.color}
         customers={flagModal.customers}
         open={flagModal.open}
+        siteName={flagModal.siteName}
         onClose={() => setFlagModal(m => ({ ...m, open: false }))}
         onCustomerClick={openFlagDetail}
       />

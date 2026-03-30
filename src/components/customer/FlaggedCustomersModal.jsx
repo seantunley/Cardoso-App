@@ -9,7 +9,7 @@ const flagColors = {
   orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", label: "Orange Flag" },
 };
 
-export default function FlaggedCustomersModal({ flagColor, customers, open, onClose, onCustomerClick }) {
+export default function FlaggedCustomersModal({ flagColor, customers, open, onClose, onCustomerClick, siteName }) {
   if (!flagColor) return null;
 
   const config = flagColors[flagColor];
@@ -29,7 +29,7 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
             </div>
             <div>
               <div className="text-lg font-semibold text-white">
-                {config.label} Customers
+                {config.label} Customers{siteName ? <span className="text-gray-400 font-normal"> — {siteName}</span> : ""}
               </div>
               <div className="text-sm text-gray-400 font-normal">
                 {sortedCustomers.length} customer{sortedCustomers.length !== 1 ? 's' : ''}
