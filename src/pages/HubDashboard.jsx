@@ -226,9 +226,9 @@ function HubCustomerModal({ record, open, onClose }) {
           <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/30 p-3">
             <p className="text-xs text-indigo-300">
               Hub snapshot · Changes must be made at the site directly.
-              {record.synced_at && (
+              {record._siteLastSeen && (
                 <span className="block mt-0.5 text-indigo-400/60">
-                  Last synced: {new Date(record.synced_at).toLocaleString()}
+                  Last synced: {new Date(record._siteLastSeen).toLocaleString()}
                 </span>
               )}
             </p>
@@ -289,7 +289,7 @@ function HubCustomerSearch({ sites }) {
 
   const openRecord = (r) => {
     const site = sites.find(s => s.site_id === r.site_id);
-    setModalRecord({ ...r, _siteName: site?.site_name || site?.site_slug || r.site_id });
+    setModalRecord({ ...r, _siteName: site?.site_name || site?.site_slug || r.site_id, _siteLastSeen: site?.last_seen || null });
     setModalOpen(true);
     setShowSuggestions(false);
   };
