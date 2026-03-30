@@ -1495,6 +1495,13 @@ app.put('/api/auth/me', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/app-info', (req, res) => {
+  res.json({
+    hub_mode: process.env.HUB_MODE === 'true',
+    version: require('./package.json').version,
+  });
+});
+
 app.get('/api/app-version-status', requireAuth, async (req, res) => {
   try {
     const versionStatus = await getVersionStatus();

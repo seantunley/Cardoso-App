@@ -16,6 +16,7 @@ import {
   Columns,
   ShieldCheck,
   ClipboardList,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -33,12 +34,14 @@ const navItems = [
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
   { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true },
+  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
 ];
 
-const APP_VERSION = "2026.1.1";
+const APP_VERSION = "2026.1.2";
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [hubMode, setHubMode] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus] = useState({
@@ -49,6 +52,13 @@ export default function Layout({ children, currentPageName }) {
   const { user: currentUser, logout } = useAuth();
 
   const isAdmin = currentUser?.role === "admin";
+
+  useEffect(() => {
+    fetch('/api/app-info')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.hub_mode) setHubMode(true); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -107,6 +117,7 @@ export default function Layout({ children, currentPageName }) {
   const canShowNavItem = (item) => {
     if (!currentUser) return false;
     if (item.adminOnly) return isAdmin;
+    if (item.hubOnly) return hubMode;
     // Use the shared hasPermission util which correctly handles falsy keys
     return hasPermission(currentUser, item.permission);
   };
