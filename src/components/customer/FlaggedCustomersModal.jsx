@@ -29,7 +29,7 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
             </div>
             <div>
               {siteName && (
-                <div className="text-xs font-bold text-white uppercase tracking-widest mb-0.5">{siteName}</div>
+                <div className="text-xl font-semibold text-white mb-0.5">{siteName}</div>
               )}
               <div className="text-lg font-semibold text-white">
                 {config.label} Customers
