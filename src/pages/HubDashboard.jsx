@@ -13,6 +13,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -51,7 +52,7 @@ function fuzzyMatch(str, pattern) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
-function SiteCard({ site }) {
+function SiteCard({ site, onFlagClick }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
@@ -81,7 +82,7 @@ function SiteCard({ site }) {
             </div>
           </div>
           {/* Red */}
-          <div className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3">
+          <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
             <p className="text-2xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
@@ -91,7 +92,7 @@ function SiteCard({ site }) {
             </div>
           </div>
           {/* Orange */}
-          <div className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3">
+          <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
             <p className="text-2xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
@@ -101,7 +102,7 @@ function SiteCard({ site }) {
             </div>
           </div>
           {/* Green */}
-          <div className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3">
+          <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
             <p className="text-2xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
@@ -448,6 +449,19 @@ export default function HubDashboard() {
       {/* Customer search */}
       <HubCustomerSearch sites={sites} />
 
+      {/* Flag drill-down modal */}
+      <FlaggedCustomersModal
+        flagColor={flagModal.color}
+        customers={flagModal.customers}
+        open={flagModal.open}
+        onClose={() => setFlagModal(m => ({ ...m, open: false }))}
+        onCustomerClick={openFlagDetail}
+      />
+      <HubCustomerModal
+        record={flagDetailRecord}
+        open={flagDetailOpen}
+        onClose={() => { setFlagDetailOpen(false); setFlagDetailRecord(null); }}
+      />
     </div>
   );
 }
