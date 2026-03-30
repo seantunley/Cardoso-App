@@ -467,7 +467,7 @@ export default function HubDashboard() {
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sites</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sites.map(s => <SiteCard key={s.site_id} site={s} />)}
+            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} />)}
           </div>
         </div>
       )}
