@@ -1495,6 +1495,13 @@ app.put('/api/auth/me', requireAuth, async (req, res) => {
   }
 });
 
+app.get('/api/app-info', (req, res) => {
+  res.json({
+    hub_mode: process.env.HUB_MODE === 'true',
+    version: require('./package.json').version,
+  });
+});
+
 app.get('/api/app-version-status', requireAuth, async (req, res) => {
   try {
     const versionStatus = await getVersionStatus();
@@ -2175,12 +2182,16 @@ app.get('/api/reporting/records', requireReportingToken, (req, res) => {
   if (since) {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
+              last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
               updated_date, synced_at, source_table, source_id
        FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(since, limit, offset);
   } else {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
+              last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
               updated_date, synced_at, source_table, source_id
        FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);
@@ -2239,6 +2250,13 @@ if (process.env.HUB_MODE === 'true') {
       customer_name TEXT,
       flag_color TEXT,
       flag_reason TEXT,
+      outstanding_balance TEXT,
+      last_unpaid_invoice_1 TEXT,
+      last_unpaid_invoice_1_amount TEXT,
+      last_unpaid_invoice_date TEXT,
+      last_receipt_number TEXT,
+      last_receipt_amount TEXT,
+      last_receipt_date TEXT,
       updated_date TEXT,
       synced_at TEXT,
       PRIMARY KEY (site_id, record_id)
@@ -2303,13 +2321,29 @@ if (process.env.HUB_MODE === 'true') {
 
       // Records — paginate until has_more is false
       const upsertRec = db.prepare(`
-        INSERT INTO hub_records (site_id, record_id, customer_number, customer_name, flag_color, flag_reason, updated_date, synced_at)
-        VALUES (@site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @updated_date, @synced_at)
+        INSERT INTO hub_records (
+          site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
+          outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
+          last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
+          updated_date, synced_at
+        ) VALUES (
+          @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
+          @outstanding_balance, @last_unpaid_invoice_1, @last_unpaid_invoice_1_amount,
+          @last_unpaid_invoice_date, @last_receipt_number, @last_receipt_amount, @last_receipt_date,
+          @updated_date, @synced_at
+        )
         ON CONFLICT(site_id, record_id) DO UPDATE SET
           customer_number=excluded.customer_number,
           customer_name=excluded.customer_name,
           flag_color=excluded.flag_color,
           flag_reason=excluded.flag_reason,
+          outstanding_balance=excluded.outstanding_balance,
+          last_unpaid_invoice_1=excluded.last_unpaid_invoice_1,
+          last_unpaid_invoice_1_amount=excluded.last_unpaid_invoice_1_amount,
+          last_unpaid_invoice_date=excluded.last_unpaid_invoice_date,
+          last_receipt_number=excluded.last_receipt_number,
+          last_receipt_amount=excluded.last_receipt_amount,
+          last_receipt_date=excluded.last_receipt_date,
           updated_date=excluded.updated_date,
           synced_at=excluded.synced_at
       `);
@@ -2323,6 +2357,13 @@ if (process.env.HUB_MODE === 'true') {
             customer_name: r.customer_name,
             flag_color: r.flag_color || 'none',
             flag_reason: r.flag_reason || null,
+            outstanding_balance: r.outstanding_balance || null,
+            last_unpaid_invoice_1: r.last_unpaid_invoice_1 || null,
+            last_unpaid_invoice_1_amount: r.last_unpaid_invoice_1_amount || null,
+            last_unpaid_invoice_date: r.last_unpaid_invoice_date || null,
+            last_receipt_number: r.last_receipt_number || null,
+            last_receipt_amount: r.last_receipt_amount || null,
+            last_receipt_date: r.last_receipt_date || null,
             updated_date: r.updated_date,
             synced_at: now,
           });
@@ -2397,12 +2438,13 @@ if (process.env.HUB_MODE === 'true') {
   // GET /api/hub/records
   app.get('/api/hub/records', (req, res) => {
     const { site_id, flag_color, search } = req.query;
+    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
     let query = 'SELECT * FROM hub_records WHERE 1=1';
     const params = [];
     if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
     if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
     if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    query += ' ORDER BY updated_date DESC LIMIT 500';
+    query += ` ORDER BY updated_date DESC LIMIT ${limit}`;
     const rows = db.prepare(query).all(...params);
     res.json({ count: rows.length, records: rows });
   });
@@ -2452,6 +2494,19 @@ if (process.env.HUB_MODE === 'true') {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
     syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
   });
+
+  // Migrate hub_records schema for existing databases
+  const hubFinancialCols = [
+    'outstanding_balance', 'last_unpaid_invoice_1', 'last_unpaid_invoice_1_amount',
+    'last_unpaid_invoice_date', 'last_receipt_number', 'last_receipt_amount', 'last_receipt_date',
+  ];
+  const existingCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
+  for (const col of hubFinancialCols) {
+    if (!existingCols.includes(col)) {
+      db.prepare(`ALTER TABLE hub_records ADD COLUMN ${col} TEXT`).run();
+      console.log(`[HUB] Migrated hub_records: added column ${col}`);
+    }
+  }
 
   console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
 }

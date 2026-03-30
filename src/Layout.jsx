@@ -16,6 +16,7 @@ import {
   Columns,
   ShieldCheck,
   ClipboardList,
+  Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,20 +26,22 @@ import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 
 const navItems = [
-  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search" },
-  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports" },
-  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records" },
-  { name: "Connections", icon: Link2, page: "Connections" },
-  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings" },
-  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
+  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
+  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports", siteOnly: true },
+  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records", siteOnly: true },
+  { name: "Connections", icon: Link2, page: "Connections", siteOnly: true },
+  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
+  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
-  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true },
+  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
+  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
 ];
 
-const APP_VERSION = "2026.1.1";
+const APP_VERSION = "2026.1.2";
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [hubMode, setHubMode] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus] = useState({
@@ -49,6 +52,13 @@ export default function Layout({ children, currentPageName }) {
   const { user: currentUser, logout } = useAuth();
 
   const isAdmin = currentUser?.role === "admin";
+
+  useEffect(() => {
+    fetch('/api/app-info')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.hub_mode) setHubMode(true); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
@@ -106,6 +116,8 @@ export default function Layout({ children, currentPageName }) {
 
   const canShowNavItem = (item) => {
     if (!currentUser) return false;
+    if (item.hubOnly) return hubMode;
+    if (item.siteOnly && hubMode) return false;
     if (item.adminOnly) return isAdmin;
     // Use the shared hasPermission util which correctly handles falsy keys
     return hasPermission(currentUser, item.permission);
