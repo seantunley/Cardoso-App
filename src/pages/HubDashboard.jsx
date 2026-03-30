@@ -118,7 +118,9 @@ function HubCustomerModal({ record, open, onClose }) {
             <User className="h-4 w-4 text-gray-400 shrink-0" />
             <div className="leading-tight">
               <div className="text-base text-white leading-none">{record.customer_name || "—"}</div>
-              <div className="text-xs text-gray-400 mt-0.5">Customer #{record.customer_number}</div>
+              <div className="text-xs text-gray-400 mt-0.5">
+                Customer #{record.customer_number} · {record._siteName}
+              </div>
             </div>
             <Badge className={cn("ml-auto border text-xs", flag.bg, flag.text)}>
               <Flag className="mr-1 h-3 w-3" />
@@ -133,37 +135,69 @@ function HubCustomerModal({ record, open, onClose }) {
             <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
               <p className="text-xs font-medium text-gray-400 mb-1">Flag Reason</p>
               <p className="text-sm text-gray-200">{record.flag_reason}</p>
-              {record.flag_created_by && (
-                <p className="text-[11px] text-gray-500 mt-1">Set by {record.flag_created_by}</p>
-              )}
             </div>
           )}
 
-          {/* Hub note */}
-          <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/30 p-3">
-            <p className="text-xs text-indigo-300">
-              This record is from the <span className="font-semibold">{record._siteName || record.site_id}</span> hub snapshot.
-              Changes must be made at the site directly.
-            </p>
+          {/* Outstanding Balance */}
+          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Calendar className="h-4 w-4 text-gray-400" />
+              <h4 className="text-sm font-semibold text-gray-300">Outstanding Balance</h4>
+            </div>
+            <div className="grid grid-cols-2 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+              <span>Account</span><span className="text-right">Balance</span>
+            </div>
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-700 px-2 py-1.5">
+              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
+              <span className="text-xs text-right text-white">{formatAmount(record.outstanding_balance)}</span>
+            </div>
           </div>
 
-          {/* Sync date */}
-          {record.synced_at && (
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-              <div className="flex items-center gap-2 mb-1">
-                <Calendar className="h-4 w-4 text-gray-400" />
-                <p className="text-xs font-medium text-gray-400">Hub Sync Info</p>
-              </div>
-              <p className="text-sm text-gray-300">
-                Last synced: {new Date(record.synced_at).toLocaleString()}
-              </p>
-              {record.updated_date && (
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Record updated at source: {new Date(record.updated_date).toLocaleString()}
-                </p>
-              )}
+          {/* Last Invoice */}
+          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <Flag className="h-4 w-4 text-orange-400" />
+              <h4 className="text-sm font-semibold text-gray-300">Last Invoice</h4>
             </div>
-          )}
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+              <span>Account</span><span>No.</span><span>Amount</span><span>Date</span>
+            </div>
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-gray-700 px-2 py-1.5">
+              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
+              <span className="text-xs text-orange-400 truncate">{record.last_unpaid_invoice_1 || "—"}</span>
+              <span className="text-xs text-white truncate">{formatAmount(record.last_unpaid_invoice_1_amount)}</span>
+              <span className="text-xs text-gray-300 truncate">{record.last_unpaid_invoice_date || "—"}</span>
+            </div>
+          </div>
+
+          {/* Last Receipt */}
+          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+            <div className="flex items-center gap-2 mb-2">
+              <CheckCircle className="h-4 w-4 text-emerald-400" />
+              <h4 className="text-sm font-semibold text-gray-300">Last Receipt</h4>
+            </div>
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+              <span>Account</span><span>No.</span><span>Amount</span><span>Date</span>
+            </div>
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-gray-700 px-2 py-1.5">
+              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
+              <span className="text-xs text-emerald-400 truncate">{record.last_receipt_number || "—"}</span>
+              <span className="text-xs text-white truncate">{formatAmount(record.last_receipt_amount)}</span>
+              <span className="text-xs text-gray-300 truncate">{record.last_receipt_date || "—"}</span>
+            </div>
+          </div>
+
+          {/* Sync info footer */}
+          <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/30 p-3">
+            <p className="text-xs text-indigo-300">
+              Hub snapshot · Changes must be made at the site directly.
+              {record.synced_at && (
+                <span className="block mt-0.5 text-indigo-400/60">
+                  Last synced: {new Date(record.synced_at).toLocaleString()}
+                </span>
+              )}
+            </p>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
