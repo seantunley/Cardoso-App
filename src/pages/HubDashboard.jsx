@@ -381,6 +381,32 @@ export default function HubDashboard() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
 
+  // Flag drill-down
+  const [flagModal, setFlagModal] = useState({ open: false, color: null, customers: [], siteName: "" });
+  const [flagDetailRecord, setFlagDetailRecord] = useState(null);
+  const [flagDetailOpen, setFlagDetailOpen] = useState(false);
+
+  const handleFlagClick = useCallback(async (site, flagColor) => {
+    try {
+      const params = new URLSearchParams({ site_id: site.site_id, flag_color: flagColor, limit: 5000 });
+      const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setFlagModal({
+        open: true,
+        color: flagColor,
+        customers: data.records || [],
+        siteName: site.site_name || site.site_slug,
+        siteId: site.site_id,
+      });
+    } catch {}
+  }, []);
+
+  const openFlagDetail = useCallback((customer) => {
+    setFlagDetailRecord(customer);
+    setFlagDetailOpen(true);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     try {
       const kpiRes = await fetch("/api/hub/kpis", { credentials: "include" });
