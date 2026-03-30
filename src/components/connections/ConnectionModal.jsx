@@ -272,7 +272,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       port: formData.port,
       database_name: formData.database_name,
       username: formData.username,
-      encrypted_password: formData.password || connection?.encrypted_password || "",
+      ...(formData.password ? { encrypted_password: formData.password } : {}),
       sync_query: formData.sync_query,
       query_index_field: formData.query_index_field,
       query_field_mappings: JSON.stringify(formData.query_field_mappings || {}),
