@@ -26,14 +26,14 @@ import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 
 const navItems = [
-  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search" },
-  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports" },
-  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records" },
-  { name: "Connections", icon: Link2, page: "Connections" },
-  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings" },
-  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings" },
+  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
+  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports", siteOnly: true },
+  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records", siteOnly: true },
+  { name: "Connections", icon: Link2, page: "Connections", siteOnly: true },
+  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
+  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
-  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true },
+  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
   { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
 ];
 
@@ -116,8 +116,9 @@ export default function Layout({ children, currentPageName }) {
 
   const canShowNavItem = (item) => {
     if (!currentUser) return false;
-    if (item.adminOnly) return isAdmin;
     if (item.hubOnly) return hubMode;
+    if (item.siteOnly && hubMode) return false;
+    if (item.adminOnly) return isAdmin;
     // Use the shared hasPermission util which correctly handles falsy keys
     return hasPermission(currentUser, item.permission);
   };
