@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,13 @@ export default function ActivityLogModal({ open, onClose }) {
     enabled: open,
   });
 
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === 'Enter') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[80vh] bg-gray-900 border-gray-700">

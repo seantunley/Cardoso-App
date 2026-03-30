@@ -39,6 +39,13 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
     setFormData(prev => ({ ...prev, [field]: value }));
   };
 
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === 'Enter') handleSave(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, handleSave]);
+
   const handleSave = () => {
     // Separate built-in fields from dynamic custom fields (those not in datarecord columns)
     const builtInKeys = new Set([
