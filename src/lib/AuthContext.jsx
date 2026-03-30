@@ -103,6 +103,12 @@ export const AuthProvider = ({ children }) => {
 
     const data = await readJsonResponse(res);
 
+    // Hub redirect: server signals this user should be on the hub instance
+    if (data.hub_redirect) {
+      window.location.href = data.hub_redirect;
+      return null;
+    }
+
     setUser(data.user);
     setIsAuthenticated(true);
     setAuthError(null);

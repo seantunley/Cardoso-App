@@ -29,6 +29,7 @@ const permissionGroups = [
     permissions: [
       { key: "can_manage_users", label: "User Management", description: "Create users and manage permissions" },
       { key: "can_manage_rules", label: "Rule Management", description: "Create and modify auto-flag rules" },
+      { key: "hub_redirect", label: "Hub Redirect", description: "Logging in at any site redirects this user to the Head Office hub" },
     ]
   },
   {

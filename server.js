@@ -537,6 +537,7 @@ ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
 
 // ==================== HELPERS ====================
 const sanitizeForSqlite = (data) => {
@@ -1451,6 +1452,16 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       );
     } catch (logErr) {
       console.error('Failed to write login log:', logErr);
+    }
+
+    // Hub redirect: if user is flagged as a hub user, send them to head office
+    if (user.hub_redirect) {
+      const hubUrl = process.env.HUB_REDIRECT_URL || null;
+      if (hubUrl) {
+        // Don't create a session on this site — just redirect
+        req.session.destroy(() => {});
+        return res.json({ success: true, hub_redirect: hubUrl });
+      }
     }
 
     res.json({
