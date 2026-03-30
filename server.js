@@ -2107,6 +2107,111 @@ app.post(
   }
 );
 
+// ==================== MULTI-SITE REPORTING API ====================
+// Read-only endpoints for hub ETL. Requires X-Reporting-Token header.
+
+const SITE_ID = process.env.SITE_ID || 'local';
+const SITE_SLUG = process.env.SITE_SLUG || 'local';
+const SITE_NAME = process.env.SITE_NAME || 'Local';
+
+function requireReportingToken(req, res, next) {
+  const token = process.env.REPORTING_TOKEN;
+  if (!token) {
+    return res.status(503).json({ error: 'Reporting API not configured' });
+  }
+  if (req.headers['x-reporting-token'] !== token) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  next();
+}
+
+// GET /api/reporting/site-info
+app.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
+  res.json({
+    site_id: SITE_ID,
+    site_slug: SITE_SLUG,
+    site_name: SITE_NAME,
+    app_version: APP_VERSION,
+    schema_version: 1,
+    reporting_at: new Date().toISOString(),
+  });
+});
+
+// GET /api/reporting/kpis
+app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
+  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
+  const byFlag = db.prepare(
+    "SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color"
+  ).all();
+  const lastSync = db.prepare(
+    "SELECT completed_at, status FROM syncrun WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"
+  ).get();
+  const activeConns = db.prepare(
+    "SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'"
+  ).get();
+
+  const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
+  for (const row of byFlag) {
+    if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
+  }
+
+  res.json({
+    site_id: SITE_ID,
+    site_slug: SITE_SLUG,
+    total_records: total.count,
+    records_by_flag: flagCounts,
+    last_sync_at: lastSync?.completed_at || null,
+    active_connections: activeConns.count,
+    generated_at: new Date().toISOString(),
+  });
+});
+
+// GET /api/reporting/records?since=ISO_DATE
+app.get('/api/reporting/records', requireReportingToken, (req, res) => {
+  const since = req.query.since;
+  let rows;
+  if (since) {
+    rows = db.prepare(
+      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+              updated_date, synced_at, source_table, source_id
+       FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT 1000`
+    ).all(since);
+  } else {
+    rows = db.prepare(
+      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+              updated_date, synced_at, source_table, source_id
+       FROM datarecord ORDER BY updated_date ASC LIMIT 1000`
+    ).all();
+  }
+  res.json({
+    site_id: SITE_ID,
+    site_slug: SITE_SLUG,
+    since: since || null,
+    count: rows.length,
+    records: rows,
+  });
+});
+
+// GET /api/reporting/health
+app.get('/api/reporting/health', requireReportingToken, (req, res) => {
+  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
+  const lastRun = db.prepare(
+    'SELECT status, completed_at FROM syncrun ORDER BY started_at DESC LIMIT 1'
+  ).get();
+  res.json({
+    site_id: SITE_ID,
+    site_slug: SITE_SLUG,
+    status: 'ok',
+    db_record_count: total.count,
+    last_sync_status: lastRun?.status || null,
+    last_sync_at: lastRun?.completed_at || null,
+    uptime_seconds: Math.floor(process.uptime()),
+    checked_at: new Date().toISOString(),
+  });
+});
+
+
+
 // ==================== DYNAMIC CRUD ROUTES ====================
 app.get('/api/:table', requireAuth, (req, res) => {
   const { table } = req.params;
@@ -2430,110 +2535,6 @@ async function runScheduledSyncCycle() {
 // Scheduled sync runs within the server process
 const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
 const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
-
-
-// ==================== MULTI-SITE REPORTING API ====================
-// Read-only endpoints for hub ETL. Requires X-Reporting-Token header.
-
-const SITE_ID = process.env.SITE_ID || 'local';
-const SITE_SLUG = process.env.SITE_SLUG || 'local';
-const SITE_NAME = process.env.SITE_NAME || 'Local';
-
-function requireReportingToken(req, res, next) {
-  const token = process.env.REPORTING_TOKEN;
-  if (!token) {
-    return res.status(503).json({ error: 'Reporting API not configured' });
-  }
-  if (req.headers['x-reporting-token'] !== token) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-}
-
-// GET /api/reporting/site-info
-app.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    site_name: SITE_NAME,
-    app_version: APP_VERSION,
-    schema_version: 1,
-    reporting_at: new Date().toISOString(),
-  });
-});
-
-// GET /api/reporting/kpis
-app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const byFlag = db.prepare(
-    "SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color"
-  ).all();
-  const lastSync = db.prepare(
-    "SELECT completed_at, status FROM syncrun WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"
-  ).get();
-  const activeConns = db.prepare(
-    "SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'"
-  ).get();
-
-  const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
-  for (const row of byFlag) {
-    if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
-  }
-
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    total_records: total.count,
-    records_by_flag: flagCounts,
-    last_sync_at: lastSync?.completed_at || null,
-    active_connections: activeConns.count,
-    generated_at: new Date().toISOString(),
-  });
-});
-
-// GET /api/reporting/records?since=ISO_DATE
-app.get('/api/reporting/records', requireReportingToken, (req, res) => {
-  const since = req.query.since;
-  let rows;
-  if (since) {
-    rows = db.prepare(
-      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              updated_date, synced_at, source_table, source_id
-       FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT 1000`
-    ).all(since);
-  } else {
-    rows = db.prepare(
-      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              updated_date, synced_at, source_table, source_id
-       FROM datarecord ORDER BY updated_date ASC LIMIT 1000`
-    ).all();
-  }
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    since: since || null,
-    count: rows.length,
-    records: rows,
-  });
-});
-
-// GET /api/reporting/health
-app.get('/api/reporting/health', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const lastRun = db.prepare(
-    'SELECT status, completed_at FROM syncrun ORDER BY started_at DESC LIMIT 1'
-  ).get();
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    status: 'ok',
-    db_record_count: total.count,
-    last_sync_status: lastRun?.status || null,
-    last_sync_at: lastRun?.completed_at || null,
-    uptime_seconds: Math.floor(process.uptime()),
-    checked_at: new Date().toISOString(),
-  });
-});
 
 
 // ==================== SHUTDOWN ====================
