@@ -226,9 +226,9 @@ function HubCustomerModal({ record, open, onClose }) {
           <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/30 p-3">
             <p className="text-xs text-indigo-300">
               Hub snapshot · Changes must be made at the site directly.
-              {record._siteLastSeen && (
+              {(record._siteLastSeen || record.synced_at) && (
                 <span className="block mt-0.5 text-indigo-400/60">
-                  Last synced: {new Date(record._siteLastSeen).toLocaleString()}
+                  Last synced: {new Date(record._siteLastSeen || record.synced_at).toLocaleString()}
                 </span>
               )}
             </p>
