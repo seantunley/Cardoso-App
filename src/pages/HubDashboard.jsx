@@ -54,42 +54,69 @@ function fuzzyMatch(str, pattern) {
 function SiteCard({ site }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
+  const total = site.kpis?.total_records ?? null;
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <span className="font-semibold text-foreground">{site.site_name || site.site_slug}</span>
         </div>
-        <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-600" : "text-muted-foreground")}>
+        <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
           {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           {isOnline ? "Online" : "Offline"}
         </div>
       </div>
+
       {site.kpis ? (
-        <div className="grid grid-cols-4 gap-2 text-sm">
-          <div className="rounded-lg bg-muted p-2 text-center">
-            <p className="text-[10px] text-muted-foreground">Total</p>
-            <p className="font-bold">{site.kpis.total_records ?? "—"}</p>
+        <div className="grid grid-cols-4 gap-2">
+          {/* Total */}
+          <div className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <p className="text-[9px] font-semibold text-indigo-400/70 uppercase tracking-widest mb-1">Total</p>
+            <p className="text-2xl font-extrabold text-white leading-none">{total ?? "—"}</p>
+            <p className="text-[9px] text-indigo-300/60 mt-1">Records</p>
+            <div className="mt-2 h-0.5 rounded-full bg-indigo-500/20">
+              <div className="h-full rounded-full bg-indigo-500/60 w-full" />
+            </div>
           </div>
-          <div className="rounded-lg bg-red-50 p-2 text-center">
-            <p className="text-[10px] text-red-600">Red</p>
-            <p className="font-bold text-red-700">{flags.red ?? 0}</p>
+          {/* Red */}
+          <div className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
+            <p className="text-2xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
+            <p className="text-[9px] text-rose-300/60 mt-1">Red Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
+              <div className="h-full rounded-full bg-rose-500/60" style={{ width: (flags.red ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
-          <div className="rounded-lg bg-orange-50 p-2 text-center">
-            <p className="text-[10px] text-orange-600">Orange</p>
-            <p className="font-bold text-orange-700">{flags.orange ?? 0}</p>
+          {/* Orange */}
+          <div className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
+            <p className="text-2xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
+            <p className="text-[9px] text-amber-300/60 mt-1">Orange Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
+              <div className="h-full rounded-full bg-amber-500/60" style={{ width: (flags.orange ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
-          <div className="rounded-lg bg-green-50 p-2 text-center">
-            <p className="text-[10px] text-green-600">Green</p>
-            <p className="font-bold text-green-700">{flags.green ?? 0}</p>
+          {/* Green */}
+          <div className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
+            <p className="text-2xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
+            <p className="text-[9px] text-emerald-300/60 mt-1">Green Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
+              <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (flags.green ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No KPI data yet</p>
       )}
+
       {site.last_seen && (
-        <p className="mt-3 text-[11px] text-muted-foreground">
+        <p className="text-[10px] text-muted-foreground/60">
           Last sync: {new Date(site.last_seen).toLocaleString()}
         </p>
       )}
