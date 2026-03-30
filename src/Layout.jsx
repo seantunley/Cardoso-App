@@ -32,9 +32,9 @@ const navItems = [
   { name: "Connections", icon: Link2, page: "Connections", siteOnly: true },
   { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
   { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
+  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
   { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
-  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
 ];
 
 const APP_VERSION = "2026.1.2";
