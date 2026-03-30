@@ -269,7 +269,7 @@ function HubCustomerSearch({ sites }) {
   const flag = (r) => FLAG_COLORS[r.flag_color] || FLAG_COLORS.none;
 
   return (
-    <div>
+    <div className="max-w-xl">
       <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Search</h2>
       <div className="rounded-xl border border-border bg-card p-5 space-y-3">
         {/* Site selector */}
