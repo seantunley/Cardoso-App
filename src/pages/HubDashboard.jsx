@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
+import HubUserManager from "../components/users/HubUserManager";
 import { toast } from "sonner";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -480,6 +481,9 @@ export default function HubDashboard() {
 
       {/* Customer search */}
       <HubCustomerSearch sites={sites} />
+
+      {/* Centralised User Management */}
+      <HubUserManager sites={sites} />
 
       {/* Flag drill-down modal */}
       <FlaggedCustomersModal

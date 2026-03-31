@@ -2506,6 +2506,149 @@ if (process.env.HUB_MODE === 'true') {
     syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
   });
 
+  // ==================== HUB: CENTRALISED USER MANAGEMENT ====================
+
+  // GET /api/hub/users — list all users on this hub (admin only)
+  app.get('/api/hub/users', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const users = db.prepare(`
+        SELECT id, email, full_name, role, is_active, hub_redirect,
+               can_access_connections, can_manage_users, can_manage_rules,
+               can_edit_records, can_flag_records, created_date
+        FROM "user" ORDER BY role DESC, full_name ASC
+      `).all();
+      res.json(users.map(u => ({
+        ...u,
+        is_active: boolFromRow(u.is_active, true),
+        hub_redirect: boolFromRow(u.hub_redirect, false),
+        can_access_connections: boolFromRow(u.can_access_connections, false),
+        can_manage_users: boolFromRow(u.can_manage_users, false),
+        can_manage_rules: boolFromRow(u.can_manage_rules, false),
+        can_edit_records: boolFromRow(u.can_edit_records, true),
+        can_flag_records: boolFromRow(u.can_flag_records, true),
+      })));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/push-users — push selected users to one or all sites
+  app.post('/api/hub/push-users', requireAuth, requireAdmin, async (req, res) => {
+    const { user_ids, site_ids } = req.body; // site_ids = null means all sites
+    if (!Array.isArray(user_ids) || user_ids.length === 0) {
+      return res.status(400).json({ error: 'user_ids required' });
+    }
+
+    const usersToSync = db.prepare(`
+      SELECT id, email, full_name, role, is_active, hub_redirect,
+             can_access_connections, can_manage_users, can_manage_rules,
+             can_edit_records, can_flag_records
+      FROM "user" WHERE id IN (${user_ids.map(() => '?').join(',')})
+    `).all(...user_ids);
+
+    if (usersToSync.length === 0) return res.status(404).json({ error: 'No matching users' });
+
+    const targetSites = site_ids
+      ? HUB_SITES.filter(s => site_ids.includes(s.id))
+      : HUB_SITES;
+
+    if (targetSites.length === 0) return res.status(400).json({ error: 'No target sites' });
+
+    const results = await Promise.allSettled(targetSites.map(async (site) => {
+      const resp = await fetch(`${site.url}/api/hub/receive-users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Reporting-Token': site.token,
+        },
+        body: JSON.stringify({ users: usersToSync }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`${site.name}: HTTP ${resp.status} — ${body}`);
+      }
+      return { site: site.name, ok: true };
+    }));
+
+    const summary = results.map((r, i) => ({
+      site: targetSites[i].name,
+      ok: r.status === 'fulfilled',
+      error: r.status === 'rejected' ? r.reason.message : null,
+    }));
+
+    const allOk = summary.every(s => s.ok);
+    res.status(allOk ? 200 : 207).json({ results: summary });
+  });
+
+  // POST /api/hub/receive-users — site endpoint: receive users pushed from hub
+  app.post('/api/hub/receive-users', (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { users } = req.body;
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ error: 'users array required' });
+    }
+
+    let created = 0, updated = 0, errors = [];
+
+    for (const u of users) {
+      try {
+        const existing = db.prepare('SELECT id FROM "user" WHERE email = ?').get(u.email);
+        if (existing) {
+          // Update everything except password_hash — never overwrite local password
+          db.prepare(`
+            UPDATE "user" SET
+              full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+              can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
+              can_edit_records = ?, can_flag_records = ?
+            WHERE email = ?
+          `).run(
+            u.full_name || null,
+            u.role || 'user',
+            u.is_active ? 1 : 0,
+            u.hub_redirect ? 1 : 0,
+            u.can_access_connections ? 1 : 0,
+            u.can_manage_users ? 1 : 0,
+            u.can_manage_rules ? 1 : 0,
+            u.can_edit_records ? 1 : 0,
+            u.can_flag_records ? 1 : 0,
+            u.email
+          );
+          updated++;
+        } else {
+          // Create new user — no password set (they must set one or reset locally)
+          db.prepare(`
+            INSERT INTO "user" (email, full_name, role, is_active, hub_redirect,
+              can_access_connections, can_manage_users, can_manage_rules,
+              can_edit_records, can_flag_records, password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+          `).run(
+            u.email,
+            u.full_name || null,
+            u.role || 'user',
+            u.is_active ? 1 : 0,
+            u.hub_redirect ? 1 : 0,
+            u.can_access_connections ? 1 : 0,
+            u.can_manage_users ? 1 : 0,
+            u.can_manage_rules ? 1 : 0,
+            u.can_edit_records ? 1 : 0,
+            u.can_flag_records ? 1 : 0
+          );
+          created++;
+        }
+      } catch (err) {
+        errors.push({ email: u.email, error: err.message });
+      }
+    }
+
+    res.json({ created, updated, errors });
+  });
+
   // Migrate hub_records schema for existing databases
   const hubFinancialCols = [
     'outstanding_balance', 'last_unpaid_invoice_1', 'last_unpaid_invoice_1_amount',
