@@ -1556,6 +1556,59 @@ app.get('/api/app-info', (req, res) => {
   });
 });
 
+// GET /api/top-balances?limit=30
+// Returns top customers by outstanding balance, sorted descending.
+// In hub mode, queries the hub_records table (cross-site).
+// In site mode, queries the local datarecord table.
+app.get('/api/top-balances', requireAuth, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
+  const isHub = process.env.HUB_MODE === 'true';
+
+  try {
+    let rows;
+    if (isHub) {
+      // hub_records has site_id, customer_number, customer_name, outstanding_balance
+      // join hub_sites for a friendly site name
+      const stmt = db.prepare(`
+        SELECT
+          r.customer_number,
+          r.customer_name,
+          r.outstanding_balance,
+          COALESCE(s.name, r.site_id) AS site_name
+        FROM hub_records r
+        LEFT JOIN hub_sites s ON s.id = r.site_id
+        WHERE r.outstanding_balance IS NOT NULL
+          AND r.outstanding_balance != ''
+          AND r.outstanding_balance != '0'
+          AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(limit);
+    } else {
+      const stmt = db.prepare(`
+        SELECT
+          customer_number,
+          customer_name,
+          outstanding_balance,
+          source_table AS site_name
+        FROM datarecord
+        WHERE outstanding_balance IS NOT NULL
+          AND outstanding_balance != ''
+          AND outstanding_balance != '0'
+          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(limit);
+    }
+    res.json(rows);
+  } catch (err) {
+    console.error('top-balances error', err);
+    res.status(500).json({ error: 'Failed to fetch top balances' });
+  }
+});
+
 app.get('/api/app-version-status', requireAuth, async (req, res) => {
   try {
     const versionStatus = await getVersionStatus();

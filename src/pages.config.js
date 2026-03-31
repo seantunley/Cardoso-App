@@ -48,6 +48,7 @@
  * The mainPage value must match a key in the PAGES object exactly.
  */
 import AuditLog from './pages/AuditLog';
+import CustomerBalances from './pages/CustomerBalances';
 import HubDashboard from './pages/HubDashboard';
 import HubSyncLog from './pages/HubSyncLog';
 import Connections from './pages/Connections';
@@ -63,6 +64,7 @@ import __Layout from './Layout.jsx';
 
 export const PAGES = {
     "AuditLog": AuditLog,
+    "CustomerBalances": CustomerBalances,
     "HubDashboard": HubDashboard,
     "HubSyncLog": HubSyncLog,
     "Connections": Connections,
