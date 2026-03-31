@@ -55,7 +55,7 @@ export default function CustomerBalances() {
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -143,6 +143,10 @@ export default function CustomerBalances() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Customer Name</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Customer ID</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Site</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Last Invoice</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Inv. Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Last Receipt</th>
+                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Rec. Amount</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Outstanding Balance</th>
                 </tr>
               </thead>
@@ -166,6 +170,18 @@ export default function CustomerBalances() {
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {row.site_name || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
+                        {row.last_unpaid_invoice_1 || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs tabular-nums text-muted-foreground">
+                        {row.last_unpaid_invoice_1_amount ? `R ${formatAmount(row.last_unpaid_invoice_1_amount)}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
+                        {row.last_receipt_number || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs tabular-nums text-muted-foreground">
+                        {row.last_receipt_amount ? `R ${formatAmount(row.last_receipt_amount)}` : "—"}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
