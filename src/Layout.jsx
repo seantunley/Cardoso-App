@@ -42,7 +42,7 @@ const navItems = [
 const APP_VERSION = "2026.1.2";
 
 export default function Layout({ children, currentPageName }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [hubMode, setHubMode] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
