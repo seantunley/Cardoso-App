@@ -27,6 +27,14 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      - name: Stage app node_modules for installer
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/app_modules | Out-Null
+          # node_modules are already installed by the Install dependencies step
+          # Copy them to a staging area (installer will pick up from repo root directly)
+          Write-Host "node_modules ready at repo root"
+        shell: powershell
+
       - name: Install NSIS and NSSM via Chocolatey
         run: |
           choco install nsis nssm -y --no-progress

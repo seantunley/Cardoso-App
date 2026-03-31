@@ -80,6 +80,8 @@ Section "Install" SecInstall
   File "..\package.json"
   File "..\package-lock.json"
   File /r "..\scripts\*"
+  File /r "..
+ode_modules\*"
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"
@@ -105,7 +107,6 @@ Section "Install" SecInstall
   FileClose $0
 
   ; Install npm dependencies (uses bundled Node)
-  ExecWait '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" install --production=false --prefix "$INSTDIR"' $0
 
   ; Install Windows service via NSSM
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
