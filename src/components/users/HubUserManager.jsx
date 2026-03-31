@@ -85,10 +85,10 @@ export default function HubUserManager({ sites = [] }) {
                 key={s.site_id}
                 onClick={() => toggleSite(s.site_id)}
                 className={cn(
-                  "text-sm px-3 py-1.5 rounded-full border transition-colors",
+                  "text-sm px-3 py-1.5 rounded-full border font-medium transition-all",
                   selectedSites.has(s.site_id)
-                    ? "bg-[var(--text-primary)] text-[var(--bg-primary)] border-[var(--text-primary)]"
-                    : "border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--text-primary)] hover:text-[var(--text-primary)]"
+                    ? "bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
+                    : "border-zinc-600 text-zinc-400 hover:border-indigo-500 hover:text-indigo-400"
                 )}
               >
                 {s.site_name || s.site_slug || s.site_id}
