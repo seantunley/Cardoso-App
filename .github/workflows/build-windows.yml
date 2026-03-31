@@ -44,9 +44,8 @@ jobs:
           Get-ChildItem windows/build/app/node_modules/sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "SQ3: $($_.FullName)" }
         shell: powershell
 
-      - name: Install NSIS via Chocolatey
-        run: choco install nsis -y --no-progress
-        shell: powershell
+      - name: Install NSIS
+        uses: crazy-max/ghaction-setup-nsis@v3
 
       - name: Download NSSM
         run: |
