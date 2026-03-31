@@ -29,7 +29,6 @@ const navItems = [
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
 ];
 
-const APP_VERSION = "2026.1.2";
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(true);
@@ -37,11 +36,7 @@ export default function Layout({ children, currentPageName }) {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [versionStatus, setVersionStatus] = useState({
-    currentVersion: APP_VERSION,
-    latestVersion: APP_VERSION,
-    updateAvailable: false,
-  });
+
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
 
@@ -52,21 +47,7 @@ export default function Layout({ children, currentPageName }) {
       .catch(() => {});
   }, []);
 
-  useEffect(() => {
-    if (!currentUser) return;
-    let isMounted = true;
-    fetch("/api/app-version-status", { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d && isMounted) setVersionStatus({
-          currentVersion: d.currentVersion || APP_VERSION,
-          latestVersion: d.latestVersion || APP_VERSION,
-          updateAvailable: Boolean(d.updateAvailable),
-        });
-      })
-      .catch(() => {});
-    return () => { isMounted = false; };
-  }, [currentUser]);
+
 
   const handleChangePassword = async (userId, newPassword) => {
     setIsSavingPassword(true);
@@ -200,17 +181,6 @@ export default function Layout({ children, currentPageName }) {
             {isCollapsed ? <ChevronRight className="h-4 w-4" /> : (<><ChevronLeft className="h-4 w-4" /><span className="ml-2">Collapse</span></>)}
           </Button>
 
-          {!isCollapsed && (
-            <div className={cn(
-              "rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-              versionStatus.updateAvailable
-                ? "border-yellow-300 bg-yellow-100 text-yellow-900"
-                : "border-transparent text-muted-foreground/50"
-            )} title={versionStatus.updateAvailable ? `New: v${versionStatus.latestVersion}` : `v${versionStatus.currentVersion}`}>
-              <p>v{versionStatus.currentVersion}</p>
-              {versionStatus.updateAvailable && (<><p className="font-medium">Update available</p><p className="font-semibold">New: v{versionStatus.latestVersion}</p></>)}
-            </div>
-          )}
         </div>
       </aside>
 
