@@ -75,6 +75,7 @@ jobs:
         shell: powershell
 
       - name: Delete existing release/tag if present
+        continue-on-error: true
         run: |
           $tag = "v${{ steps.version.outputs.version }}"
           $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
