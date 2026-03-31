@@ -74,6 +74,25 @@ jobs:
           echo "version=$version" >> $env:GITHUB_OUTPUT
         shell: powershell
 
+      - name: Delete existing release/tag if present
+        run: |
+          $tag = "v${{ steps.version.outputs.version }}"
+          $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
+            -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" } `
+            -ErrorAction SilentlyContinue
+          if ($resp.id) {
+            Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/$($resp.id)" `
+              -Method Delete `
+              -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" }
+            Write-Host "Deleted release $($resp.id)"
+          }
+          git tag -d $tag 2>$null
+          git push origin :refs/tags/$tag 2>$null
+          Write-Host "Tag cleanup done"
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -82,6 +101,5 @@ jobs:
           files: CardosoSetup.exe
           generate_release_notes: true
           make_latest: true
-          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
