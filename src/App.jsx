@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
@@ -9,6 +10,7 @@ import { useAuth } from "@/lib/AuthContext";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
+import HubDashboard from "@/pages/HubDashboard";
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -44,6 +46,13 @@ const ProtectedPage = ({ children, currentPageName }) => {
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated, forcePasswordChange, completePasswordChange } = useAuth();
+  const [hubMode, setHubMode] = useState(false);
+  useEffect(() => {
+    fetch("/api/app-info", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.hub_mode) setHubMode(true); })
+      .catch(() => {});
+  }, [isAuthenticated]);
 
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (
@@ -67,8 +76,8 @@ const AuthenticatedApp = () => {
       <Route
         path="/"
         element={
-          <ProtectedPage currentPageName={mainPageKey}>
-            <MainPage />
+          <ProtectedPage currentPageName={hubMode ? "HubDashboard" : mainPageKey}>
+            {hubMode ? <HubDashboard /> : <MainPage />}
           </ProtectedPage>
         }
       />
