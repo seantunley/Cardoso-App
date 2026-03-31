@@ -106,6 +106,8 @@ Section "Install" SecInstall
 
   ; Install npm dependencies (ignore native scripts - uses prebuilt binaries)
   nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" install --production --ignore-scripts --prefix "$INSTDIR"'
+  nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" rebuild better-sqlite3 --update-binary --prefix "$INSTDIR"'
+  nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" rebuild sqlite3 --update-binary --prefix "$INSTDIR"' 
 
   ; Install Windows service via NSSM
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
