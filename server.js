@@ -398,8 +398,8 @@ db.exec(`
     price_list TEXT,
     price TEXT,
     terms TEXT,
-    created_date TEXT DEFAULT (datetime("now")),
-    updated_date TEXT DEFAULT (datetime("now")),
+    created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source_table, item_number)
   );
   CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
@@ -2519,7 +2519,7 @@ if (process.env.HUB_MODE === 'true') {
       price_list TEXT,
       price TEXT,
       terms TEXT,
-      synced_at TEXT DEFAULT (datetime("now")),
+      synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
     );
   `);
