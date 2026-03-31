@@ -168,9 +168,9 @@ export default function Users({ embedded = false }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto p-6 lg:p-8 space-y-4">
+      <div className="max-w-5xl mx-auto p-3 lg:p-5 space-y-3">
         <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Users</h1>
+          <h1 className="text-xl font-bold text-foreground tracking-tight">Users</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage user accounts and permissions</p>
         </div>
         {content}

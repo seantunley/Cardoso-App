@@ -76,7 +76,7 @@ function SiteCard({ site, onFlagClick }) {
           {/* Total */}
           <div className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-900/60 p-3">
             <p className="text-[9px] font-semibold text-indigo-400/70 uppercase tracking-widest mb-1">Total</p>
-            <p className="text-2xl font-extrabold text-white leading-none">{total ?? "—"}</p>
+            <p className="text-xl font-extrabold text-white leading-none">{total ?? "—"}</p>
             <p className="text-[9px] text-indigo-300/60 mt-1">Records</p>
             <div className="mt-2 h-0.5 rounded-full bg-indigo-500/20">
               <div className="h-full rounded-full bg-indigo-500/60 w-full" />
@@ -86,7 +86,7 @@ function SiteCard({ site, onFlagClick }) {
           <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
-            <p className="text-2xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
             <p className="text-[9px] text-rose-300/60 mt-1">Red Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
               <div className="h-full rounded-full bg-rose-500/60" style={{ width: (flags.red ?? 0) > 0 ? "100%" : "0%" }} />
@@ -96,7 +96,7 @@ function SiteCard({ site, onFlagClick }) {
           <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
-            <p className="text-2xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
             <p className="text-[9px] text-amber-300/60 mt-1">Orange Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
               <div className="h-full rounded-full bg-amber-500/60" style={{ width: (flags.orange ?? 0) > 0 ? "100%" : "0%" }} />
@@ -106,7 +106,7 @@ function SiteCard({ site, onFlagClick }) {
           <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
-            <p className="text-2xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
             <p className="text-[9px] text-emerald-300/60 mt-1">Green Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
               <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (flags.green ?? 0) > 0 ? "100%" : "0%" }} />
@@ -455,11 +455,11 @@ export default function HubDashboard() {
   const sites = kpis?.sites || [];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Customer Management</h1>
+          <h1 className="text-xl font-bold text-foreground">Customer Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
         </div>
         <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
