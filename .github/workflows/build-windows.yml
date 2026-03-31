@@ -45,7 +45,19 @@ jobs:
         shell: powershell
 
       - name: Install NSIS
-        uses: crazy-max/ghaction-setup-nsis@v3
+        run: |
+          $maxAttempts = 3
+          for ($i = 1; $i -le $maxAttempts; $i++) {
+            Write-Host "NSIS install attempt $i of $maxAttempts..."
+            choco install nsis -y --no-progress
+            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
+              Write-Host "NSIS installed successfully"
+              break
+            }
+            if ($i -lt $maxAttempts) { Start-Sleep -Seconds 10 }
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS install failed after $maxAttempts attempts" }
+        shell: powershell
 
       - name: Download NSSM
         run: |
