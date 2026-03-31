@@ -527,6 +527,7 @@ ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 })();
 
 ensureColumn('user', 'password_hash', 'TEXT');
+ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
@@ -537,6 +538,7 @@ ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
 
 // ==================== HELPERS ====================
 const sanitizeForSqlite = (data) => {
@@ -1453,6 +1455,24 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       console.error('Failed to write login log:', logErr);
     }
 
+    // Force password change on first login
+    if (user.must_change_password) {
+      // Create a temporary session token so the client can call set-initial-password
+      req.session.pendingUserId = user.id;
+      req.session.userId = null;
+      return res.json({ success: false, force_password_change: true });
+    }
+
+    // Hub redirect: if user is flagged as a hub user, send them to head office
+    if (user.hub_redirect) {
+      const hubUrl = process.env.HUB_REDIRECT_URL || null;
+      if (hubUrl) {
+        // Don't create a session on this site — just redirect
+        req.session.destroy(() => {});
+        return res.json({ success: true, hub_redirect: hubUrl });
+      }
+    }
+
     res.json({
       success: true,
       user: sanitizeUser(user),
@@ -1467,6 +1487,40 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => {
     res.json({ success: true });
   });
+
+app.post('/api/auth/set-initial-password', async (req, res) => {
+  const userId = req.session.pendingUserId;
+  if (!userId) return res.status(401).json({ error: 'No pending session' });
+
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    db.prepare(`UPDATE "user" SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(hash, userId);
+
+    // Upgrade session to full login
+    const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);
+    req.session.pendingUserId = null;
+    req.session.userId = userId;
+
+    // Hub redirect check
+    if (user.hub_redirect) {
+      const hubUrl = process.env.HUB_REDIRECT_URL || null;
+      if (hubUrl) {
+        req.session.destroy(() => {});
+        return res.json({ success: true, hub_redirect: hubUrl });
+      }
+    }
+
+    res.json({ success: true, user: sanitizeUser(user) });
+  } catch (err) {
+    console.error('set-initial-password error:', err);
+    res.status(500).json({ error: 'Failed to set password' });
+  }
+});
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -1783,20 +1837,24 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     }
 
     const defaults = defaultPermissionsForRole(role);
-    const passwordHash = await bcrypt.hash(password, 12);
+    const defaultPassword = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+    const finalPassword = password || defaultPassword;
+    const mustChange = password ? 0 : 1;
+    const passwordHash = await bcrypt.hash(finalPassword, 12);
 
     const info = db.prepare(`
       INSERT INTO "user" (
-        email, full_name, role, password_hash, is_active,
+        email, full_name, role, password_hash, is_active, must_change_password,
         can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       email.trim().toLowerCase(),
       full_name,
       role,
       passwordHash,
       1,
+      mustChange,
       defaults.can_access_customer_search ? 1 : 0,
       defaults.can_access_records ? 1 : 0,
       defaults.can_access_reports ? 1 : 0,
@@ -2493,6 +2551,152 @@ if (process.env.HUB_MODE === 'true') {
   app.post('/api/hub/sync', (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
     syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
+  });
+
+  // ==================== HUB: CENTRALISED USER MANAGEMENT ====================
+
+  // GET /api/hub/users — list all users on this hub (admin only)
+  app.get('/api/hub/users', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const users = db.prepare(`
+        SELECT id, email, full_name, role, is_active, hub_redirect,
+               can_access_connections, can_manage_users, can_manage_rules,
+               can_edit_records, can_flag_records, created_date
+        FROM "user" ORDER BY role DESC, full_name ASC
+      `).all();
+      res.json(users.map(u => ({
+        ...u,
+        is_active: boolFromRow(u.is_active, true),
+        hub_redirect: boolFromRow(u.hub_redirect, false),
+        can_access_connections: boolFromRow(u.can_access_connections, false),
+        can_manage_users: boolFromRow(u.can_manage_users, false),
+        can_manage_rules: boolFromRow(u.can_manage_rules, false),
+        can_edit_records: boolFromRow(u.can_edit_records, true),
+        can_flag_records: boolFromRow(u.can_flag_records, true),
+      })));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/push-users — push selected users to one or all sites
+  app.post('/api/hub/push-users', requireAuth, requireAdmin, async (req, res) => {
+    const { user_ids, site_ids } = req.body; // site_ids = null means all sites
+    if (!Array.isArray(user_ids) || user_ids.length === 0) {
+      return res.status(400).json({ error: 'user_ids required' });
+    }
+
+    const usersToSync = db.prepare(`
+      SELECT id, email, full_name, role, is_active, hub_redirect,
+             can_access_connections, can_manage_users, can_manage_rules,
+             can_edit_records, can_flag_records
+      FROM "user" WHERE id IN (${user_ids.map(() => '?').join(',')})
+    `).all(...user_ids);
+
+    if (usersToSync.length === 0) return res.status(404).json({ error: 'No matching users' });
+
+    const targetSites = site_ids
+      ? HUB_SITES.filter(s => site_ids.includes(s.id))
+      : HUB_SITES;
+
+    if (targetSites.length === 0) return res.status(400).json({ error: 'No target sites' });
+
+    const results = await Promise.allSettled(targetSites.map(async (site) => {
+      const resp = await fetch(`${site.url}/api/hub/receive-users`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Reporting-Token': site.token,
+        },
+        body: JSON.stringify({ users: usersToSync }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`${site.name}: HTTP ${resp.status} — ${body}`);
+      }
+      return { site: site.name, ok: true };
+    }));
+
+    const summary = results.map((r, i) => ({
+      site: targetSites[i].name,
+      ok: r.status === 'fulfilled',
+      error: r.status === 'rejected' ? r.reason.message : null,
+    }));
+
+    const allOk = summary.every(s => s.ok);
+    res.status(allOk ? 200 : 207).json({ results: summary });
+  });
+
+  // POST /api/hub/receive-users — site endpoint: receive users pushed from hub
+  app.post(`/api/hub/receive-users`, async (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { users } = req.body;
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ error: 'users array required' });
+    }
+
+    let created = 0, updated = 0, errors = [];
+
+    for (const u of users) {
+      try {
+        const existing = db.prepare('SELECT id FROM "user" WHERE email = ?').get(u.email);
+        if (existing) {
+          // Update everything except password_hash — never overwrite local password
+          db.prepare(`
+            UPDATE "user" SET
+              full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+              can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
+              can_edit_records = ?, can_flag_records = ?
+            WHERE email = ?
+          `).run(
+            u.full_name || null,
+            u.role || 'user',
+            u.is_active ? 1 : 0,
+            u.hub_redirect ? 1 : 0,
+            u.can_access_connections ? 1 : 0,
+            u.can_manage_users ? 1 : 0,
+            u.can_manage_rules ? 1 : 0,
+            u.can_edit_records ? 1 : 0,
+            u.can_flag_records ? 1 : 0,
+            u.email
+          );
+          updated++;
+        } else {
+          // Create new user — no password set (they must set one or reset locally)
+          const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+          const defaultHash = await bcrypt.hash(defaultPw, 12);
+          db.prepare(`
+            INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
+              can_access_connections, can_manage_users, can_manage_rules,
+              can_edit_records, can_flag_records, password_hash)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+          `).run(
+            u.email,
+            u.full_name || null,
+            u.role || 'user',
+            u.is_active ? 1 : 0,
+            u.hub_redirect ? 1 : 0,
+            u.can_access_connections ? 1 : 0,
+            u.can_manage_users ? 1 : 0,
+            u.can_manage_rules ? 1 : 0,
+            u.can_edit_records ? 1 : 0,
+            u.can_flag_records ? 1 : 0,
+            defaultHash
+          );
+          created++;
+        }
+      } catch (err) {
+        errors.push({ email: u.email, error: err.message });
+      }
+    }
+
+    res.json({ created, updated, errors });
   });
 
   // Migrate hub_records schema for existing databases

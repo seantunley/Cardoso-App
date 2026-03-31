@@ -1,21 +1,12 @@
 import { Link } from "react-router-dom";
 import {
-  LayoutDashboard,
-  FileText,
   Settings,
-  Database,
-  Users,
   LogOut,
   ChevronLeft,
   ChevronRight,
   KeyRound,
   Search,
-  BarChart2,
-  ScrollText,
   Link2,
-  Columns,
-  ShieldCheck,
-  ClipboardList,
   Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -24,37 +15,33 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
-
-const navItems = [
-  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
-  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports", siteOnly: true },
-  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records", siteOnly: true },
-  { name: "Connections", icon: Link2, page: "Connections", siteOnly: true },
-  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
-  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
-  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
-  { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
-  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
-];
+import SettingsPanel from "@/components/settings/SettingsPanel";
 
 const APP_VERSION = "2026.1.2";
 
+const navItems = [
+  { name: "Customer Management", icon: Search,  page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
+  { name: "Connections",         icon: Link2,   page: "Connections",    siteOnly: true },
+  { name: "Customer Management", icon: Globe,   page: "HubDashboard",   hubOnly: true },
+];
+
 export default function Layout({ children, currentPageName }) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
-  const [hubMode, setHubMode] = useState(false);
+  const [isCollapsed, setIsCollapsed]       = useState(true);
+  const [hubMode, setHubMode]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen]     = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
-  const [versionStatus, setVersionStatus] = useState({
+  const [versionStatus, setVersionStatus]   = useState({
     currentVersion: APP_VERSION,
-    latestVersion: APP_VERSION,
+    latestVersion:  APP_VERSION,
     updateAvailable: false,
   });
-  const { user: currentUser, logout } = useAuth();
 
+  const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
-    fetch('/api/app-info')
+    fetch("/api/app-info")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.hub_mode) setHubMode(true); })
       .catch(() => {});
@@ -62,56 +49,32 @@ export default function Layout({ children, currentPageName }) {
 
   useEffect(() => {
     if (!currentUser) return;
-
     let isMounted = true;
-
-    const loadVersionStatus = async () => {
-      try {
-        const res = await fetch("/api/app-version-status", {
-          credentials: "include",
+    fetch("/api/app-version-status", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && isMounted) setVersionStatus({
+          currentVersion:  d.currentVersion  || APP_VERSION,
+          latestVersion:   d.latestVersion   || APP_VERSION,
+          updateAvailable: Boolean(d.updateAvailable),
         });
-
-        if (!res.ok) return;
-
-        const data = await res.json();
-        if (isMounted) {
-          setVersionStatus({
-            currentVersion: data.currentVersion || APP_VERSION,
-            latestVersion: data.latestVersion || APP_VERSION,
-            updateAvailable: Boolean(data.updateAvailable),
-          });
-        }
-      } catch {
-        // Silent fail — version badge should never break the app.
-      }
-    };
-
-    loadVersionStatus();
-
-    return () => {
-      isMounted = false;
-    };
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
   }, [currentUser]);
 
   const handleChangePassword = async (userId, newPassword) => {
     setIsSavingPassword(true);
     try {
       const res = await fetch(`/api/users/${userId}/password`, {
-        method: "PUT",
-        credentials: "include",
+        method: "PUT", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: newPassword }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to update password");
-      }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
       setChangePasswordOpen(false);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setIsSavingPassword(false);
-    }
+    } catch (err) { alert(err.message); }
+    finally { setIsSavingPassword(false); }
   };
 
   const canShowNavItem = (item) => {
@@ -119,53 +82,48 @@ export default function Layout({ children, currentPageName }) {
     if (item.hubOnly) return hubMode;
     if (item.siteOnly && hubMode) return false;
     if (item.adminOnly) return isAdmin;
-    // Use the shared hasPermission util which correctly handles falsy keys
     return hasPermission(currentUser, item.permission);
   };
 
   const visibleNavItems = navItems.filter(canShowNavItem);
-
-  const handleLogout = async () => {
-    await logout(true);
-  };
+  const canSeeSettings  = isAdmin
+    || hasPermission(currentUser, "can_access_settings")
+    || hasPermission(currentUser, "can_manage_users")
+    || hasPermission(currentUser, "can_manage_rules");
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside
-        className={cn(
-          "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex",
-          "border-border transition-all duration-300",
-          isCollapsed ? "w-20" : "w-64"
-        )}
-      >
-        <div className="border-b border-border p-6">
-          <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
-            <div className="rounded-xl bg-primary p-2 text-primary-foreground">
-              <ShieldCheck className="h-5 w-5" />
+      <aside className={cn(
+        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
+        isCollapsed ? "w-16" : "w-56"
+      )}>
+        <div className="border-b border-border px-3 pt-4 pb-3">
+          <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
+            <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
+              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                <rect width="32" height="32" rx="7" fill="#1e293b"/>
+                <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bc32)"/>
+                <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
+                <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
+                <path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                <defs><linearGradient id="bc32" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs>
+              </svg>
             </div>
             {!isCollapsed && (
-              <div>
-                <h1 className="font-bold text-foreground">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground">Customer Manager</p>
+              <div className="min-w-0">
+                <h1 className="font-semibold text-base text-foreground leading-tight">Cardoso Cigarettes</h1>
+                <p className="text-xs text-muted-foreground">Business System</p>
               </div>
             )}
           </div>
-        </div>
-
-        {currentUser && !isCollapsed && (
-          <div className="border-b border-border p-4">
-            <div className="rounded-lg bg-muted p-3">
-              <p className="truncate text-sm font-medium text-foreground">
-                {currentUser.full_name || "User"}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {currentUser.email}
-              </p>
+          {currentUser && !isCollapsed && (
+            <div className="mt-3.5 rounded-lg bg-muted px-2.5 py-1.5">
+              <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
             </div>
-          </div>
-        )}
-
-        <nav className="flex-1 space-y-1 p-4">
+          )}
+        </div>
+        <nav className="flex-1 space-y-0.5 p-3">
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
             return (
@@ -174,123 +132,90 @@ export default function Layout({ children, currentPageName }) {
                 to={`/${item.page}`}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200",
+                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-200",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   isCollapsed && "justify-center px-0"
                 )}
               >
-                <item.icon className="h-5 w-5" />
+                <item.icon className="h-3.5 w-3.5 shrink-0" />
                 {!isCollapsed && item.name}
               </Link>
             );
           })}
         </nav>
+        <div className="space-y-0.5 border-t border-border p-3">
+          {canSeeSettings && (
+            <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+              className={cn("w-full h-8", !isCollapsed && "justify-start")}
+              onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
+              <Settings className="h-3.5 w-3.5 shrink-0" />
+              {!isCollapsed && <span className="ml-1.5 text-xs">Settings</span>}
+            </Button>
+          )}
 
-        <div className="space-y-2 border-t border-border p-4">
-          <Button
-            variant="ghost"
-            size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
-            onClick={() => setChangePasswordOpen(true)}
-            title={isCollapsed ? "Change Password" : undefined}
-          >
-            <KeyRound className="h-4 w-4" />
-            {!isCollapsed && <span className="ml-2">Change Password</span>}
+          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
+            onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
+            <KeyRound className="h-3.5 w-3.5 shrink-0" />
+            {!isCollapsed && <span className="ml-1.5 text-xs">Change Password</span>}
           </Button>
 
-          <Button
-            variant="outline"
-            size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
-            onClick={handleLogout}
-            title={isCollapsed ? "Logout" : undefined}
-          >
-            <LogOut className="h-4 w-4" />
-            {!isCollapsed && <span className="ml-2">Logout</span>}
+          <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
+            onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            {!isCollapsed && <span className="ml-1.5 text-xs">Logout</span>}
           </Button>
 
-          <Button
-            variant="ghost"
-            size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            title={isCollapsed ? "Expand" : "Collapse"}
-          >
-            {isCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronLeft className="h-4 w-4" />
-                <span className="ml-2">Collapse</span>
-              </>
-            )}
+          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
+            onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
+            {isCollapsed
+              ? <ChevronRight className="h-3.5 w-3.5" />
+              : <><ChevronLeft className="h-3.5 w-3.5" /><span className="ml-1.5 text-xs">Collapse</span></>}
           </Button>
 
           {!isCollapsed && (
-            <div
-              className={cn(
-                "rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-                versionStatus.updateAvailable
-                  ? "border-yellow-300 bg-yellow-100 text-yellow-900"
-                  : "border-transparent text-muted-foreground/50"
-              )}
-              title={
-                versionStatus.updateAvailable
-                  ? `New version available: v${versionStatus.latestVersion}`
-                  : `Current version: v${versionStatus.currentVersion}`
-              }
-            >
+            <div className={cn(
+              "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
+              versionStatus.updateAvailable
+                ? "border-yellow-300 bg-yellow-100 text-yellow-900"
+                : "border-transparent text-muted-foreground/50"
+            )} title={versionStatus.updateAvailable ? `New: v${versionStatus.latestVersion}` : `v${versionStatus.currentVersion}`}>
               <p>v{versionStatus.currentVersion}</p>
               {versionStatus.updateAvailable && (
-                <>
-                  <p className="font-medium">Update available</p>
-                  <p className="font-semibold">New: v{versionStatus.latestVersion}</p>
-                </>
+                <><p className="font-medium">Update available</p><p className="font-semibold">New: v{versionStatus.latestVersion}</p></>
               )}
             </div>
           )}
         </div>
       </aside>
-
       <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
         <div className="flex items-center gap-2">
-          <div className="rounded-lg bg-primary p-1.5 text-primary-foreground">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
+          <div className="rounded-lg overflow-hidden" style={{width:"28px",height:"28px"}}><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="32" height="32" rx="7" fill="#1e293b"/><rect x="4" y="13" width="24" height="15" rx="3" fill="#3b82f6"/><rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bg)"/><rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/><rect x="13" y="17" width="6" height="6" rx="1" fill="#93c5fd"/><path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round"/><defs><linearGradient id="bg" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs></svg></div>
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
+        {canSeeSettings && (
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" /></Button>
+        )}
       </header>
-
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">
         {visibleNavItems.slice(0, 4).map((item) => {
           const isActive = currentPageName === item.page;
           return (
-            <Link
-              key={item.page}
-              to={`/${item.page}`}
-              className={cn(
-                "flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all",
-                isActive ? "text-foreground" : "text-muted-foreground"
-              )}
-            >
+            <Link key={item.page} to={`/${item.page}`}
+              className={cn("flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all", isActive ? "text-foreground" : "text-muted-foreground")}>
               <item.icon className="h-5 w-5" />
               <span className="text-xs font-medium">{item.name}</span>
             </Link>
           );
         })}
       </nav>
-
-      <main
-        className={cn(
-          "bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0",
-          isCollapsed ? "lg:ml-20" : "lg:ml-64"
-        )}
-      >
+      <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
         {children}
       </main>
-
       {currentUser && (
         <ChangePasswordModal
           user={currentUser}
@@ -300,6 +225,12 @@ export default function Layout({ children, currentPageName }) {
           isSaving={isSavingPassword}
         />
       )}
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        hubMode={hubMode}
+      />
     </div>
   );
 }

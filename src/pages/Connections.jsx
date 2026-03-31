@@ -232,10 +232,10 @@ export default function Connections() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-primary)]">
-      <div className="max-w-7xl mx-auto p-6 lg:p-8 space-y-8">
+      <div className="max-w-7xl mx-auto p-3 lg:p-5 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">
+            <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
               Database Connections
             </h1>
             <p className="text-[var(--text-secondary)] mt-1">
@@ -310,10 +310,10 @@ export default function Connections() {
             )}
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4">
             {selectedConnectionId && connections.find((c) => c.id === selectedConnectionId) && (
               <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
-                <CardContent className="p-6">
+                <CardContent className="p-4">
                   <ConnectionStatus
                     connection={connections.find((c) => c.id === selectedConnectionId)}
                   />

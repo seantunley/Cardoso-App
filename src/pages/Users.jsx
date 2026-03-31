@@ -3,354 +3,177 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { useAuth } from "@/lib/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import {
-  Loader2,
-  Plus,
-  Shield,
-  User as UserIcon,
-  RefreshCw,
-  Trash2,
-  KeyRound,
-  Lock,
-  Pencil,
-} from "lucide-react";
+import { Loader2, Plus, Shield, User as UserIcon, RefreshCw, Trash2, KeyRound, Lock, Pencil } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import CreateLocalUserModal from "../components/users/CreateLocalUserModal";
 import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
 import EditUserModal from "../components/users/EditUserModal";
+import HubUserManager from "../components/users/HubUserManager";
 
-export default function Users() {
+export default function Users({ embedded = false }) {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
-
   const isAdmin = currentUser?.role === "admin";
+
+  const { data: hubKpis } = useQuery({
+    queryKey: ["hub-kpis"],
+    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(() => null),
+    enabled: isAdmin,
+    retry: false,
+  });
+  const hubSites = hubKpis?.sites || [];
+  const isHubMode = hubSites.length > 0;
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingPermissionsUser, setEditingPermissionsUser] = useState(null);
   const [passwordUser, setPasswordUser] = useState(null);
   const [editingUser, setEditingUser] = useState(null);
 
-  const {
-    data: users = [],
-    isLoading,
-    refetch,
-    isFetching,
-  } = useQuery({
+  const { data: users = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["users"],
-    queryFn: async () => {
-      return await api.users.list();
-    },
+    queryFn: () => api.users.list(),
     enabled: !!currentUser,
   });
 
   const createUserMutation = useMutation({
-    mutationFn: async (formData) => {
-      const payload = {
-        email: formData.email,
-        full_name: formData.full_name || "",
-        role: formData.role || "user",
-        password: formData.password,
-      };
-      return await api.users.create(payload);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] });
-      setCreateModalOpen(false);
-      toast.success("User created successfully");
-    },
-    onError: (error) => {
-      toast.error(error.message || "Failed to create user");
-    },
+    mutationFn: (d) => api.users.create({ email: d.email, full_name: d.full_name || "", role: d.role || "user", password: d.password }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setCreateModalOpen(false); toast.success("User created"); },
+    onError: (e) => toast.error(e.message || "Failed to create user"),
   });
-
   const updatePermissionsMutation = useMutation({
-    mutationFn: async ({ id, permissions }) => {
-      return await api.users.updatePermissions(id, permissions);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["users"] });
-      setEditingPermissionsUser(null);
-      toast.success("User updated");
-    },
-    onError: (error) => {
-      toast.error(error.message || "Failed to update user");
-    },
+    mutationFn: ({ id, permissions }) => api.users.updatePermissions(id, permissions),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setEditingPermissionsUser(null); toast.success("Permissions updated"); },
+    onError: (e) => toast.error(e.message || "Failed"),
   });
-
   const updatePasswordMutation = useMutation({
-    mutationFn: async ({ id, password }) => {
-      return await api.users.updatePassword(id, password);
-    },
-    onSuccess: () => {
-      setPasswordUser(null);
-      toast.success("Password updated");
-    },
-    onError: (error) => {
-      toast.error(error.message || "Failed to update password");
-    },
+    mutationFn: ({ id, password }) => api.users.updatePassword(id, password),
+    onSuccess: () => { setPasswordUser(null); toast.success("Password updated"); },
+    onError: (e) => toast.error(e.message || "Failed"),
   });
-
   const deleteUserMutation = useMutation({
-    mutationFn: async (id) => {
-      return await api.users.delete(id);
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["users"] });
-      await refetch();
-      toast.success("User deleted");
-    },
-    onError: (error) => {
-      toast.error(error.message || "Failed to delete user");
-    },
+    mutationFn: (id) => api.users.delete(id),
+    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["users"] }); await refetch(); toast.success("User deleted"); },
+    onError: (e) => toast.error(e.message || "Failed"),
   });
-
-  const handleCreateUser = async (formData) => {
-    await createUserMutation.mutateAsync(formData);
-  };
-
-  const handleSavePermissions = async (id, permissionState) => {
-    await updatePermissionsMutation.mutateAsync({
-      id,
-      permissions: permissionState,
-    });
-  };
-
-  const handleChangePassword = async (id, password) => {
-    await updatePasswordMutation.mutateAsync({ id, password });
-  };
 
   const handleDeleteUser = async (user) => {
-    if (!isAdmin) {
-      toast.error("Only admins can delete users");
-      return;
-    }
-    if (currentUser?.id === user.id) {
-      toast.error("You cannot delete your own account");
-      return;
-    }
-
-    const confirmed = window.confirm(`Delete ${user.full_name || user.email}? This cannot be undone.`);
-    if (!confirmed) return;
-
+    if (!isAdmin) { toast.error("Only admins can delete users"); return; }
+    if (currentUser?.id === user.id) { toast.error("Cannot delete your own account"); return; }
+    if (!window.confirm(`Delete ${user.full_name || user.email}? This cannot be undone.`)) return;
     await deleteUserMutation.mutateAsync(user.id);
   };
 
-  const activeUsers = users.filter((u) => u.is_active !== false);
-  const adminCount = users.filter((u) => u.role === "admin").length;
-
-  // Non-admins should not be able to reach this page at all (nav is hidden),
-  // but guard the UI explicitly as a second layer of defence.
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-[var(--bg-primary)] flex items-center justify-center">
+      <div className="flex items-center justify-center py-16">
         <div className="text-center space-y-3">
-          <Lock className="w-12 h-12 text-[var(--text-tertiary)] mx-auto" />
-          <h3 className="text-lg font-medium text-[var(--text-primary)]">Access Denied</h3>
-          <p className="text-[var(--text-secondary)]">You do not have permission to manage users.</p>
+          <Lock className="w-10 h-10 text-muted-foreground mx-auto" />
+          <p className="text-sm text-muted-foreground">Access denied.</p>
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
-      <div className="max-w-6xl mx-auto p-6 lg:p-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div>
-            <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">
-              Users
-            </h1>
-            <p className="text-[var(--text-secondary)] mt-1">
-              {activeUsers.length} active user{activeUsers.length === 1 ? "" : "s"} · {adminCount} admin{adminCount === 1 ? "" : "s"}
-            </p>
-          </div>
+  const activeUsers = users.filter(u => u.is_active !== false);
+  const adminCount = users.filter(u => u.role === "admin").length;
 
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              onClick={() => refetch()}
-              disabled={isFetching}
-              className="border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
-            >
-              <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-
-            <Button
-              onClick={() => setCreateModalOpen(true)}
-              className="bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add User
-            </Button>
-          </div>
+  const content = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm text-muted-foreground">{activeUsers.length} active · {adminCount} admin{adminCount !== 1 ? "s" : ""}</p>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
+          </Button>
+          <Button size="sm" onClick={() => setCreateModalOpen(true)} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" /> Add User
+          </Button>
         </div>
+      </div>
 
-        {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <div
-                key={i}
-                className="h-24 bg-[var(--bg-secondary)] rounded-xl animate-pulse"
-              />
-            ))}
-          </div>
-        ) : users.length === 0 ? (
-          <div className="text-center py-16 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-color)]">
-            <UserIcon className="w-12 h-12 text-[var(--text-tertiary)] mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-[var(--text-primary)]">
-              No users found
-            </h3>
-            <p className="text-[var(--text-secondary)] mt-1 mb-6">
-              Create your first user account
-            </p>
-            <Button
-              onClick={() => setCreateModalOpen(true)}
-              className="bg-[var(--text-primary)] text-[var(--bg-primary)] hover:opacity-90"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add User
-            </Button>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {users.map((user) => (
-              <Card
-                key={user.id}
-                className="border-[var(--border-color)] bg-[var(--bg-secondary)]"
-              >
-                <CardContent className="p-5">
-                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-lg font-semibold text-[var(--text-primary)]">
-                          {user.full_name || "Unnamed User"}
-                        </h3>
-
-                        <Badge
-                          variant="outline"
-                          className={
-                            user.role === "admin"
-                              ? "border-purple-700 text-purple-400"
-                              : "border-[var(--border-color)] text-[var(--text-secondary)]"
-                          }
-                        >
-                          {user.role === "admin" ? "Admin" : "User"}
-                        </Badge>
-
-                        <Badge
-                          variant="outline"
-                          className={
-                            user.is_active
-                              ? "border-green-700 text-green-400"
-                              : "border-red-700 text-red-400"
-                          }
-                        >
-                          {user.is_active ? "Active" : "Disabled"}
-                        </Badge>
-
-                        {currentUser?.id === user.id && (
-                          <Badge
-                            variant="outline"
-                            className="border-blue-700 text-blue-400"
-                          >
-                            You
-                          </Badge>
-                        )}
-                      </div>
-
-                      <p className="text-sm text-[var(--text-secondary)] mt-1">
-                        {user.email}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <Button
-                        variant="outline"
-                        onClick={() => setEditingUser(user)}
-                        className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
-                      >
-                        <Pencil className="w-4 h-4 mr-2" />
-                        Edit
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={() => setEditingPermissionsUser(user)}
-                        className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
-                      >
-                        <Shield className="w-4 h-4 mr-2" />
-                        Permissions
-                      </Button>
-
-                      <Button
-                        variant="outline"
-                        onClick={() => setPasswordUser(user)}
-                        className="border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-tertiary)]"
-                      >
-                        <KeyRound className="w-4 h-4 mr-2" />
-                        Password
-                      </Button>
-
+      {isLoading ? (
+        <div className="space-y-2">{[1,2,3].map(i => <div key={i} className="h-14 animate-pulse bg-muted rounded-xl" />)}</div>
+      ) : users.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 border border-dashed border-border rounded-xl text-muted-foreground gap-3">
+          <UserIcon className="h-8 w-8" />
+          <p className="text-sm">No users yet</p>
+          <Button size="sm" onClick={() => setCreateModalOpen(true)}><Plus className="h-3.5 w-3.5 mr-1.5" />Add User</Button>
+        </div>
+      ) : (
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/40">
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Name</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Email</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Role</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {users.map(user => (
+                <tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
+                  <td className="px-4 py-3 font-medium text-foreground">
+                    {user.full_name || "Unnamed"}
+                    {currentUser?.id === user.id && <Badge variant="outline" className="ml-2 text-xs border-blue-700 text-blue-400">You</Badge>}
+                  </td>
+                  <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
+                  <td className="px-4 py-3">
+                    <Badge variant="outline" className={user.role === "admin" ? "border-purple-700 text-purple-400" : "border-border text-muted-foreground"}>
+                      {user.role === "admin" ? "Admin" : "User"}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <Badge variant="outline" className={user.is_active ? "border-green-700 text-green-400" : "border-red-700 text-red-400"}>
+                      {user.is_active ? "Active" : "Disabled"}
+                    </Badge>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => setEditingUser(user)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Permissions" onClick={() => setEditingPermissionsUser(user)}><Shield className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Set Password" onClick={() => setPasswordUser(user)}><KeyRound className="h-3.5 w-3.5" /></Button>
                       {currentUser?.id !== user.id && (
-                        <Button
-                          variant="outline"
-                          onClick={() => handleDeleteUser(user)}
-                          disabled={deleteUserMutation.isPending}
-                          className="border-red-800 text-red-400 hover:bg-red-900/20 hover:text-red-300"
-                        >
-                          {deleteUserMutation.isPending ? (
-                            <Loader2 className="w-4 h-4 animate-spin" />
-                          ) : (
-                            <Trash2 className="w-4 h-4" />
-                          )}
+                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-400 hover:text-red-500" title="Delete" onClick={() => handleDeleteUser(user)} disabled={deleteUserMutation.isPending}>
+                          {deleteUserMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                         </Button>
                       )}
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-        <CreateLocalUserModal
-          open={createModalOpen}
-          onClose={() => setCreateModalOpen(false)}
-          onCreate={handleCreateUser}
-          isCreating={createUserMutation.isPending}
-        />
+      {isHubMode && (
+        <div className="pt-4 border-t border-border">
+          <HubUserManager sites={hubSites} />
+        </div>
+      )}
 
-        <UserPermissionsModal
-          user={editingPermissionsUser}
-          open={!!editingPermissionsUser}
-          onClose={() => setEditingPermissionsUser(null)}
-          onSave={handleSavePermissions}
-          isSaving={updatePermissionsMutation.isPending}
-        />
+      <CreateLocalUserModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} onCreate={d => createUserMutation.mutateAsync(d)} isCreating={createUserMutation.isPending} />
+      <UserPermissionsModal user={editingPermissionsUser} open={!!editingPermissionsUser} onClose={() => setEditingPermissionsUser(null)} onSave={(id, perms) => updatePermissionsMutation.mutateAsync({ id, permissions: perms })} isSaving={updatePermissionsMutation.isPending} />
+      <ChangePasswordModal user={passwordUser} open={!!passwordUser} onClose={() => setPasswordUser(null)} onSave={(id, pw) => updatePasswordMutation.mutateAsync({ id, password: pw })} isSaving={updatePasswordMutation.isPending} />
+      <EditUserModal user={editingUser} open={!!editingUser} onClose={() => setEditingUser(null)} onSave={updated => { queryClient.setQueryData(["users"], old => old ? old.map(u => u.id === updated.id ? updated : u) : old); toast.success("User updated"); }} />
+    </div>
+  );
 
-        <ChangePasswordModal
-          user={passwordUser}
-          open={!!passwordUser}
-          onClose={() => setPasswordUser(null)}
-          onSave={handleChangePassword}
-          isSaving={updatePasswordMutation.isPending}
-        />
+  if (embedded) return content;
 
-        <EditUserModal
-          user={editingUser}
-          open={!!editingUser}
-          onClose={() => setEditingUser(null)}
-          onSave={(updated) => {
-            queryClient.setQueryData(["users"], (old) =>
-              old ? old.map((u) => (u.id === updated.id ? updated : u)) : old
-            );
-            toast.success("User updated");
-          }}
-        />
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-5xl mx-auto p-3 lg:p-5 space-y-3">
+        <div>
+          <h1 className="text-xl font-bold text-foreground tracking-tight">Users</h1>
+          <p className="text-sm text-muted-foreground mt-1">Manage user accounts and permissions</p>
+        </div>
+        {content}
       </div>
     </div>
   );

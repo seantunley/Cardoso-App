@@ -49,6 +49,7 @@
  */
 import AuditLog from './pages/AuditLog';
 import HubDashboard from './pages/HubDashboard';
+import HubSyncLog from './pages/HubSyncLog';
 import Connections from './pages/Connections';
 import CustomerSearch from './pages/CustomerSearch';
 import Dashboard from './pages/Dashboard';
@@ -63,6 +64,7 @@ import __Layout from './Layout.jsx';
 export const PAGES = {
     "AuditLog": AuditLog,
     "HubDashboard": HubDashboard,
+    "HubSyncLog": HubSyncLog,
     "Connections": Connections,
     "CustomerSearch": CustomerSearch,
     "Dashboard": Dashboard,

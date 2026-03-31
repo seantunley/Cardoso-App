@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Flag, User } from "lucide-react";
@@ -9,7 +10,7 @@ const flagColors = {
   orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", label: "Orange Flag" },
 };
 
-export default function FlaggedCustomersModal({ flagColor, customers, open, onClose, onCustomerClick }) {
+export default function FlaggedCustomersModal({ flagColor, customers, open, onClose, onCustomerClick, siteName }) {
   if (!flagColor) return null;
 
   const config = flagColors[flagColor];
@@ -19,6 +20,13 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
     return String(numA).localeCompare(String(numB));
   });
 
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === 'Enter') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open]);
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[80vh] bg-gray-900 border-gray-700">
@@ -28,6 +36,9 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
               <Flag className={cn("w-5 h-5", config.text)} />
             </div>
             <div>
+              {siteName && (
+                <div className="text-xl font-semibold text-white mb-0.5">{siteName}</div>
+              )}
               <div className="text-lg font-semibold text-white">
                 {config.label} Customers
               </div>

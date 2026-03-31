@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
-  RefreshCw, AlertCircle, CheckCircle2, Clock, Search,
+  RefreshCw, AlertCircle, Clock, Search,
   Building2, Wifi, WifiOff, Loader2, User, Flag, Shield,
   Trash2, History, CheckCircle, Calendar,
 } from "lucide-react";
@@ -13,6 +13,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
@@ -51,45 +52,73 @@ function fuzzyMatch(str, pattern) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
-function SiteCard({ site }) {
+function SiteCard({ site, onFlagClick }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
+  const total = site.kpis?.total_records ?? null;
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-center justify-between mb-3">
+    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <span className="font-semibold text-foreground">{site.site_name || site.site_slug}</span>
         </div>
-        <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-600" : "text-muted-foreground")}>
+        <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
           {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
           {isOnline ? "Online" : "Offline"}
         </div>
       </div>
+
       {site.kpis ? (
-        <div className="grid grid-cols-4 gap-2 text-sm">
-          <div className="rounded-lg bg-muted p-2 text-center">
-            <p className="text-[10px] text-muted-foreground">Total</p>
-            <p className="font-bold">{site.kpis.total_records ?? "—"}</p>
+        <div className="grid grid-cols-4 gap-2">
+
+          {/* Total */}
+          <div className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-900/60 p-3">
+            <p className="text-[9px] font-semibold text-indigo-400/70 uppercase tracking-widest mb-1">Total</p>
+            <p className="text-xl font-extrabold text-white leading-none">{total ?? "—"}</p>
+            <p className="text-[9px] text-indigo-300/60 mt-1">Records</p>
+            <div className="mt-2 h-0.5 rounded-full bg-indigo-500/20">
+              <div className="h-full rounded-full bg-indigo-500/60 w-full" />
+            </div>
           </div>
-          <div className="rounded-lg bg-red-50 p-2 text-center">
-            <p className="text-[10px] text-red-600">Red</p>
-            <p className="font-bold text-red-700">{flags.red ?? 0}</p>
+          {/* Red */}
+          <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+            <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
+            <p className="text-[9px] text-rose-300/60 mt-1">Red Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
+              <div className="h-full rounded-full bg-rose-500/60" style={{ width: (flags.red ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
-          <div className="rounded-lg bg-orange-50 p-2 text-center">
-            <p className="text-[10px] text-orange-600">Orange</p>
-            <p className="font-bold text-orange-700">{flags.orange ?? 0}</p>
+          {/* Orange */}
+          <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+            <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
+            <p className="text-[9px] text-amber-300/60 mt-1">Orange Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
+              <div className="h-full rounded-full bg-amber-500/60" style={{ width: (flags.orange ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
-          <div className="rounded-lg bg-green-50 p-2 text-center">
-            <p className="text-[10px] text-green-600">Green</p>
-            <p className="font-bold text-green-700">{flags.green ?? 0}</p>
+          {/* Green */}
+          <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+            <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
+            <p className="text-xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
+            <p className="text-[9px] text-emerald-300/60 mt-1">Green Flagged</p>
+            <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
+              <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (flags.green ?? 0) > 0 ? "100%" : "0%" }} />
+            </div>
           </div>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No KPI data yet</p>
       )}
+
       {site.last_seen && (
-        <p className="mt-3 text-[11px] text-muted-foreground">
+        <p className="text-[10px] text-muted-foreground/60">
           Last sync: {new Date(site.last_seen).toLocaleString()}
         </p>
       )}
@@ -102,6 +131,12 @@ function SiteCard({ site }) {
 function HubCustomerModal({ record, open, onClose }) {
   if (!record) return null;
   const flag = FLAG_COLORS[record.flag_color] || FLAG_COLORS.none;
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (e.key === 'Enter') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
@@ -191,9 +226,9 @@ function HubCustomerModal({ record, open, onClose }) {
           <div className="rounded-xl border border-indigo-800/40 bg-indigo-950/30 p-3">
             <p className="text-xs text-indigo-300">
               Hub snapshot · Changes must be made at the site directly.
-              {record.synced_at && (
+              {(record._siteLastSeen || record.synced_at) && (
                 <span className="block mt-0.5 text-indigo-400/60">
-                  Last synced: {new Date(record.synced_at).toLocaleString()}
+                  Last synced: {new Date(record._siteLastSeen || record.synced_at).toLocaleString()}
                 </span>
               )}
             </p>
@@ -254,7 +289,7 @@ function HubCustomerSearch({ sites }) {
 
   const openRecord = (r) => {
     const site = sites.find(s => s.site_id === r.site_id);
-    setModalRecord({ ...r, _siteName: site?.site_name || site?.site_slug || r.site_id });
+    setModalRecord({ ...r, _siteName: site?.site_name || site?.site_slug || r.site_id, _siteLastSeen: site?.last_seen || null });
     setModalOpen(true);
     setShowSuggestions(false);
   };
@@ -269,73 +304,78 @@ function HubCustomerSearch({ sites }) {
   const flag = (r) => FLAG_COLORS[r.flag_color] || FLAG_COLORS.none;
 
   return (
-    <div>
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Search</h2>
-      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        {/* Site selector */}
-        <div className="flex gap-3 flex-wrap">
-          <select
-            className="rounded-md border border-input bg-background px-3 py-2 text-sm w-56"
-            value={selectedSiteId}
-            onChange={e => setSelectedSiteId(e.target.value)}
-          >
-            <option value="">All sites</option>
-            {sites.map(s => (
-              <option key={s.site_id} value={s.site_id}>{s.site_name || s.site_slug}</option>
-            ))}
-          </select>
-          {loading && <Loader2 className="h-4 w-4 animate-spin self-center text-muted-foreground" />}
-          {!loading && <span className="text-xs text-muted-foreground self-center">{allRecords.length.toLocaleString()} records loaded</span>}
-        </div>
-
-        {/* Search input */}
-        <div className="relative">
-          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground">
-            <Search className="h-4 w-4" />
+    <div className="w-full">
+      {/* Search card */}
+      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            Customer Search
           </div>
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-            placeholder="Customer number or name…"
-            className="pl-10 h-11"
-          />
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
-              {suggestions.map(({ record: r }, idx) => {
-                const f = flag(r);
-                const site = sites.find(s => s.site_id === r.site_id);
-                return (
-                  <button
-                    key={`${r.site_id}-${r.record_id}`}
-                    onClick={() => openRecord(r)}
-                    className={cn(
-                      "w-full border-b border-border px-4 py-2.5 text-left last:border-0 transition-colors flex items-center justify-between gap-3",
-                      idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted text-foreground"
-                    )}
-                  >
-                    <div>
-                      <div className="text-sm font-medium">{r.customer_name || "—"}</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
-                      </div>
-                    </div>
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0", f.bg, f.text)}>
-                      <span className={cn("h-1.5 w-1.5 rounded-full",
-                        r.flag_color === "red" && "bg-red-500",
-                        r.flag_color === "orange" && "bg-orange-500",
-                        r.flag_color === "green" && "bg-green-500",
-                        (!r.flag_color || r.flag_color === "none") && "bg-muted-foreground"
-                      )} />
-                      {f.label}
-                    </span>
-                  </button>
-                );
-              })}
+          <div className="flex items-center gap-2">
+            <select
+              className="rounded-md border border-input bg-background px-2.5 py-1.5 text-xs h-8"
+              value={selectedSiteId}
+              onChange={e => setSelectedSiteId(e.target.value)}
+            >
+              <option value="">All sites</option>
+              {sites.map(s => (
+                <option key={s.site_id} value={s.site_id}>{s.site_name || s.site_slug}</option>
+              ))}
+            </select>
+            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
+        </div>
+        <div className="p-3">
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+              <Search className="h-4 w-4" />
             </div>
-          )}
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="Search by customer number or name…"
+              className="pl-10 h-10 text-sm bg-background"
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+                {suggestions.map(({ record: r }, idx) => {
+                  const f = flag(r);
+                  const site = sites.find(s => s.site_id === r.site_id);
+                  return (
+                    <button
+                      key={`${r.site_id}-${r.record_id}`}
+                      onClick={() => openRecord(r)}
+                      className={cn(
+                        "w-full border-b border-border px-4 py-2.5 text-left last:border-0 transition-colors flex items-center justify-between gap-3",
+                        idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted/60 text-foreground"
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
+                        </div>
+                      </div>
+                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold shrink-0 border", f.bg, f.text, f.border)}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full",
+                          r.flag_color === "red" && "bg-red-500",
+                          r.flag_color === "orange" && "bg-orange-500",
+                          r.flag_color === "green" && "bg-green-500",
+                          (!r.flag_color || r.flag_color === "none") && "bg-muted-foreground"
+                        )} />
+                        {f.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -344,63 +384,46 @@ function HubCustomerSearch({ sites }) {
   );
 }
 
-// ─── sync log ────────────────────────────────────────────────────────────────
-
-function SyncLog({ rows }) {
-  if (!rows.length) return null;
-  return (
-    <div>
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sync Log</h2>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/40">
-              {["Site", "Status", "Records", "Started", "Note"].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, i) => (
-              <tr key={i} className="border-b border-border last:border-0">
-                <td className="px-4 py-2.5 text-foreground">{row.site_slug}</td>
-                <td className="px-4 py-2.5">
-                  {row.status === "success" ? <CheckCircle2 className="h-4 w-4 text-green-500" />
-                   : row.status === "error"  ? <AlertCircle  className="h-4 w-4 text-red-500" />
-                   : <Clock className="h-4 w-4 text-muted-foreground" />}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground">{row.records_fetched ?? "—"}</td>
-                <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                  {row.started_at ? new Date(row.started_at).toLocaleString() : "—"}
-                </td>
-                <td className="px-4 py-2.5 text-muted-foreground text-xs max-w-[240px] truncate">{row.error_message || "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
 
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function HubDashboard() {
   const [kpis, setKpis] = useState(null);
-  const [syncLog, setSyncLog] = useState([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
 
+  // Flag drill-down
+  const [flagModal, setFlagModal] = useState({ open: false, color: null, customers: [], siteName: "" });
+  const [flagDetailRecord, setFlagDetailRecord] = useState(null);
+  const [flagDetailOpen, setFlagDetailOpen] = useState(false);
+
+  const handleFlagClick = useCallback(async (site, flagColor) => {
+    try {
+      const params = new URLSearchParams({ site_id: site.site_id, flag_color: flagColor, limit: 5000 });
+      const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      setFlagModal({
+        open: true,
+        color: flagColor,
+        customers: data.records || [],
+        siteName: site.site_name || site.site_slug,
+        siteId: site.site_id,
+      });
+    } catch {}
+  }, []);
+
+  const openFlagDetail = useCallback((customer) => {
+    setFlagDetailRecord(customer);
+    setFlagDetailOpen(true);
+  }, []);
+
   const fetchAll = useCallback(async () => {
     try {
-      const [kpiRes, syncRes] = await Promise.all([
-        fetch("/api/hub/kpis",          { credentials: "include" }),
-        fetch("/api/hub/sync-log?limit=20", { credentials: "include" }),
-      ]);
+      const kpiRes = await fetch("/api/hub/kpis", { credentials: "include" });
       if (!kpiRes.ok) throw new Error("Hub API unavailable — is this the Head Office instance?");
       setKpis(await kpiRes.json());
-      if (syncRes.ok) setSyncLog(await syncRes.json());
       setError(null);
     } catch (e) {
       setError(e.message);
@@ -438,11 +461,11 @@ export default function HubDashboard() {
   const sites = kpis?.sites || [];
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Hub Dashboard</h1>
+          <h1 className="text-xl font-bold text-foreground">Customer Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
         </div>
         <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
@@ -451,21 +474,33 @@ export default function HubDashboard() {
         </Button>
       </div>
 
+      {/* Customer search */}
+      <HubCustomerSearch sites={sites} />
+
       {/* Per-site cards */}
       {sites.length > 0 && (
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sites</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sites.map(s => <SiteCard key={s.site_id} site={s} />)}
+            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} />)}
           </div>
         </div>
       )}
 
-      {/* Customer search */}
-      <HubCustomerSearch sites={sites} />
-
-      {/* Sync log */}
-      <SyncLog rows={syncLog} />
+      {/* Flag drill-down modal */}
+      <FlaggedCustomersModal
+        flagColor={flagModal.color}
+        customers={flagModal.customers}
+        open={flagModal.open}
+        siteName={flagModal.siteName}
+        onClose={() => setFlagModal(m => ({ ...m, open: false }))}
+        onCustomerClick={openFlagDetail}
+      />
+      <HubCustomerModal
+        record={flagDetailRecord}
+        open={flagDetailOpen}
+        onClose={() => { setFlagDetailOpen(false); setFlagDetailRecord(null); }}
+      />
     </div>
   );
 }

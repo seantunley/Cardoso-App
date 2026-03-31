@@ -85,11 +85,11 @@ export default function CustomerSearch() {
 
   return (
      <div className="min-h-screen bg-[var(--bg-primary)]">
-       <div className="max-w-4xl mx-auto p-4 lg:p-6 space-y-4">
+       <div className="max-w-4xl mx-auto p-3 lg:p-5 space-y-3">
          {/* Header */}
          <div>
-           <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">
-             Customer Account Lookup
+           <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
+             Customer Management
            </h1>
            <p className="text-sm text-[var(--text-secondary)] mt-1">
              Search and review customer accounts, balances, and outstanding activity
@@ -107,7 +107,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-rose-400/70 uppercase tracking-widest mb-2">Critical</p>
-                    <p className="text-3xl font-extrabold text-white leading-none">{redFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{redFlagged.length}</p>
                     <p className="text-xs text-rose-300/60 mt-1.5">Red Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/20">
@@ -128,7 +128,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-2">Attention</p>
-                    <p className="text-3xl font-extrabold text-white leading-none">{orangeFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{orangeFlagged.length}</p>
                     <p className="text-xs text-amber-300/60 mt-1.5">Orange Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/20">
@@ -149,7 +149,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-2">Approved</p>
-                    <p className="text-3xl font-extrabold text-white leading-none">{greenFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{greenFlagged.length}</p>
                     <p className="text-xs text-emerald-300/60 mt-1.5">Green Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/20">
