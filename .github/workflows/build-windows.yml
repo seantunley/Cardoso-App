@@ -25,48 +25,54 @@ jobs:
       - name: Build frontend
         run: npm run build
 
-      - name: Download NSSM
+      - name: Install NSIS and NSSM via Chocolatey
         run: |
-          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile nssm.zip
-          Expand-Archive nssm.zip -DestinationPath nssm-tmp
-          New-Item -ItemType Directory -Force -Path windows/build/nssm
-          Copy-Item nssm-tmp/nssm-2.24/win64/nssm.exe windows/build/nssm/nssm.exe
+          choco install nsis nssm -y --no-progress
+        shell: powershell
+
+      - name: Stage NSSM for installer
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/nssm | Out-Null
+          $nssmPath = Get-Command nssm | Select-Object -ExpandProperty Source
+          Copy-Item $nssmPath windows/build/nssm/nssm.exe
+        shell: powershell
 
       - name: Bundle Node.js runtime
         run: |
-          $nodeVersion = node --version
-          $arch = "x64"
-          $nodeZipUrl = "https://nodejs.org/dist/$nodeVersion/node-$nodeVersion-win-$arch.zip"
-          Invoke-WebRequest -Uri $nodeZipUrl -OutFile node.zip
-          Expand-Archive node.zip -DestinationPath node-tmp
-          New-Item -ItemType Directory -Force -Path windows/build/node
-          Copy-Item -Recurse "node-tmp/node-$nodeVersion-win-$arch/*" windows/build/node/
-          # Also copy node_modules/npm into the bundled node
-          Copy-Item -Recurse node_modules/npm windows/build/node/node_modules/npm
+          $nodeExe = Get-Command node | Select-Object -ExpandProperty Source
+          $nodeDir = Split-Path $nodeExe
+          New-Item -ItemType Directory -Force -Path windows/build/node | Out-Null
+          # Copy node.exe
+          Copy-Item "$nodeDir\node.exe" windows/build/node/
+          # Copy npm
+          Copy-Item -Recurse "$nodeDir\node_modules" windows/build/node/node_modules -ErrorAction SilentlyContinue
+          Copy-Item "$nodeDir\npm" windows/build/node/npm -ErrorAction SilentlyContinue
+          Copy-Item "$nodeDir\npm.cmd" windows/build/node/npm.cmd -ErrorAction SilentlyContinue
+          Copy-Item "$nodeDir\npx.cmd" windows/build/node/npx.cmd -ErrorAction SilentlyContinue
+        shell: powershell
 
       - name: Update version in installer
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           $paddedVersion = "$version.0"
-          (Get-Content windows/installer.nsi) `
-            -replace 'VIProductVersion ".*"', "VIProductVersion `"$paddedVersion`"" `
-            -replace 'DisplayVersion" ".*"', "DisplayVersion`" `"$version`"" `
-            -replace '"FileVersion" ".*"', "`"FileVersion`" `"$version`"" |
-          Set-Content windows/installer.nsi
-
-      - name: Install NSIS
-        run: |
-          choco install nsis -y
+          $content = Get-Content windows/installer.nsi -Raw
+          $content = $content -replace 'VIProductVersion "[^"]*"', "VIProductVersion `"$paddedVersion`""
+          $content = $content -replace '"DisplayVersion" "[^"]*"', "`"DisplayVersion`" `"$version`""
+          $content = $content -replace '"FileVersion" "[^"]*"', "`"FileVersion`" `"$version`""
+          Set-Content windows/installer.nsi $content
+        shell: powershell
 
       - name: Build installer
         run: |
-          makensis windows/installer.nsi
+          & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
+        shell: powershell
 
       - name: Get version
         id: version
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           echo "version=$version" >> $env:GITHUB_OUTPUT
+        shell: powershell
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -76,5 +82,6 @@ jobs:
           files: CardosoSetup.exe
           generate_release_notes: true
           make_latest: true
+          overwrite: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
