@@ -21,12 +21,24 @@ import CreateLocalUserModal from "../components/users/CreateLocalUserModal";
 import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
 import EditUserModal from "../components/users/EditUserModal";
+import HubUserManager from "../components/users/HubUserManager";
+import { useQuery } from "@tanstack/react-query";
 
 export default function Users() {
   const queryClient = useQueryClient();
   const { user: currentUser } = useAuth();
 
   const isAdmin = currentUser?.role === "admin";
+
+  // Hub: fetch sites so the push-to-sites selector is populated
+  const { data: hubKpis } = useQuery({
+    queryKey: ["hub-kpis"],
+    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(() => null),
+    enabled: isAdmin,
+    retry: false,
+  });
+  const hubSites = hubKpis?.sites || [];
+  const isHubMode = hubSites.length > 0;
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingPermissionsUser, setEditingPermissionsUser] = useState(null);
@@ -351,6 +363,13 @@ export default function Users() {
             toast.success("User updated");
           }}
         />
+
+        {/* Centralised User Management — only visible on hub */}
+        {isHubMode && (
+          <div className="mt-8 pt-8 border-t border-[var(--border-color)]">
+            <HubUserManager sites={hubSites} />
+          </div>
+        )}
       </div>
     </div>
   );
