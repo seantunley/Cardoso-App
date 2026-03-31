@@ -46,17 +46,33 @@ jobs:
 
       - name: Install NSIS
         run: |
-          $maxAttempts = 3
-          for ($i = 1; $i -le $maxAttempts; $i++) {
-            Write-Host "NSIS install attempt $i of $maxAttempts..."
-            choco install nsis -y --no-progress
-            if (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe") {
-              Write-Host "NSIS installed successfully"
-              break
-            }
-            if ($i -lt $maxAttempts) { Start-Sleep -Seconds 10 }
+          $nsisInstaller = "$env:TEMP\nsis-setup.exe"
+          $urls = @(
+            "https://github.com/nicehash/NiceHashQuickMiner/releases/download/v0.0.0/nsis-3.10-setup.exe",
+            "https://prdownloads.sourceforge.net/nsis/nsis-3.10-setup.exe?download",
+            "https://sourceforge.net/projects/nsis/files/NSIS%203/3.10/nsis-3.10-setup.exe/download"
+          )
+          $installed = $false
+          foreach ($url in $urls) {
+            try {
+              Write-Host "Trying $url"
+              [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+              Invoke-WebRequest -Uri $url -OutFile $nsisInstaller -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+              $size = (Get-Item $nsisInstaller).Length
+              Write-Host "Downloaded $size bytes"
+              if ($size -gt 1MB) {
+                Start-Process -FilePath $nsisInstaller -ArgumentList "/S" -Wait
+                $installed = $true
+                break
+              }
+            } catch { Write-Host "Failed: $_" }
           }
-          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS install failed after $maxAttempts attempts" }
+          if (-not $installed) {
+            Write-Host "Direct download failed, trying Chocolatey..."
+            choco install nsis -y --no-progress
+          }
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS install failed" }
+          Write-Host "NSIS ready"
         shell: powershell
 
       - name: Download NSSM
