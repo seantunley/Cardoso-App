@@ -30,6 +30,7 @@ VIAddVersionKey "FileVersion" "2026.1.2"
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 Page custom ConfigPage ConfigPageLeave
+; (Config page is skipped automatically in silent mode)
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
 
@@ -130,7 +131,10 @@ Section "Install" SecInstall
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SERVICE_NAME}" \
     "DisplayVersion" "2026.1.2"
 
+  ; Only show message box in interactive mode
+  IfSilent done_msg
   MessageBox MB_OK "Cardoso is installed and running.$\n$\nOpen: http://localhost:$PortValue$\n$\nIMPORTANT: Edit $INSTDIR\.env and set SESSION_SECRET and ENCRYPTION_KEY, then restart the service."
+  done_msg:
 SectionEnd
 
 Section "Uninstall"

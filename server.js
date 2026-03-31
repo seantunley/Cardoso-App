@@ -2879,6 +2879,8 @@ process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 // ==================== AUTO-UPDATE (WINDOWS SERVICE) ====================
 import { exec as execChild } from 'child_process';
+import { createWriteStream } from 'fs';
+import { pipeline } from 'stream/promises';
 
 let autoUpdateRunning = false;
 
@@ -2887,25 +2889,38 @@ async function triggerWindowsUpdate() {
     console.log('[AutoUpdate] Update already in progress, skipping.');
     return { ok: false, reason: 'already_running' };
   }
-  const updateScript = path.join(process.cwd(), 'scripts', 'update-silent.bat');
-  if (!fs.existsSync(updateScript)) {
-    console.warn('[AutoUpdate] update-silent.bat not found — skipping.');
-    return { ok: false, reason: 'script_not_found' };
-  }
   autoUpdateRunning = true;
-  console.log('[AutoUpdate] Triggering update via update-silent.bat...');
-  return new Promise((resolve) => {
-    execChild(`"${updateScript}"`, { detached: true, stdio: 'ignore', windowsHide: true }, (err) => {
-      autoUpdateRunning = false;
-      if (err) {
-        console.error('[AutoUpdate] Script error:', err.message);
-        resolve({ ok: false, reason: err.message });
-      } else {
-        console.log('[AutoUpdate] Update script launched.');
-        resolve({ ok: true });
-      }
+
+  try {
+    // Get download URL for latest release asset
+    const releaseResp = await fetch('https://api.github.com/repos/seantunley/Cardoso-App/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'cardoso-app-auto-update' }
     });
-  });
+    if (!releaseResp.ok) throw new Error(`GitHub API error: ${releaseResp.status}`);
+    const release = await releaseResp.json();
+    const asset = release.assets.find(a => a.name === 'CardosoSetup.exe');
+    if (!asset) throw new Error('CardosoSetup.exe not found in latest release');
+
+    console.log(`[AutoUpdate] Downloading ${asset.name} (${(asset.size/1024/1024).toFixed(1)} MB)...`);
+
+    // Download to temp file
+    const tmpPath = path.join(process.env.TEMP || 'C:\Windows\Temp', 'CardosoSetup-update.exe');
+    const dlResp = await fetch(asset.browser_download_url);
+    if (!dlResp.ok) throw new Error(`Download failed: ${dlResp.status}`);
+    await pipeline(dlResp.body, createWriteStream(tmpPath));
+    console.log(`[AutoUpdate] Downloaded to ${tmpPath}`);
+
+    // Run installer silently — NSIS /S flag, detached so service can be replaced
+    const child = execChild(`"${tmpPath}" /S`, { detached: true, stdio: 'ignore', windowsHide: true });
+    child.unref();
+    console.log('[AutoUpdate] Silent installer launched. Service will restart momentarily.');
+    return { ok: true };
+  } catch (err) {
+    console.error('[AutoUpdate] Error:', err.message);
+    autoUpdateRunning = false;
+    return { ok: false, reason: err.message };
+  }
+  // Note: autoUpdateRunning stays true until service restarts — intentional
 }
 
 // Admin-triggered update endpoint
