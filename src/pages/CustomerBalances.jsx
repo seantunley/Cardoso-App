@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 const LIMIT = 30;
@@ -31,6 +31,7 @@ async function fetchTopBalances(limit) {
 
 export default function CustomerBalances() {
   const [limit] = useState(LIMIT);
+  const [siteFilter, setSiteFilter] = useState("all");
 
   const { data: rows = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ["top-balances", limit],
@@ -38,7 +39,19 @@ export default function CustomerBalances() {
     staleTime: 60_000,
   });
 
-  const grandTotal = rows.reduce((s, r) => s + parseAmount(r.outstanding_balance), 0);
+  // Derive unique site names from data
+  const sites = useMemo(() => {
+    const names = [...new Set(rows.map((r) => r.site_name).filter(Boolean))].sort();
+    return names;
+  }, [rows]);
+
+  // Apply site filter
+  const filtered = useMemo(() => {
+    if (siteFilter === "all") return rows;
+    return rows.filter((r) => r.site_name === siteFilter);
+  }, [rows, siteFilter]);
+
+  const grandTotal = filtered.reduce((s, r) => s + parseAmount(r.outstanding_balance), 0);
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
@@ -63,10 +76,38 @@ export default function CustomerBalances() {
           </button>
         </div>
 
+        {/* Filters row */}
+        {!isLoading && !isError && sites.length > 0 && (
+          <div className="mb-4 flex items-center gap-3">
+            <label className="text-xs text-muted-foreground whitespace-nowrap">Filter by site:</label>
+            <select
+              value={siteFilter}
+              onChange={(e) => setSiteFilter(e.target.value)}
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            >
+              <option value="all">All sites</option>
+              {sites.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+            {siteFilter !== "all" && (
+              <button
+                onClick={() => setSiteFilter("all")}
+                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Summary card */}
-        {rows.length > 0 && (
+        {filtered.length > 0 && (
           <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3 flex items-center justify-between">
-            <span className="text-sm text-muted-foreground">Total outstanding ({rows.length} customers)</span>
+            <span className="text-sm text-muted-foreground">
+              Total outstanding ({filtered.length} customer{filtered.length !== 1 ? "s" : ""}
+              {siteFilter !== "all" ? ` · ${siteFilter}` : ""})
+            </span>
             <span className="text-lg font-bold text-foreground">R {formatAmount(grandTotal)}</span>
           </div>
         )}
@@ -86,14 +127,14 @@ export default function CustomerBalances() {
         )}
 
         {/* State: empty */}
-        {!isLoading && !isError && rows.length === 0 && (
+        {!isLoading && !isError && filtered.length === 0 && (
           <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-            No outstanding balances found.
+            {siteFilter !== "all" ? `No outstanding balances for "${siteFilter}".` : "No outstanding balances found."}
           </div>
         )}
 
         {/* Table */}
-        {!isLoading && !isError && rows.length > 0 && (
+        {!isLoading && !isError && filtered.length > 0 && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <table className="w-full text-sm">
               <thead>
@@ -106,7 +147,7 @@ export default function CustomerBalances() {
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row, idx) => {
+                {filtered.map((row, idx) => {
                   const amount = parseAmount(row.outstanding_balance);
                   const isTop = idx === 0;
                   return (
