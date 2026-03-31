@@ -1,0 +1,133 @@
+name: Build Windows Installer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies (native binaries compiled for win32/x64/node22)
+        run: npm ci
+        shell: powershell
+
+      - name: Build frontend
+        run: npm run build
+        shell: powershell
+
+      - name: Stage app files for installer
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/app | Out-Null
+          # Copy app files
+          Copy-Item server.js windows/build/app/
+          Copy-Item package.json windows/build/app/
+          Copy-Item package-lock.json windows/build/app/
+          Copy-Item -Recurse dist windows/build/app/dist
+          Copy-Item -Recurse src windows/build/app/src
+          Copy-Item -Recurse scripts windows/build/app/scripts
+          # Copy node_modules WITH pre-compiled native binaries (built on this windows runner)
+          Copy-Item -Recurse node_modules windows/build/app/node_modules
+          Write-Host "Staged app. node_modules size: $((Get-ChildItem windows/build/app/node_modules -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB) MB"
+          # Confirm native binaries are present
+          Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" | ForEach-Object { Write-Host "BSQ3: $($_.FullName)" }
+          Get-ChildItem windows/build/app/node_modules/sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "SQ3: $($_.FullName)" }
+        shell: powershell
+
+      - name: Install NSIS via Chocolatey
+        run: choco install nsis -y --no-progress
+        shell: powershell
+
+      - name: Download NSSM
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/nssm | Out-Null
+          $urls = @(
+            "https://github.com/NSSM-Service/nssm/releases/download/2.24/nssm-win64.exe",
+            "https://raw.githubusercontent.com/bmrf/standalone_scripts/master/nssm.exe"
+          )
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile "windows/build/nssm/nssm.exe" -TimeoutSec 30 -ErrorAction Stop
+              $size = (Get-Item "windows/build/nssm/nssm.exe").Length
+              if ($size -gt 100000) { Write-Host "Got nssm ($size bytes) from $url"; break }
+            } catch { Write-Host "Failed: $url" }
+          }
+          if (-not (Test-Path "windows/build/nssm/nssm.exe") -or (Get-Item "windows/build/nssm/nssm.exe").Length -lt 100000) {
+            $cached = Get-ChildItem "C:\ProgramData\chocolatey" -Recurse -Filter "nssm.exe" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 100000 } | Select-Object -First 1
+            if ($cached) { Copy-Item $cached.FullName "windows/build/nssm/nssm.exe"; Write-Host "Used choco cache" }
+            else { throw "Cannot obtain nssm.exe" }
+          }
+        shell: powershell
+
+      - name: Bundle Node.js runtime
+        run: |
+          $nodeExe = (Get-Command node).Source
+          $nodeDir = Split-Path $nodeExe
+          New-Item -ItemType Directory -Force -Path windows/build/node | Out-Null
+          Copy-Item "$nodeDir\node.exe" windows/build/node/
+          if (Test-Path "$nodeDir\node_modules") {
+            Copy-Item -Recurse "$nodeDir\node_modules" windows/build/node/node_modules -ErrorAction SilentlyContinue
+          }
+        shell: powershell
+
+      - name: Update version in installer
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $content = Get-Content windows/installer.nsi -Raw
+          $content = $content -replace 'VIProductVersion "[^"]*"', "VIProductVersion `"$version.0`""
+          $content = $content -replace '"DisplayVersion" "[^"]*"', "`"DisplayVersion`" `"$version`""
+          $content = $content -replace '"FileVersion" "[^"]*"', "`"FileVersion`" `"$version`""
+          Set-Content windows/installer.nsi $content
+        shell: powershell
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          Rename-Item CardosoSetup.exe "CardosoSetup-v$v.exe"
+        shell: powershell
+
+      - name: Get version
+        id: version
+        run: |
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+        shell: powershell
+
+      - name: Delete existing release/tag if present
+        continue-on-error: true
+        run: |
+          $tag = "v${{ steps.version.outputs.version }}"
+          $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
+            -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" } `
+            -ErrorAction SilentlyContinue
+          if ($resp.id) {
+            Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/$($resp.id)" `
+              -Method Delete -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" }
+          }
+          git tag -d $tag 2>$null; git push origin ":refs/tags/$tag" 2>$null
+        shell: powershell
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "Cardoso v${{ steps.version.outputs.version }}"
+          files: CardosoSetup-v${{ steps.version.outputs.version }}.exe
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
