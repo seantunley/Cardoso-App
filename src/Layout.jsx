@@ -111,13 +111,13 @@ export default function Layout({ children, currentPageName }) {
             </div>
             {!isCollapsed && (
               <div className="min-w-0">
-                <h1 className="font-semibold text-sm text-foreground leading-tight">Cardoso Cigarettes</h1>
-                <p className="text-[11px] text-muted-foreground">Business System</p>
+                <h1 className="font-semibold text-base text-foreground leading-tight">Cardoso Cigarettes</h1>
+                <p className="text-xs text-muted-foreground">Business System</p>
               </div>
             )}
           </div>
           {currentUser && !isCollapsed && (
-            <div className="mt-2 rounded-lg bg-muted px-2.5 py-1.5">
+            <div className="mt-3.5 rounded-lg bg-muted px-2.5 py-1.5">
               <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
               <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
             </div>
