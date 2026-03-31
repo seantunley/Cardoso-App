@@ -373,6 +373,7 @@ function HubCustomerSearch({ sites }) {
               })}
             </div>
           )}
+          </div>
         </div>
       </div>
 
