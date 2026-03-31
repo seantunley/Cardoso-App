@@ -304,27 +304,30 @@ function HubCustomerSearch({ sites }) {
   const flag = (r) => FLAG_COLORS[r.flag_color] || FLAG_COLORS.none;
 
   return (
-    <div className="max-w-xl">
-      <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Search</h2>
-      <div className="rounded-xl border border-border bg-card p-5 space-y-3">
-        {/* Site selector */}
-        <div className="flex gap-3 flex-wrap">
-          <select
-            className="rounded-md border border-input bg-background px-3 py-2 text-sm w-56"
-            value={selectedSiteId}
-            onChange={e => setSelectedSiteId(e.target.value)}
-          >
-            <option value="">All sites</option>
-            {sites.map(s => (
-              <option key={s.site_id} value={s.site_id}>{s.site_name || s.site_slug}</option>
-            ))}
-          </select>
-          {loading && <Loader2 className="h-4 w-4 animate-spin self-center text-muted-foreground" />}
+    <div className="w-full">
+      {/* Search card */}
+      <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
+          <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+            <Search className="h-4 w-4 text-muted-foreground" />
+            Customer Search
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              className="rounded-md border border-input bg-background px-2.5 py-1.5 text-xs h-8"
+              value={selectedSiteId}
+              onChange={e => setSelectedSiteId(e.target.value)}
+            >
+              <option value="">All sites</option>
+              {sites.map(s => (
+                <option key={s.site_id} value={s.site_id}>{s.site_name || s.site_slug}</option>
+              ))}
+            </select>
+            {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          </div>
         </div>
-
-        {/* Search input */}
-        <div className="relative">
-          <div className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground">
+        <div className="p-3 relative">
+          <div className="absolute left-6 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
             <Search className="h-4 w-4" />
           </div>
           <Input
@@ -333,11 +336,11 @@ function HubCustomerSearch({ sites }) {
             onChange={e => setQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-            placeholder="Customer number or name…"
-            className="pl-10 h-11"
+            placeholder="Search by customer number or name…"
+            className="pl-10 h-10 text-sm bg-background"
           />
           {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
+            <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
               {suggestions.map(({ record: r }, idx) => {
                 const f = flag(r);
                 const site = sites.find(s => s.site_id === r.site_id);
@@ -347,16 +350,16 @@ function HubCustomerSearch({ sites }) {
                     onClick={() => openRecord(r)}
                     className={cn(
                       "w-full border-b border-border px-4 py-2.5 text-left last:border-0 transition-colors flex items-center justify-between gap-3",
-                      idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted text-foreground"
+                      idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted/60 text-foreground"
                     )}
                   >
-                    <div>
-                      <div className="text-sm font-medium">{r.customer_name || "—"}</div>
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
                       <div className="text-[11px] text-muted-foreground mt-0.5">
                         #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
                       </div>
                     </div>
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium shrink-0", f.bg, f.text)}>
+                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold shrink-0 border", f.bg, f.text, f.border)}>
                       <span className={cn("h-1.5 w-1.5 rounded-full",
                         r.flag_color === "red" && "bg-red-500",
                         r.flag_color === "orange" && "bg-orange-500",
@@ -468,6 +471,9 @@ export default function HubDashboard() {
         </Button>
       </div>
 
+      {/* Customer search */}
+      <HubCustomerSearch sites={sites} />
+
       {/* Per-site cards */}
       {sites.length > 0 && (
         <div>
@@ -477,9 +483,6 @@ export default function HubDashboard() {
           </div>
         </div>
       )}
-
-      {/* Customer search */}
-      <HubCustomerSearch sites={sites} />
 
       {/* Flag drill-down modal */}
       <FlaggedCustomersModal
