@@ -59,12 +59,14 @@ import Records from './pages/Records';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Users from './pages/Users';
+import Inventory from './pages/Inventory';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
     "AuditLog": AuditLog,
     "CustomerBalances": CustomerBalances,
+    "Inventory": Inventory,
     "HubDashboard": HubDashboard,
     "HubSyncLog": HubSyncLog,
     "Connections": Connections,

@@ -8,6 +8,7 @@ import {
   Search,
   Globe,
   Wallet,
+  Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,7 @@ const navItems = [
   { name: "Customer Management", icon: Search,  page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
   { name: "Customer Management", icon: Globe,   page: "HubDashboard",     hubOnly: true },
   { name: "Customer Balances",   icon: Wallet,  page: "CustomerBalances", permission: "can_access_customer_search" },
+  { name: "Inventory", icon: Package, page: "Inventory", permission: "can_access_customer_search" },
 ];
 
 export default function Layout({ children, currentPageName }) {

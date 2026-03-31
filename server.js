@@ -387,6 +387,24 @@ db.exec(`
   ON databaseconnection (status);
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS inventoryrecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source_table TEXT NOT NULL,
+    item_number TEXT NOT NULL,
+    item_description TEXT,
+    qty_on_hand TEXT,
+    last_cost TEXT,
+    price_list TEXT,
+    price TEXT,
+    terms TEXT,
+    created_date TEXT DEFAULT (datetime("now")),
+    updated_date TEXT DEFAULT (datetime("now")),
+    UNIQUE(source_table, item_number)
+  );
+  CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
+`);
+
 // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
 function ensureFlexibleCustomFieldConfigTable() {
   const exists = db
@@ -495,6 +513,7 @@ ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
 ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
+ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
 
 // Migrate field_mappings from legacy flat format to per-table format
 // Legacy: { localKey: { sourceField, ... } }
@@ -1169,6 +1188,53 @@ async function runConnectionImport(connectionId) {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
+    const inventoryMappingConfig = {
+      item_number:      { fallbacks: ['item_number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
+      item_description: { fallbacks: ['item_description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc'] },
+      qty_on_hand:      { fallbacks: ['qty_on_hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand'] },
+      last_cost:        { fallbacks: ['last_cost', 'LastCost', 'LAST_COST', 'Cost', 'COST'] },
+      price_list:       { fallbacks: ['price_list', 'PriceList', 'PRICE_LIST', 'Pricelist'] },
+      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice'] },
+      terms:            { fallbacks: ['terms', 'Terms', 'TERMS', 'PaymentTerms'] },
+    };
+
+    const upsertInventoryRecord = db.prepare(`
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_table, item_number) DO UPDATE SET
+        item_description=excluded.item_description,
+        qty_on_hand=excluded.qty_on_hand,
+        last_cost=excluded.last_cost,
+        price_list=excluded.price_list,
+        price=excluded.price,
+        terms=excluded.terms,
+        updated_date=excluded.updated_date
+    `);
+
+    const runInventoryRows = (rows, sourceName) => {
+      const syncTimestamp = new Date().toISOString();
+      const writeInventory = db.transaction((rowsToWrite) => {
+        for (const row of rowsToWrite) {
+          const itemNumber = String(
+            getMappedOrFallbackValue(row, {}, 'item_number', inventoryMappingConfig.item_number.fallbacks) || ''
+          );
+          if (!itemNumber) continue;
+          upsertInventoryRecord.run(
+            sourceName,
+            itemNumber,
+            String(getMappedOrFallbackValue(row, {}, 'item_description', inventoryMappingConfig.item_description.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, {}, 'qty_on_hand', inventoryMappingConfig.qty_on_hand.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, {}, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, {}, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, {}, 'price', inventoryMappingConfig.price.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, {}, 'terms', inventoryMappingConfig.terms.fallbacks) || ''),
+            syncTimestamp
+          );
+        }
+      });
+      writeInventory(rows);
+    };
+
     // Shared write-rows helper used by both query mode and legacy table mode
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
       const existingRows = db.prepare(`
@@ -1315,7 +1381,11 @@ async function runConnectionImport(connectionId) {
       // are keyed to this connection rather than a physical table name
       const sourceName = `query::${connConfig.id}`;
 
-      runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
+      if (connConfig.record_type === 'inventory') {
+        runInventoryRows(rows, sourceName);
+      } else {
+        runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
+      }
       importedCount = rows.length;
     } else {
       // ── LEGACY TABLE MODE (backward compat) ────────────────────────────────
@@ -1355,7 +1425,12 @@ async function runConnectionImport(connectionId) {
         const result = await pool.request().query(query);
         const rows = result.recordset || [];
 
-        runWriteRows(rows, table_name, fieldMappings, index_field);
+        const configRecordType = config.record_type || connConfig.record_type || 'customer';
+        if (configRecordType === 'inventory') {
+          runInventoryRows(rows, table_name);
+        } else {
+          runWriteRows(rows, table_name, fieldMappings, index_field);
+        }
         importedCount += rows.length;
       }
     }
@@ -1618,6 +1693,28 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
   } catch (err) {
     console.error('top-balances error', err);
     res.status(500).json({ error: 'Failed to fetch top balances' });
+  }
+});
+
+// GET /api/inventory?search=&limit=500
+app.get('/api/inventory', requireAuth, (req, res) => {
+  const search = req.query.search || '';
+  const limit = Math.min(parseInt(req.query.limit, 10) || 500, 10000);
+  try {
+    let rows;
+    if (search) {
+      rows = db.prepare(
+        `SELECT * FROM inventoryrecord WHERE item_number LIKE ? OR item_description LIKE ? ORDER BY item_number ASC LIMIT ?`
+      ).all(`%${search}%`, `%${search}%`, limit);
+    } else {
+      rows = db.prepare(
+        `SELECT * FROM inventoryrecord ORDER BY item_number ASC LIMIT ?`
+      ).all(limit);
+    }
+    res.json({ count: rows.length, records: rows });
+  } catch (err) {
+    console.error('inventory error', err);
+    res.status(500).json({ error: 'Failed to fetch inventory' });
   }
 });
 
@@ -2351,6 +2448,25 @@ app.get('/api/reporting/health', requireReportingToken, (req, res) => {
 
 
 
+// GET /api/reporting/inventory?offset=0&limit=1000
+app.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
+  const offset = parseInt(req.query.offset) || 0;
+  const rows = db.prepare(
+    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date
+     FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
+  ).all(limit, offset);
+  res.json({
+    site_id: SITE_ID,
+    site_slug: SITE_SLUG,
+    offset,
+    limit,
+    count: rows.length,
+    has_more: rows.length === limit,
+    records: rows,
+  });
+});
+
 // ==================== HUB ETL ====================
 // Only active when HUB_MODE=true. Aggregates data from remote sites.
 
@@ -2392,6 +2508,19 @@ if (process.env.HUB_MODE === 'true') {
       records_fetched INTEGER,
       status TEXT,
       error TEXT
+    );
+    CREATE TABLE IF NOT EXISTS hub_inventory (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id TEXT NOT NULL,
+      item_number TEXT NOT NULL,
+      item_description TEXT,
+      qty_on_hand TEXT,
+      last_cost TEXT,
+      price_list TEXT,
+      price TEXT,
+      terms TEXT,
+      synced_at TEXT DEFAULT (datetime("now")),
+      UNIQUE(site_id, item_number)
     );
   `);
 
@@ -2511,6 +2640,52 @@ if (process.env.HUB_MODE === 'true') {
         hasMore = recData.has_more === true;
       }
 
+      // Inventory — full refresh
+      const upsertInv = db.prepare(`
+        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, synced_at)
+        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @terms, @synced_at)
+        ON CONFLICT(site_id, item_number) DO UPDATE SET
+          item_description=excluded.item_description,
+          qty_on_hand=excluded.qty_on_hand,
+          last_cost=excluded.last_cost,
+          price_list=excluded.price_list,
+          price=excluded.price,
+          terms=excluded.terms,
+          synced_at=excluded.synced_at
+      `);
+      const insertInventory = db.transaction((invRecords) => {
+        const now = new Date().toISOString();
+        for (const r of invRecords) {
+          upsertInv.run({
+            site_id: site.id,
+            item_number: r.item_number,
+            item_description: r.item_description || null,
+            qty_on_hand: r.qty_on_hand || null,
+            last_cost: r.last_cost || null,
+            price_list: r.price_list || null,
+            price: r.price || null,
+            terms: r.terms || null,
+            synced_at: now,
+          });
+        }
+      });
+      let invOffset = 0;
+      let invHasMore = true;
+      while (invHasMore) {
+        const ctrlInv = new AbortController();
+        const tInv = setTimeout(() => ctrlInv.abort(), 10000);
+        const invUrl = `${site.url}/api/reporting/inventory?offset=${invOffset}&limit=1000`;
+        const invRes = await fetch(invUrl, { headers, signal: ctrlInv.signal });
+        clearTimeout(tInv);
+        if (!invRes.ok) break;
+        const invData = await invRes.json();
+        if (invData.records && invData.records.length > 0) {
+          insertInventory(invData.records);
+          invOffset += invData.records.length;
+        }
+        invHasMore = invData.has_more === true;
+      }
+
       // Update hub_sites
       db.prepare(`
         UPDATE hub_sites SET last_seen=?, last_kpis=?, status='ok' WHERE id=?
@@ -2601,6 +2776,23 @@ if (process.env.HUB_MODE === 'true') {
       sites: perSite,
       generated_at: new Date().toISOString(),
     });
+  });
+
+  // GET /api/hub/inventory
+  app.get('/api/hub/inventory', requireAuth, (req, res) => {
+    const { site_id, search } = req.query;
+    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
+    let query = 'SELECT * FROM hub_inventory WHERE 1=1';
+    const params = [];
+    if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
+    if (search) { query += ' AND (item_number LIKE ? OR item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    query += ` ORDER BY item_number ASC LIMIT ${limit}`;
+    try {
+      const rows = db.prepare(query).all(...params);
+      res.json({ count: rows.length, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // GET /api/hub/sync-log
