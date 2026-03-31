@@ -35,7 +35,12 @@ jobs:
       - name: Stage NSSM for installer
         run: |
           New-Item -ItemType Directory -Force -Path windows/build/nssm | Out-Null
-          $nssmPath = Get-Command nssm | Select-Object -ExpandProperty Source
+          # Find nssm.exe wherever choco installed it
+          $nssmPath = Get-ChildItem -Path "C:\ProgramData\chocolatey" -Recurse -Filter "nssm.exe" -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match "win64|tools" } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $nssmPath) { $nssmPath = (Get-Command nssm).Source }
+          Write-Host "Using nssm from: $nssmPath"
           Copy-Item $nssmPath windows/build/nssm/nssm.exe
         shell: powershell
 
