@@ -7,7 +7,6 @@ import {
   KeyRound,
   Search,
   Link2,
-  ShieldCheck,
   Globe,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -94,18 +93,26 @@ export default function Layout({ children, currentPageName }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-
-      {/* ── Desktop sidebar ── */}
       <aside className={cn(
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
         isCollapsed ? "w-16" : "w-56"
       )}>
-
-        {/* Branding + logged-in user */}
         <div className="border-b border-border p-3">
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
-            <div className="rounded-lg bg-primary p-1.5 text-primary-foreground shrink-0">
-              <ShieldCheck className="h-4 w-4" />
+            <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
+              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
+                <rect width="32" height="32" rx="6" fill="#c0392b"/>
+                <rect x="2" y="2" width="28" height="28" rx="5" fill="#e74c3c"/>
+                <rect x="0" y="11" width="32" height="4" fill="#f39c12"/>
+                <rect x="0" y="11" width="32" height="1" fill="#e67e22"/>
+                <rect x="0" y="14" width="32" height="1" fill="#e67e22"/>
+                <rect x="5" y="16" width="22" height="3" rx="1.5" fill="#f5f5f0"/>
+                <rect x="5" y="20" width="22" height="3" rx="1.5" fill="#f5f5f0"/>
+                <rect x="24" y="16" width="3" height="3" rx="1" fill="#e8a87c"/>
+                <rect x="24" y="20" width="3" height="3" rx="1" fill="#e8a87c"/>
+                <rect x="4" y="4" width="24" height="6" rx="2" fill="#c0392b"/>
+                <text x="16" y="9.5" textAnchor="middle" fill="#ffd700" fontSize="5" fontWeight="bold" fontFamily="serif">CARDOSO</text>
+              </svg>
             </div>
             {!isCollapsed && (
               <div className="min-w-0">
@@ -114,8 +121,6 @@ export default function Layout({ children, currentPageName }) {
               </div>
             )}
           </div>
-
-          {/* Logged-in user — shown just under branding when expanded */}
           {currentUser && !isCollapsed && (
             <div className="mt-2 rounded-lg bg-muted px-2.5 py-1.5">
               <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
@@ -123,8 +128,6 @@ export default function Layout({ children, currentPageName }) {
             </div>
           )}
         </div>
-
-        {/* Main nav */}
         <nav className="flex-1 space-y-0.5 p-3">
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
@@ -147,38 +150,36 @@ export default function Layout({ children, currentPageName }) {
             );
           })}
         </nav>
-
-        {/* Bottom actions */}
         <div className="space-y-0.5 border-t border-border p-3">
           {canSeeSettings && (
-            <Button variant="ghost" size={isCollapsed ? "icon" : "default"}
-              className={cn("w-full", !isCollapsed && "justify-start")}
+            <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+              className={cn("w-full h-8", !isCollapsed && "justify-start")}
               onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
-              <Settings className="h-4 w-4 shrink-0" />
-              {!isCollapsed && <span className="ml-2">Settings</span>}
+              <Settings className="h-3.5 w-3.5 shrink-0" />
+              {!isCollapsed && <span className="ml-1.5 text-xs">Settings</span>}
             </Button>
           )}
 
-          <Button variant="ghost" size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
+          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
-            <KeyRound className="h-4 w-4 shrink-0" />
-            {!isCollapsed && <span className="ml-2">Change Password</span>}
+            <KeyRound className="h-3.5 w-3.5 shrink-0" />
+            {!isCollapsed && <span className="ml-1.5 text-xs">Change Password</span>}
           </Button>
 
-          <Button variant="outline" size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
+          <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
-            <LogOut className="h-4 w-4 shrink-0" />
-            {!isCollapsed && <span className="ml-2">Logout</span>}
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            {!isCollapsed && <span className="ml-1.5 text-xs">Logout</span>}
           </Button>
 
-          <Button variant="ghost" size={isCollapsed ? "icon" : "default"}
-            className={cn("w-full", !isCollapsed && "justify-start")}
+          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
+            className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
             {isCollapsed
               ? <ChevronRight className="h-3.5 w-3.5" />
-              : <><ChevronLeft className="h-3.5 w-3.5" /><span className="ml-2">Collapse</span></>}
+              : <><ChevronLeft className="h-3.5 w-3.5" /><span className="ml-1.5 text-xs">Collapse</span></>}
           </Button>
 
           {!isCollapsed && (
@@ -196,19 +197,15 @@ export default function Layout({ children, currentPageName }) {
           )}
         </div>
       </aside>
-
-      {/* ── Mobile header ── */}
       <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
         <div className="flex items-center gap-2">
-          <div className="rounded-lg bg-primary p-1.5 text-primary-foreground"><ShieldCheck className="h-4 w-4" /></div>
+          <div className="rounded-lg overflow-hidden" style={{width:"28px",height:"28px"}}><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="32" height="32" rx="6" fill="#e74c3c"/><rect x="0" y="11" width="32" height="4" fill="#f39c12"/><rect x="5" y="16" width="22" height="3" rx="1.5" fill="#f5f5f0"/><rect x="5" y="20" width="22" height="3" rx="1.5" fill="#f5f5f0"/><rect x="24" y="16" width="3" height="3" rx="1" fill="#e8a87c"/><rect x="24" y="20" width="3" height="3" rx="1" fill="#e8a87c"/><rect x="4" y="4" width="24" height="6" rx="2" fill="#c0392b"/><text x="16" y="9.5" textAnchor="middle" fill="#ffd700" fontSize="5" fontWeight="bold" fontFamily="serif">CARDOSO</text></svg></div>
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
         {canSeeSettings && (
           <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" /></Button>
         )}
       </header>
-
-      {/* ── Mobile bottom nav ── */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">
         {visibleNavItems.slice(0, 4).map((item) => {
           const isActive = currentPageName === item.page;
@@ -221,13 +218,9 @@ export default function Layout({ children, currentPageName }) {
           );
         })}
       </nav>
-
-      {/* ── Main content ── */}
       <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
         {children}
       </main>
-
-      {/* ── Modals ── */}
       {currentUser && (
         <ChangePasswordModal
           user={currentUser}
