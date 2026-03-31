@@ -1,23 +1,15 @@
 import { Link } from "react-router-dom";
 import {
-  LayoutDashboard,
-  FileText,
   Settings,
-  Database,
   Users,
   LogOut,
   ChevronLeft,
   ChevronRight,
   KeyRound,
   Search,
-  BarChart2,
-  ScrollText,
   Link2,
-  Columns,
   ShieldCheck,
-  ClipboardList,
   Globe,
-  History,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -25,18 +17,16 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
+import SettingsPanel from "@/components/settings/SettingsPanel";
 
 const navItems = [
-  { name: "Customer Search", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
-  { name: "Reports", icon: BarChart2, page: "Reports", permission: "can_access_reports", siteOnly: true },
-  { name: "Records", icon: ScrollText, page: "Records", permission: "can_access_records", siteOnly: true },
+  // Site pages
+  { name: "Customer Management", icon: Search, page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
   { name: "Connections", icon: Link2, page: "Connections", siteOnly: true },
-  { name: "Fields", icon: Columns, page: "Fields", permission: "can_access_settings", siteOnly: true },
-  { name: "Settings", icon: Settings, page: "Settings", permission: "can_access_settings", siteOnly: true },
-  { name: "Hub Dashboard", icon: Globe, page: "HubDashboard", hubOnly: true },
-  { name: "Sync Log", icon: History, page: "HubSyncLog", hubOnly: true },
+  // Hub pages
+  { name: "Customer Management", icon: Globe, page: "HubDashboard", hubOnly: true },
+  // Shared
   { name: "Users", icon: Users, page: "Users", permission: "can_manage_users" },
-  { name: "Audit Log", icon: ClipboardList, page: "AuditLog", adminOnly: true, siteOnly: true },
 ];
 
 const APP_VERSION = "2026.1.2";
@@ -45,6 +35,7 @@ export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed] = useState(true);
   const [hubMode, setHubMode] = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus] = useState({
     currentVersion: APP_VERSION,
@@ -52,7 +43,6 @@ export default function Layout({ children, currentPageName }) {
     updateAvailable: false,
   });
   const { user: currentUser, logout } = useAuth();
-
   const isAdmin = currentUser?.role === "admin";
 
   useEffect(() => {
@@ -64,56 +54,32 @@ export default function Layout({ children, currentPageName }) {
 
   useEffect(() => {
     if (!currentUser) return;
-
     let isMounted = true;
-
-    const loadVersionStatus = async () => {
-      try {
-        const res = await fetch("/api/app-version-status", {
-          credentials: "include",
+    fetch("/api/app-version-status", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d && isMounted) setVersionStatus({
+          currentVersion: d.currentVersion || APP_VERSION,
+          latestVersion: d.latestVersion || APP_VERSION,
+          updateAvailable: Boolean(d.updateAvailable),
         });
-
-        if (!res.ok) return;
-
-        const data = await res.json();
-        if (isMounted) {
-          setVersionStatus({
-            currentVersion: data.currentVersion || APP_VERSION,
-            latestVersion: data.latestVersion || APP_VERSION,
-            updateAvailable: Boolean(data.updateAvailable),
-          });
-        }
-      } catch {
-        // Silent fail — version badge should never break the app.
-      }
-    };
-
-    loadVersionStatus();
-
-    return () => {
-      isMounted = false;
-    };
+      })
+      .catch(() => {});
+    return () => { isMounted = false; };
   }, [currentUser]);
 
   const handleChangePassword = async (userId, newPassword) => {
     setIsSavingPassword(true);
     try {
       const res = await fetch(`/api/users/${userId}/password`, {
-        method: "PUT",
-        credentials: "include",
+        method: "PUT", credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: newPassword }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to update password");
-      }
+      if (!res.ok) { const d = await res.json(); throw new Error(d.error || "Failed"); }
       setChangePasswordOpen(false);
-    } catch (err) {
-      alert(err.message);
-    } finally {
-      setIsSavingPassword(false);
-    }
+    } catch (err) { alert(err.message); }
+    finally { setIsSavingPassword(false); }
   };
 
   const canShowNavItem = (item) => {
@@ -121,25 +87,23 @@ export default function Layout({ children, currentPageName }) {
     if (item.hubOnly) return hubMode;
     if (item.siteOnly && hubMode) return false;
     if (item.adminOnly) return isAdmin;
-    // Use the shared hasPermission util which correctly handles falsy keys
     return hasPermission(currentUser, item.permission);
   };
 
   const visibleNavItems = navItems.filter(canShowNavItem);
 
-  const handleLogout = async () => {
-    await logout(true);
-  };
+  // Settings gear: show if user has any settings-related permission or is admin
+  const canSeeSettings = isAdmin || hasPermission(currentUser, "can_access_settings") || hasPermission(currentUser, "can_manage_users") || hasPermission(currentUser, "can_manage_rules");
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside
-        className={cn(
-          "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex",
-          "border-border transition-all duration-300",
-          isCollapsed ? "w-20" : "w-64"
-        )}
-      >
+      {/* Desktop sidebar */}
+      <aside className={cn(
+        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex",
+        "border-border transition-all duration-300",
+        isCollapsed ? "w-20" : "w-64"
+      )}>
+        {/* Branding */}
         <div className="border-b border-border p-6">
           <div className={cn("flex items-center gap-3", isCollapsed && "justify-center")}>
             <div className="rounded-xl bg-primary p-2 text-primary-foreground">
@@ -148,25 +112,23 @@ export default function Layout({ children, currentPageName }) {
             {!isCollapsed && (
               <div>
                 <h1 className="font-bold text-foreground">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground">Customer Manager</p>
+                <p className="text-xs text-muted-foreground">Business System</p>
               </div>
             )}
           </div>
         </div>
 
+        {/* User info */}
         {currentUser && !isCollapsed && (
           <div className="border-b border-border p-4">
             <div className="rounded-lg bg-muted p-3">
-              <p className="truncate text-sm font-medium text-foreground">
-                {currentUser.full_name || "User"}
-              </p>
-              <p className="truncate text-xs text-muted-foreground">
-                {currentUser.email}
-              </p>
+              <p className="truncate text-sm font-medium text-foreground">{currentUser.full_name || "User"}</p>
+              <p className="truncate text-xs text-muted-foreground">{currentUser.email}</p>
             </div>
           </div>
         )}
 
+        {/* Main nav */}
         <nav className="flex-1 space-y-1 p-4">
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
@@ -190,7 +152,22 @@ export default function Layout({ children, currentPageName }) {
           })}
         </nav>
 
+        {/* Bottom actions */}
         <div className="space-y-2 border-t border-border p-4">
+          {/* Settings gear */}
+          {canSeeSettings && (
+            <Button
+              variant="ghost"
+              size={isCollapsed ? "icon" : "default"}
+              className={cn("w-full", !isCollapsed && "justify-start")}
+              onClick={() => setSettingsOpen(true)}
+              title={isCollapsed ? "Settings" : undefined}
+            >
+              <Settings className="h-4 w-4" />
+              {!isCollapsed && <span className="ml-2">Settings</span>}
+            </Button>
+          )}
+
           <Button
             variant="ghost"
             size={isCollapsed ? "icon" : "default"}
@@ -206,7 +183,7 @@ export default function Layout({ children, currentPageName }) {
             variant="outline"
             size={isCollapsed ? "icon" : "default"}
             className={cn("w-full", !isCollapsed && "justify-start")}
-            onClick={handleLogout}
+            onClick={() => logout(true)}
             title={isCollapsed ? "Logout" : undefined}
           >
             <LogOut className="h-4 w-4" />
@@ -220,63 +197,40 @@ export default function Layout({ children, currentPageName }) {
             onClick={() => setIsCollapsed(!isCollapsed)}
             title={isCollapsed ? "Expand" : "Collapse"}
           >
-            {isCollapsed ? (
-              <ChevronRight className="h-4 w-4" />
-            ) : (
-              <>
-                <ChevronLeft className="h-4 w-4" />
-                <span className="ml-2">Collapse</span>
-              </>
-            )}
+            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : (<><ChevronLeft className="h-4 w-4" /><span className="ml-2">Collapse</span></>)}
           </Button>
 
           {!isCollapsed && (
-            <div
-              className={cn(
-                "rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-                versionStatus.updateAvailable
-                  ? "border-yellow-300 bg-yellow-100 text-yellow-900"
-                  : "border-transparent text-muted-foreground/50"
-              )}
-              title={
-                versionStatus.updateAvailable
-                  ? `New version available: v${versionStatus.latestVersion}`
-                  : `Current version: v${versionStatus.currentVersion}`
-              }
-            >
+            <div className={cn(
+              "rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
+              versionStatus.updateAvailable
+                ? "border-yellow-300 bg-yellow-100 text-yellow-900"
+                : "border-transparent text-muted-foreground/50"
+            )} title={versionStatus.updateAvailable ? `New: v${versionStatus.latestVersion}` : `v${versionStatus.currentVersion}`}>
               <p>v{versionStatus.currentVersion}</p>
-              {versionStatus.updateAvailable && (
-                <>
-                  <p className="font-medium">Update available</p>
-                  <p className="font-semibold">New: v{versionStatus.latestVersion}</p>
-                </>
-              )}
+              {versionStatus.updateAvailable && (<><p className="font-medium">Update available</p><p className="font-semibold">New: v{versionStatus.latestVersion}</p></>)}
             </div>
           )}
         </div>
       </aside>
 
+      {/* Mobile header */}
       <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
         <div className="flex items-center gap-2">
-          <div className="rounded-lg bg-primary p-1.5 text-primary-foreground">
-            <ShieldCheck className="h-4 w-4" />
-          </div>
+          <div className="rounded-lg bg-primary p-1.5 text-primary-foreground"><ShieldCheck className="h-4 w-4" /></div>
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
+        {canSeeSettings && (
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" /></Button>
+        )}
       </header>
 
+      {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">
         {visibleNavItems.slice(0, 4).map((item) => {
           const isActive = currentPageName === item.page;
           return (
-            <Link
-              key={item.page}
-              to={`/${item.page}`}
-              className={cn(
-                "flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all",
-                isActive ? "text-foreground" : "text-muted-foreground"
-              )}
-            >
+            <Link key={item.page} to={`/${item.page}`} className={cn("flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all", isActive ? "text-foreground" : "text-muted-foreground")}>
               <item.icon className="h-5 w-5" />
               <span className="text-xs font-medium">{item.name}</span>
             </Link>
@@ -284,15 +238,12 @@ export default function Layout({ children, currentPageName }) {
         })}
       </nav>
 
-      <main
-        className={cn(
-          "bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0",
-          isCollapsed ? "lg:ml-20" : "lg:ml-64"
-        )}
-      >
+      {/* Main content */}
+      <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-20" : "lg:ml-64")}>
         {children}
       </main>
 
+      {/* Modals */}
       {currentUser && (
         <ChangePasswordModal
           user={currentUser}
@@ -302,6 +253,12 @@ export default function Layout({ children, currentPageName }) {
           isSaving={isSavingPassword}
         />
       )}
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        hubMode={hubMode}
+      />
     </div>
   );
 }

@@ -89,7 +89,7 @@ export default function CustomerSearch() {
          {/* Header */}
          <div>
            <h1 className="text-2xl font-bold text-[var(--text-primary)] tracking-tight">
-             Customer Account Lookup
+             Customer Management
            </h1>
            <p className="text-sm text-[var(--text-secondary)] mt-1">
              Search and review customer accounts, balances, and outstanding activity

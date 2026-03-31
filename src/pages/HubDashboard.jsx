@@ -459,7 +459,7 @@ export default function HubDashboard() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Hub Dashboard</h1>
+          <h1 className="text-2xl font-bold text-foreground">Customer Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
         </div>
         <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
