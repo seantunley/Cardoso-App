@@ -326,53 +326,55 @@ function HubCustomerSearch({ sites }) {
             {loading && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
           </div>
         </div>
-        <div className="p-3 relative">
-          <div className="absolute left-6 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
-            <Search className="h-4 w-4" />
-          </div>
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
-            placeholder="Search by customer number or name…"
-            className="pl-10 h-10 text-sm bg-background"
-          />
-          {showSuggestions && suggestions.length > 0 && (
-            <div className="absolute left-3 right-3 top-[calc(100%-4px)] z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
-              {suggestions.map(({ record: r }, idx) => {
-                const f = flag(r);
-                const site = sites.find(s => s.site_id === r.site_id);
-                return (
-                  <button
-                    key={`${r.site_id}-${r.record_id}`}
-                    onClick={() => openRecord(r)}
-                    className={cn(
-                      "w-full border-b border-border px-4 py-2.5 text-left last:border-0 transition-colors flex items-center justify-between gap-3",
-                      idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted/60 text-foreground"
-                    )}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">
-                        #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
-                      </div>
-                    </div>
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold shrink-0 border", f.bg, f.text, f.border)}>
-                      <span className={cn("h-1.5 w-1.5 rounded-full",
-                        r.flag_color === "red" && "bg-red-500",
-                        r.flag_color === "orange" && "bg-orange-500",
-                        r.flag_color === "green" && "bg-green-500",
-                        (!r.flag_color || r.flag_color === "none") && "bg-muted-foreground"
-                      )} />
-                      {f.label}
-                    </span>
-                  </button>
-                );
-              })}
+        <div className="p-3">
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none">
+              <Search className="h-4 w-4" />
             </div>
-          )}
+            <Input
+              ref={inputRef}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+              onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+              placeholder="Search by customer number or name…"
+              className="pl-10 h-10 text-sm bg-background"
+            />
+            {showSuggestions && suggestions.length > 0 && (
+              <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-50 rounded-xl border border-border bg-card shadow-2xl overflow-hidden">
+                {suggestions.map(({ record: r }, idx) => {
+                  const f = flag(r);
+                  const site = sites.find(s => s.site_id === r.site_id);
+                  return (
+                    <button
+                      key={`${r.site_id}-${r.record_id}`}
+                      onClick={() => openRecord(r)}
+                      className={cn(
+                        "w-full border-b border-border px-4 py-2.5 text-left last:border-0 transition-colors flex items-center justify-between gap-3",
+                        idx === selectedIdx ? "bg-primary/10 text-foreground" : "hover:bg-muted/60 text-foreground"
+                      )}
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
+                        </div>
+                      </div>
+                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-semibold shrink-0 border", f.bg, f.text, f.border)}>
+                        <span className={cn("h-1.5 w-1.5 rounded-full",
+                          r.flag_color === "red" && "bg-red-500",
+                          r.flag_color === "orange" && "bg-orange-500",
+                          r.flag_color === "green" && "bg-green-500",
+                          (!r.flag_color || r.flag_color === "none") && "bg-muted-foreground"
+                        )} />
+                        {f.label}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       </div>
