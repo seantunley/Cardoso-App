@@ -22,7 +22,6 @@ import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
 import EditUserModal from "../components/users/EditUserModal";
 import HubUserManager from "../components/users/HubUserManager";
-import { useQuery } from "@tanstack/react-query";
 
 export default function Users() {
   const queryClient = useQueryClient();
