@@ -73,13 +73,8 @@ FunctionEnd
 Section "Install" SecInstall
   SetOutPath "$INSTDIR"
 
-  ; Copy all app files
-  File /r "..\dist\*"
-  File /r "..\src\*"
-  File "..\server.js"
-  File "..\package.json"
-  File "..\package-lock.json"
-  File /r "..\scripts\*"
+  ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
+  File /r ".\build\app\*"
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"
@@ -99,15 +94,9 @@ Section "Install" SecInstall
   FileWrite $0 "PORT=$PortValue$\r$\n"
   FileWrite $0 "SITE_NAME=$SiteNameValue$\r$\n"
   FileWrite $0 "DB_PATH=./database/cardoso.db$\r$\n"
-  ; SESSION_SECRET — generate a random 32-char string
   FileWrite $0 "SESSION_SECRET=CHANGE_ME_RUN_SETUP$\r$\n"
   FileWrite $0 "ENCRYPTION_KEY=$\r$\n"
   FileClose $0
-
-  ; Install npm dependencies (ignore native scripts - uses prebuilt binaries)
-  nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" install --production --ignore-scripts --prefix "$INSTDIR"'
-  nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" rebuild better-sqlite3 --update-binary --prefix "$INSTDIR"'
-  nsExec::ExecToLog '"$INSTDIR\node\node.exe" "$INSTDIR\node\node_modules\npm\bin\npm-cli.js" rebuild sqlite3 --update-binary --prefix "$INSTDIR"' 
 
   ; Install Windows service via NSSM
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
