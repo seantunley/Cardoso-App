@@ -98,34 +98,34 @@ export default function Layout({ children, currentPageName }) {
       {/* ── Desktop sidebar ── */}
       <aside className={cn(
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
-        isCollapsed ? "w-20" : "w-64"
+        isCollapsed ? "w-16" : "w-56"
       )}>
 
         {/* Branding + logged-in user */}
-        <div className="border-b border-border p-4">
+        <div className="border-b border-border p-3">
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
-            <div className="rounded-xl bg-primary p-2 text-primary-foreground shrink-0">
-              <ShieldCheck className="h-5 w-5" />
+            <div className="rounded-lg bg-primary p-1.5 text-primary-foreground shrink-0">
+              <ShieldCheck className="h-4 w-4" />
             </div>
             {!isCollapsed && (
               <div className="min-w-0">
-                <h1 className="font-bold text-foreground leading-tight">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground">Business System</p>
+                <h1 className="font-semibold text-sm text-foreground leading-tight">Cardoso Cigarettes</h1>
+                <p className="text-[11px] text-muted-foreground">Business System</p>
               </div>
             )}
           </div>
 
           {/* Logged-in user — shown just under branding when expanded */}
           {currentUser && !isCollapsed && (
-            <div className="mt-3 rounded-lg bg-muted px-3 py-2">
-              <p className="truncate text-sm font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
-              <p className="truncate text-xs text-muted-foreground">{currentUser.email}</p>
+            <div className="mt-2 rounded-lg bg-muted px-2.5 py-1.5">
+              <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
             </div>
           )}
         </div>
 
         {/* Main nav */}
-        <nav className="flex-1 space-y-1 p-4">
+        <nav className="flex-1 space-y-0.5 p-3">
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
             return (
@@ -134,14 +134,14 @@ export default function Layout({ children, currentPageName }) {
                 to={`/${item.page}`}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
-                  "flex items-center gap-3 rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200",
+                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-200",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   isCollapsed && "justify-center px-0"
                 )}
               >
-                <item.icon className="h-5 w-5 shrink-0" />
+                <item.icon className="h-3.5 w-3.5 shrink-0" />
                 {!isCollapsed && item.name}
               </Link>
             );
@@ -149,7 +149,7 @@ export default function Layout({ children, currentPageName }) {
         </nav>
 
         {/* Bottom actions */}
-        <div className="space-y-1 border-t border-border p-4">
+        <div className="space-y-0.5 border-t border-border p-3">
           {canSeeSettings && (
             <Button variant="ghost" size={isCollapsed ? "icon" : "default"}
               className={cn("w-full", !isCollapsed && "justify-start")}
@@ -177,8 +177,8 @@ export default function Layout({ children, currentPageName }) {
             className={cn("w-full", !isCollapsed && "justify-start")}
             onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
             {isCollapsed
-              ? <ChevronRight className="h-4 w-4" />
-              : <><ChevronLeft className="h-4 w-4" /><span className="ml-2">Collapse</span></>}
+              ? <ChevronRight className="h-3.5 w-3.5" />
+              : <><ChevronLeft className="h-3.5 w-3.5" /><span className="ml-2">Collapse</span></>}
           </Button>
 
           {!isCollapsed && (
@@ -223,7 +223,7 @@ export default function Layout({ children, currentPageName }) {
       </nav>
 
       {/* ── Main content ── */}
-      <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-20" : "lg:ml-64")}>
+      <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
         {children}
       </main>
 
