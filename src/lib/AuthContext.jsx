@@ -23,6 +23,7 @@ async function readJsonResponse(res) {
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
   const [authError, setAuthError] = useState(null);
@@ -109,11 +110,23 @@ export const AuthProvider = ({ children }) => {
       return null;
     }
 
+    // Force password change on first login
+    if (data.force_password_change) {
+      setForcePasswordChange(true);
+      return null;
+    }
+
     setUser(data.user);
     setIsAuthenticated(true);
     setAuthError(null);
 
     return data.user;
+  };
+
+  const completePasswordChange = (userData) => {
+    setForcePasswordChange(false);
+    setUser(userData);
+    setIsAuthenticated(true);
   };
 
   const logout = async (shouldRedirect = true) => {
@@ -148,6 +161,8 @@ export const AuthProvider = ({ children }) => {
         authError,
         appPublicSettings,
         login,
+        forcePasswordChange,
+        completePasswordChange,
         logout,
         navigateToLogin,
         checkAppState,

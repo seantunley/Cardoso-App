@@ -8,6 +8,7 @@ import PageNotFound from "./lib/PageNotFound";
 import { useAuth } from "@/lib/AuthContext";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
+import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -42,7 +43,7 @@ const ProtectedPage = ({ children, currentPageName }) => {
 };
 
 const AuthenticatedApp = () => {
-  const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated } = useAuth();
+  const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated, forcePasswordChange, completePasswordChange } = useAuth();
 
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (

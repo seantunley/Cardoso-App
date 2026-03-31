@@ -527,6 +527,7 @@ ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 })();
 
 ensureColumn('user', 'password_hash', 'TEXT');
+ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
@@ -1454,6 +1455,14 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
       console.error('Failed to write login log:', logErr);
     }
 
+    // Force password change on first login
+    if (user.must_change_password) {
+      // Create a temporary session token so the client can call set-initial-password
+      req.session.pendingUserId = user.id;
+      req.session.userId = null;
+      return res.json({ success: false, force_password_change: true });
+    }
+
     // Hub redirect: if user is flagged as a hub user, send them to head office
     if (user.hub_redirect) {
       const hubUrl = process.env.HUB_REDIRECT_URL || null;
@@ -1478,6 +1487,40 @@ app.post('/api/auth/logout', (req, res) => {
   req.session.destroy(() => {
     res.json({ success: true });
   });
+
+app.post('/api/auth/set-initial-password', async (req, res) => {
+  const userId = req.session.pendingUserId;
+  if (!userId) return res.status(401).json({ error: 'No pending session' });
+
+  const { password } = req.body;
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  }
+
+  try {
+    const hash = await bcrypt.hash(password, 12);
+    db.prepare(`UPDATE "user" SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(hash, userId);
+
+    // Upgrade session to full login
+    const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);
+    req.session.pendingUserId = null;
+    req.session.userId = userId;
+
+    // Hub redirect check
+    if (user.hub_redirect) {
+      const hubUrl = process.env.HUB_REDIRECT_URL || null;
+      if (hubUrl) {
+        req.session.destroy(() => {});
+        return res.json({ success: true, hub_redirect: hubUrl });
+      }
+    }
+
+    res.json({ success: true, user: sanitizeUser(user) });
+  } catch (err) {
+    console.error('set-initial-password error:', err);
+    res.status(500).json({ error: 'Failed to set password' });
+  }
+});
 });
 
 app.get('/api/auth/me', requireAuth, (req, res) => {
@@ -1794,20 +1837,24 @@ app.post('/api/users', requireAuth, requireAdmin, async (req, res) => {
     }
 
     const defaults = defaultPermissionsForRole(role);
-    const passwordHash = await bcrypt.hash(password, 12);
+    const defaultPassword = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+    const finalPassword = password || defaultPassword;
+    const mustChange = password ? 0 : 1;
+    const passwordHash = await bcrypt.hash(finalPassword, 12);
 
     const info = db.prepare(`
       INSERT INTO "user" (
-        email, full_name, role, password_hash, is_active,
+        email, full_name, role, password_hash, is_active, must_change_password,
         can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       email.trim().toLowerCase(),
       full_name,
       role,
       passwordHash,
       1,
+      mustChange,
       defaults.can_access_customer_search ? 1 : 0,
       defaults.can_access_records ? 1 : 0,
       defaults.can_access_reports ? 1 : 0,
@@ -2622,11 +2669,13 @@ if (process.env.HUB_MODE === 'true') {
           updated++;
         } else {
           // Create new user — no password set (they must set one or reset locally)
+          const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+          const defaultHash = await bcrypt.hash(defaultPw, 12);
           db.prepare(`
-            INSERT INTO "user" (email, full_name, role, is_active, hub_redirect,
+            INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
               can_access_connections, can_manage_users, can_manage_rules,
               can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -2637,7 +2686,8 @@ if (process.env.HUB_MODE === 'true') {
             u.can_manage_users ? 1 : 0,
             u.can_manage_rules ? 1 : 0,
             u.can_edit_records ? 1 : 0,
-            u.can_flag_records ? 1 : 0
+            u.can_flag_records ? 1 : 0,
+            defaultHash
           );
           created++;
         }
