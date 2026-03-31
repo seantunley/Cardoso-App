@@ -2898,7 +2898,7 @@ async function triggerWindowsUpdate() {
     });
     if (!releaseResp.ok) throw new Error(`GitHub API error: ${releaseResp.status}`);
     const release = await releaseResp.json();
-    const asset = release.assets.find(a => a.name === 'CardosoSetup.exe');
+    const asset = release.assets.find(a => a.name.startsWith('CardosoSetup-') && a.name.endsWith('.exe'));
     if (!asset) throw new Error('CardosoSetup.exe not found in latest release');
 
     console.log(`[AutoUpdate] Downloading ${asset.name} (${(asset.size/1024/1024).toFixed(1)} MB)...`);

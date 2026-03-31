@@ -94,6 +94,8 @@ jobs:
       - name: Build installer
         run: |
           & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          Rename-Item CardosoSetup.exe "CardosoSetup-v$v.exe"
         shell: powershell
 
       - name: Get version
@@ -124,7 +126,7 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: "Cardoso v${{ steps.version.outputs.version }}"
-          files: CardosoSetup.exe
+          files: CardosoSetup-v${{ steps.version.outputs.version }}.exe
           generate_release_notes: true
           make_latest: true
         env:
