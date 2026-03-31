@@ -304,7 +304,7 @@ function HubCustomerSearch({ sites }) {
   const flag = (r) => FLAG_COLORS[r.flag_color] || FLAG_COLORS.none;
 
   return (
-    <div className="w-full">
+    <div className="w-full max-w-2xl">
       {/* Search card */}
       <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/30">
