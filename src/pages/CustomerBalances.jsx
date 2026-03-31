@@ -144,9 +144,7 @@ export default function CustomerBalances() {
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Customer ID</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Site</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Last Invoice</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Inv. Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-semibold text-muted-foreground">Last Receipt</th>
-                  <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Rec. Amount</th>
                   <th className="px-4 py-3 text-right text-xs font-semibold text-muted-foreground">Outstanding Balance</th>
                 </tr>
               </thead>
@@ -171,17 +169,23 @@ export default function CustomerBalances() {
                       <td className="px-4 py-3 text-xs text-muted-foreground">
                         {row.site_name || "—"}
                       </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-                        {row.last_unpaid_invoice_1 || "—"}
+                      <td className="px-4 py-3 text-xs">
+                        <div className="font-mono text-foreground">{row.last_unpaid_invoice_1 || "—"}</div>
+                        {row.last_unpaid_invoice_1_amount && (
+                          <div className="tabular-nums text-muted-foreground">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>
+                        )}
+                        {row.last_unpaid_invoice_date && (
+                          <div className="text-muted-foreground/60">{row.last_unpaid_invoice_date}</div>
+                        )}
                       </td>
-                      <td className="px-4 py-3 text-right text-xs tabular-nums text-muted-foreground">
-                        {row.last_unpaid_invoice_1_amount ? `R ${formatAmount(row.last_unpaid_invoice_1_amount)}` : "—"}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-                        {row.last_receipt_number || "—"}
-                      </td>
-                      <td className="px-4 py-3 text-right text-xs tabular-nums text-muted-foreground">
-                        {row.last_receipt_amount ? `R ${formatAmount(row.last_receipt_amount)}` : "—"}
+                      <td className="px-4 py-3 text-xs">
+                        <div className="font-mono text-foreground">{row.last_receipt_number || "—"}</div>
+                        {row.last_receipt_amount && (
+                          <div className="tabular-nums text-muted-foreground">R {formatAmount(row.last_receipt_amount)}</div>
+                        )}
+                        {row.last_receipt_date && (
+                          <div className="text-muted-foreground/60">{row.last_receipt_date}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>

@@ -1576,8 +1576,10 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           r.outstanding_balance,
           r.last_unpaid_invoice_1,
           r.last_unpaid_invoice_1_amount,
+          r.last_unpaid_invoice_date,
           r.last_receipt_number,
           r.last_receipt_amount,
+          r.last_receipt_date,
           COALESCE(s.name, r.site_id) AS site_name
         FROM hub_records r
         LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -1597,8 +1599,10 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           outstanding_balance,
           last_unpaid_invoice_1,
           last_unpaid_invoice_1_amount,
+          last_unpaid_invoice_date,
           last_receipt_number,
           last_receipt_amount,
+          last_receipt_date,
           source_table AS site_name
         FROM datarecord
         WHERE outstanding_balance IS NOT NULL
