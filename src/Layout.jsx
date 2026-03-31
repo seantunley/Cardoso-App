@@ -101,17 +101,12 @@ export default function Layout({ children, currentPageName }) {
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
             <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
               <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-                <rect width="32" height="32" rx="6" fill="#c0392b"/>
-                <rect x="2" y="2" width="28" height="28" rx="5" fill="#e74c3c"/>
-                <rect x="0" y="11" width="32" height="4" fill="#f39c12"/>
-                <rect x="0" y="11" width="32" height="1" fill="#e67e22"/>
-                <rect x="0" y="14" width="32" height="1" fill="#e67e22"/>
-                <rect x="5" y="16" width="22" height="3" rx="1.5" fill="#f5f5f0"/>
-                <rect x="5" y="20" width="22" height="3" rx="1.5" fill="#f5f5f0"/>
-                <rect x="24" y="16" width="3" height="3" rx="1" fill="#e8a87c"/>
-                <rect x="24" y="20" width="3" height="3" rx="1" fill="#e8a87c"/>
-                <rect x="4" y="4" width="24" height="6" rx="2" fill="#c0392b"/>
-                <text x="16" y="9.5" textAnchor="middle" fill="#ffd700" fontSize="5" fontWeight="bold" fontFamily="serif">CARDOSO</text>
+                <rect width="32" height="32" rx="7" fill="#1e293b"/>
+                <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bc32)"/>
+                <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
+                <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
+                <path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" fill="none"/>
+                <defs><linearGradient id="bc32" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs>
               </svg>
             </div>
             {!isCollapsed && (
