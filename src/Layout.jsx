@@ -17,7 +17,7 @@ import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 
-const APP_VERSION = "2026.1.2";
+const APP_VERSION = "2026.2.1";
 
 const navItems = [
   { name: "Customer Management", icon: Search,  page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
