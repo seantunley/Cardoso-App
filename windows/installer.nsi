@@ -82,6 +82,8 @@ Section "Install" SecInstall
   File /r "..\scripts\*"
   File /r "..
 ode_modules\*"
+  File /r "..
+ode_modules\*"
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"

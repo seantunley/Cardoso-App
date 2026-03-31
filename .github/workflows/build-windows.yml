@@ -21,35 +21,47 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install dependencies
-        run: npm install --production=false
-
-      - name: Build frontend
-        run: npm run build
-
-      - name: Stage app node_modules for installer
+      - name: Install dependencies and build
         run: |
-          New-Item -ItemType Directory -Force -Path windows/build/app_modules | Out-Null
-          # node_modules are already installed by the Install dependencies step
-          # Copy them to a staging area (installer will pick up from repo root directly)
-          Write-Host "node_modules ready at repo root"
+          npm ci
+          npm run build
         shell: powershell
 
-      - name: Install NSIS and NSSM via Chocolatey
-        run: |
-          choco install nsis nssm -y --no-progress
+      - name: Install NSIS via Chocolatey
+        run: choco install nsis -y --no-progress
         shell: powershell
 
-      - name: Stage NSSM for installer
+      - name: Download NSSM from GitHub mirror
         run: |
           New-Item -ItemType Directory -Force -Path windows/build/nssm | Out-Null
-          # Find nssm.exe wherever choco installed it
-          $nssmPath = Get-ChildItem -Path "C:\ProgramData\chocolatey" -Recurse -Filter "nssm.exe" -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -match "win64|tools" } |
-            Select-Object -First 1 -ExpandProperty FullName
-          if (-not $nssmPath) { $nssmPath = (Get-Command nssm).Source }
-          Write-Host "Using nssm from: $nssmPath"
-          Copy-Item $nssmPath windows/build/nssm/nssm.exe
+          # Use a reliable GitHub-hosted nssm binary
+          $urls = @(
+            "https://github.com/NSSM-Service/nssm/releases/download/2.24/nssm-win64.exe",
+            "https://raw.githubusercontent.com/bmrf/standalone_scripts/master/nssm.exe"
+          )
+          $downloaded = $false
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile "windows/build/nssm/nssm.exe" -TimeoutSec 30 -ErrorAction Stop
+              $size = (Get-Item "windows/build/nssm/nssm.exe").Length
+              if ($size -gt 100000) {
+                Write-Host "Downloaded nssm from $url ($size bytes)"
+                $downloaded = $true
+                break
+              }
+            } catch { Write-Host "Failed: $url" }
+          }
+          if (-not $downloaded) {
+            # Last resort: extract from choco cache if nssm was previously installed
+            $cached = Get-ChildItem "C:\ProgramData\chocolatey" -Recurse -Filter "nssm.exe" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 100000 } | Select-Object -First 1
+            if ($cached) {
+              Copy-Item $cached.FullName "windows/build/nssm/nssm.exe"
+              Write-Host "Used cached nssm: $($cached.FullName)"
+            } else {
+              throw "Could not obtain nssm.exe from any source"
+            }
+          }
         shell: powershell
 
       - name: Bundle Node.js runtime
@@ -57,13 +69,21 @@ jobs:
           $nodeExe = Get-Command node | Select-Object -ExpandProperty Source
           $nodeDir = Split-Path $nodeExe
           New-Item -ItemType Directory -Force -Path windows/build/node | Out-Null
-          # Copy node.exe
           Copy-Item "$nodeDir\node.exe" windows/build/node/
-          # Copy npm
-          Copy-Item -Recurse "$nodeDir\node_modules" windows/build/node/node_modules -ErrorAction SilentlyContinue
-          Copy-Item "$nodeDir\npm" windows/build/node/npm -ErrorAction SilentlyContinue
+          if (Test-Path "$nodeDir\node_modules") {
+            Copy-Item -Recurse "$nodeDir\node_modules" windows/build/node/node_modules -ErrorAction SilentlyContinue
+          }
           Copy-Item "$nodeDir\npm.cmd" windows/build/node/npm.cmd -ErrorAction SilentlyContinue
           Copy-Item "$nodeDir\npx.cmd" windows/build/node/npx.cmd -ErrorAction SilentlyContinue
+        shell: powershell
+
+      - name: Stage app for installer (with node_modules)
+        run: |
+          # node_modules are already installed by npm ci above
+          # Verify better-sqlite3 native binary exists for win32
+          $bsq3 = Get-ChildItem "node_modules\better-sqlite3\prebuilds" -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          Write-Host "better-sqlite3 prebuilds: $($bsq3.Count) files"
+          $bsq3 | ForEach-Object { Write-Host "  $($_.FullName)" }
         shell: powershell
 
       - name: Update version in installer
@@ -104,7 +124,6 @@ jobs:
           }
           git tag -d $tag 2>$null
           git push origin :refs/tags/$tag 2>$null
-          Write-Host "Tag cleanup done"
         shell: powershell
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
