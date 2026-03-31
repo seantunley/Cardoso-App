@@ -139,13 +139,13 @@ export default function CustomerBalances() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground w-8">#</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Customer Name</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Customer ID</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Site</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Last Invoice</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground">Last Receipt</th>
-                  <th className="px-3 py-2 text-right text-xs font-semibold text-muted-foreground">Outstanding Balance</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-6">#</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Customer Name</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Customer ID</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Last Invoice</th>
+                  <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Last Receipt</th>
+                  <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Outstanding Balance</th>
                 </tr>
               </thead>
               <tbody>
@@ -157,37 +157,37 @@ export default function CustomerBalances() {
                       key={`${row.customer_number}-${row.site_name}-${idx}`}
                       className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
                     >
-                      <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
-                      <td className="px-3 py-2">
+                      <td className="px-2 py-1 text-xs text-muted-foreground">{idx + 1}</td>
+                      <td className="px-2 py-1">
                         <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
                           {row.customer_name || "—"}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground font-mono">
+                      <td className="px-2 py-1 text-xs text-muted-foreground font-mono">
                         {row.customer_number || "—"}
                       </td>
-                      <td className="px-3 py-2 text-xs text-muted-foreground">
+                      <td className="px-2 py-1 text-xs text-muted-foreground">
                         {row.site_name || "—"}
                       </td>
-                      <td className="px-3 py-2 text-xs">
-                        <div className="font-mono text-foreground">{row.last_unpaid_invoice_1 || "—"}</div>
+                      <td className="px-2 py-1 text-xs">
+                        <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
                         {row.last_unpaid_invoice_1_amount && (
-                          <div className="tabular-nums text-amber-400">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>
+                          <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>
                         )}
                         {row.last_unpaid_invoice_date && (
-                          <div className="text-muted-foreground/60">{row.last_unpaid_invoice_date}</div>
+                          <div className="text-muted-foreground/60 leading-tight">{row.last_unpaid_invoice_date}</div>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-xs">
-                        <div className="font-mono text-foreground">{row.last_receipt_number || "—"}</div>
+                      <td className="px-2 py-1 text-xs">
+                        <div className="font-mono text-foreground leading-tight">{row.last_receipt_number || "—"}</div>
                         {row.last_receipt_amount && (
-                          <div className="tabular-nums text-amber-400">R {formatAmount(row.last_receipt_amount)}</div>
+                          <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_receipt_amount)}</div>
                         )}
                         {row.last_receipt_date && (
-                          <div className="text-muted-foreground/60">{row.last_receipt_date}</div>
+                          <div className="text-muted-foreground/60 leading-tight">{row.last_receipt_date}</div>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-right">
+                      <td className="px-2 py-1 text-right">
                         <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
                           R {formatAmount(amount)}
                         </span>
