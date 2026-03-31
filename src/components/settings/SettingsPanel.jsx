@@ -23,7 +23,171 @@ import {
 // Sub-components
 import AutoFlagRuleForm from "@/components/settings/AutoFlagRuleForm";
 import AuditLogTable from "@/components/audit/AuditLogTable";
+import ConnectionCard from "@/components/dashboard/ConnectionCard";
+import ConnectionModal from "@/components/connections/ConnectionModal";
+import ConnectionStatus from "@/components/connections/ConnectionStatus";
 
+
+
+// ─── Connections Tab ──────────────────────────────────────────────────────────
+
+async function fetchLocalConnections() {
+  const r = await fetch("/api/databaseconnection", { credentials: "include" });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Failed to fetch connections");
+  return Array.isArray(d) ? d : [];
+}
+async function createLocalConnection(data) {
+  const r = await fetch("/api/databaseconnection", { method: "POST", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Failed to create connection");
+  return d;
+}
+async function updateLocalConnection(id, data) {
+  const r = await fetch(`/api/databaseconnection/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(data) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Failed to update connection");
+  return d;
+}
+async function deleteLocalConnection(id) {
+  const r = await fetch(`/api/databaseconnection/${id}`, { method: "DELETE", credentials: "include" });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Failed to delete connection");
+  return d;
+}
+async function runLocalImport(connectionId) {
+  const r = await fetch(`/api/import/${connectionId}`, { method: "POST", credentials: "include" });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || "Import failed");
+  return d;
+}
+
+function ConnectionsTab({ currentUser }) {
+  const queryClient = useQueryClient();
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingConnection, setEditingConnection] = useState(null);
+  const [syncingId, setSyncingId] = useState(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState(null);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
+
+  const isAdmin = currentUser?.role === "admin";
+
+  const { data: connections = [], isLoading, error } = useQuery({
+    queryKey: ["connections"],
+    queryFn: fetchLocalConnections,
+    enabled: !!currentUser,
+    refetchInterval: 30000,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: createLocalConnection,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["connections"] }); setModalOpen(false); toast.success("Connection created"); },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }) => updateLocalConnection(id, data),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["connections"] }); setModalOpen(false); setEditingConnection(null); toast.success("Connection updated"); },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: deleteLocalConnection,
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["connections"] }); toast.success("Connection deleted"); },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const handleSave = (data, id) => {
+    const payload = { ...data, created_by: currentUser?.email };
+    if (id) updateMutation.mutate({ id, data: payload }); else createMutation.mutate(payload);
+  };
+
+  const handleSyncAll = async () => {
+    if (!connections.length) { toast.error("No connections to sync"); return; }
+    setIsSyncingAll(true);
+    try {
+      let total = 0;
+      for (const c of connections) { const r = await runLocalImport(c.id); total += r.imported || 0; }
+      toast.success(`Sync complete. ${total} records imported.`);
+      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["records"] });
+    } catch (e) { toast.error(`Sync failed: ${e.message}`); }
+    finally { setIsSyncingAll(false); }
+  };
+
+  const handleSync = async (conn) => {
+    setSyncingId(conn.id);
+    try {
+      const r = await runLocalImport(conn.id);
+      toast.success(r.message || `Synced ${conn.name} (${r.imported || 0} records)`);
+      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: ["records"] });
+    } catch (e) { toast.error(`Failed: ${e.message}`); }
+    finally { setSyncingId(null); }
+  };
+
+  const handleEdit = (conn) => { setEditingConnection(conn); setModalOpen(true); };
+  const handleDelete = (conn) => { if (confirm("Delete this connection?")) deleteMutation.mutate(conn.id); };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex justify-end gap-2">
+        <Button onClick={handleSyncAll} disabled={isSyncingAll} variant="outline" size="sm"
+          className="border-border text-muted-foreground hover:text-foreground">
+          <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll ? "animate-spin" : ""}`} />
+          {isSyncingAll ? "Syncing..." : "Sync All"}
+        </Button>
+        {isAdmin && (
+          <Button onClick={() => { setEditingConnection(null); setModalOpen(true); }} size="sm"
+            className="bg-white hover:bg-gray-100 text-gray-900">
+            <Plus className="w-4 h-4 mr-2" />New Connection
+          </Button>
+        )}
+      </div>
+
+      {error && <div className="rounded-xl border border-rose-700 bg-rose-900/20 p-4 text-sm text-rose-300">{error.message}</div>}
+
+      {isLoading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[1,2].map(i => <div key={i} className="h-48 rounded-2xl bg-muted animate-pulse" />)}
+        </div>
+      ) : connections.length === 0 ? (
+        <div className="text-center py-12 rounded-2xl border border-border bg-card">
+          <p className="text-muted-foreground text-sm">
+            {isAdmin ? "No connections yet. Add one to start syncing." : "No connections configured. Contact an admin."}
+          </p>
+          {isAdmin && (
+            <Button onClick={() => setModalOpen(true)} size="sm" className="mt-4 bg-white hover:bg-gray-100 text-gray-900">
+              <Plus className="w-4 h-4 mr-2" />Add Connection
+            </Button>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {selectedConnectionId && connections.find(c => c.id === selectedConnectionId) && (
+            <Card className="border-border bg-card">
+              <CardContent className="p-4">
+                <ConnectionStatus connection={connections.find(c => c.id === selectedConnectionId)} />
+              </CardContent>
+            </Card>
+          )}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {connections.map(conn => (
+              <div key={conn.id} onClick={() => setSelectedConnectionId(conn.id)}
+                className={`cursor-pointer transition-opacity ${selectedConnectionId === conn.id ? "opacity-100" : "opacity-75 hover:opacity-100"}`}>
+                <ConnectionCard connection={conn} onSync={handleSync}
+                  onEdit={isAdmin ? handleEdit : null} onDelete={isAdmin ? handleDelete : null}
+                  isSyncing={syncingId === conn.id} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <ConnectionModal connection={editingConnection} open={modalOpen}
+        onClose={() => { setModalOpen(false); setEditingConnection(null); }}
+        onSave={handleSave} isSaving={createMutation.isPending || updateMutation.isPending} />
+    </div>
+  );
+}
 
 // ─── Fields Tab ─────────────────────────────────────────────────────────────
 
@@ -405,6 +569,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     { id: "theme", label: "Theme" },
     !hubMode && { id: "autoflag", label: "Auto-Flag Rules" },
     !hubMode && { id: "fields", label: "Fields" },
+    !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
     hubMode && { id: "synclog", label: "Sync Log" },
   ].filter(Boolean);
@@ -436,7 +601,8 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "autoflag" && <AutoFlagTab />}
                 {t.id === "fields"   && <FieldsTab />}
                 {t.id === "audit"    && <AuditTab />}
-                {t.id === "synclog"  && <SyncLogTab />}
+                {t.id === "synclog"       && <SyncLogTab />}
+                {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
               </TabsContent>
             ))}
           </div>

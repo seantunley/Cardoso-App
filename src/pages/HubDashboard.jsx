@@ -248,44 +248,33 @@ function HubCustomerSearch({ sites }) {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedIdx, setSelectedIdx] = useState(-1);
   const [loading, setLoading] = useState(false);
-  const [allRecords, setAllRecords] = useState([]);
   const [modalRecord, setModalRecord] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const inputRef = useRef(null);
 
-  // Fetch hub records for selected site (or all)
-  const loadRecords = useCallback(async (siteId) => {
+  // Server-side search: query the API when the user types, filtered by site
+  const searchRecords = useCallback(async (searchQuery, siteId) => {
+    if (!searchQuery.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
     setLoading(true);
     try {
-      const params = new URLSearchParams({ limit: 5000 });
+      const params = new URLSearchParams({ search: searchQuery.trim(), limit: 20 });
       if (siteId) params.set("site_id", siteId);
       const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
       if (res.ok) {
         const data = await res.json();
-        setAllRecords(data.records || []);
+        setSuggestions((data.records || []).map(r => ({ record: r, score: 1 })));
+        setSelectedIdx(-1);
+        setShowSuggestions((data.records || []).length > 0);
       }
     } finally {
       setLoading(false);
     }
   }, []);
 
-  useEffect(() => { loadRecords(selectedSiteId); }, [selectedSiteId, loadRecords]);
-
   useEffect(() => {
-    if (!query.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
-    const matches = [];
-    for (const r of allRecords) {
-      const numMatch  = fuzzyMatch(String(r.customer_number || ""), query);
-      const nameMatch = fuzzyMatch(String(r.customer_name  || ""), query);
-      if (numMatch.matches || nameMatch.matches) {
-        matches.push({ record: r, score: Math.max(numMatch.score, nameMatch.score) });
-      }
-    }
-    matches.sort((a, b) => b.score - a.score);
-    setSuggestions(matches.slice(0, 8));
-    setSelectedIdx(-1);
-    setShowSuggestions(matches.length > 0);
-  }, [query, allRecords]);
+    const timeout = setTimeout(() => searchRecords(query, selectedSiteId), 200);
+    return () => clearTimeout(timeout);
+  }, [query, selectedSiteId, searchRecords]);
 
   const openRecord = (r) => {
     const site = sites.find(s => s.site_id === r.site_id);

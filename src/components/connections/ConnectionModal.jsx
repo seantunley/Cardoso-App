@@ -72,6 +72,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     query_index_field: "",
     query_field_mappings: {},
     status: "inactive",
+    record_type: "customer",
   });
 
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
@@ -125,6 +126,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           return raw;
         })(),
         status: connection.status || "inactive",
+        record_type: connection.record_type || "customer",
       });
       // Reset query test state when editing an existing connection
       setQueryTestStatus(null);
@@ -143,6 +145,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         query_index_field: "",
         query_field_mappings: {},
         status: "inactive",
+        record_type: "customer",
       });
       setConnectionTestStatus(null);
       setQueryTestStatus(null);
@@ -277,6 +280,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       query_index_field: formData.query_index_field,
       query_field_mappings: JSON.stringify(formData.query_field_mappings || {}),
       status: formData.status,
+      record_type: formData.record_type || "customer",
     };
 
     onSave(dataToSave, connection?.id);
@@ -603,6 +607,23 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               </Button>
             </div>
           )}
+
+          {/* ── Record Type ── */}
+          <div className="space-y-2 pt-4 border-t border-gray-800">
+            <Label className="text-sm font-medium text-gray-300">Record Type</Label>
+            <Select
+              value={formData.record_type || "customer"}
+              onValueChange={(val) => setFormData({ ...formData, record_type: val })}
+            >
+              <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                <SelectItem value="customer">Customer Records</SelectItem>
+                <SelectItem value="inventory">Inventory Records</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           {/* ── Status ── */}
           <div className="space-y-2 pt-4 border-t border-gray-800">

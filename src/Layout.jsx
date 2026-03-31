@@ -6,8 +6,9 @@ import {
   ChevronRight,
   KeyRound,
   Search,
-  Link2,
   Globe,
+  Wallet,
+  Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -17,12 +18,13 @@ import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 import SettingsPanel from "@/components/settings/SettingsPanel";
 
-const APP_VERSION = "2026.2.1";
+const APP_VERSION = "2026.2.2";
 
 const navItems = [
-  { name: "Customer Management", icon: Search,  page: "CustomerSearch", permission: "can_access_customer_search", siteOnly: true },
-  { name: "Connections",         icon: Link2,   page: "Connections",    siteOnly: true },
-  { name: "Customer Management", icon: Globe,   page: "HubDashboard",   hubOnly: true },
+  { name: "Customer Management", icon: Search,  page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
+  { name: "Customer Management", icon: Globe,   page: "HubDashboard",     hubOnly: true },
+  { name: "Customer Balances",   icon: Wallet,  page: "CustomerBalances", permission: "can_access_customer_search" },
+  { name: "Inventory", icon: Package, page: "Inventory", permission: "can_access_customer_search" },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -97,7 +99,7 @@ export default function Layout({ children, currentPageName }) {
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
         isCollapsed ? "w-16" : "w-56"
       )}>
-        <div className="border-b border-border px-3 pt-4 pb-3">
+        <div className="border-b border-border px-3 pt-6 pb-3">
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
             <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
               <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
@@ -117,7 +119,7 @@ export default function Layout({ children, currentPageName }) {
             )}
           </div>
           {currentUser && !isCollapsed && (
-            <div className="mt-3.5 rounded-lg bg-muted px-2.5 py-1.5">
+            <div className="mt-6 rounded-lg bg-muted px-2.5 py-1.5">
               <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
               <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
             </div>
