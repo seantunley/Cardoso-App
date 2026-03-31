@@ -6,7 +6,6 @@ import {
   ChevronRight,
   KeyRound,
   Search,
-  Link2,
   Globe,
   Wallet,
 } from "lucide-react";
@@ -22,7 +21,6 @@ const APP_VERSION = "2026.2.1";
 
 const navItems = [
   { name: "Customer Management", icon: Search,  page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
-  { name: "Connections",         icon: Link2,   page: "Connections",      siteOnly: true },
   { name: "Customer Management", icon: Globe,   page: "HubDashboard",     hubOnly: true },
   { name: "Customer Balances",   icon: Wallet,  page: "CustomerBalances", permission: "can_access_customer_search" },
 ];
