@@ -97,7 +97,7 @@ export default function Layout({ children, currentPageName }) {
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
         isCollapsed ? "w-16" : "w-56"
       )}>
-        <div className="border-b border-border p-3">
+        <div className="border-b border-border px-3 pt-4 pb-3">
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
             <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
               <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
