@@ -2629,7 +2629,7 @@ if (process.env.HUB_MODE === 'true') {
   });
 
   // POST /api/hub/receive-users — site endpoint: receive users pushed from hub
-  app.post('/api/hub/receive-users', (req, res) => {
+  app.post(`/api/hub/receive-users`, async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
     if (!expectedToken || token !== expectedToken) {
