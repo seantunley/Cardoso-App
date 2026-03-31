@@ -1,0 +1,80 @@
+name: Build Windows Installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install --production=false
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Download NSSM
+        run: |
+          Invoke-WebRequest -Uri "https://nssm.cc/release/nssm-2.24.zip" -OutFile nssm.zip
+          Expand-Archive nssm.zip -DestinationPath nssm-tmp
+          New-Item -ItemType Directory -Force -Path windows/build/nssm
+          Copy-Item nssm-tmp/nssm-2.24/win64/nssm.exe windows/build/nssm/nssm.exe
+
+      - name: Bundle Node.js runtime
+        run: |
+          $nodeVersion = node --version
+          $arch = "x64"
+          $nodeZipUrl = "https://nodejs.org/dist/$nodeVersion/node-$nodeVersion-win-$arch.zip"
+          Invoke-WebRequest -Uri $nodeZipUrl -OutFile node.zip
+          Expand-Archive node.zip -DestinationPath node-tmp
+          New-Item -ItemType Directory -Force -Path windows/build/node
+          Copy-Item -Recurse "node-tmp/node-$nodeVersion-win-$arch/*" windows/build/node/
+          # Also copy node_modules/npm into the bundled node
+          Copy-Item -Recurse node_modules/npm windows/build/node/node_modules/npm
+
+      - name: Update version in installer
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $paddedVersion = "$version.0"
+          (Get-Content windows/installer.nsi) `
+            -replace 'VIProductVersion ".*"', "VIProductVersion `"$paddedVersion`"" `
+            -replace 'DisplayVersion" ".*"', "DisplayVersion`" `"$version`"" `
+            -replace '"FileVersion" ".*"', "`"FileVersion`" `"$version`"" |
+          Set-Content windows/installer.nsi
+
+      - name: Install NSIS
+        run: |
+          choco install nsis -y
+
+      - name: Build installer
+        run: |
+          makensis windows/installer.nsi
+
+      - name: Get version
+        id: version
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: "Cardoso v${{ steps.version.outputs.version }}"
+          files: CardosoSetup.exe
+          generate_release_notes: true
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

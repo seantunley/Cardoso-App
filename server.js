@@ -2877,6 +2877,69 @@ function gracefulShutdown(signal) {
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
+// ==================== AUTO-UPDATE (WINDOWS SERVICE) ====================
+import { exec as execChild } from 'child_process';
+
+let autoUpdateRunning = false;
+
+async function triggerWindowsUpdate() {
+  if (autoUpdateRunning) {
+    console.log('[AutoUpdate] Update already in progress, skipping.');
+    return { ok: false, reason: 'already_running' };
+  }
+  const updateScript = path.join(process.cwd(), 'scripts', 'update-silent.bat');
+  if (!fs.existsSync(updateScript)) {
+    console.warn('[AutoUpdate] update-silent.bat not found — skipping.');
+    return { ok: false, reason: 'script_not_found' };
+  }
+  autoUpdateRunning = true;
+  console.log('[AutoUpdate] Triggering update via update-silent.bat...');
+  return new Promise((resolve) => {
+    execChild(`"${updateScript}"`, { detached: true, stdio: 'ignore', windowsHide: true }, (err) => {
+      autoUpdateRunning = false;
+      if (err) {
+        console.error('[AutoUpdate] Script error:', err.message);
+        resolve({ ok: false, reason: err.message });
+      } else {
+        console.log('[AutoUpdate] Update script launched.');
+        resolve({ ok: true });
+      }
+    });
+  });
+}
+
+// Admin-triggered update endpoint
+app.post('/api/app-update-trigger', requireAuth, requireAdmin, async (req, res) => {
+  if (process.platform !== 'win32') {
+    return res.status(400).json({ error: 'Auto-update only supported on Windows.' });
+  }
+  const result = await triggerWindowsUpdate();
+  if (result.ok) {
+    res.json({ ok: true, message: 'Update started. Service will restart automatically.' });
+  } else {
+    res.status(500).json({ ok: false, error: result.reason });
+  }
+});
+
+// Background hourly check — auto-triggers update if new version available (Windows only)
+if (process.platform === 'win32' && IS_PRODUCTION) {
+  const AUTO_UPDATE_INTERVAL_MS = 1000 * 60 * 60; // 1 hour
+  setInterval(async () => {
+    try {
+      const status = await getVersionStatus();
+      if (status.updateAvailable) {
+        console.log(`[AutoUpdate] New version ${status.latestVersion} available (current: ${status.currentVersion}). Triggering update.`);
+        await triggerWindowsUpdate();
+      } else {
+        console.log(`[AutoUpdate] Version check: up to date (${status.currentVersion}).`);
+      }
+    } catch (err) {
+      console.error('[AutoUpdate] Hourly check error:', err.message);
+    }
+  }, AUTO_UPDATE_INTERVAL_MS);
+  console.log('[AutoUpdate] Hourly auto-update check enabled.');
+}
+
 // ==================== PRODUCTION SPA FALLBACK ====================
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
