@@ -88,15 +88,18 @@ Section "Install" SecInstall
   CreateDirectory "$INSTDIR\logs"
   CreateDirectory "$INSTDIR\database"
 
-  ; Write .env file with config from installer page
-  FileOpen $0 "$INSTDIR\.env" w
-  FileWrite $0 "NODE_ENV=production$\r$\n"
-  FileWrite $0 "PORT=$PortValue$\r$\n"
-  FileWrite $0 "SITE_NAME=$SiteNameValue$\r$\n"
-  FileWrite $0 "DB_PATH=./database/cardoso.db$\r$\n"
-  FileWrite $0 "SESSION_SECRET=CHANGE_ME_RUN_SETUP$\r$\n"
-  FileWrite $0 "ENCRYPTION_KEY=$\r$\n"
-  FileClose $0
+  ; Write .env only if it does not already exist (preserve existing config on upgrade)
+  IfFileExists "$INSTDIR\.env" env_exists env_missing
+  env_missing:
+    FileOpen $0 "$INSTDIR\.env" w
+    FileWrite $0 "NODE_ENV=production$\r$\n"
+    FileWrite $0 "PORT=$PortValue$\r$\n"
+    FileWrite $0 "SITE_NAME=$SiteNameValue$\r$\n"
+    FileWrite $0 "DB_PATH=./database/cardoso.db$\r$\n"
+    FileWrite $0 "SESSION_SECRET=CHANGE_ME_RUN_SETUP$\r$\n"
+    FileWrite $0 "ENCRYPTION_KEY=$\r$\n"
+    FileClose $0
+  env_exists:
 
   ; Install Windows service via NSSM
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
