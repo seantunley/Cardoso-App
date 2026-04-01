@@ -2979,6 +2979,10 @@ if (process.env.HUB_MODE === 'true') {
       status TEXT,
       error TEXT
     );
+    CREATE TABLE IF NOT EXISTS hub_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
     CREATE TABLE IF NOT EXISTS hub_inventory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       site_id TEXT NOT NULL,
@@ -2993,6 +2997,28 @@ if (process.env.HUB_MODE === 'true') {
       UNIQUE(site_id, item_number)
     );
   `);
+
+  // Seed default hub settings
+  db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
+
+  // GET /api/hub/backup-settings
+  app.get('/api/hub/backup-settings', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const row = db.prepare('SELECT value FROM hub_settings WHERE key = ?').get('backup_sync_enabled');
+    res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
+  });
+
+  app.post('/api/hub/backup-settings', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const { backup_sync_enabled } = req.body;
+    if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
+    db.prepare('INSERT OR REPLACE INTO hub_settings (key, value) VALUES (?, ?)').run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
+    res.json({ ok: true, backup_sync_enabled });
+  });
 
   // --- Site registry from env ---
   let HUB_SITES = [];
@@ -4024,6 +4050,47 @@ async function runScheduledSyncCycle() {
 const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
 const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
 
+// Hub backup pull cron (03:00 daily, hub mode only)
+let hubBackupCronTask = null;
+async function runHubBackupPull() {
+  if (process.env.HUB_MODE !== 'true') return;
+  const row = db.prepare('SELECT value FROM hub_settings WHERE key = ?').get('backup_sync_enabled');
+  const enabled = row ? row.value === 'true' : true;
+  if (!enabled) {
+    console.log('[HUB BACKUP] Skipping scheduled pull — backup sync disabled.');
+    return;
+  }
+  const sites = db.prepare('SELECT id, name, url FROM hub_sites WHERE url IS NOT NULL AND url != ""').all();
+  const token = process.env.REPORTING_TOKEN || '';
+  console.log(`[HUB BACKUP] Starting scheduled pull for ${sites.length} site(s)`);
+  for (const site of sites) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const upstream = await fetch(`${site.url}/api/backup/download`, {
+        headers: { 'x-reporting-token': token },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); continue; }
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      const { mkdirSync, writeFileSync } = await import('fs');
+      const path = await import('path');
+      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+      mkdirSync(dir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
+      writeFileSync(file, buf);
+      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${file}`);
+    } catch (err) {
+      console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
+    }
+  }
+}
+if (process.env.HUB_MODE === 'true') {
+  hubBackupCronTask = cron.schedule('0 3 * * *', runHubBackupPull);
+}
+
 
 // ==================== SHUTDOWN ====================
 function gracefulShutdown(signal) {
@@ -4033,6 +4100,7 @@ function gracefulShutdown(signal) {
   try {
     weekdayHalfHourTask.stop();
     weekdayFivePmTask.stop();
+    try { hubBackupCronTask?.stop(); } catch {}
   } catch {}
 
   if (server) {

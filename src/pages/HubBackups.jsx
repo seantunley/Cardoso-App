@@ -1,11 +1,11 @@
 // src/pages/HubBackups.jsx
 // Hub admin page — monitors backup health across all registered sites.
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff,
+  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -49,6 +49,12 @@ const STATUS_META = {
 };
 
 // ── fetch ──────────────────────────────────────────────────────────────────
+async function fetchBackupSettings() {
+  const res = await fetch("/api/hub/backup-settings", { credentials: "include" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 async function fetchBackupStatus() {
   const res = await fetch("/api/hub/backup-status", { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -170,6 +176,32 @@ function SummaryBar({ sites }) {
 export default function HubBackups() {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(null);
+  const [syncEnabled, setSyncEnabled] = useState(true);
+  const [togglingSync, setTogglingSync] = useState(false);
+
+  useEffect(() => {
+    fetchBackupSettings().then(d => setSyncEnabled(d.backup_sync_enabled)).catch(() => {});
+  }, []);
+
+  const handleToggleSync = useCallback(async () => {
+    setTogglingSync(true);
+    try {
+      const res = await fetch("/api/hub/backup-settings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ backup_sync_enabled: !syncEnabled }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = await res.json();
+      setSyncEnabled(d.backup_sync_enabled);
+      toast({ title: d.backup_sync_enabled ? "Backup sync enabled" : "Backup sync disabled" });
+    } catch (err) {
+      toast({ title: "Failed to update setting", description: err.message, variant: "destructive" });
+    } finally {
+      setTogglingSync(false);
+    }
+  }, [syncEnabled, toast]);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["hub-backup-status"],
@@ -227,17 +259,33 @@ export default function HubBackups() {
               <p className="text-xs text-slate-400">Live backup health across all registered sites</p>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="text-xs"
-            style={{ borderColor: "rgba(255,255,255,0.1)", color: "#94a3b8" }}
-          >
-            <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleToggleSync}
+              disabled={togglingSync}
+              className="text-xs"
+              style={{
+                borderColor: syncEnabled ? "rgba(16,185,129,0.4)" : "rgba(239,68,68,0.4)",
+                color: syncEnabled ? "#6ee7b7" : "#fca5a5",
+              }}
+            >
+              <Power className="w-3.5 h-3.5 mr-1.5" />
+              {syncEnabled ? "Sync On" : "Sync Off"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="text-xs"
+              style={{ borderColor: "rgba(255,255,255,0.1)", color: "#94a3b8" }}
+            >
+              <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         {/* Loading */}
