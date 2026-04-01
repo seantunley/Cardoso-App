@@ -229,23 +229,44 @@ function parseDateField(val) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function analyseInvoiceCredit(record) {
+function analyseInvoiceCredit(records) {
+  // records = array of all accounts (main + sub-accounts like BF, CA, OC)
+  // Merge slots across all accounts, take combined outstanding balance
+  const record = records[0] || {};
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  const invoices = [1,2,3,4,5].map(i => ({
-    number: record[`last_unpaid_invoice_${i}`] || record.data?.[`last_unpaid_invoice_${i}`],
-    amount: Math.abs(parseAmount(record[`last_unpaid_invoice_${i}_amount`] || record.data?.[`last_unpaid_invoice_${i}_amount`])),
-    date:   parseDateField(record[`last_unpaid_invoice_${i}_date`] || record.data?.[`last_unpaid_invoice_${i}_date`]),
-  })).filter(x => x.number || x.amount > 0);
+  // Collect invoice slots from all accounts, sort by date, take most recent 5
+  const allInvoices = records.flatMap(r =>
+    [1,2,3,4,5].map(i => ({
+      number: r[`last_unpaid_invoice_${i}`] || r.data?.[`last_unpaid_invoice_${i}`],
+      amount: Math.abs(parseAmount(r[`last_unpaid_invoice_${i}_amount`] || r.data?.[`last_unpaid_invoice_${i}_amount`])),
+      date:   parseDateField(r[`last_unpaid_invoice_${i}_date`] || r.data?.[`last_unpaid_invoice_${i}_date`]),
+    })).filter(x => x.number || x.amount > 0)
+  );
+  // Sort by date desc, deduplicate by number, keep most recent 5
+  const seenInvNums = new Set();
+  const invoices = allInvoices
+    .sort((a, b) => (b.date || 0) - (a.date || 0))
+    .filter(x => { if (x.number && seenInvNums.has(x.number)) return false; if (x.number) seenInvNums.add(x.number); return true; })
+    .slice(0, 5);
 
-  const receipts = [1,2,3,4,5].map(i => ({
-    number: record[`last_receipt_${i}`] || record.data?.[`last_receipt_${i}`],
-    amount: Math.abs(parseAmount(record[`last_receipt_${i}_amount`] || record.data?.[`last_receipt_${i}_amount`])),
-    date:   parseDateField(record[`last_receipt_${i}_date`] || record.data?.[`last_receipt_${i}_date`]),
-  })).filter(x => x.number || x.amount > 0);
+  // Collect receipt slots from all accounts, sort by date, take most recent 5
+  const allReceipts = records.flatMap(r =>
+    [1,2,3,4,5].map(i => ({
+      number: r[`last_receipt_${i}`] || r.data?.[`last_receipt_${i}`],
+      amount: Math.abs(parseAmount(r[`last_receipt_${i}_amount`] || r.data?.[`last_receipt_${i}_amount`])),
+      date:   parseDateField(r[`last_receipt_${i}_date`] || r.data?.[`last_receipt_${i}_date`]),
+    })).filter(x => x.number || x.amount > 0)
+  );
+  const seenRecNums = new Set();
+  const receipts = allReceipts
+    .sort((a, b) => (b.date || 0) - (a.date || 0))
+    .filter(x => { if (x.number && seenRecNums.has(x.number)) return false; if (x.number) seenRecNums.add(x.number); return true; })
+    .slice(0, 5);
 
-  const rawBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
+  // Sum outstanding balance across all accounts
+  const rawBalance = records.reduce((s, r) => s + parseAmount(r.outstanding_balance || r.data?.outstanding_balance), 0);
   const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
 
   // ── Zero balance = instant pass ─────────────────────────────────────────
@@ -955,7 +976,8 @@ export default function CustomerLookup({
             <div className="w-72 shrink-0 space-y-3">
             {/* ── Credit Analysis Panel ── */}
             {(() => {
-              const analysis = analyseInvoiceCredit(customer || {});
+              const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
+              const analysis = analyseInvoiceCredit(allAccountRecords);
               const verdictStyles = {
                 approve: { border: "border-emerald-600", bg: "bg-emerald-900/30", icon: "✅", titleColor: "text-emerald-400", badgeColor: "bg-emerald-700 text-emerald-100" },
                 caution: { border: "border-yellow-600", bg: "bg-yellow-900/20", icon: "⚠️", titleColor: "text-yellow-400", badgeColor: "bg-yellow-700 text-yellow-100" },
