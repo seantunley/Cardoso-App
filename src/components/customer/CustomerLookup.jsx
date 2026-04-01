@@ -783,15 +783,16 @@ export default function CustomerLookup({
               closeAndReset();
             }
           }}
-          style={{ width: "900px", maxWidth: "900px", height: "82vh", maxHeight: "82vh", minHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
           className={cn(
-            "border-4 bg-gray-900",
+            "max-w-5xl border-4 bg-gray-900 p-0",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
             (!customer?.flag_color || customer?.flag_color === "none") && "border-gray-700"
           )}
         >
+          {/* Fixed-size inner shell — controls all sizing from here */}
+          <div style={{ width: "860px", height: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
@@ -831,9 +832,9 @@ export default function CustomerLookup({
             </div>
           )}
 
-          <div className="pt-2 flex gap-4" style={{height:"calc(82vh - 140px)"}}>
+          <div style={{ display: "flex", gap: "16px", flex: 1, minHeight: 0, paddingTop: "8px" }}>
             {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div className="flex-1 min-w-0 space-y-4 overflow-y-auto pr-2 h-full">
+            <div style={{ flex: 1, minWidth: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -994,7 +995,7 @@ export default function CustomerLookup({
 
             </div>{/* end left col */}
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div className="w-72 shrink-0 space-y-3 overflow-y-auto h-full">
+            <div style={{ width: "288px", flexShrink: 0, overflowY: "auto" }} className="space-y-3">
             {/* ── Credit Analysis Panel ── */}
             {(() => {
               const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
@@ -1153,7 +1154,7 @@ export default function CustomerLookup({
             </div>{/* end flag card */}
             </div>{/* end right col */}
             </div>{/* end two-col flex */}
-          </div>
+          </div>{/* end fixed shell */}
         </DialogContent>
       </Dialog>
       {/* ── Flag Removal Reason Modal ── */}
