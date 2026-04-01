@@ -269,16 +269,28 @@ function analyseInvoiceCredit(records) {
   const rawBalance = records.reduce((s, r) => s + parseAmount(r.outstanding_balance || r.data?.outstanding_balance), 0);
   const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
 
+  // ── Inactivity check (computed early so all return paths can use it) ────
+  const allDatesEarly = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
+  const mostRecentEarly = allDatesEarly.length > 0 ? Math.max(...allDatesEarly.map(d => +d)) : null;
+  const inactiveDaysEarly = mostRecentEarly !== null ? Math.floor((today - mostRecentEarly) / 86400000) : null;
+  const inactiveYearsEarly = inactiveDaysEarly !== null && inactiveDaysEarly > 730 ? Math.floor(inactiveDaysEarly / 365) : null;
+  const inactiveNote = inactiveYearsEarly
+    ? ` Customer has not transacted in over ${inactiveYearsEarly} year${inactiveYearsEarly > 1 ? "s" : ""} — treat as a new account.`
+    : "";
+  const inactiveFactor = inactiveYearsEarly
+    ? [{ type: "warn", text: `No transactions in over ${inactiveYearsEarly} year${inactiveYearsEarly > 1 ? "s" : ""} — customer has been inactive for a long time.` }]
+    : [];
+
   // ── Zero balance = instant pass ─────────────────────────────────────────
   if (outstandingBalance === 0) {
     const hasHistory = invoices.length > 0 || receipts.length > 0;
     return {
       verdict: "approve",
       title: hasHistory ? "Approve Invoice" : "New Customer",
-      summary: hasHistory
+      summary: (hasHistory
         ? "Balance is zero — account fully settled. Safe to issue a new invoice."
-        : "No invoice or receipt history. Safe to issue a first invoice.",
-      factors: [{ type: "good", text: "Outstanding balance is R0.00 — all accounts cleared." }],
+        : "No invoice or receipt history. Safe to issue a first invoice.") + inactiveNote,
+      factors: [{ type: "good", text: "Outstanding balance is R0.00 — all accounts cleared." }, ...inactiveFactor],
       score: 100,
     };
   }
@@ -288,8 +300,8 @@ function analyseInvoiceCredit(records) {
     return {
       verdict: "caution",
       title: "Proceed with Caution",
-      summary: "Outstanding balance but no invoice/receipt history available to assess.",
-      factors: [{ type: "warn", text: `Outstanding balance of R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})} with no supporting history.` }],
+      summary: `Outstanding balance but no invoice/receipt history available to assess.${inactiveNote}`,
+      factors: [{ type: "warn", text: `Outstanding balance of R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})} with no supporting history.` }, ...inactiveFactor],
       score: 50,
     };
   }
@@ -340,14 +352,8 @@ function analyseInvoiceCredit(records) {
   }
 
   // ── RULE 1b: Last transaction recency ──────────────────────────────────
-  const allDates = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
-  if (allDates.length > 0) {
-    const mostRecent = Math.max(...allDates);
-    const daysSinceLastTransaction = Math.floor((today - mostRecent) / 86400000);
-    if (daysSinceLastTransaction > 730) {
-      factors.push({ type: "warn", text: `No transactions in over ${Math.floor(daysSinceLastTransaction / 365)} year${Math.floor(daysSinceLastTransaction / 365) > 1 ? "s" : ""} — customer has been inactive for a long time.` });
-    }
-  }
+  // (already computed as inactiveNote/inactiveFactor above — push factor here if applicable)
+  if (inactiveFactor.length > 0) factors.push(...inactiveFactor);
 
   // ── RULE 2: Payment speed on matched pairs ──────────────────────────────
   // A customer who pays in full but slowly is caution, not hold.
@@ -388,15 +394,6 @@ function analyseInvoiceCredit(records) {
 
   // ── Verdict ─────────────────────────────────────────────────────────────
   const score = Math.max(0, 100 - deductions);
-
-  // Check inactivity (used to append note to any verdict)
-  const allDatesForVerdict = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
-  const mostRecentForVerdict = allDatesForVerdict.length > 0 ? Math.max(...allDatesForVerdict) : null;
-  const inactiveDays = mostRecentForVerdict ? Math.floor((today - mostRecentForVerdict) / 86400000) : null;
-  const inactiveYears = inactiveDays !== null && inactiveDays > 730 ? Math.floor(inactiveDays / 365) : null;
-  const inactiveNote = inactiveYears
-    ? ` Customer has not transacted in over ${inactiveYears} year${inactiveYears > 1 ? "s" : ""} — treat as a new account.`
-    : "";
 
   let verdict, title, summary;
   if (score <= 39) {
