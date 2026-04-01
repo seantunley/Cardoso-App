@@ -3093,7 +3093,19 @@ app.get('/api/:table', requireAuth, (req, res) => {
   }
 
   try {
-    const stmt = db.prepare(`SELECT * FROM "${table}"`);
+    // Optional sort: ?sort=priority (asc) or ?sort=-priority (desc)
+    const sortParam = req.query.sort;
+    let orderClause = '';
+    if (sortParam) {
+      const desc = sortParam.startsWith('-');
+      const col = desc ? sortParam.slice(1) : sortParam;
+      const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+      const validCols = new Set(tableInfo.map(c => c.name));
+      if (validCols.has(col)) {
+        orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
+      }
+    }
+    const stmt = db.prepare(`SELECT * FROM "${table}"${orderClause}`);
     const rows = stmt.all();
     let output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
     if (table === 'databaseconnection') output = output.map(sanitizeConnection);
@@ -3148,6 +3160,11 @@ app.post('/api/:table', requireAuth, (req, res) => {
   }
 
   const data = sanitizeForSqlite(req.body);
+
+  // Serialize JSON fields that must be stored as strings
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
+  }
 
   if (table === 'databaseconnection' && data.status !== undefined) {
     const allowedStatuses = new Set(['active', 'inactive', 'error', 'testing']);
