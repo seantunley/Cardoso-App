@@ -388,22 +388,32 @@ function analyseInvoiceCredit(records) {
 
   // ── Verdict ─────────────────────────────────────────────────────────────
   const score = Math.max(0, 100 - deductions);
+
+  // Check inactivity (used to append note to any verdict)
+  const allDatesForVerdict = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
+  const mostRecentForVerdict = allDatesForVerdict.length > 0 ? Math.max(...allDatesForVerdict) : null;
+  const inactiveDays = mostRecentForVerdict ? Math.floor((today - mostRecentForVerdict) / 86400000) : null;
+  const inactiveYears = inactiveDays !== null && inactiveDays > 730 ? Math.floor(inactiveDays / 365) : null;
+  const inactiveNote = inactiveYears
+    ? ` Customer has not transacted in over ${inactiveYears} year${inactiveYears > 1 ? "s" : ""} — treat as a new account.`
+    : "";
+
   let verdict, title, summary;
   if (score <= 39) {
     verdict = "hold";
     title = "Hold — Do Not Invoice";
-    summary = "Outstanding debt is overdue. Resolve before issuing a new invoice.";
+    summary = `Outstanding debt is overdue. Resolve before issuing a new invoice.${inactiveNote}`;
   } else if (score <= 74 || outstandingBalance > 0) {
     // Good payment record but still carries a balance — always at least caution
     verdict = "caution";
     title = "Proceed with Caution";
-    summary = outstandingBalance > 0 && score >= 75
+    summary = (outstandingBalance > 0 && score >= 75
       ? "Payment history looks good, but an outstanding balance remains — confirm settlement before issuing."
-      : "Customer pays but slowly — consider confirming payment intent before issuing.";
+      : "Customer pays but slowly — consider confirming payment intent before issuing.") + inactiveNote;
   } else {
     verdict = "approve";
     title = "Approve Invoice";
-    summary = "Customer is paying reliably and within terms.";
+    summary = `Customer is paying reliably and within terms.${inactiveNote}`;
   }
 
   return { verdict, title, summary, factors, score };
