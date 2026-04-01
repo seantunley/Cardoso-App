@@ -3248,6 +3248,57 @@ app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
   }
 });
 
+
+// ─── Auto-Flag Rules Export / Import ─────────────────────────────────────────
+
+app.get('/api/autoflagrule/export', requireAuth, (req, res) => {
+  try {
+    const user = req.user;
+    if (!user.can_manage_rules) return res.status(403).json({ error: 'Admin only' });
+    const rules = db.prepare(`SELECT name, priority, conditions, color, is_active FROM autoflagrule ORDER BY priority DESC`).all();
+    const exportData = rules.map(r => ({
+      ...r,
+      conditions: (() => { try { return JSON.parse(r.conditions); } catch { return r.conditions; } })()
+    }));
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="cardoso-rules-export.json"');
+    res.json(exportData);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/autoflagrule/import', requireAuth, (req, res) => {
+  try {
+    const user = req.user;
+    if (!user.can_manage_rules) return res.status(403).json({ error: 'Admin only' });
+    const rules = req.body;
+    if (!Array.isArray(rules)) return res.status(400).json({ error: 'Expected array of rules' });
+
+    let created = 0, updated = 0, skipped = 0;
+    const upsert = db.transaction(() => {
+      for (const rule of rules) {
+        if (!rule.name || !rule.conditions) { skipped++; continue; }
+        const condStr = typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions);
+        const existing = db.prepare(`SELECT id FROM autoflagrule WHERE name = ?`).get(rule.name);
+        if (existing) {
+          db.prepare(`UPDATE autoflagrule SET priority = ?, conditions = ?, color = ?, is_active = ? WHERE id = ?`)
+            .run(rule.priority ?? 1, condStr, rule.color ?? null, rule.is_active ?? 1, existing.id);
+          updated++;
+        } else {
+          db.prepare(`INSERT INTO autoflagrule (name, priority, conditions, color, is_active) VALUES (?, ?, ?, ?, ?)`)
+            .run(rule.name, rule.priority ?? 1, condStr, rule.color ?? null, rule.is_active ?? 1);
+          created++;
+        }
+      }
+    });
+    upsert();
+    res.json({ created, updated, skipped });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/:table', requireAuth, (req, res) => {
   const { table } = req.params;
 

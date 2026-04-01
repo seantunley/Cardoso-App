@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
   RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
+  Download, Upload,
 } from "lucide-react";
 
 // Sub-components
@@ -515,6 +516,41 @@ function AutoFlagTab() {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
+  const handleExport = async () => {
+    try {
+      const res = await fetch('/api/autoflagrule/export', { credentials: 'include' });
+      if (!res.ok) { toast.error('Export failed'); return; }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'cardoso-rules-export.json'; a.click();
+      URL.revokeObjectURL(url);
+      toast.success('Rules exported');
+    } catch (e) { toast.error(`Export error: ${e.message}`); }
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const rules = JSON.parse(ev.target.result);
+        const res = await fetch('/api/autoflagrule/import', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rules),
+        });
+        if (!res.ok) { toast.error('Import failed'); return; }
+        const { created, updated, skipped } = await res.json();
+        queryClient.invalidateQueries({ queryKey: ['autoFlagRules'] });
+        toast.success(`Imported: ${created} created, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}`);
+      } catch (err) { toast.error(`Import error: ${err.message}`); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const { data: autoFlagRules = [], isLoading } = useQuery({
     queryKey: ["autoFlagRules"],
     queryFn: () => api.entities.AutoFlagRule.list("-priority"),
@@ -573,6 +609,19 @@ function AutoFlagTab() {
           <Button size="sm" variant="outline" onClick={() => setShowNewRule(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Rule
           </Button>
+        )}
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={handleExport} className="gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+        )}
+        {canManageRules && (
+          <label>
+            <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+            <Button size="sm" variant="outline" className="gap-1.5 cursor-pointer" asChild>
+              <span><Upload className="h-3.5 w-3.5" /> Import</span>
+            </Button>
+          </label>
         )}
       </div>
       {showNewRule && canManageRules && <AutoFlagRuleForm onSave={handleSave} onDelete={() => setShowNewRule(false)} isSaving={createMutation.isPending} isAdmin={canManageRules} />}
