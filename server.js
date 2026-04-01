@@ -3198,6 +3198,8 @@ if (process.env.HUB_MODE === 'true') {
 
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
+    const allRules = db.prepare(`SELECT id, rule_name, is_active, flag_color, conditions FROM autoflagrule`).all();
+    console.log('[apply-auto-flags] All rules:', JSON.stringify(allRules.map(r => ({ id: r.id, name: r.rule_name, is_active: r.is_active, flag_color: r.flag_color }))));
     const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
@@ -3206,6 +3208,15 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
     if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
 
     const records = db.prepare(`SELECT * FROM datarecord`).all();
+    console.log(`[apply-auto-flags] ${rules.length} active rules, ${records.length} records`);
+    if (records.length > 0) {
+      const sample = records[0];
+      console.log('[apply-auto-flags] Sample record fields:', Object.keys(sample).join(', '));
+      console.log('[apply-auto-flags] Sample outstanding_balance:', sample.outstanding_balance, '| flag_color:', sample.flag_color, '| auto_flagged:', sample.auto_flagged, '| flag_created_by:', sample.flag_created_by);
+    }
+    if (rules.length > 0) {
+      console.log('[apply-auto-flags] First rule conditions:', rules[0].conditions);
+    }
     let flagged = 0, cleared = 0;
 
     const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
