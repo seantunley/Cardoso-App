@@ -517,7 +517,7 @@ function AutoFlagTab() {
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
   const handleExport = () => {
-    window.location.href = '/api/autoflagrule/export';
+    window.open('/api/autoflagrule/export', '_blank');
   };
 
   const handleImport = (e) => {
