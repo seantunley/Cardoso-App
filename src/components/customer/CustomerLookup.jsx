@@ -796,7 +796,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-[820px] w-full border-4 bg-gray-900 p-0",
+            "max-w-[1100px] w-full border-4 bg-gray-900 p-0",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
