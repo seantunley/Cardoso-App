@@ -1903,7 +1903,7 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           flag_color,
           flag_reason,
           auto_flagged,
-          source_table AS site_name
+          ? AS site_name
         FROM datarecord
         WHERE outstanding_balance IS NOT NULL
           AND outstanding_balance != ''
@@ -1912,7 +1912,7 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
         ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
         LIMIT ?
       `);
-      rows = stmt.all(limit);
+      rows = stmt.all(SITE_NAME, limit);
     }
     res.json(rows);
   } catch (err) {
