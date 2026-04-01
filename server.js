@@ -385,6 +385,15 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_databaseconnection_status
   ON databaseconnection (status);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_customer_number
+  ON datarecord (customer_number);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_flag_color
+  ON datarecord (flag_color);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance
+  ON datarecord (outstanding_balance);
 `);
 
 db.exec(`
@@ -611,6 +620,22 @@ db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_
 ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
+
+// ==================== SCHEMA CACHE ====================
+// Pre-load and cache table schemas at startup so PRAGMA table_info is never
+// called on hot request paths (PUT/POST run it on every write otherwise).
+const _schemaCache = new Map();
+function getTableColumns(table) {
+  if (_schemaCache.has(table)) return _schemaCache.get(table);
+  const cols = new Set(db.prepare(`PRAGMA table_info("${table}")`).all().map(c => c.name));
+  _schemaCache.set(table, cols);
+  return cols;
+}
+function invalidateSchemaCache(table) { _schemaCache.delete(table); }
+// Warm the cache for all allowed tables at startup
+for (const t of allowedTables) {
+  try { getTableColumns(t); } catch {}
+}
 
 // ==================== HELPERS ====================
 const sanitizeForSqlite = (data) => {
@@ -3588,8 +3613,7 @@ app.get('/api/:table', requireAuth, (req, res) => {
     if (sortParam) {
       const desc = sortParam.startsWith('-');
       const col = desc ? sortParam.slice(1) : sortParam;
-      const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-      const validCols = new Set(tableInfo.map(c => c.name));
+      const validCols = getTableColumns(table);
       if (validCols.has(col)) {
         orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
       }
@@ -3679,8 +3703,7 @@ app.post('/api/:table', requireAuth, (req, res) => {
     }
 
     // Validate column names against actual schema to prevent injection
-    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const validColumns = getTableColumns(table);
     const invalidCols = columns.filter((k) => !validColumns.has(k));
     if (invalidCols.length > 0) {
       return res.status(400).json({ error: `Invalid fields: ${invalidCols.join(', ')}` });
@@ -3774,8 +3797,7 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     }
 
     // Validate column names against actual schema to prevent injection
-    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const validColumns = getTableColumns(table);
     const invalidKeys = keys.filter((k) => !validColumns.has(k));
     if (invalidKeys.length > 0) {
       return res.status(400).json({ error: `Invalid fields: ${invalidKeys.join(', ')}` });

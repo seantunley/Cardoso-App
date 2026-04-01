@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -654,6 +654,13 @@ export default function CustomerLookup({
     }
   };
 
+  // Memoize credit analysis so it doesn't recalculate on every render
+  const creditAnalysis = useMemo(() => {
+    if (!customer) return null;
+    const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
+    return analyseInvoiceCredit(allAccountRecords);
+  }, [customer, subAccounts]);
+
   const canModifyFlag = () => {
     if (!customer || !currentUser) return false;
     if (currentUser.role === "admin") return true;
@@ -997,9 +1004,8 @@ export default function CustomerLookup({
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
             <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }} className="space-y-3">
             {/* ── Credit Analysis Panel ── */}
-            {(() => {
-              const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
-              const analysis = analyseInvoiceCredit(allAccountRecords);
+            {creditAnalysis && (() => {
+              const analysis = creditAnalysis;
               const verdictStyles = {
                 approve: { border: "border-emerald-600", bg: "bg-emerald-900/30", icon: "✅", titleColor: "text-emerald-400", badgeColor: "bg-emerald-700 text-emerald-100" },
                 caution: { border: "border-yellow-600", bg: "bg-yellow-900/20", icon: "⚠️", titleColor: "text-yellow-400", badgeColor: "bg-yellow-700 text-yellow-100" },

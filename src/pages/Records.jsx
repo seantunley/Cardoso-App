@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { checkAutoFlagRules } from "@/lib/evalFlagRules";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Input } from "@/components/ui/input";
@@ -56,43 +55,20 @@ export default function Records() {
   });
 
   const applyAutoFlagMutation = useMutation({
-    mutationFn: async (recordIds) => {
-      const rules = await api.entities.AutoFlagRule.list();
-      const activeRules = rules.filter((r) => r.is_active);
-      const now = new Date().toISOString();
-
-      let flaggedCount = 0;
-      const targetRecords = records.filter((r) => recordIds.includes(r.id));
-
-      for (const record of targetRecords) {
-        let parsedData = record.data;
-        if (typeof parsedData === "string") {
-          try {
-            parsedData = JSON.parse(parsedData);
-          } catch {
-            parsedData = {};
-          }
-        }
-
-        const autoFlag = checkAutoFlagRules(record, activeRules);
-
-        if (autoFlag && autoFlag.flag_color !== record.flag_color) {
-          await api.entities.DataRecord.update(record.id, {
-            ...autoFlag,
-            last_checked: now,
-          });
-          flaggedCount++;
-        } else {
-          await api.entities.DataRecord.update(record.id, { last_checked: now });
-        }
-      }
-
-      return flaggedCount;
+    // Use the server-side batch endpoint — single SQLite transaction instead of N individual PUTs
+    mutationFn: async () => {
+      const res = await fetch("/api/apply-auto-flags", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Auto-flag failed");
+      return data.flagged ?? 0;
     },
     onSuccess: (count) => {
       queryClient.invalidateQueries({ queryKey: ["records"] });
       setSelectedRecords(new Set());
-      toast.success(`Applied auto-flagging to ${count} record(s)`);
+      toast.success(`Applied auto-flagging: ${count} record(s) updated`);
     },
   });
 
