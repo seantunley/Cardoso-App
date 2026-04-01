@@ -275,7 +275,8 @@ function analyseInvoiceCredit(record) {
   const latestReceipt = receiptsSorted[0];
 
   let sequentialFail = false;
-  if (latestInvoice) {
+  // If balance is zero the account is settled — skip sequential and age checks
+  if (outstandingBalance > 0 && latestInvoice) {
     if (!latestReceipt) {
       sequentialFail = true;
       factors.push({ type: "block", text: "No receipts on record — outstanding invoice with zero payments." });
@@ -288,7 +289,10 @@ function analyseInvoiceCredit(record) {
   }
 
   // ── RULE 2: Days since last receipt ─────────────────────────────────────
-  if (latestReceipt && latestReceipt.date) {
+  // If balance is zero, account is settled — payment recency is irrelevant
+  if (outstandingBalance === 0 && (invoices.length > 0 || receipts.length > 0)) {
+    factors.push({ type: "good", text: "Balance is zero — account fully settled." });
+  } else if (latestReceipt && latestReceipt.date) {
     const daysSincePayment = Math.floor((today - latestReceipt.date) / 86400000);
     if (daysSincePayment >= 21) {
       factors.push({ type: "bad", text: `Last payment was ${daysSincePayment} days ago — critically overdue (threshold: 21 days).` });
