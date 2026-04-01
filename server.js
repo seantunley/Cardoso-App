@@ -3222,17 +3222,33 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
     const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
     const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
 
-    let _debugCount = 0;
+    // Find a sample record with positive balance for debug
+    const samplePositive = records.find(r => {
+      const b = parseFloat(String(r.outstanding_balance ?? '').replace(/,/g,'').replace(/\s/g,''));
+      return !isNaN(b) && b > 0;
+    });
+    if (samplePositive) {
+      console.log(`[apply-auto-flags] First positive-balance record: name="${samplePositive.customer_name}" balance="${samplePositive.outstanding_balance}" last_unpaid_invoice_date="${samplePositive.last_unpaid_invoice_date}" flag_color="${samplePositive.flag_color}" auto_flagged=${samplePositive.auto_flagged} flag_created_by="${samplePositive.flag_created_by}"`);
+      const testResult = applyAutoFlagRulesToRecord(samplePositive, activeRules);
+      console.log(`[apply-auto-flags] => applyAutoFlagRulesToRecord result: ${JSON.stringify(testResult)}`);
+      // Also test each condition individually
+      if (activeRules.length > 0) {
+        const rule = activeRules[0];
+        const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
+        for (const cond of conditions) {
+          const raw = samplePositive[cond.field];
+          console.log(`[apply-auto-flags] condition field="${cond.field}" type="${cond.condition_type}" value="${cond.condition_value}" rawRecordValue="${raw}"`);
+        }
+      }
+    } else {
+      console.log('[apply-auto-flags] No records with positive outstanding_balance found!');
+    }
     const applyAll = db.transaction(() => {
       for (const record of records) {
         const manuallyFlagged = record.flag_color && !record.auto_flagged && record.flag_created_by;
         if (manuallyFlagged) continue;
 
         const autoFlag = applyAutoFlagRulesToRecord(record, activeRules);
-        if (_debugCount < 3) {
-          console.log(`[apply-auto-flags] record #${_debugCount} balance="${record.outstanding_balance}" name="${record.customer_name}" => autoFlag=${JSON.stringify(autoFlag)}`);
-          _debugCount++;
-        }
         if (autoFlag) {
           updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, record.id);
           flagged++;
