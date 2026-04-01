@@ -526,39 +526,24 @@ function AutoFlagTab() {
 
   const applyMutation = useMutation({
     mutationFn: async () => {
-      const rules = await api.entities.AutoFlagRule.list("-priority");
-      const activeRules = rules.filter((r) => r.is_active);
-      const allRecords = await api.entities.DataRecord.list();
-      let flaggedCount = 0;
-      const now = new Date().toISOString();
-      for (const record of allRecords) {
-        if (record.flag_color && record.flag_color !== "none" && record.flag_created_by && !record.auto_flagged) continue;
-        const autoFlag = checkAutoFlagRules(record, activeRules);
-        if (autoFlag && autoFlag.flag_color !== record.flag_color) {
-          await api.entities.DataRecord.update(record.id, { ...autoFlag, last_checked: now });
-          flaggedCount++;
-        } else {
-          await api.entities.DataRecord.update(record.id, { last_checked: now });
-        }
-      }
-      return flaggedCount;
+      const res = await fetch('/api/apply-auto-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
     },
-    onSuccess: (count) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Applied rules to ${count} record(s)`); },
+    onSuccess: ({ flagged, cleared }) => {
+      queryClient.invalidateQueries({ queryKey: ["records"] });
+      toast.success(`Flagged ${flagged} record(s), cleared ${cleared}`);
+    },
     onError: (e) => toast.error(`Failed: ${e.message}`),
   });
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      const allRecords = await api.entities.DataRecord.list();
-      const autoFlagged = allRecords.filter((r) => r.auto_flagged);
-      let count = 0;
-      for (const record of autoFlagged) {
-        await api.entities.DataRecord.update(record.id, { flag_color: "none", flag_reason: null, flag_created_by: null, auto_flagged: false });
-        count++;
-      }
-      return count;
+      const res = await fetch('/api/clear-auto-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
     },
-    onSuccess: (count) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Cleared ${count} auto-flagged record(s)`); },
+    onSuccess: ({ cleared }) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Cleared ${cleared} auto-flagged record(s)`); },
     onError: (e) => toast.error(`Failed to clear: ${e.message}`),
   });
 

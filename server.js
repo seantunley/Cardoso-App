@@ -3189,6 +3189,55 @@ if (process.env.HUB_MODE === 'true') {
 
 
 // ==================== DYNAMIC CRUD ROUTES ====================
+
+app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
+  try {
+    const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
+    const activeRules = rules.map(r => {
+      try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
+      return r;
+    });
+    if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
+
+    const records = db.prepare(`SELECT * FROM datarecord`).all();
+    let flagged = 0, cleared = 0;
+
+    const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
+    const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
+
+    const applyAll = db.transaction(() => {
+      for (const record of records) {
+        const manuallyFlagged = record.flag_color && !record.auto_flagged && record.flag_created_by;
+        if (manuallyFlagged) continue;
+
+        const autoFlag = applyAutoFlagRulesToRecord(record, activeRules);
+        if (autoFlag) {
+          updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, record.id);
+          flagged++;
+        } else if (record.auto_flagged) {
+          clearFlag.run(record.id);
+          cleared++;
+        }
+      }
+    });
+    applyAll();
+    res.json({ flagged, cleared });
+  } catch (err) {
+    console.error('apply-auto-flags error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
+  try {
+    const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
+    res.json({ cleared: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/:table', requireAuth, (req, res) => {
   const { table } = req.params;
 
