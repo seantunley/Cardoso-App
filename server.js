@@ -235,6 +235,10 @@ db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
+db.pragma('cache_size = -65536');
+db.pragma('mmap_size = 268435456');
+db.pragma('temp_store = MEMORY');
+db.exec('PRAGMA optimize');
 
 console.log(`✅ SQLite database ready → ${dbPath}`);
 
@@ -394,6 +398,9 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance
   ON datarecord (outstanding_balance);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_updated_date
+  ON datarecord (updated_date);
 `);
 
 db.exec(`
@@ -636,6 +643,7 @@ function invalidateSchemaCache(table) { _schemaCache.delete(table); }
 for (const t of allowedTables) {
   try { getTableColumns(t); } catch {}
 }
+initPreparedStatements();
 
 // ==================== HELPERS ====================
 const sanitizeForSqlite = (data) => {
@@ -1100,7 +1108,7 @@ function sanitizeConnection(conn) {
 }
 
 function getUserById(id) {
-  return db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(id);
+  return stmts.getUserById.get(id);
 }
 
 function recoverAbandonedSyncs() {
@@ -1526,9 +1534,7 @@ async function runConnectionImport(connectionId) {
       const syncTimestamp = new Date().toISOString();
 
       // Load active auto-flag rules once for the entire sync batch
-      const activeAutoFlagRules = db.prepare(
-        `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
-      ).all();
+      const activeAutoFlagRules = stmts.activeAutoFlagRules.all();
 
       const updateRecordFlag = db.prepare(`
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
@@ -1838,7 +1844,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   }
 
   try {
-    const user = db.prepare(`SELECT * FROM "user" WHERE lower(email) = lower(?)`).get(email);
+    const user = stmts.getUserByEmail.get(email);
 
     if (!user || !user.password_hash) {
       return res.status(401).json({ error: 'Invalid username or password' });
@@ -1910,7 +1916,7 @@ app.post('/api/auth/set-initial-password', async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 12);
-    db.prepare(`UPDATE "user" SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(hash, userId);
+    stmts.updateUserPassword.run(hash, userId);
 
     // Upgrade session to full login
     const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);
@@ -2075,6 +2081,25 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
 // Returns top customers by outstanding balance, sorted descending.
 // In hub mode, queries the hub_records table (cross-site).
 // In site mode, queries the local datarecord table.
+app.get('/api/kpis', requireAuth, (req, res) => {
+  try {
+    const total = stmts.kpiTotalRecords.get();
+    const byFlag = stmts.kpiFlagCounts.all();
+    const lastSync = stmts.kpiLastSync.get();
+    const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
+    for (const row of byFlag) {
+      if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
+    }
+    res.json({
+      total_records: total.count,
+      records_by_flag: flagCounts,
+      last_sync_at: lastSync?.completed_at || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/top-balances', requireAuth, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
   const isHub = process.env.HUB_MODE === 'true';
@@ -2812,16 +2837,10 @@ app.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
 
 // GET /api/reporting/kpis
 app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const byFlag = db.prepare(
-    "SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color"
-  ).all();
-  const lastSync = db.prepare(
-    "SELECT completed_at, status FROM syncrun WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"
-  ).get();
-  const activeConns = db.prepare(
-    "SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'"
-  ).get();
+  const total = stmts.kpiTotalRecords.get();
+  const byFlag = stmts.kpiFlagCounts.all();
+  const lastSync = stmts.kpiLastSync.get();
+  const activeConns = stmts.kpiActiveConns.get();
 
   const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
   for (const row of byFlag) {
@@ -2876,10 +2895,8 @@ app.get('/api/reporting/records', requireReportingToken, (req, res) => {
 
 // GET /api/reporting/health
 app.get('/api/reporting/health', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const lastRun = db.prepare(
-    'SELECT status, completed_at FROM syncrun ORDER BY started_at DESC LIMIT 1'
-  ).get();
+  const total = stmts.kpiTotalRecords.get();
+  const lastRun = stmts.kpiLastRun.get();
   res.json({
     site_id: SITE_ID,
     site_slug: SITE_SLUG,
@@ -3006,7 +3023,7 @@ if (process.env.HUB_MODE === 'true') {
     if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
     const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
     if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
-    const row = db.prepare('SELECT value FROM hub_settings WHERE key = ?').get('backup_sync_enabled');
+    const row = stmts.getHubSetting.get('backup_sync_enabled');
     res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
   });
 
@@ -3016,7 +3033,7 @@ if (process.env.HUB_MODE === 'true') {
     if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
     const { backup_sync_enabled } = req.body;
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
-    db.prepare('INSERT OR REPLACE INTO hub_settings (key, value) VALUES (?, ?)').run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
+    stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
     res.json({ ok: true, backup_sync_enabled });
   });
 
@@ -3602,18 +3619,18 @@ if (process.env.HUB_MODE === 'true') {
 
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
-    const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
+    const rules = stmts.activeAutoFlagRules.all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
       return r;
     });
     if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
 
-    const records = db.prepare(`SELECT * FROM datarecord`).all();
+    const records = stmts.autoRecordsForFlags.all();
     let flagged = 0, cleared = 0;
 
-    const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
-    const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
+    const updateFlag = stmts.updateAutoFlag;
+    const clearFlag = stmts.clearAutoFlag;
 
     const applyAll = db.transaction(() => {
       for (const record of records) {
@@ -3641,7 +3658,7 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 
 app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
   try {
-    const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
+    const result = stmts.clearAllAutoFlags.run();
     res.json({ cleared: result.changes });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4054,38 +4071,38 @@ const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
 let hubBackupCronTask = null;
 async function runHubBackupPull() {
   if (process.env.HUB_MODE !== 'true') return;
-  const row = db.prepare('SELECT value FROM hub_settings WHERE key = ?').get('backup_sync_enabled');
+  const row = stmts.getHubSetting.get('backup_sync_enabled');
   const enabled = row ? row.value === 'true' : true;
   if (!enabled) {
     console.log('[HUB BACKUP] Skipping scheduled pull — backup sync disabled.');
     return;
   }
-  const sites = db.prepare('SELECT id, name, url FROM hub_sites WHERE url IS NOT NULL AND url != ""').all();
+  const sites = stmts.hubSitesForBackup.all();
   const token = process.env.REPORTING_TOKEN || '';
-  console.log(`[HUB BACKUP] Starting scheduled pull for ${sites.length} site(s)`);
-  for (const site of sites) {
+  console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
+  const { mkdirSync, writeFileSync } = await import('fs');
+  const pathMod = await import('path');
+  await Promise.allSettled(sites.map(async (site) => {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
+      const hardTimeout = setTimeout(() => controller.abort(), 30000);
       const upstream = await fetch(`${site.url}/api/backup/download`, {
         headers: { 'x-reporting-token': token },
         signal: controller.signal,
       });
-      clearTimeout(timeout);
-      if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); continue; }
+      clearTimeout(hardTimeout);
+      if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
       const buf = Buffer.from(await upstream.arrayBuffer());
-      const { mkdirSync, writeFileSync } = await import('fs');
-      const path = await import('path');
-      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+      const dir = pathMod.join(process.cwd(), 'database', 'hub-backups', site.id);
       mkdirSync(dir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
+      const file = pathMod.join(dir, `cardoso-${site.id}-${ts}.db`);
       writeFileSync(file, buf);
       console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${file}`);
     } catch (err) {
       console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
     }
-  }
+  }));
 }
 if (process.env.HUB_MODE === 'true') {
   hubBackupCronTask = cron.schedule('0 3 * * *', runHubBackupPull);

@@ -210,6 +210,11 @@ export const api = {
     },
   },
 
+  kpis: async () => {
+    const res = await fetch(`${API_BASE}/kpis`, { credentials: 'include' });
+    return readResponse(res, 'KPIs');
+  },
+
   importData: async (connectionId) => {
     const res = await fetch(`${API_BASE}/import/${connectionId}`, {
       method: "POST",

@@ -1,4 +1,6 @@
 import { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Flag, User } from "lucide-react";
@@ -10,11 +12,23 @@ const flagColors = {
   orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", label: "Orange Flag" },
 };
 
-export default function FlaggedCustomersModal({ flagColor, customers, open, onClose, onCustomerClick, siteName }) {
+export default function FlaggedCustomersModal({ flagColor, open, onClose, onCustomerClick, siteName }) {
   if (!flagColor) return null;
 
   const config = flagColors[flagColor];
-  const sortedCustomers = [...customers].sort((a, b) => {
+
+  // Self-fetch flagged records when opened
+  const { data: fetchedCustomers = [], isFetching } = useQuery({
+    queryKey: ['flagged-customers', flagColor],
+    queryFn: async () => {
+      const all = await api.entities.DataRecord.list('-created_date', 2000);
+      return all.filter(r => r.flag_color === flagColor);
+    },
+    enabled: !!open && !!flagColor,
+    staleTime: 30_000,
+  });
+
+  const sortedCustomers = [...fetchedCustomers].sort((a, b) => {
     const numA = a.customer_number || a.data?.customer_number || "";
     const numB = b.customer_number || b.data?.customer_number || "";
     return String(numA).localeCompare(String(numB));
@@ -43,7 +57,7 @@ export default function FlaggedCustomersModal({ flagColor, customers, open, onCl
                 {config.label} Customers
               </div>
               <div className="text-sm text-gray-400 font-normal">
-                {sortedCustomers.length} customer{sortedCustomers.length !== 1 ? 's' : ''}
+                {isFetching ? 'Loading...' : `${sortedCustomers.length} customer${sortedCustomers.length !== 1 ? 's' : ''}`}
               </div>
             </div>
           </DialogTitle>

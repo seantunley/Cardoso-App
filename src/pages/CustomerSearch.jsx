@@ -43,9 +43,10 @@ export default function CustomerSearch() {
     }
   }, [connections, selectedConnectionId]);
 
-  const { data: records = [] } = useQuery({
-    queryKey: ["records"],
-    queryFn: () => api.entities.DataRecord.list("-created_date", 1000),
+  const { data: kpis = null } = useQuery({
+    queryKey: ["kpis"],
+    queryFn: () => api.kpis(),
+    staleTime: 30_000,
   });
 
   useEffect(() => {
@@ -55,7 +56,7 @@ export default function CustomerSearch() {
         // Batch rapid events (e.g., during a sync) into a single invalidation
         clearTimeout(debounceTimer);
         debounceTimer = setTimeout(() => {
-          queryClient.invalidateQueries({ queryKey: ["records"] });
+          queryClient.invalidateQueries({ queryKey: ["kpis"] });
         }, 1000);
       }
     });
@@ -68,10 +69,10 @@ export default function CustomerSearch() {
   const activeConnections = connections.filter(c => c.status === "active");
   const selectedConnection = connections.find(c => c.id === selectedConnectionId);
   
-  // Calculate flag stats
-  const redFlagged = records.filter((r) => r.flag_color === "red");
-  const greenFlagged = records.filter((r) => r.flag_color === "green");
-  const orangeFlagged = records.filter((r) => r.flag_color === "orange");
+  // Flag counts from KPI endpoint (no full record load)
+  const redCount = kpis?.records_by_flag?.red ?? 0;
+  const greenCount = kpis?.records_by_flag?.green ?? 0;
+  const orangeCount = kpis?.records_by_flag?.orange ?? 0;
 
   const handleFlagClick = (flagColor) => {
     setSelectedFlagColor(flagColor);
@@ -84,12 +85,7 @@ export default function CustomerSearch() {
     setFlagModalOpen(false);
   };
 
-  const getFlaggedCustomers = () => {
-    if (selectedFlagColor === "red") return redFlagged;
-    if (selectedFlagColor === "green") return greenFlagged;
-    if (selectedFlagColor === "orange") return orangeFlagged;
-    return [];
-  };
+  // FlaggedCustomersModal fetches its own records server-side
 
   return (
      <div className="min-h-screen bg-[var(--bg-primary)]">
@@ -115,7 +111,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-rose-400/70 uppercase tracking-widest mb-2">Critical</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{redFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{redCount}</p>
                     <p className="text-xs text-rose-300/60 mt-1.5">Red Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/20">
@@ -123,7 +119,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-rose-500/20">
-                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
 
@@ -136,7 +132,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-2">Attention</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{orangeFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{orangeCount}</p>
                     <p className="text-xs text-amber-300/60 mt-1.5">Orange Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/20">
@@ -144,7 +140,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-amber-500/20">
-                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
 
@@ -157,7 +153,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-2">Approved</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{greenFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{greenCount}</p>
                     <p className="text-xs text-emerald-300/60 mt-1.5">Green Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/20">
@@ -165,7 +161,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-emerald-500/20">
-                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
             </div>
@@ -173,7 +169,6 @@ export default function CustomerSearch() {
             {/* Flagged Customers Modal */}
             <FlaggedCustomersModal
               flagColor={selectedFlagColor}
-              customers={getFlaggedCustomers()}
               open={flagModalOpen}
               onClose={() => setFlagModalOpen(false)}
               onCustomerClick={handleCustomerClickFromModal}
