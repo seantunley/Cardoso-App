@@ -134,9 +134,6 @@ export default function Records() {
       source_id: r.source_id,
       source_table: r.source_table,
       flag_color: r.flag_color,
-      custom_field_1: r.custom_field_1,
-      custom_field_2: r.custom_field_2,
-      custom_field_3: r.custom_field_3,
       note: r.note,
       data: r.data,
     }));

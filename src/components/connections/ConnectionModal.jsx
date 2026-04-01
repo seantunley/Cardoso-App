@@ -48,16 +48,30 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Last Invoice — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Last Invoice — Amount", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_date", label: "Last Invoice — Date", type: "text", isBuiltIn: true },
-  { key: "last_receipt_number", label: "Last Receipt — Number", type: "text", isBuiltIn: true },
-  { key: "last_receipt_amount", label: "Last Receipt — Amount", type: "text", isBuiltIn: true },
-  { key: "last_receipt_date", label: "Last Receipt — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_1_date", label: "Invoice 1 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_2_date", label: "Invoice 2 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_3_date", label: "Invoice 3 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_4_date", label: "Invoice 4 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_5_date", label: "Invoice 5 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1", label: "Receipt 1 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1_amount", label: "Receipt 1 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1_date", label: "Receipt 1 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2", label: "Receipt 2 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2_amount", label: "Receipt 2 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2_date", label: "Receipt 2 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3", label: "Receipt 3 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3_amount", label: "Receipt 3 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3_date", label: "Receipt 3 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4", label: "Receipt 4 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4_amount", label: "Receipt 4 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4_date", label: "Receipt 4 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5", label: "Receipt 5 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5_amount", label: "Receipt 5 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5_date", label: "Receipt 5 — Date", type: "text", isBuiltIn: true },
   { key: "note", label: "Note", type: "text", isBuiltIn: true },
   { key: "flag_color", label: "Flag Color", type: "text", isBuiltIn: true },
   { key: "flag_reason", label: "Flag Reason", type: "text", isBuiltIn: true },
-  { key: "custom_field_1", label: "Legacy Custom Field 1", type: "text", isBuiltIn: true },
-  { key: "custom_field_2", label: "Legacy Custom Field 2", type: "text", isBuiltIn: true },
-  { key: "custom_field_3", label: "Legacy Custom Field 3", type: "text", isBuiltIn: true },
+
 ];
 
 export default function ConnectionModal({ connection, open, onClose, onSave, isSaving }) {
@@ -445,7 +459,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 setQueryColumns([]);
                 setQueryPreview([]);
               }}
-              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date,\n  RECNO1 AS last_receipt_number,\n  RECAMT1 AS last_receipt_amount,\n  RECDATE1 AS last_receipt_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_1_date,\n  RECNO1 AS last_receipt_1,\n  RECAMT1 AS last_receipt_1_amount,\n  RECDATE1 AS last_receipt_1_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
               rows={8}
               className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
             />

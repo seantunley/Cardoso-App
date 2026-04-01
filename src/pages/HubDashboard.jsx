@@ -201,7 +201,7 @@ function HubCustomerModal({ record, open, onClose }) {
               <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
               <span className="text-xs text-orange-400 truncate">{record.last_unpaid_invoice_1 || "—"}</span>
               <span className="text-xs text-white truncate">{formatAmount(record.last_unpaid_invoice_1_amount)}</span>
-              <span className="text-xs text-gray-300 truncate">{record.last_unpaid_invoice_date || "—"}</span>
+              <span className="text-xs text-gray-300 truncate">{record.last_unpaid_invoice_1_date || "—"}</span>
             </div>
           </div>
 
@@ -216,9 +216,9 @@ function HubCustomerModal({ record, open, onClose }) {
             </div>
             <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-gray-700 px-2 py-1.5">
               <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
-              <span className="text-xs text-emerald-400 truncate">{record.last_receipt_number || "—"}</span>
-              <span className="text-xs text-white truncate">{formatAmount(record.last_receipt_amount)}</span>
-              <span className="text-xs text-gray-300 truncate">{record.last_receipt_date || "—"}</span>
+              <span className="text-xs text-emerald-400 truncate">{record.last_receipt_1 || "—"}</span>
+              <span className="text-xs text-white truncate">{formatAmount(record.last_receipt_1_amount)}</span>
+              <span className="text-xs text-gray-300 truncate">{record.last_receipt_1_date || "—"}</span>
             </div>
           </div>
 

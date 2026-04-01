@@ -68,18 +68,36 @@ function flattenRecord(record) {
     flag_color: record.flag_color || record.data?.flag_color || "none",
     flag_reason: record.flag_reason || record.data?.flag_reason || "",
     flag_created_by: record.flag_created_by || record.data?.flag_created_by || null,
-    last_unpaid_invoice_1:
-      record.last_unpaid_invoice_1 || record.data?.last_unpaid_invoice_1,
-    last_unpaid_invoice_1_amount:
-      record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
-    last_unpaid_invoice_date:
-      record.last_unpaid_invoice_date || record.data?.last_unpaid_invoice_date,
-    last_receipt_number:
-      record.last_receipt_number || record.data?.last_receipt_number,
-    last_receipt_amount:
-      record.last_receipt_amount || record.data?.last_receipt_amount,
-    last_receipt_date:
-      record.last_receipt_date || record.data?.last_receipt_date,
+    last_unpaid_invoice_1: record.last_unpaid_invoice_1 || record.data?.last_unpaid_invoice_1,
+    last_unpaid_invoice_1_amount: record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
+    last_unpaid_invoice_1_date: record.last_unpaid_invoice_1_date || record.data?.last_unpaid_invoice_1_date,
+    last_unpaid_invoice_2: record.last_unpaid_invoice_2 || record.data?.last_unpaid_invoice_2,
+    last_unpaid_invoice_2_amount: record.last_unpaid_invoice_2_amount || record.data?.last_unpaid_invoice_2_amount,
+    last_unpaid_invoice_2_date: record.last_unpaid_invoice_2_date || record.data?.last_unpaid_invoice_2_date,
+    last_unpaid_invoice_3: record.last_unpaid_invoice_3 || record.data?.last_unpaid_invoice_3,
+    last_unpaid_invoice_3_amount: record.last_unpaid_invoice_3_amount || record.data?.last_unpaid_invoice_3_amount,
+    last_unpaid_invoice_3_date: record.last_unpaid_invoice_3_date || record.data?.last_unpaid_invoice_3_date,
+    last_unpaid_invoice_4: record.last_unpaid_invoice_4 || record.data?.last_unpaid_invoice_4,
+    last_unpaid_invoice_4_amount: record.last_unpaid_invoice_4_amount || record.data?.last_unpaid_invoice_4_amount,
+    last_unpaid_invoice_4_date: record.last_unpaid_invoice_4_date || record.data?.last_unpaid_invoice_4_date,
+    last_unpaid_invoice_5: record.last_unpaid_invoice_5 || record.data?.last_unpaid_invoice_5,
+    last_unpaid_invoice_5_amount: record.last_unpaid_invoice_5_amount || record.data?.last_unpaid_invoice_5_amount,
+    last_unpaid_invoice_5_date: record.last_unpaid_invoice_5_date || record.data?.last_unpaid_invoice_5_date,
+    last_receipt_1: record.last_receipt_1 || record.data?.last_receipt_1,
+    last_receipt_1_amount: record.last_receipt_1_amount || record.data?.last_receipt_1_amount,
+    last_receipt_1_date: record.last_receipt_1_date || record.data?.last_receipt_1_date,
+    last_receipt_2: record.last_receipt_2 || record.data?.last_receipt_2,
+    last_receipt_2_amount: record.last_receipt_2_amount || record.data?.last_receipt_2_amount,
+    last_receipt_2_date: record.last_receipt_2_date || record.data?.last_receipt_2_date,
+    last_receipt_3: record.last_receipt_3 || record.data?.last_receipt_3,
+    last_receipt_3_amount: record.last_receipt_3_amount || record.data?.last_receipt_3_amount,
+    last_receipt_3_date: record.last_receipt_3_date || record.data?.last_receipt_3_date,
+    last_receipt_4: record.last_receipt_4 || record.data?.last_receipt_4,
+    last_receipt_4_amount: record.last_receipt_4_amount || record.data?.last_receipt_4_amount,
+    last_receipt_4_date: record.last_receipt_4_date || record.data?.last_receipt_4_date,
+    last_receipt_5: record.last_receipt_5 || record.data?.last_receipt_5,
+    last_receipt_5_amount: record.last_receipt_5_amount || record.data?.last_receipt_5_amount,
+    last_receipt_5_date: record.last_receipt_5_date || record.data?.last_receipt_5_date,
     outstanding_balance:
       record.outstanding_balance || record.data?.outstanding_balance,
     terms: record.terms || record.data?.terms || null,
@@ -729,25 +747,113 @@ export default function CustomerLookup({
               return (
                 <div className="flex flex-col gap-2">
                   {renderTransactionTable({
-                    title: "Last Invoice",
+                    title: "Invoice 1",
                     icon: Flag,
                     iconColor: "text-orange-400",
                     accounts: allAccounts,
                     getFields: (r) => ({
                       ref: r?.last_unpaid_invoice_1,
                       amt: r?.last_unpaid_invoice_1_amount,
-                      date: r?.last_unpaid_invoice_date,
+                      date: r?.last_unpaid_invoice_1_date,
                     }),
                   })}
                   {renderTransactionTable({
-                    title: "Last Receipt",
+                    title: "Invoice 2",
+                    icon: Flag,
+                    iconColor: "text-orange-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_unpaid_invoice_2,
+                      amt: r?.last_unpaid_invoice_2_amount,
+                      date: r?.last_unpaid_invoice_2_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Invoice 3",
+                    icon: Flag,
+                    iconColor: "text-orange-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_unpaid_invoice_3,
+                      amt: r?.last_unpaid_invoice_3_amount,
+                      date: r?.last_unpaid_invoice_3_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Invoice 4",
+                    icon: Flag,
+                    iconColor: "text-orange-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_unpaid_invoice_4,
+                      amt: r?.last_unpaid_invoice_4_amount,
+                      date: r?.last_unpaid_invoice_4_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Invoice 5",
+                    icon: Flag,
+                    iconColor: "text-orange-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_unpaid_invoice_5,
+                      amt: r?.last_unpaid_invoice_5_amount,
+                      date: r?.last_unpaid_invoice_5_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Receipt 1",
                     icon: CheckCircle,
                     iconColor: "text-emerald-400",
                     accounts: allAccounts,
                     getFields: (r) => ({
-                      ref: r?.last_receipt_number,
-                      amt: r?.last_receipt_amount,
-                      date: r?.last_receipt_date,
+                      ref: r?.last_receipt_1,
+                      amt: r?.last_receipt_1_amount,
+                      date: r?.last_receipt_1_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Receipt 2",
+                    icon: CheckCircle,
+                    iconColor: "text-emerald-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_receipt_2,
+                      amt: r?.last_receipt_2_amount,
+                      date: r?.last_receipt_2_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Receipt 3",
+                    icon: CheckCircle,
+                    iconColor: "text-emerald-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_receipt_3,
+                      amt: r?.last_receipt_3_amount,
+                      date: r?.last_receipt_3_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Receipt 4",
+                    icon: CheckCircle,
+                    iconColor: "text-emerald-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_receipt_4,
+                      amt: r?.last_receipt_4_amount,
+                      date: r?.last_receipt_4_date,
+                    }),
+                  })}
+                  {renderTransactionTable({
+                    title: "Receipt 5",
+                    icon: CheckCircle,
+                    iconColor: "text-emerald-400",
+                    accounts: allAccounts,
+                    getFields: (r) => ({
+                      ref: r?.last_receipt_5,
+                      amt: r?.last_receipt_5_amount,
+                      date: r?.last_receipt_5_date,
                     }),
                   })}
                 </div>

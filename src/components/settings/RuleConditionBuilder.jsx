@@ -15,8 +15,16 @@ import { cn } from "@/lib/utils";
 export const RULE_FIELDS = [
   { value: "age_analysis",             label: "Age Analysis",             type: "text" },
   { value: "outstanding_balance",      label: "Outstanding Balance",      type: "number" },
-  { value: "last_unpaid_invoice_date", label: "Last Unpaid Invoice Date", type: "date" },
-  { value: "last_receipt_date",        label: "Last Receipt Date",        type: "date" },
+  { value: "last_unpaid_invoice_1_date", label: "Invoice 1 Date", type: "date" },
+  { value: "last_unpaid_invoice_2_date", label: "Invoice 2 Date", type: "date" },
+  { value: "last_unpaid_invoice_3_date", label: "Invoice 3 Date", type: "date" },
+  { value: "last_unpaid_invoice_4_date", label: "Invoice 4 Date", type: "date" },
+  { value: "last_unpaid_invoice_5_date", label: "Invoice 5 Date", type: "date" },
+  { value: "last_receipt_1_date", label: "Receipt 1 Date", type: "date" },
+  { value: "last_receipt_2_date", label: "Receipt 2 Date", type: "date" },
+  { value: "last_receipt_3_date", label: "Receipt 3 Date", type: "date" },
+  { value: "last_receipt_4_date", label: "Receipt 4 Date", type: "date" },
+  { value: "last_receipt_5_date", label: "Receipt 5 Date", type: "date" },
   { value: "updated_date",             label: "Last Updated",             type: "date" },
   { value: "created_date",             label: "Date Created",             type: "date" },
 ];

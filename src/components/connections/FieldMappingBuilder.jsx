@@ -17,9 +17,7 @@ const FALLBACK_FIELDS = [
   { key: "customer_name", label: "Customer Name", type: "text" },
   { key: "age_analysis", label: "Age Analysis", type: "text" },
   { key: "note", label: "Notes", type: "text" },
-  { key: "custom_field_1", label: "Custom Field 1", type: "text", isCustom: true },
-  { key: "custom_field_2", label: "Custom Field 2", type: "text", isCustom: true },
-  { key: "custom_field_3", label: "Custom Field 3", type: "text", isCustom: true },
+
 ];
 
 const SYNC_MODES = [
