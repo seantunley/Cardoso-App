@@ -726,9 +726,9 @@ export default function CustomerLookup({
                           </span>
                           <div className="space-y-0.5">
                             <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-2 mb-1">
-                              <span className="text-gray-500 uppercase tracking-wide text-[10px]">Number</span>
-                              <span className="text-gray-500 uppercase tracking-wide text-[10px]">Amount</span>
-                              <span className="text-gray-500 uppercase tracking-wide text-[10px]">Date</span>
+                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Number</span>
+                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Amount</span>
+                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Date</span>
                             </div>
                             {activeSlots.map(({ numField, amtField, dateField }, i) => {
                               const ref = r?.[numField];
