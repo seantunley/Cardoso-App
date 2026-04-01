@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { checkAutoFlagRules } from "@/lib/evalFlagRules";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -335,9 +336,7 @@ export default function Settings() {
       const now = new Date().toISOString();
       for (const record of records) {
         if (record.flag_color && record.flag_color !== "none" && record.flag_created_by && !record.auto_flagged) continue;
-        const ageAnalysis = record.age_analysis || record.data?.age_analysis;
-        if (!ageAnalysis) continue;
-        const autoFlag = checkAutoFlagRulesSync(ageAnalysis, activeRules);
+        const autoFlag = checkAutoFlagRules(record, activeRules);
         if (autoFlag && autoFlag.flag_color !== record.flag_color) {
           await api.entities.DataRecord.update(record.id, { ...autoFlag, last_checked: now });
           flaggedCount++;
@@ -376,53 +375,6 @@ export default function Settings() {
     if (confirm("Delete this auto-flag rule?")) deleteRuleMutation.mutate(id);
   };
 
-  const checkAutoFlagRulesSync = (ageAnalysis, rules) => {
-    if (!ageAnalysis) return null;
-    const evaluateCondition = (conditionType, conditionValue, conditionValueSecondary) => {
-      if (["greater_than", "less_than", "greater_or_equal", "less_or_equal"].includes(conditionType)) {
-        const numbersInAgeAnalysis = ageAnalysis.match(/[+\-]?\d+/g)?.map((n) => parseInt(n, 10)) || [];
-        const threshold = parseFloat(conditionValue);
-        if (!isNaN(threshold) && numbersInAgeAnalysis.length > 0) {
-          for (const num of numbersInAgeAnalysis) {
-            switch (conditionType) {
-              case "greater_than": if (num > threshold) return true; break;
-              case "less_than": if (num < threshold) return true; break;
-              case "greater_or_equal": if (num >= threshold) return true; break;
-              case "less_or_equal": if (num <= threshold) return true; break;
-            }
-          }
-        }
-        return false;
-      } else if (conditionType === "range_between") {
-        const numbers = ageAnalysis.match(/[+\-]?\d+/g)?.map((n) => parseInt(n, 10)) || [];
-        const low = parseFloat(conditionValue);
-        const high = parseFloat(conditionValueSecondary);
-        return numbers.some((n) => n >= low && n <= high);
-      } else {
-        const valueLower = String(conditionValue).toLowerCase();
-        const ageAnalysisLower = ageAnalysis.toLowerCase();
-        switch (conditionType) {
-          case "contains": return ageAnalysisLower.includes(valueLower);
-          case "equals": return ageAnalysisLower === valueLower;
-          case "starts_with": return ageAnalysisLower.startsWith(valueLower);
-          case "ends_with": return ageAnalysisLower.endsWith(valueLower);
-          default: return false;
-        }
-      }
-    };
-    for (const rule of rules) {
-      let conditions = rule.conditions;
-      if (typeof conditions === "string") { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
-      if (!Array.isArray(conditions) || conditions.length === 0) continue;
-      const logic = rule.logic || "AND";
-      const results = conditions.map((c) =>
-        evaluateCondition(c.condition_type, c.condition_value, c.condition_value_secondary)
-      );
-      const matches = logic === "OR" ? results.some(Boolean) : results.every(Boolean);
-      if (matches) return { flag_color: rule.flag_color, flag_reason: `Auto-flagged: ${rule.rule_name}`, auto_flagged: true };
-    }
-    return null;
-  };
 
   // Visible tabs: hide Connections on hub mode
   const visibleTabs = TABS.filter((t) => !(t.siteOnly && isHub));
