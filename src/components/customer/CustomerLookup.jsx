@@ -784,7 +784,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-4xl w-[900px] h-[82vh] border-4 bg-gray-900 flex flex-col",
+            "max-w-4xl w-[900px] border-4 bg-gray-900 flex flex-col overflow-hidden",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
@@ -830,9 +830,9 @@ export default function CustomerLookup({
             </div>
           )}
 
-          <div className="pt-2 flex gap-4 flex-1 min-h-0">
+          <div className="pt-2 flex gap-4" style={{height:"calc(82vh - 140px)"}}>
             {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div className="flex-1 min-w-0 space-y-4 overflow-y-auto pr-1">
+            <div className="flex-1 min-w-0 space-y-4 overflow-y-auto pr-2 h-full">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -993,7 +993,7 @@ export default function CustomerLookup({
 
             </div>{/* end left col */}
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div className="w-72 shrink-0 space-y-3 overflow-y-auto">
+            <div className="w-72 shrink-0 space-y-3 overflow-y-auto h-full">
             {/* ── Credit Analysis Panel ── */}
             {(() => {
               const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
