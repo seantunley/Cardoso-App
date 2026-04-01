@@ -339,6 +339,16 @@ function analyseInvoiceCredit(records) {
     deductions += 10;
   }
 
+  // ── RULE 1b: Last transaction recency ──────────────────────────────────
+  const allDates = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
+  if (allDates.length > 0) {
+    const mostRecent = Math.max(...allDates);
+    const daysSinceLastTransaction = Math.floor((today - mostRecent) / 86400000);
+    if (daysSinceLastTransaction > 730) {
+      factors.push({ type: "warn", text: `No transactions in over ${Math.floor(daysSinceLastTransaction / 365)} year${Math.floor(daysSinceLastTransaction / 365) > 1 ? "s" : ""} — customer has been inactive for a long time.` });
+    }
+  }
+
   // ── RULE 2: Payment speed on matched pairs ──────────────────────────────
   // A customer who pays in full but slowly is caution, not hold.
   if (paidPairs.length > 0) {
