@@ -858,7 +858,7 @@ function sanitizeUser(user) {
     can_access_connections: boolFromRow(user.can_access_connections, false),
     can_access_settings: boolFromRow(user.can_access_settings, false),
     can_manage_users: boolFromRow(user.can_manage_users, false),
-    can_manage_rules: boolFromRow(user.can_manage_rules, false),
+    can_manage_rules: user.role === 'admin' ? true : boolFromRow(user.can_manage_rules, false),
     can_edit_records: boolFromRow(user.can_edit_records, true),
     can_flag_records: boolFromRow(user.can_flag_records, true),
     created_date: user.created_date,
