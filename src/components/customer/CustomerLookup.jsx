@@ -582,13 +582,12 @@ export default function CustomerLookup({
               <Badge
                 className={cn(
                   "ml-auto border text-xs",
-                  flagColors[customer?.flag_color || "none"].bg,
-                  flagColors[customer?.flag_color || "none"].text
+                  (flagColors[customer?.flag_color] || flagColors["none"]).bg,
+                  (flagColors[customer?.flag_color] || flagColors["none"]).text
                 )}
               >
                 <Flag className="mr-1 h-3 w-3" />
-                {flagColors[customer?.flag_color || "none"].label}
-
+                {(flagColors[customer?.flag_color] || flagColors["none"]).label}
               </Badge>
             </DialogTitle>
           </DialogHeader>
