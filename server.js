@@ -3262,7 +3262,8 @@ app.get('/api/autoflagrule/export', requireAuth, requireAdmin, (req, res) => {
     res.setHeader('Content-Disposition', 'attachment; filename="cardoso-rules-export.json"');
     res.json(exportData);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error('[export error]', err);
+    res.status(500).json({ error: err.message, stack: err.stack });
   }
 });
 
