@@ -23,6 +23,7 @@ const APP_VERSION = "2026.2.3";
 const navItems = [
   { name: "Customer Management", icon: Search,  color: "#3b82f6", page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
   { name: "Customer Management", icon: Globe,   color: "#818cf8", page: "HubDashboard",     hubOnly: true },
+  { name: "Site Backups",          icon: HardDrive, color: "#3b82f6", page: "HubBackups",      hubOnly: true, adminOnly: true },
   { name: "Customer Balances",   icon: Wallet,  color: "#10b981", page: "CustomerBalances", permission: "can_access_customer_search" },
   { name: "Inventory",           icon: Package, color: "#f97316", page: "Inventory",        permission: "can_access_customer_search" },
 ];

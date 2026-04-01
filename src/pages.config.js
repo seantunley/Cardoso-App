@@ -46,6 +46,7 @@
 import AuditLog from './pages/AuditLog';
 import CustomerBalances from './pages/CustomerBalances';
 import HubDashboard from './pages/HubDashboard';
+import HubBackups from './pages/HubBackups';
 import HubSyncLog from './pages/HubSyncLog';
 import Connections from './pages/Connections';
 import CustomerSearch from './pages/CustomerSearch';
@@ -62,6 +63,7 @@ export const PAGES = {
     "CustomerBalances": CustomerBalances,
     "Inventory": Inventory,
     "HubDashboard": HubDashboard,
+    "HubBackups": HubBackups,
     "HubSyncLog": HubSyncLog,
     "Connections": Connections,
     "CustomerSearch": CustomerSearch,

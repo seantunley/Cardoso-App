@@ -3240,6 +3240,84 @@ if (process.env.HUB_MODE === 'true') {
 
   // --- Hub API routes ---
 
+
+
+  // GET /api/hub/proxy-backup?site_id=xxx
+  // Proxies a backup download from a site through the Hub server to avoid CORS.
+  // Admin-only.
+  app.get('/api/hub/proxy-backup', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+    const { site_id } = req.query;
+    if (!site_id) return res.status(400).json({ error: 'site_id required' });
+
+    const site = db.prepare('SELECT id, name, url FROM hub_sites WHERE id = ?').get(site_id);
+    if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
+
+    const token = process.env.REPORTING_TOKEN || '';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const upstream = await fetch(`${site.url}/api/backup/download`, {
+        headers: { 'x-reporting-token': token },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!upstream.ok) return res.status(upstream.status).json({ error: `Site returned ${upstream.status}` });
+
+      const filename = `cardoso-${site.id}-${new Date().toISOString().slice(0,10)}.db`;
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      upstream.body.pipe(res);
+    } catch (err) {
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/backup-status
+  // Polls /api/backup/status on each registered site and returns aggregated results.
+  // Admin-only (session required).
+  app.get('/api/hub/backup-status', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+    const sites = db.prepare('SELECT id, name, url FROM hub_sites').all();
+    const token = process.env.REPORTING_TOKEN || '';
+
+    const results = await Promise.all(sites.map(async (site) => {
+      const base = { site_id: site.id, site_name: site.name, url: site.url };
+      if (!site.url) return { ...base, error: 'No API URL configured', status: 'unknown' };
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const r = await fetch(`${site.url}/api/backup/status`, {
+          headers: { 'x-reporting-token': token },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!r.ok) return { ...base, error: `HTTP ${r.status}`, status: 'error' };
+        const data = await r.json();
+        // Determine health
+        let status = 'ok';
+        if (!data.last_backup) {
+          status = 'never';
+        } else {
+          const hoursAgo = (Date.now() - new Date(data.last_backup.mtime).getTime()) / 3600000;
+          if (hoursAgo > 48) status = 'stale';
+          else if (hoursAgo > 25) status = 'warning';
+        }
+        return { ...base, ...data, status };
+      } catch (err) {
+        return { ...base, error: err.name === 'AbortError' ? 'Timeout' : err.message, status: 'unreachable' };
+      }
+    }));
+
+    res.json({ sites: results });
+  });
+
   // GET /api/hub/sites
   // Accessible via session (dashboard) OR x-reporting-token (scripts/hub-pull-backups.ps1)
   app.get('/api/hub/sites', (req, res) => {
@@ -4074,6 +4152,51 @@ if (IS_PRODUCTION) {
   });
 }
 
+
+
+// ==================== BACKUP STATUS ====================
+
+// GET /api/backup/status
+// Returns metadata about the most recent local backup file.
+// Used by the Hub to monitor backup health across sites.
+app.get('/api/backup/status', (req, res) => {
+  const token = req.headers['x-reporting-token'];
+  const expectedToken = process.env.REPORTING_TOKEN;
+  if (!expectedToken || token !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const fs = require('fs');
+  const backupDir = path.resolve(path.dirname(dbPath), 'backups');
+
+  let lastBackup = null;
+  if (fs.existsSync(backupDir)) {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const full = path.join(backupDir, f);
+        const stat = fs.statSync(full);
+        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+
+    if (files.length > 0) {
+      lastBackup = files[0];
+      lastBackup.total_backups = files.length;
+    }
+  }
+
+  const dbStat = fs.existsSync(dbPath) ? fs.statSync(path.resolve(dbPath)) : null;
+
+  res.json({
+    site_id: process.env.SITE_ID || 'unknown',
+    site_name: process.env.SITE_NAME || 'Unknown',
+    db_size: dbStat ? dbStat.size : null,
+    db_modified: dbStat ? dbStat.mtime.toISOString() : null,
+    last_backup: lastBackup,
+    backup_dir: backupDir,
+  });
+});
 
 // ==================== BACKUP ====================
 // GET /api/backup/download
