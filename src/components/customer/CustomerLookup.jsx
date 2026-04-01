@@ -792,7 +792,7 @@ export default function CustomerLookup({
           )}
         >
           {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "860px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
+          <div style={{ width: "780px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
@@ -995,7 +995,7 @@ export default function CustomerLookup({
 
             </div>{/* end left col */}
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "12px", minHeight: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }} className="space-y-3">
             {/* ── Credit Analysis Panel ── */}
             {(() => {
               const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
@@ -1034,7 +1034,7 @@ export default function CustomerLookup({
                 </div>
               );
             })()}
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
               <div className="mb-3 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
                   Flag Management
