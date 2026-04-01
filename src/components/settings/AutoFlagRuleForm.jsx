@@ -13,6 +13,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Flag, Trash2, Save, ChevronDown, ChevronRight, Pencil } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import RuleConditionBuilder from "./RuleConditionBuilder";
 import RuleTester from "./RuleTester";
@@ -44,6 +45,23 @@ export default function AutoFlagRuleForm({ rule, onSave, onDelete, isSaving, isA
   };
 
   const flagCfg = flagColors[formData.flag_color] || flagColors.red;
+  const queryClient = useQueryClient();
+  const toggleActiveMutation = useMutation({
+    mutationFn: async (newActive) => {
+      const res = await fetch(`/api/autoflagrule/${rule?.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: newActive }),
+        credentials: 'include',
+      });
+      if (!res.ok) throw new Error('Failed to toggle rule');
+      return res.json();
+    },
+    onSuccess: (_, newActive) => {
+      setFormData(f => ({ ...f, is_active: newActive }));
+      queryClient.invalidateQueries({ queryKey: ['autoFlagRules'] });
+    },
+  });
 
   // ── Collapsed summary row ──
   if (!expanded && rule) {
@@ -63,6 +81,21 @@ export default function AutoFlagRuleForm({ rule, onSave, onDelete, isSaving, isA
                 <span className="text-xs text-gray-500 border border-gray-600 rounded px-1.5 py-0.5 shrink-0">inactive</span>
               )}
             </button>
+            {isAdmin && (
+              <label
+                className="flex items-center gap-1.5 cursor-pointer shrink-0 select-none"
+                onClick={e => e.stopPropagation()}
+                title={formData.is_active ? "Disable rule" : "Enable rule"}
+              >
+                <input
+                  type="checkbox"
+                  checked={!!formData.is_active}
+                  onChange={e => toggleActiveMutation.mutate(e.target.checked)}
+                  className="w-3.5 h-3.5 accent-blue-500 cursor-pointer"
+                />
+                <span className="text-xs text-gray-400">{formData.is_active ? "on" : "off"}</span>
+              </label>
+            )}
             <div className="flex items-center gap-2 shrink-0">
               {isAdmin && (
                 <Button
