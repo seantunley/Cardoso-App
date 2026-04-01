@@ -82,6 +82,7 @@ function flattenRecord(record) {
       record.last_receipt_date || record.data?.last_receipt_date,
     outstanding_balance:
       record.outstanding_balance || record.data?.outstanding_balance,
+    terms: record.terms || record.data?.terms || null,
   };
 }
 
@@ -752,6 +753,13 @@ export default function CustomerLookup({
                 </div>
               );
             })()}
+
+            {customer?.terms && (
+              <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2">
+                <span className="text-xs text-gray-400 shrink-0">Payment Terms:</span>
+                <span className="text-xs font-medium text-white">{customer.terms}</span>
+              </div>
+            )}
 
             <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
               <div className="mb-3 flex items-center justify-between">

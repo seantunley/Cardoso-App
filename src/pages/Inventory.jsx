@@ -163,7 +163,6 @@ export default function Inventory() {
                     <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Last Cost</th>
                     <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price List</th>
                     <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Terms</th>
                     {hubMode && (
                       <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
                     )}
@@ -181,7 +180,6 @@ export default function Inventory() {
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.last_cost || "—"}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.price_list || "—"}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.price || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-muted-foreground">{row.terms || "—"}</td>
                       {hubMode && (
                         <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
                       )}

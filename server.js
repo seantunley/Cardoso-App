@@ -510,6 +510,7 @@ ensureColumn('datarecord', 'last_receipt_number', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_amount', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
 ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
+ensureColumn('datarecord', 'terms', 'TEXT');
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
@@ -826,6 +827,10 @@ function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
     },
     last_receipt_date: {
       fallbacks: ['last_receipt_date', 'LastReceiptDate', 'LastReceiptIssuedDate', 'LAST_RECEIPT_DATE', 'ReceiptDate', 'RECDATE'],
+      defaultMode: 'sync',
+    },
+    terms: {
+      fallbacks: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],
       defaultMode: 'sync',
     },
     note: {
@@ -1229,6 +1234,7 @@ async function runConnectionImport(connectionId) {
         last_receipt_number = ?,
         last_receipt_amount = ?,
         last_receipt_date = ?,
+        terms = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -1266,9 +1272,10 @@ async function runConnectionImport(connectionId) {
         last_receipt_number,
         last_receipt_amount,
         last_receipt_date,
+        terms,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -1278,19 +1285,17 @@ async function runConnectionImport(connectionId) {
       last_cost:        { fallbacks: ['last_cost', 'LastCost', 'LAST_COST', 'Cost', 'COST'] },
       price_list:       { fallbacks: ['price_list', 'PriceList', 'PRICE_LIST', 'Pricelist'] },
       price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice'] },
-      terms:            { fallbacks: ['terms', 'Terms', 'TERMS', 'PaymentTerms'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_table, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
         last_cost=excluded.last_cost,
         price_list=excluded.price_list,
         price=excluded.price,
-        terms=excluded.terms,
         updated_date=excluded.updated_date
     `);
 
@@ -1310,7 +1315,6 @@ async function runConnectionImport(connectionId) {
             String(getMappedOrFallbackValue(row, {}, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, {}, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, {}, 'price', inventoryMappingConfig.price.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'terms', inventoryMappingConfig.terms.fallbacks) || ''),
             syncTimestamp
           );
         }
@@ -1329,7 +1333,7 @@ async function runConnectionImport(connectionId) {
                last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
                last_unpaid_invoice_3, last_unpaid_invoice_3_amount,
                last_unpaid_invoice_date, outstanding_balance,
-               last_receipt_number, last_receipt_amount, last_receipt_date
+               last_receipt_number, last_receipt_amount, last_receipt_date, terms
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -1406,6 +1410,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_receipt_number ?? existing.last_receipt_number ?? ''),
               String(baseRecordData.last_receipt_amount ?? existing.last_receipt_amount ?? ''),
               String(baseRecordData.last_receipt_date ?? existing.last_receipt_date ?? ''),
+              String(baseRecordData.terms ?? existing.terms ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -1456,6 +1461,7 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.last_receipt_number ?? ''),
               String(baseRecordData.last_receipt_amount ?? ''),
               String(baseRecordData.last_receipt_date ?? ''),
+              String(baseRecordData.terms ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
@@ -2678,7 +2684,7 @@ app.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
   const offset = parseInt(req.query.offset) || 0;
   const rows = db.prepare(
-    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date
+    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, updated_date
      FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
   ).all(limit, offset);
   res.json({
@@ -2867,15 +2873,14 @@ if (process.env.HUB_MODE === 'true') {
 
       // Inventory — full refresh
       const upsertInv = db.prepare(`
-        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, synced_at)
-        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @terms, @synced_at)
+        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, synced_at)
+        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @synced_at)
         ON CONFLICT(site_id, item_number) DO UPDATE SET
           item_description=excluded.item_description,
           qty_on_hand=excluded.qty_on_hand,
           last_cost=excluded.last_cost,
           price_list=excluded.price_list,
           price=excluded.price,
-          terms=excluded.terms,
           synced_at=excluded.synced_at
       `);
       const insertInventory = db.transaction((invRecords) => {
@@ -2889,7 +2894,6 @@ if (process.env.HUB_MODE === 'true') {
             last_cost: r.last_cost || null,
             price_list: r.price_list || null,
             price: r.price || null,
-            terms: r.terms || null,
             synced_at: now,
           });
         }
