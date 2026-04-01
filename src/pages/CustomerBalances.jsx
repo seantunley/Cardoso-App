@@ -6,18 +6,19 @@ const LIMIT = 200;
 /* ── print styles (injected once) ── */
 const PRINT_STYLE = `
 @media print {
-  body > * { display: none !important; }
-  #customer-balances-printable { display: block !important; }
-
+  body { visibility: hidden; background: #fff; }
   #customer-balances-printable {
-    position: fixed;
-    inset: 0;
+    visibility: visible;
+    position: absolute;
+    left: 0; top: 0;
+    width: 100%;
     background: #fff;
     color: #000;
     font-family: Arial, Helvetica, sans-serif;
     font-size: 11px;
     padding: 16mm 16mm 12mm 16mm;
   }
+  #customer-balances-printable * { visibility: visible; }
 
   .cb-print-header { margin-bottom: 8mm; border-bottom: 2px solid #000; padding-bottom: 4mm; }
   .cb-print-header h1 { font-size: 16px; font-weight: 700; margin: 0 0 2px 0; }
@@ -165,7 +166,7 @@ export default function CustomerBalances() {
   return (
     <>
       {/* ── Print-only block (hidden on screen) ── */}
-      <div id="customer-balances-printable" style={{ display: "none" }}>
+      <div id="customer-balances-printable" style={{ visibility: "hidden", position: "absolute" }}>
         <div className="cb-print-header">
           <h1>{printTitle}</h1>
           <p>Printed: {printDate} · {filtered.length} customer{filtered.length !== 1 ? "s" : ""}</p>
