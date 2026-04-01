@@ -3222,12 +3222,17 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
     const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
     const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
 
+    let _debugCount = 0;
     const applyAll = db.transaction(() => {
       for (const record of records) {
         const manuallyFlagged = record.flag_color && !record.auto_flagged && record.flag_created_by;
         if (manuallyFlagged) continue;
 
         const autoFlag = applyAutoFlagRulesToRecord(record, activeRules);
+        if (_debugCount < 3) {
+          console.log(`[apply-auto-flags] record #${_debugCount} balance="${record.outstanding_balance}" name="${record.customer_name}" => autoFlag=${JSON.stringify(autoFlag)}`);
+          _debugCount++;
+        }
         if (autoFlag) {
           updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, record.id);
           flagged++;
