@@ -834,7 +834,7 @@ export default function CustomerLookup({
 
           <div style={{ display: "flex", gap: "16px", flex: 1, minHeight: 0, paddingTop: "8px" }}>
             {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div style={{ width: "420px", flexShrink: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
+            <div style={{ width: "320px", flexShrink: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
