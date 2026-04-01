@@ -248,7 +248,8 @@ function analyseInvoiceCredit(record) {
     date:   parseDateField(record[`last_receipt_${i}_date`] || record.data?.[`last_receipt_${i}_date`]),
   })).filter(x => x.number || x.amount);
 
-  const outstandingBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
+  const rawBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
+  const outstandingBalance = rawBalance < 1 ? 0 : rawBalance; // treat sub-R1 as rounding
 
   // No data at all
   if (invoices.length === 0 && receipts.length === 0) {
