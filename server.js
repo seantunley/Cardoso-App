@@ -3253,9 +3253,12 @@ app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
 
 app.get('/api/autoflagrule/export', requireAuth, requireAdmin, (req, res) => {
   try {
-    const rules = db.prepare(`SELECT name, priority, conditions, color, is_active FROM autoflagrule ORDER BY priority DESC`).all();
+    const rules = db.prepare(`SELECT rule_name, priority, conditions, flag_color, is_active FROM autoflagrule ORDER BY priority DESC`).all();
     const exportData = rules.map(r => ({
-      ...r,
+      name: r.rule_name,
+      priority: r.priority,
+      color: r.flag_color,
+      is_active: r.is_active,
       conditions: (() => { try { return JSON.parse(r.conditions); } catch { return r.conditions; } })()
     }));
     res.setHeader('Content-Type', 'application/json');
@@ -3263,7 +3266,7 @@ app.get('/api/autoflagrule/export', requireAuth, requireAdmin, (req, res) => {
     res.json(exportData);
   } catch (err) {
     console.error('[export error]', err);
-    res.status(500).json({ error: err.message, stack: err.stack });
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3276,15 +3279,16 @@ app.post('/api/autoflagrule/import', requireAuth, requireAdmin, (req, res) => {
     const upsert = db.transaction(() => {
       for (const rule of rules) {
         if (!rule.name || !rule.conditions) { skipped++; continue; }
+        const ruleColor = rule.color ?? rule.flag_color ?? 'red';
         const condStr = typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions);
-        const existing = db.prepare(`SELECT id FROM autoflagrule WHERE name = ?`).get(rule.name);
+        const existing = db.prepare(`SELECT id FROM autoflagrule WHERE rule_name = ?`).get(rule.name);
         if (existing) {
-          db.prepare(`UPDATE autoflagrule SET priority = ?, conditions = ?, color = ?, is_active = ? WHERE id = ?`)
-            .run(rule.priority ?? 1, condStr, rule.color ?? null, rule.is_active ?? 1, existing.id);
+          db.prepare(`UPDATE autoflagrule SET priority = ?, conditions = ?, flag_color = ?, is_active = ? WHERE id = ?`)
+            .run(rule.priority ?? 1, condStr, ruleColor, rule.is_active ?? 1, existing.id);
           updated++;
         } else {
-          db.prepare(`INSERT INTO autoflagrule (name, priority, conditions, color, is_active) VALUES (?, ?, ?, ?, ?)`)
-            .run(rule.name, rule.priority ?? 1, condStr, rule.color ?? null, rule.is_active ?? 1);
+          db.prepare(`INSERT INTO autoflagrule (rule_name, priority, conditions, flag_color, is_active) VALUES (?, ?, ?, ?, ?)`)
+            .run(rule.name, rule.priority ?? 1, condStr, ruleColor, rule.is_active ?? 1);
           created++;
         }
       }
