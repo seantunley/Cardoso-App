@@ -191,166 +191,6 @@ function ConnectionsTab({ currentUser }) {
   );
 }
 
-// ─── Fields Tab ─────────────────────────────────────────────────────────────
-
-const BUILT_IN_FIELDS = [
-  { key: "customer_number", label: "Customer Number", type: "text" },
-  { key: "customer_name",   label: "Customer Name",   type: "text" },
-  { key: "age_analysis",    label: "Age Analysis",     type: "text" },
-  { key: "source_id",       label: "Source ID",        type: "text" },
-  { key: "source_table",    label: "Source Table",     type: "text" },
-  { key: "data",            label: "Data",             type: "object" },
-  { key: "flag_color",      label: "Flag Color",       type: "text" },
-];
-
-function FieldsTab() {
-  const queryClient = useQueryClient();
-  const [editingField, setEditingField] = useState(null);
-  const [editValues, setEditValues] = useState({});
-  const [addingField, setAddingField] = useState(false);
-  const [newField, setNewField] = useState({ key: "", label: "", field_type: "text" });
-
-  const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
-  const canManage = hasPermission(currentUser, "can_access_settings") || currentUser?.role === "admin";
-
-  const { data: customFields = [], isLoading } = useQuery({
-    queryKey: ["customFields"],
-    queryFn: () => api.entities.CustomField.list(),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data) => api.entities.CustomField.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field added"); setAddingField(false); setNewField({ key: "", label: "", field_type: "text" }); },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => api.entities.CustomField.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field updated"); setEditingField(null); },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => api.entities.CustomField.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field deleted"); },
-  });
-
-  const startEdit = (field) => {
-    setEditingField(field.id);
-    setEditValues({ label: field.label, field_type: field.field_type });
-  };
-
-  return (
-    <div className="space-y-6">
-      {/* Built-in */}
-      <div>
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Built-in Fields</h3>
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-border bg-muted/40">
-              {["Field Key","Label","Type",""].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {BUILT_IN_FIELDS.map(f => (
-                <tr key={f.key} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key}</td>
-                  <td className="px-4 py-2.5 text-foreground">{f.label}</td>
-                  <td className="px-4 py-2.5"><Badge variant="secondary">{f.type}</Badge></td>
-                  <td className="px-4 py-2.5"><Lock className="h-3.5 w-3.5 text-muted-foreground/50" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Custom */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Custom Fields</h3>
-          {canManage && (
-            <Button size="sm" variant="outline" onClick={() => setAddingField(true)} className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> Add Field
-            </Button>
-          )}
-        </div>
-
-        {addingField && (
-          <div className="mb-3 rounded-xl border border-border bg-card p-4 space-y-3">
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Key (snake_case)</label>
-                <Input value={newField.key} onChange={e => setNewField(v => ({ ...v, key: e.target.value }))} placeholder="e.g. credit_limit" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Label</label>
-                <Input value={newField.label} onChange={e => setNewField(v => ({ ...v, label: e.target.value }))} placeholder="e.g. Credit Limit" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Type</label>
-                <Select value={newField.field_type} onValueChange={v => setNewField(f => ({ ...f, field_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["text","number","date","boolean","select"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => createMutation.mutate(newField)} disabled={!newField.key || !newField.label || createMutation.isPending}>Save</Button>
-              <Button size="sm" variant="ghost" onClick={() => setAddingField(false)}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className="h-20 animate-pulse bg-muted rounded-xl" />
-        ) : customFields.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border rounded-xl">No custom fields yet</div>
-        ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-border bg-muted/40">
-                {["Key","Label","Type",""].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {customFields.map(f => (
-                  <tr key={f.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key || f.field_key}</td>
-                    <td className="px-4 py-2.5">
-                      {editingField === f.id
-                        ? <Input className="h-7 text-sm" value={editValues.label} onChange={e => setEditValues(v => ({ ...v, label: e.target.value }))} />
-                        : <span className="text-foreground">{f.label}</span>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {editingField === f.id
-                        ? <Select value={editValues.field_type} onValueChange={v => setEditValues(ev => ({ ...ev, field_type: v }))}><SelectTrigger className="h-7 text-sm"><SelectValue /></SelectTrigger><SelectContent>{["text","number","date","boolean","select"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
-                        : <Badge variant="secondary">{f.field_type}</Badge>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {canManage && (
-                        editingField === f.id ? (
-                          <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => updateMutation.mutate({ id: f.id, data: editValues })}><Check className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingField(null)}><X className="h-3.5 w-3.5" /></Button>
-                          </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(f)}><Edit2 className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => confirm("Delete this field?") && deleteMutation.mutate(f.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                          </div>
-                        )
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ─── Sync Log Tab ────────────────────────────────────────────────────────────
 
 function SyncLogTab() {
@@ -655,7 +495,6 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     canManageUsers && { id: "users", label: "Users" },
     { id: "theme", label: "Theme" },
     !hubMode && { id: "autoflag", label: "Auto-Flag Rules" },
-    !hubMode && { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
     hubMode && { id: "synclog", label: "Sync Log" },
@@ -686,7 +525,6 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "users"    && <UsersTabContent />}
                 {t.id === "theme"    && <ThemeTab />}
                 {t.id === "autoflag" && <AutoFlagTab />}
-                {t.id === "fields"   && <FieldsTab />}
                 {t.id === "audit"    && <AuditTab />}
                 {t.id === "synclog"       && <SyncLogTab />}
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}

@@ -19,11 +19,6 @@ const flagDot = { none: "bg-slate-400", red: "bg-red-500", green: "bg-green-500"
 
 export default function RecordEditModal({ open, onClose, record, onSave }) {
   const [formData, setFormData] = useState({});
-  const { data: configs = [] } = useQuery({
-    queryKey: ["customFieldConfigs"],
-    queryFn: () => api.entities.CustomFieldConfig.list(),
-  });
-
   useEffect(() => {
     if (record) {
       // Parse local_fields JSON so dynamic custom field values are accessible by key
@@ -36,9 +31,6 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
 
       setFormData({
         customer_name: record.customer_name || "",
-        custom_field_1: record.custom_field_1 || "",
-        custom_field_2: record.custom_field_2 || "",
-        custom_field_3: record.custom_field_3 || "",
         ...parsedLocalFields,
       });
     }
@@ -59,8 +51,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
     // Separate built-in fields from dynamic custom fields (those not in datarecord columns)
     const builtInKeys = new Set([
       "customer_name", "customer_number", "age_analysis", "note",
-      "custom_field_1", "custom_field_2", "custom_field_3",
-    ]);
+      ]);
 
     const builtInChanges = {};
     const dynamicChanges = {};
@@ -91,77 +82,6 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
     onClose();
   };
 
-  const renderField = (config) => {
-    if (!config.is_active) return null;
-    const value = formData[config.field_key] || "";
-    switch (config.field_type) {
-      case "text":
-        return (
-          <div key={config.id} className="space-y-1.5">
-            <Label className="text-sm font-medium text-gray-200">{config.label}</Label>
-            <Input
-              value={value}
-              onChange={(e) => handleChange(config.field_key, e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
-            />
-          </div>
-        );
-      case "select":
-        // NEW: Parse options if it's a JSON string from DB
-        let parsedOptions = Array.isArray(config.options) ? config.options : [];
-        if (typeof config.options === 'string') {
-          try {
-            parsedOptions = JSON.parse(config.options);
-          } catch (e) {
-            console.error(`Failed to parse options for ${config.field_key}:`, e);
-            parsedOptions = [];
-          }
-        }
-        return (
-          <div key={config.id} className="space-y-1.5">
-            <Label className="text-sm font-medium text-gray-200">{config.label}</Label>
-            <Select value={value} onValueChange={(val) => handleChange(config.field_key, val)}>
-              <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
-                <SelectValue placeholder="Select..." />
-              </SelectTrigger>
-              <SelectContent className="bg-gray-800 border-gray-700 text-white">
-                {parsedOptions.map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        );
-      case "number":
-        return (
-          <div key={config.id} className="space-y-1.5">
-            <Label className="text-sm font-medium text-gray-200">{config.label}</Label>
-            <Input
-              type="number"
-              value={value}
-              onChange={(e) => handleChange(config.field_key, e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
-            />
-          </div>
-        );
-      case "date":
-        return (
-          <div key={config.id} className="space-y-1.5">
-            <Label className="text-sm font-medium text-gray-200">{config.label}</Label>
-            <Input
-              type="date"
-              value={value}
-              onChange={(e) => handleChange(config.field_key, e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white"
-            />
-          </div>
-        );
-      default:
-        return null;
-    }
-  };
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="bg-gray-900 border-gray-700 text-white">
@@ -207,7 +127,6 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
               className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
             />
           </div>
-          {configs.map((config) => renderField(config))}
         </div>
         <div className="flex justify-end gap-3">
           <Button variant="outline" onClick={onClose} className="border-gray-700 text-gray-300 hover:bg-gray-800">

@@ -50,7 +50,6 @@ import HubSyncLog from './pages/HubSyncLog';
 import Connections from './pages/Connections';
 import CustomerSearch from './pages/CustomerSearch';
 import Dashboard from './pages/Dashboard';
-import Fields from './pages/Fields';
 import Records from './pages/Records';
 import Reports from './pages/Reports';
 import Users from './pages/Users';
@@ -67,7 +66,6 @@ export const PAGES = {
     "Connections": Connections,
     "CustomerSearch": CustomerSearch,
     "Dashboard": Dashboard,
-    "Fields": Fields,
     "Records": Records,
     "Reports": Reports,
     "Users": Users,
