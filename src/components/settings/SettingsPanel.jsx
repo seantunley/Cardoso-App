@@ -4,6 +4,7 @@ import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
+import { checkAutoFlagRules } from "@/lib/evalFlagRules";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -523,6 +524,44 @@ function AutoFlagTab() {
   const updateMutation = useMutation({ mutationFn: ({ id, data }) => api.entities.AutoFlagRule.update(id, data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] }); toast.success("Rule updated"); } });
   const deleteMutation = useMutation({ mutationFn: (id) => api.entities.AutoFlagRule.delete(id), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] }); toast.success("Rule deleted"); } });
 
+  const applyMutation = useMutation({
+    mutationFn: async () => {
+      const rules = await api.entities.AutoFlagRule.list("-priority");
+      const activeRules = rules.filter((r) => r.is_active);
+      const allRecords = await api.entities.DataRecord.list();
+      let flaggedCount = 0;
+      const now = new Date().toISOString();
+      for (const record of allRecords) {
+        if (record.flag_color && record.flag_color !== "none" && record.flag_created_by && !record.auto_flagged) continue;
+        const autoFlag = checkAutoFlagRules(record, activeRules);
+        if (autoFlag && autoFlag.flag_color !== record.flag_color) {
+          await api.entities.DataRecord.update(record.id, { ...autoFlag, last_checked: now });
+          flaggedCount++;
+        } else {
+          await api.entities.DataRecord.update(record.id, { last_checked: now });
+        }
+      }
+      return flaggedCount;
+    },
+    onSuccess: (count) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Applied rules to ${count} record(s)`); },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      const allRecords = await api.entities.DataRecord.list();
+      const autoFlagged = allRecords.filter((r) => r.auto_flagged);
+      let count = 0;
+      for (const record of autoFlagged) {
+        await api.entities.DataRecord.update(record.id, { flag_color: "none", flag_reason: null, flag_created_by: null, auto_flagged: false });
+        count++;
+      }
+      return count;
+    },
+    onSuccess: (count) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Cleared ${count} auto-flagged record(s)`); },
+    onError: (e) => toast.error(`Failed to clear: ${e.message}`),
+  });
+
   const handleSave = (data, id) => {
     if (!canManageRules) { toast.error("No permission"); return; }
     id ? updateMutation.mutate({ id, data }) : createMutation.mutate(data);
@@ -535,6 +574,16 @@ function AutoFlagTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending} className="gap-1.5">
+            <Zap className="h-3.5 w-3.5" />{applyMutation.isPending ? "Applying…" : "Apply Now"}
+          </Button>
+        )}
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={() => { if (confirm("Clear all auto-flagged records?")) clearMutation.mutate(); }} disabled={clearMutation.isPending} className="gap-1.5 border-rose-700 text-rose-400 hover:bg-rose-900/20">
+            {clearMutation.isPending ? "Clearing…" : "Clear Auto Flags"}
+          </Button>
+        )}
         {canManageRules && (
           <Button size="sm" variant="outline" onClick={() => setShowNewRule(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Rule
