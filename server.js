@@ -690,7 +690,9 @@ function _evalCondition(condition, record) {
 
   if (['date_older_than','date_newer_than','before_date','after_date'].includes(condition_type)) {
     if (!raw) return false;
-    const recordDate = new Date(raw);
+    let dateStr = String(raw).trim();
+    if (/^\d{8}$/.test(dateStr)) dateStr = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+    const recordDate = new Date(dateStr);
     if (isNaN(recordDate.getTime())) return false;
     const now = new Date();
     if (condition_type === 'date_older_than') return (now - recordDate) / 86400000 > parseFloat(condition_value);
@@ -1789,7 +1791,9 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
       }
       if (['date_older_than','date_newer_than','before_date','after_date'].includes(ct)) {
         if (!raw) return false;
-        const d = new Date(raw);
+        let _ds = String(raw).trim();
+        if (/^\d{8}$/.test(_ds)) _ds = `${_ds.slice(0,4)}-${_ds.slice(4,6)}-${_ds.slice(6,8)}`;
+        const d = new Date(_ds);
         if (isNaN(d.getTime())) return false;
         const now = new Date();
         if (ct === 'date_older_than') return (now - d) / 86400000 > parseFloat(cond.condition_value);
@@ -3198,8 +3202,6 @@ if (process.env.HUB_MODE === 'true') {
 
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
-    const allRules = db.prepare(`SELECT id, rule_name, is_active, flag_color, conditions FROM autoflagrule`).all();
-    console.log('[apply-auto-flags] All rules:', JSON.stringify(allRules.map(r => ({ id: r.id, name: r.rule_name, is_active: r.is_active, flag_color: r.flag_color }))));
     const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
@@ -3208,41 +3210,11 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
     if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
 
     const records = db.prepare(`SELECT * FROM datarecord`).all();
-    console.log(`[apply-auto-flags] ${rules.length} active rules, ${records.length} records`);
-    if (records.length > 0) {
-      const sample = records[0];
-      console.log('[apply-auto-flags] Sample record fields:', Object.keys(sample).join(', '));
-      console.log('[apply-auto-flags] Sample outstanding_balance:', sample.outstanding_balance, '| flag_color:', sample.flag_color, '| auto_flagged:', sample.auto_flagged, '| flag_created_by:', sample.flag_created_by);
-    }
-    if (rules.length > 0) {
-      console.log('[apply-auto-flags] First rule conditions:', rules[0].conditions);
-    }
     let flagged = 0, cleared = 0;
 
     const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
     const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
 
-    // Find a sample record with positive balance for debug
-    const samplePositive = records.find(r => {
-      const b = parseFloat(String(r.outstanding_balance ?? '').replace(/,/g,'').replace(/\s/g,''));
-      return !isNaN(b) && b > 0;
-    });
-    if (samplePositive) {
-      console.log(`[apply-auto-flags] First positive-balance record: name="${samplePositive.customer_name}" balance="${samplePositive.outstanding_balance}" last_unpaid_invoice_date="${samplePositive.last_unpaid_invoice_date}" flag_color="${samplePositive.flag_color}" auto_flagged=${samplePositive.auto_flagged} flag_created_by="${samplePositive.flag_created_by}"`);
-      const testResult = applyAutoFlagRulesToRecord(samplePositive, activeRules);
-      console.log(`[apply-auto-flags] => applyAutoFlagRulesToRecord result: ${JSON.stringify(testResult)}`);
-      // Also test each condition individually
-      if (activeRules.length > 0) {
-        const rule = activeRules[0];
-        const conditions = Array.isArray(rule.conditions) ? rule.conditions : [];
-        for (const cond of conditions) {
-          const raw = samplePositive[cond.field];
-          console.log(`[apply-auto-flags] condition field="${cond.field}" type="${cond.condition_type}" value="${cond.condition_value}" rawRecordValue="${raw}"`);
-        }
-      }
-    } else {
-      console.log('[apply-auto-flags] No records with positive outstanding_balance found!');
-    }
     const applyAll = db.transaction(() => {
       for (const record of records) {
         const manuallyFlagged = record.flag_color && !record.auto_flagged && record.flag_created_by;

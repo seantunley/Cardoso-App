@@ -45,7 +45,9 @@ export function evaluateCondition(condition, record) {
   // DATE
   if (["date_older_than","date_newer_than","before_date","after_date"].includes(condition_type)) {
     if (!raw) return false;
-    const recordDate = new Date(raw);
+    let dateStr = String(raw).trim();
+    if (/^\d{8}$/.test(dateStr)) dateStr = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+    const recordDate = new Date(dateStr);
     if (isNaN(recordDate.getTime())) return false;
     const now = new Date();
     switch (condition_type) {
