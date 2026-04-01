@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-const LIMIT = 30;
+const LIMIT = 200;
 
 function parseAmount(val) {
   if (val === null || val === undefined || val === "") return 0;
