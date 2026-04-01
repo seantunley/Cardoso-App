@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 const LIMIT = 30;
@@ -32,6 +32,14 @@ async function fetchTopBalances(limit) {
 export default function CustomerBalances() {
   const [limit] = useState(LIMIT);
   const [siteFilter, setSiteFilter] = useState("all");
+  const [hubMode, setHubMode] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/hub/sites", { credentials: "include" })
+      .then((r) => r.json())
+      .catch(() => null)
+      .then((d) => { if (d?.hub_mode) setHubMode(true); });
+  }, []);
 
   const { data: rows = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ["top-balances", limit],
@@ -77,7 +85,7 @@ export default function CustomerBalances() {
         </div>
 
         {/* Filters row */}
-        {!isLoading && !isError && sites.length > 0 && (
+        {!isLoading && !isError && sites.length > 1 && (
           <div className="mb-4 flex items-center gap-3">
             <label className="text-xs text-muted-foreground whitespace-nowrap">Filter by site:</label>
             <select
