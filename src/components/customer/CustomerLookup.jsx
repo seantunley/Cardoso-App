@@ -341,26 +341,7 @@ function analyseInvoiceCredit(record) {
     }
   }
 
-  // ── RULE 3: Overall coverage ratio ─────────────────────────────────────
-  const totalInvoiced  = invoices.reduce((s, x) => s + x.amount, 0);
-  const totalReceipted = receipts.reduce((s, x) => s + x.amount, 0);
-  if (totalInvoiced > 0 && receipts.length > 0) {
-    const coverage = totalReceipted / totalInvoiced;
-    if (coverage >= 0.9) {
-      factors.push({ type: "good", text: `${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
-    } else if (coverage >= 0.5) {
-      factors.push({ type: "warn", text: `${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
-      deductions += 15;
-    } else {
-      factors.push({ type: "bad", text: `Only ${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
-      deductions += 30;
-    }
-  } else if (receipts.length === 0) {
-    factors.push({ type: "block", text: "No receipts on record against this outstanding balance." });
-    deductions += 50;
-  }
-
-  // ── RULE 4: Balance exposure ────────────────────────────────────────────
+  // ── RULE 3: Balance exposure ────────────────────────────────────────────
   if (totalInvoiced > 0) {
     const avgInvoice = totalInvoiced / invoices.length;
     if (outstandingBalance > avgInvoice * 2) {
