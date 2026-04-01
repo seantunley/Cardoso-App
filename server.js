@@ -3180,6 +3180,11 @@ app.post('/api/:table', requireAuth, (req, res) => {
     data.encrypted_password = encryptPassword(data.encrypted_password);
   }
 
+  // Serialize conditions array for autoflagrule
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
+  }
+
   try {
     const columns = Object.keys(data);
     if (columns.length === 0) {
@@ -3232,6 +3237,11 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
   // Encrypt MSSQL password before storing
   if (table === 'databaseconnection' && data.encrypted_password) {
     data.encrypted_password = encryptPassword(data.encrypted_password);
+  }
+
+  // Serialize conditions array for autoflagrule
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
   }
 
   try {
