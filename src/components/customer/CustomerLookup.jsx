@@ -353,18 +353,21 @@ function analyseInvoiceCredit(record) {
   // ── Verdict ─────────────────────────────────────────────────────────────
   const score = Math.max(0, 100 - deductions);
   let verdict, title, summary;
-  if (score >= 75) {
-    verdict = "approve";
-    title = "Approve Invoice";
-    summary = "Customer is paying reliably and within terms.";
-  } else if (score >= 40) {
-    verdict = "caution";
-    title = "Proceed with Caution";
-    summary = "Customer pays but slowly — consider confirming payment intent before issuing.";
-  } else {
+  if (score <= 39) {
     verdict = "hold";
     title = "Hold — Do Not Invoice";
     summary = "Outstanding debt is overdue. Resolve before issuing a new invoice.";
+  } else if (score <= 74 || outstandingBalance > 0) {
+    // Good payment record but still carries a balance — always at least caution
+    verdict = "caution";
+    title = "Proceed with Caution";
+    summary = outstandingBalance > 0 && score >= 75
+      ? "Payment history looks good, but an outstanding balance remains — confirm settlement before issuing."
+      : "Customer pays but slowly — consider confirming payment intent before issuing.";
+  } else {
+    verdict = "approve";
+    title = "Approve Invoice";
+    summary = "Customer is paying reliably and within terms.";
   }
 
   return { verdict, title, summary, factors, score };
