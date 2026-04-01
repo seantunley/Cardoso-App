@@ -1,12 +1,10 @@
 /**
- * Evaluate a single auto-flag rule condition against a full record object.
- * record: the full datarecord row (flat, with all fields)
+ * Evaluate a single condition against a full record object.
  */
 export function evaluateCondition(condition, record) {
   const { field, condition_type, condition_value, condition_value_secondary } = condition;
   const raw = record[field];
 
-  // is_empty / is_not_empty work for all types
   if (condition_type === "is_empty") {
     return raw === null || raw === undefined || String(raw).trim() === "";
   }
@@ -14,7 +12,7 @@ export function evaluateCondition(condition, record) {
     return raw !== null && raw !== undefined && String(raw).trim() !== "";
   }
 
-  // --- TEXT conditions (age_analysis etc.) ---
+  // TEXT
   if (["contains","equals","starts_with","ends_with"].includes(condition_type)) {
     const val = String(raw ?? "").toLowerCase();
     const cmp = String(condition_value ?? "").toLowerCase();
@@ -26,16 +24,16 @@ export function evaluateCondition(condition, record) {
     }
   }
 
-  // --- NUMBER conditions ---
+  // NUMBER
   if (["greater_than","less_than","greater_or_equal","less_or_equal","range_between"].includes(condition_type)) {
     const num = parseFloat(String(raw ?? "").replace(/,/g, ""));
-    const threshold = parseFloat(condition_value);
     if (isNaN(num)) return false;
+    const threshold = parseFloat(condition_value);
     switch (condition_type) {
-      case "greater_than":    return num > threshold;
-      case "less_than":       return num < threshold;
-      case "greater_or_equal":return num >= threshold;
-      case "less_or_equal":   return num <= threshold;
+      case "greater_than":     return num > threshold;
+      case "less_than":        return num < threshold;
+      case "greater_or_equal": return num >= threshold;
+      case "less_or_equal":    return num <= threshold;
       case "range_between": {
         const lo = parseFloat(condition_value);
         const hi = parseFloat(condition_value_secondary);
@@ -44,29 +42,17 @@ export function evaluateCondition(condition, record) {
     }
   }
 
-  // --- DATE conditions ---
+  // DATE
   if (["date_older_than","date_newer_than","before_date","after_date"].includes(condition_type)) {
     if (!raw) return false;
     const recordDate = new Date(raw);
     if (isNaN(recordDate.getTime())) return false;
     const now = new Date();
     switch (condition_type) {
-      case "date_older_than": {
-        const days = parseFloat(condition_value);
-        return (now - recordDate) / 86400000 > days;
-      }
-      case "date_newer_than": {
-        const days = parseFloat(condition_value);
-        return (now - recordDate) / 86400000 < days;
-      }
-      case "before_date": {
-        const d = new Date(condition_value);
-        return recordDate < d;
-      }
-      case "after_date": {
-        const d = new Date(condition_value);
-        return recordDate > d;
-      }
+      case "date_older_than": return (now - recordDate) / 86400000 > parseFloat(condition_value);
+      case "date_newer_than": return (now - recordDate) / 86400000 < parseFloat(condition_value);
+      case "before_date":     return recordDate < new Date(condition_value);
+      case "after_date":      return recordDate > new Date(condition_value);
     }
   }
 
@@ -74,8 +60,32 @@ export function evaluateCondition(condition, record) {
 }
 
 /**
+ * Evaluate all conditions for a rule using group logic:
+ *   - Conditions within the same group are AND'd together
+ *   - Groups are OR'd against each other
+ * 
+ * Backward compatible: conditions without a `group` field default to group 1
+ * (treated as a single AND group, same as the old AND logic).
+ */
+function evaluateRuleConditions(conditions, record) {
+  if (!Array.isArray(conditions) || conditions.length === 0) return false;
+
+  // Assign default group for legacy conditions
+  const withGroups = conditions.map(c => ({ group: 1, ...c }));
+
+  // Collect unique groups
+  const groupNums = [...new Set(withGroups.map(c => c.group))];
+
+  // Each group must ALL pass (AND); any group passing = rule matches (OR)
+  return groupNums.some(g => {
+    const groupConds = withGroups.filter(c => c.group === g);
+    return groupConds.every(c => evaluateCondition(c, record));
+  });
+}
+
+/**
  * Check all active auto-flag rules against a full record.
- * Returns { flag_color, flag_reason, auto_flagged } or null.
+ * Returns { flag_color, flag_reason, auto_flagged } for the first matching rule, or null.
  */
 export function checkAutoFlagRules(record, rules) {
   for (const rule of rules) {
@@ -85,14 +95,13 @@ export function checkAutoFlagRules(record, rules) {
     }
     if (!Array.isArray(conditions) || conditions.length === 0) continue;
 
-    const logic = rule.logic || "AND";
-    const results = conditions.map(c => evaluateCondition(c, record));
-    const matches = logic === "OR" ? results.some(Boolean) : results.every(Boolean);
-    if (matches) return {
-      flag_color: rule.flag_color,
-      flag_reason: `Auto-flagged: ${rule.rule_name}`,
-      auto_flagged: true,
-    };
+    if (evaluateRuleConditions(conditions, record)) {
+      return {
+        flag_color: rule.flag_color,
+        flag_reason: `Auto-flagged: ${rule.rule_name}`,
+        auto_flagged: true,
+      };
+    }
   }
   return null;
 }

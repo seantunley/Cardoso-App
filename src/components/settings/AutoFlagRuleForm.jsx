@@ -85,12 +85,8 @@ export default function AutoFlagRuleForm({ rule, onSave, onDelete, isSaving, isA
 
               <RuleConditionBuilder
                 conditions={formData.conditions}
-                logic={formData.logic}
                 onConditionsChange={(conditions) =>
                   setFormData({ ...formData, conditions })
-                }
-                onLogicChange={(logic) =>
-                  setFormData({ ...formData, logic })
                 }
                 isAdmin={isAdmin}
               />

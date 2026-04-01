@@ -52,17 +52,28 @@ export default function RuleTester({ rule }) {
     let conditions = rule.conditions;
     if (typeof conditions === "string") { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
 
-    const results = conditions.map(c => ({
+    const withGroups = conditions.map(c => ({ group: 1, ...c }));
+    const groupNums = [...new Set(withGroups.map(c => c.group))];
+
+    // Build per-condition results for display
+    const results = withGroups.map(c => ({
       condition: c,
       passed: evaluateCondition(c, testData),
     }));
-    const finalPassed = rule.logic === "AND" ? results.every(r => r.passed) : results.some(r => r.passed);
+
+    // Group-aware final: any group where ALL conditions pass = match
+    const finalPassed = groupNums.some(g => {
+      const groupConds = withGroups.filter(c => c.group === g);
+      return groupConds.every(c => evaluateCondition(c, testData));
+    });
+
     setTestResults({
       passed: finalPassed,
       message: finalPassed
         ? `Rule MATCHED — Will apply ${flagColors[rule.flag_color]?.label}`
         : "Rule did not match",
       conditions: results,
+      groupNums,
     });
   };
 
@@ -108,28 +119,47 @@ export default function RuleTester({ rule }) {
 
             {testResults.conditions && (
               <div className="space-y-2">
-                <p className="text-sm text-gray-400 font-medium">Condition Results ({rule.logic} logic):</p>
-                <div className="space-y-2">
-                  {testResults.conditions.map((result, idx) => (
-                    <div key={idx} className={cn(
-                      "p-3 rounded-lg border text-sm",
-                      result.passed ? "bg-green-900/20 border-green-800 text-green-300" : "bg-red-900/20 border-red-800 text-red-300"
-                    )}>
-                      <div className="flex items-center gap-2">
-                        <div className={cn("w-2 h-2 rounded-full flex-shrink-0", result.passed ? "bg-green-500" : "bg-red-500")} />
-                        <span>
-                          <strong>{RULE_FIELDS.find(f => f.value === result.condition.field)?.label || result.condition.field}</strong>{" "}
-                          {conditionTypeLabels[result.condition.condition_type] || result.condition.condition_type}
-                          {!["is_empty","is_not_empty"].includes(result.condition.condition_type) && (
-                            result.condition.condition_value_secondary
-                              ? ` ${result.condition.condition_value} – ${result.condition.condition_value_secondary}`
-                              : ` "${result.condition.condition_value}"`
-                          )}
-                        </span>
+                <p className="text-sm text-gray-400 font-medium">Condition Results (groups OR'd, conditions AND'd within group):</p>
+                {testResults.groupNums.map((g, gi) => {
+                  const groupResults = testResults.conditions.filter(r => (r.condition.group ?? 1) === g);
+                  const groupPassed = groupResults.every(r => r.passed);
+                  return (
+                    <div key={g} className="space-y-1">
+                      {gi > 0 && (
+                        <div className="flex items-center gap-2 my-1">
+                          <div className="flex-1 h-px bg-gray-700" />
+                          <span className="text-xs font-bold text-indigo-400 tracking-widest">OR</span>
+                          <div className="flex-1 h-px bg-gray-700" />
+                        </div>
+                      )}
+                      <div className={cn("rounded-lg border p-2 space-y-1", groupPassed ? "border-green-800/50" : "border-gray-700")}>
+                        <p className="text-xs text-gray-500 mb-1">Group {gi + 1}</p>
+                        {groupResults.map((result, idx) => (
+                          <div key={idx}>
+                            {idx > 0 && <p className="text-xs text-gray-600 text-center py-0.5">AND</p>}
+                            <div className={cn(
+                              "p-2 rounded border text-sm",
+                              result.passed ? "bg-green-900/20 border-green-800 text-green-300" : "bg-red-900/20 border-red-800 text-red-300"
+                            )}>
+                              <div className="flex items-center gap-2">
+                                <div className={cn("w-2 h-2 rounded-full flex-shrink-0", result.passed ? "bg-green-500" : "bg-red-500")} />
+                                <span>
+                                  <strong>{RULE_FIELDS.find(f => f.value === result.condition.field)?.label || result.condition.field}</strong>{" "}
+                                  {conditionTypeLabels[result.condition.condition_type] || result.condition.condition_type}
+                                  {!["is_empty","is_not_empty"].includes(result.condition.condition_type) && (
+                                    result.condition.condition_value_secondary
+                                      ? ` ${result.condition.condition_value} – ${result.condition.condition_value_secondary}`
+                                      : ` "${result.condition.condition_value}"`
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             )}
           </div>
