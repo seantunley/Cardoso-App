@@ -538,30 +538,35 @@ export default function CustomerLookup({
       return;
     }
 
-    const searchTerm = customerNumber.trim();
-    const matches = [];
+    // Debounce: wait 200ms after the user stops typing before fuzzy-searching
+    const timer = setTimeout(() => {
+      const searchTerm = customerNumber.trim();
+      const matches = [];
 
-    allRecords.forEach((record) => {
-      const custNum = record.customer_number || "";
-      const custName = record.customer_name || "";
+      allRecords.forEach((record) => {
+        const custNum = record.customer_number || "";
+        const custName = record.customer_name || "";
 
-      const numMatch = fuzzyMatch(String(custNum), searchTerm);
-      const nameMatch = fuzzyMatch(String(custName), searchTerm);
+        const numMatch = fuzzyMatch(String(custNum), searchTerm);
+        const nameMatch = fuzzyMatch(String(custName), searchTerm);
 
-      if (numMatch.matches || nameMatch.matches) {
-        matches.push({
-          record,
-          score: Math.max(numMatch.score, nameMatch.score),
-          customerNumber: String(custNum),
-          customerName: String(custName),
-        });
-      }
-    });
+        if (numMatch.matches || nameMatch.matches) {
+          matches.push({
+            record,
+            score: Math.max(numMatch.score, nameMatch.score),
+            customerNumber: String(custNum),
+            customerName: String(custName),
+          });
+        }
+      });
 
-    matches.sort((a, b) => b.score - a.score);
-    setSuggestions(matches.slice(0, 5));
-    setSelectedSuggestionIndex(-1);
-    setShowSuggestions(matches.length > 0);
+      matches.sort((a, b) => b.score - a.score);
+      setSuggestions(matches.slice(0, 5));
+      setSelectedSuggestionIndex(-1);
+      setShowSuggestions(matches.length > 0);
+    }, 200);
+
+    return () => clearTimeout(timer);
   }, [customerNumber, allRecords]);
 
   const handleLookup = async (customNumber = null) => {

@@ -49,12 +49,20 @@ export default function CustomerSearch() {
   });
 
   useEffect(() => {
+    let debounceTimer = null;
     const unsubscribe = api.entities.DataRecord.subscribe((event) => {
       if (["create", "update"].includes(event.type)) {
-        queryClient.invalidateQueries({ queryKey: ["records"] });
+        // Batch rapid events (e.g., during a sync) into a single invalidation
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ["records"] });
+        }, 1000);
       }
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
   }, [queryClient]);
 
   const activeConnections = connections.filter(c => c.status === "active");
