@@ -60,27 +60,36 @@ export function evaluateCondition(condition, record) {
 }
 
 /**
- * Evaluate all conditions for a rule using group logic:
- *   - Conditions within the same group are AND'd together
- *   - Groups are OR'd against each other
- * 
- * Backward compatible: conditions without a `group` field default to group 1
- * (treated as a single AND group, same as the old AND logic).
+ * Evaluate a rule's conditions against a record.
+ *
+ * Each condition carries an `operator` ("AND" | "OR") that defines how it
+ * connects to the previous result — evaluated left to right.
+ *
+ * Examples:
+ *   [A]                          → A
+ *   [A, AND B]                   → A && B
+ *   [A, OR B]                    → A || B
+ *   [A, AND B, OR C]             → (A && B) || C
+ *   [A, AND B, AND C, OR D]      → (A && B && C) || D
+ *
+ * Backward compatible: conditions without `operator` default to AND.
  */
 function evaluateRuleConditions(conditions, record) {
   if (!Array.isArray(conditions) || conditions.length === 0) return false;
 
-  // Assign default group for legacy conditions
-  const withGroups = conditions.map(c => ({ group: 1, ...c }));
+  let result = evaluateCondition(conditions[0], record);
 
-  // Collect unique groups
-  const groupNums = [...new Set(withGroups.map(c => c.group))];
+  for (let i = 1; i < conditions.length; i++) {
+    const op = (conditions[i].operator ?? "AND").toUpperCase();
+    const val = evaluateCondition(conditions[i], record);
+    if (op === "OR") {
+      result = result || val;
+    } else {
+      result = result && val;
+    }
+  }
 
-  // Each group must ALL pass (AND); any group passing = rule matches (OR)
-  return groupNums.some(g => {
-    const groupConds = withGroups.filter(c => c.group === g);
-    return groupConds.every(c => evaluateCondition(c, record));
-  });
+  return result;
 }
 
 /**

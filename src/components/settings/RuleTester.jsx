@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle2, AlertCircle, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { evaluateCondition, checkAutoFlagRules } from "@/lib/evalFlagRules";
+import { evaluateCondition } from "@/lib/evalFlagRules";
 import { RULE_FIELDS } from "./RuleConditionBuilder";
 
 const flagColors = {
@@ -16,21 +16,21 @@ const flagColors = {
 };
 
 const conditionTypeLabels = {
-  contains:       "Contains",
-  equals:         "Equals",
-  starts_with:    "Starts With",
-  ends_with:      "Ends With",
-  is_empty:       "Is Empty",
-  is_not_empty:   "Is Not Empty",
-  greater_than:   "> (Greater Than)",
-  less_than:      "< (Less Than)",
-  greater_or_equal: "≥ (Greater or Equal)",
-  less_or_equal:  "≤ (Less or Equal)",
-  range_between:  "Between",
-  date_older_than:"Older Than (days)",
-  date_newer_than:"Newer Than (days)",
-  before_date:    "Before Date",
-  after_date:     "After Date",
+  contains:        "Contains",
+  equals:          "Equals",
+  starts_with:     "Starts With",
+  ends_with:       "Ends With",
+  is_empty:        "Is Empty",
+  is_not_empty:    "Is Not Empty",
+  greater_than:    "> (Greater Than)",
+  less_than:       "< (Less Than)",
+  greater_or_equal:"≥ (Greater or Equal)",
+  less_or_equal:   "≤ (Less or Equal)",
+  range_between:   "Between",
+  date_older_than: "Older Than (days)",
+  date_newer_than: "Newer Than (days)",
+  before_date:     "Before Date",
+  after_date:      "After Date",
 };
 
 export default function RuleTester({ rule }) {
@@ -52,28 +52,22 @@ export default function RuleTester({ rule }) {
     let conditions = rule.conditions;
     if (typeof conditions === "string") { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
 
-    const withGroups = conditions.map(c => ({ group: 1, ...c }));
-    const groupNums = [...new Set(withGroups.map(c => c.group))];
-
-    // Build per-condition results for display
-    const results = withGroups.map(c => ({
+    // Evaluate left-to-right with per-condition operators
+    const results = conditions.map(c => ({
       condition: c,
       passed: evaluateCondition(c, testData),
     }));
 
-    // Group-aware final: any group where ALL conditions pass = match
-    const finalPassed = groupNums.some(g => {
-      const groupConds = withGroups.filter(c => c.group === g);
-      return groupConds.every(c => evaluateCondition(c, testData));
-    });
+    let finalPassed = results[0]?.passed ?? false;
+    for (let i = 1; i < results.length; i++) {
+      const op = (conditions[i].operator ?? "AND").toUpperCase();
+      finalPassed = op === "OR" ? finalPassed || results[i].passed : finalPassed && results[i].passed;
+    }
 
-    setTestResults({
-      passed: finalPassed,
-      message: finalPassed
-        ? `Rule MATCHED — Will apply ${flagColors[rule.flag_color]?.label}`
-        : "Rule did not match",
+    setTestResults({ passed: finalPassed, message: finalPassed
+      ? `Rule MATCHED — Will apply ${flagColors[rule.flag_color]?.label ?? rule.flag_color}`
+      : "Rule did not match",
       conditions: results,
-      groupNums,
     });
   };
 
@@ -91,7 +85,7 @@ export default function RuleTester({ rule }) {
             <div key={f.value} className="space-y-1">
               <Label className="text-gray-300 text-xs">{f.label}</Label>
               <Input
-                type={f.type === "date" ? "date" : f.type === "number" ? "number" : "text"}
+                type={f.type === "date" ? "date" : "text"}
                 value={testData[f.value] || ""}
                 onChange={e => setTestData({ ...testData, [f.value]: e.target.value })}
                 placeholder={f.type === "number" ? "e.g., 1500" : f.type === "date" ? "" : "e.g., overdue"}
@@ -117,49 +111,42 @@ export default function RuleTester({ rule }) {
               </div>
             </Alert>
 
-            {testResults.conditions && (
-              <div className="space-y-2">
-                <p className="text-sm text-gray-400 font-medium">Condition Results (groups OR'd, conditions AND'd within group):</p>
-                {testResults.groupNums.map((g, gi) => {
-                  const groupResults = testResults.conditions.filter(r => (r.condition.group ?? 1) === g);
-                  const groupPassed = groupResults.every(r => r.passed);
-                  return (
-                    <div key={g} className="space-y-1">
-                      {gi > 0 && (
-                        <div className="flex items-center gap-2 my-1">
-                          <div className="flex-1 h-px bg-gray-700" />
-                          <span className="text-xs font-bold text-indigo-400 tracking-widest">OR</span>
-                          <div className="flex-1 h-px bg-gray-700" />
-                        </div>
-                      )}
-                      <div className={cn("rounded-lg border p-2 space-y-1", groupPassed ? "border-green-800/50" : "border-gray-700")}>
-                        <p className="text-xs text-gray-500 mb-1">Group {gi + 1}</p>
-                        {groupResults.map((result, idx) => (
-                          <div key={idx}>
-                            {idx > 0 && <p className="text-xs text-gray-600 text-center py-0.5">AND</p>}
-                            <div className={cn(
-                              "p-2 rounded border text-sm",
-                              result.passed ? "bg-green-900/20 border-green-800 text-green-300" : "bg-red-900/20 border-red-800 text-red-300"
-                            )}>
-                              <div className="flex items-center gap-2">
-                                <div className={cn("w-2 h-2 rounded-full flex-shrink-0", result.passed ? "bg-green-500" : "bg-red-500")} />
-                                <span>
-                                  <strong>{RULE_FIELDS.find(f => f.value === result.condition.field)?.label || result.condition.field}</strong>{" "}
-                                  {conditionTypeLabels[result.condition.condition_type] || result.condition.condition_type}
-                                  {!["is_empty","is_not_empty"].includes(result.condition.condition_type) && (
-                                    result.condition.condition_value_secondary
-                                      ? ` ${result.condition.condition_value} – ${result.condition.condition_value_secondary}`
-                                      : ` "${result.condition.condition_value}"`
-                                  )}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
+            {testResults.conditions?.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-sm text-gray-400 font-medium">Condition Results:</p>
+                {testResults.conditions.map((result, idx) => (
+                  <div key={idx}>
+                    {idx > 0 && (
+                      <div className="flex items-center gap-2 my-1">
+                        <div className="flex-1 h-px bg-gray-700" />
+                        <span className={cn(
+                          "text-xs font-bold tracking-widest",
+                          (result.condition.operator ?? "AND") === "OR" ? "text-indigo-400" : "text-gray-500"
+                        )}>
+                          {result.condition.operator ?? "AND"}
+                        </span>
+                        <div className="flex-1 h-px bg-gray-700" />
+                      </div>
+                    )}
+                    <div className={cn(
+                      "p-2 rounded border text-sm",
+                      result.passed ? "bg-green-900/20 border-green-800 text-green-300" : "bg-red-900/20 border-red-800 text-red-300"
+                    )}>
+                      <div className="flex items-center gap-2">
+                        <div className={cn("w-2 h-2 rounded-full flex-shrink-0", result.passed ? "bg-green-500" : "bg-red-500")} />
+                        <span>
+                          <strong>{RULE_FIELDS.find(f => f.value === result.condition.field)?.label || result.condition.field}</strong>{" "}
+                          {conditionTypeLabels[result.condition.condition_type] || result.condition.condition_type}
+                          {!["is_empty","is_not_empty"].includes(result.condition.condition_type) && (
+                            result.condition.condition_value_secondary
+                              ? ` ${result.condition.condition_value} – ${result.condition.condition_value_secondary}`
+                              : ` "${result.condition.condition_value}"`
+                          )}
+                        </span>
                       </div>
                     </div>
-                  );
-                })}
+                  </div>
+                ))}
               </div>
             )}
           </div>
