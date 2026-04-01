@@ -342,6 +342,7 @@ function analyseInvoiceCredit(record) {
   }
 
   // ── RULE 3: Balance exposure ────────────────────────────────────────────
+  const totalInvoiced = invoices.reduce((s, x) => s + x.amount, 0);
   if (totalInvoiced > 0) {
     const avgInvoice = totalInvoiced / invoices.length;
     if (outstandingBalance > avgInvoice * 2) {
@@ -960,7 +961,7 @@ export default function CustomerLookup({
                 caution: { border: "border-yellow-600", bg: "bg-yellow-900/20", icon: "⚠️", titleColor: "text-yellow-400", badgeColor: "bg-yellow-700 text-yellow-100" },
                 hold:    { border: "border-red-600",     bg: "bg-red-900/20",     icon: "🔴", titleColor: "text-red-400",     badgeColor: "bg-red-700 text-red-100" },
               };
-              const s = verdictStyles[analysis.verdict];
+              const s = verdictStyles[analysis.verdict] || verdictStyles["caution"];
               const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
               const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
               return (
