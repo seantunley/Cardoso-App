@@ -348,13 +348,17 @@ function analyseInvoiceCredit(records) {
       : null;
 
     if (avgLag !== null) {
-      if (avgLag <= 14) {
-        factors.push({ type: "good", text: `Pays in full — average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} (within 14-day terms).` });
+      // If there are also unpaid invoices with an outstanding balance, paid history means nothing
+      if (unpaidPairs.length > 0 && outstandingBalance > 0) {
+        factors.push({ type: "bad", text: `Average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} on settled invoices, but has unpaid invoices and an outstanding balance — unreliable payer.` });
+        deductions += 35;
+      } else if (avgLag <= 14) {
+        factors.push({ type: "good", text: `Average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} — within 14-day terms.` });
       } else if (avgLag <= 21) {
-        factors.push({ type: "warn", text: `Pays in full but slowly — average lag ${avgLag} days (target: 14 days).` });
+        factors.push({ type: "warn", text: `Average payment lag ${avgLag} days — slow but within 21 days (target: 14 days).` });
         deductions += 20;
       } else {
-        factors.push({ type: "warn", text: `Pays in full but very slowly — average lag ${avgLag} days.` });
+        factors.push({ type: "warn", text: `Average payment lag ${avgLag} days — very slow payer.` });
         deductions += 30;
       }
     } else {
