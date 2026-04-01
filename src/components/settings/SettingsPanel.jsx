@@ -191,6 +191,98 @@ function ConnectionsTab({ currentUser }) {
   );
 }
 
+// ─── Fields Tab ─────────────────────────────────────────────────────────────
+
+const CUSTOMER_FIELDS = [
+  { key: "customer_number",           label: "Customer Number",           fallbacks: "customer_number, CustomerNumber, CUSTOMER_NUMBER",              mode: "sync" },
+  { key: "customer_name",             label: "Customer Name",             fallbacks: "customer_name, CustomerName, CUSTOMER_NAME, name",              mode: "sync" },
+  { key: "age_analysis",              label: "Age Analysis",              fallbacks: "age_analysis, AgeAnalysis, AGE_ANALYSIS",                        mode: "sync" },
+  { key: "outstanding_balance",       label: "Outstanding Balance",       fallbacks: "outstanding_balance, OutstandingBalance, AMTDUE, AMTOUTSTANDING, BalanceDue, TotalDue, AmountDue", mode: "sync" },
+  { key: "age_current",               label: "Age Current",               fallbacks: "age_current, AgeCurrent, Current, CURRENT",                     mode: "sync" },
+  { key: "age_7_days",                label: "Age 7 Days",                fallbacks: "age_7_days, Age7Days, Age7, AMTDUE07",                          mode: "sync" },
+  { key: "age_14_days",               label: "Age 14 Days",               fallbacks: "age_14_days, Age14Days, Age14, AMTDUE14",                       mode: "sync" },
+  { key: "age_21_days",               label: "Age 21 Days",               fallbacks: "age_21_days, Age21Days, Age21, AMTDUE21",                       mode: "sync" },
+  { key: "last_unpaid_invoice_1",     label: "Last Invoice #1",           fallbacks: "last_unpaid_invoice_1, LastUnpaidInvoice1",                     mode: "sync" },
+  { key: "last_unpaid_invoice_1_amount", label: "Last Invoice #1 Amount", fallbacks: "last_unpaid_invoice_1_amount, LastUnpaidInvoice1Amount",        mode: "sync" },
+  { key: "last_unpaid_invoice_2",     label: "Last Invoice #2",           fallbacks: "last_unpaid_invoice_2, LastUnpaidInvoice2",                     mode: "sync" },
+  { key: "last_unpaid_invoice_2_amount", label: "Last Invoice #2 Amount", fallbacks: "last_unpaid_invoice_2_amount, LastUnpaidInvoice2Amount",        mode: "sync" },
+  { key: "last_unpaid_invoice_3",     label: "Last Invoice #3",           fallbacks: "last_unpaid_invoice_3, LastUnpaidInvoice3",                     mode: "sync" },
+  { key: "last_unpaid_invoice_3_amount", label: "Last Invoice #3 Amount", fallbacks: "last_unpaid_invoice_3_amount, LastUnpaidInvoice3Amount",        mode: "sync" },
+  { key: "last_unpaid_invoice_date",  label: "Last Invoice Date",         fallbacks: "last_unpaid_invoice_date, LastUnpaidInvoiceDate, InvoiceDate, INVDATE, LastInvoiceDate", mode: "sync" },
+  { key: "last_receipt_number",       label: "Last Receipt Number",       fallbacks: "last_receipt_number, LastReceiptNumber, ReceiptNo, RECNO",      mode: "sync" },
+  { key: "last_receipt_amount",       label: "Last Receipt Amount",       fallbacks: "last_receipt_amount, LastReceiptAmount, ReceiptAmount, RECAMT", mode: "sync" },
+  { key: "last_receipt_date",         label: "Last Receipt Date",         fallbacks: "last_receipt_date, LastReceiptDate, LastReceiptIssuedDate, ReceiptDate, RECDATE", mode: "sync" },
+  { key: "terms",                     label: "Payment Terms",             fallbacks: "terms, Terms, TERMS, PaymentTerms, payment_terms",              mode: "sync" },
+  { key: "note",                      label: "Note",                      fallbacks: "note, Note, notes, Notes",                                      mode: "local-only" },
+  { key: "custom_field_1",            label: "Custom Field 1",            fallbacks: "—",                                                             mode: "sync-if-empty" },
+  { key: "custom_field_2",            label: "Custom Field 2",            fallbacks: "—",                                                             mode: "sync-if-empty" },
+  { key: "custom_field_3",            label: "Custom Field 3",            fallbacks: "—",                                                             mode: "sync-if-empty" },
+];
+
+const INVENTORY_FIELDS = [
+  { key: "item_number",      label: "Item Number",      fallbacks: "item_number, ItemNumber, ItemNo, ITEMNO",            mode: "sync" },
+  { key: "item_description", label: "Item Description", fallbacks: "item_description, ItemDescription, Description, DESC", mode: "sync" },
+  { key: "qty_on_hand",      label: "Qty on Hand",      fallbacks: "qty_on_hand, QtyOnHand, Quantity, QTY, OnHand",      mode: "sync" },
+  { key: "last_cost",        label: "Last Cost",        fallbacks: "last_cost, LastCost, Cost, COST",                    mode: "sync" },
+  { key: "price_list",       label: "Price List",       fallbacks: "price_list, PriceList, PRICE_LIST",                  mode: "sync" },
+  { key: "price",            label: "Price",            fallbacks: "price, Price, SellPrice, UnitPrice",                 mode: "sync" },
+];
+
+const MODE_BADGE = {
+  "sync":          { label: "Sync",          cls: "bg-blue-900/50 text-blue-300 border-blue-700" },
+  "sync-if-empty": { label: "Sync if empty", cls: "bg-yellow-900/50 text-yellow-300 border-yellow-700" },
+  "local-only":    { label: "Local only",    cls: "bg-gray-700 text-gray-300 border-gray-600" },
+};
+
+function FieldsTable({ fields }) {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/40">
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-48">Field Key</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-44">Label</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">SQL Fallback Names</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-32">Mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map(f => {
+            const badge = MODE_BADGE[f.mode] || MODE_BADGE["sync"];
+            return (
+              <tr key={f.key} className="border-b border-border last:border-0 hover:bg-muted/20">
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key}</td>
+                <td className="px-4 py-2.5 text-foreground text-sm">{f.label}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground/70 leading-relaxed">{f.fallbacks}</td>
+                <td className="px-4 py-2.5">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
+                    {badge.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function FieldsTab() {
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Customer Fields</h3>
+        <FieldsTable fields={CUSTOMER_FIELDS} />
+      </div>
+      <div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Inventory Fields</h3>
+        <FieldsTable fields={INVENTORY_FIELDS} />
+      </div>
+    </div>
+  );
+}
+
 // ─── Sync Log Tab ────────────────────────────────────────────────────────────
 
 function SyncLogTab() {
@@ -495,6 +587,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     canManageUsers && { id: "users", label: "Users" },
     { id: "theme", label: "Theme" },
     !hubMode && { id: "autoflag", label: "Auto-Flag Rules" },
+    { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
     hubMode && { id: "synclog", label: "Sync Log" },
@@ -525,6 +618,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "users"    && <UsersTabContent />}
                 {t.id === "theme"    && <ThemeTab />}
                 {t.id === "autoflag" && <AutoFlagTab />}
+                {t.id === "fields"   && <FieldsTab />}
                 {t.id === "audit"    && <AuditTab />}
                 {t.id === "synclog"       && <SyncLogTab />}
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
