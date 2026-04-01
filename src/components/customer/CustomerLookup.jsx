@@ -251,7 +251,21 @@ function analyseInvoiceCredit(record) {
   const rawBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
   const outstandingBalance = rawBalance < 1 ? 0 : rawBalance; // treat sub-R1 as rounding
 
-  // No data at all
+  // Zero balance = fully settled, pass immediately regardless of dates
+  if (outstandingBalance === 0) {
+    const hasHistory = invoices.length > 0 || receipts.length > 0;
+    return {
+      verdict: "approve",
+      title: hasHistory ? "Approve Invoice" : "New Customer",
+      summary: hasHistory
+        ? "Balance is zero — account fully settled. Safe to issue a new invoice."
+        : "No invoice or receipt history. Safe to issue a first invoice.",
+      factors: [{ type: "good", text: "Outstanding balance is R0.00 — all accounts cleared." }],
+      score: 100,
+    };
+  }
+
+  // No data at all (balance > 0 but no slots)
   if (invoices.length === 0 && receipts.length === 0) {
     return {
       verdict: "approve",
