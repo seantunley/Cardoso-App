@@ -606,7 +606,7 @@ export default function CustomerLookup({
               {customer?.flag_reason && (
                 <>
                   <span className="opacity-40">·</span>
-                  <span className="opacity-80">{customer.flag_reason}</span>
+                  <span className="opacity-80">{customer.flag_reason.replace(/^Auto-flagged:\s*/i, "")}</span>
                 </>
               )}
             </div>
