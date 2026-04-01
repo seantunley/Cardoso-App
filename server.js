@@ -509,6 +509,7 @@ ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_number', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_amount', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
+ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
@@ -555,6 +556,8 @@ ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
+// Back-fill: existing admin users should have can_manage_rules = 1
+db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
 ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
@@ -652,6 +655,86 @@ function getMappedOrFallbackValue(row, fieldMappings, localKey, fallbacks = []) 
 
   return '';
 }
+
+
+// ── Inline auto-flag rule evaluator (mirrors src/lib/evalFlagRules.js) ────────
+function _evalCondition(condition, record) {
+  const { field, condition_type, condition_value, condition_value_secondary } = condition;
+  const raw = record[field];
+
+  if (condition_type === 'is_empty')     return raw === null || raw === undefined || String(raw).trim() === '';
+  if (condition_type === 'is_not_empty') return raw !== null && raw !== undefined && String(raw).trim() !== '';
+
+  if (['contains','equals','starts_with','ends_with'].includes(condition_type)) {
+    const val = String(raw ?? '').toLowerCase();
+    const cmp = String(condition_value ?? '').toLowerCase();
+    if (condition_type === 'contains')    return val.includes(cmp);
+    if (condition_type === 'equals')      return val === cmp;
+    if (condition_type === 'starts_with') return val.startsWith(cmp);
+    if (condition_type === 'ends_with')   return val.endsWith(cmp);
+  }
+
+  if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(condition_type)) {
+    const num = parseFloat(String(raw ?? '').replace(/,/g, '').replace(/\s/g, ''));
+    if (isNaN(num)) return false;
+    const threshold = parseFloat(condition_value);
+    if (condition_type === 'greater_than')     return num > threshold;
+    if (condition_type === 'less_than')        return num < threshold;
+    if (condition_type === 'greater_or_equal') return num >= threshold;
+    if (condition_type === 'less_or_equal')    return num <= threshold;
+    if (condition_type === 'range_between') {
+      const hi = parseFloat(condition_value_secondary);
+      return num >= threshold && num <= hi;
+    }
+  }
+
+  if (['date_older_than','date_newer_than','before_date','after_date'].includes(condition_type)) {
+    if (!raw) return false;
+    let dateStr = String(raw).trim();
+    if (/^\d{8}$/.test(dateStr)) dateStr = `${dateStr.slice(0,4)}-${dateStr.slice(4,6)}-${dateStr.slice(6,8)}`;
+    const recordDate = new Date(dateStr);
+    if (isNaN(recordDate.getTime())) return false;
+    const now = new Date();
+    if (condition_type === 'date_older_than') return (now - recordDate) / 86400000 > parseFloat(condition_value);
+    if (condition_type === 'date_newer_than') return (now - recordDate) / 86400000 < parseFloat(condition_value);
+    if (condition_type === 'before_date')     return recordDate < new Date(condition_value);
+    if (condition_type === 'after_date')      return recordDate > new Date(condition_value);
+  }
+
+  return false;
+}
+
+function _evalRuleConditions(conditions, record) {
+  if (!Array.isArray(conditions) || conditions.length === 0) return false;
+  let result = _evalCondition(conditions[0], record);
+  for (let i = 1; i < conditions.length; i++) {
+    const op = (conditions[i].operator ?? 'AND').toUpperCase();
+    const val = _evalCondition(conditions[i], record);
+    result = op === 'OR' ? (result || val) : (result && val);
+  }
+  return result;
+}
+
+/**
+ * Check active auto-flag rules against a record object.
+ * Returns { flag_color, flag_reason, auto_flagged: 1 } or null.
+ * Only applies if the record has NOT been manually flagged by a user.
+ */
+function applyAutoFlagRulesToRecord(record, activeRules) {
+  // Never overwrite a manual flag (flag exists AND was set by a real user AND not auto-flagged)
+  if (record.flag_color && record.flag_color !== 'none' && record.flag_created_by && !record.auto_flagged) return null;
+
+  for (const rule of activeRules) {
+    let conditions = rule.conditions;
+    if (typeof conditions === 'string') { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
+    if (!Array.isArray(conditions) || conditions.length === 0) continue;
+    if (_evalRuleConditions(conditions, record)) {
+      return { flag_color: rule.flag_color, flag_reason: `Auto-flagged: ${rule.rule_name}`, auto_flagged: 1 };
+    }
+  }
+  return null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function shouldApplyMappedValue(mode, existingValue, incomingValue) {
   if (mode === 'local-only') return false;
@@ -856,7 +939,7 @@ function sanitizeUser(user) {
     can_access_connections: boolFromRow(user.can_access_connections, false),
     can_access_settings: boolFromRow(user.can_access_settings, false),
     can_manage_users: boolFromRow(user.can_manage_users, false),
-    can_manage_rules: boolFromRow(user.can_manage_rules, false),
+    can_manage_rules: user.role === 'admin' ? true : boolFromRow(user.can_manage_rules, false),
     can_edit_records: boolFromRow(user.can_edit_records, true),
     can_flag_records: boolFromRow(user.can_flag_records, true),
     created_date: user.created_date,
@@ -1257,6 +1340,15 @@ async function runConnectionImport(connectionId) {
 
       const syncTimestamp = new Date().toISOString();
 
+      // Load active auto-flag rules once for the entire sync batch
+      const activeAutoFlagRules = db.prepare(
+        `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
+      ).all();
+
+      const updateRecordFlag = db.prepare(`
+        UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
+      `);
+
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
@@ -1322,6 +1414,20 @@ async function runConnectionImport(connectionId) {
               syncTimestamp,
               existing.id
             );
+             // Apply auto-flag rules only if the record was NOT manually flagged by a user
+             // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
+             const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
+             if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
+               const mergedRecord = { ...existing, ...baseRecordData };
+               const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
+               if (autoFlag) {
+                 // Flag it (or update the auto-flag if the rule result changed)
+                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, existing.id);
+               } else if (existing.auto_flagged) {
+                 // Rule no longer matches — clear the auto-flag
+                 updateRecordFlag.run(null, null, 0, existing.id);
+               }
+             }
           } else {
             insertNewRecord.run(
               baseRecordData.created_by,
@@ -1353,13 +1459,22 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
+            // Apply auto-flag rules to new records (user hasn't touched them yet)
+            if (activeAutoFlagRules.length > 0) {
+              const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
+              if (newRecord) {
+                const autoFlag = applyAutoFlagRulesToRecord(newRecord, activeAutoFlagRules);
+                if (autoFlag) {
+                  updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
+                }
+              }
+            }
           }
         }
       });
 
       writeRowsTransaction(rows);
     };
-
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
       const syncQueryStripped = syncQuery
@@ -1631,6 +1746,110 @@ app.get('/api/app-info', (req, res) => {
   });
 });
 
+// POST /api/test-rule
+// Accepts { conditions, sample_size } and runs the rule logic against real records.
+// Returns up to sample_size records (default 5) that matched, plus up to sample_size that didn't.
+app.post('/api/test-rule', requireAuth, (req, res) => {
+  try {
+    const { conditions: rawConditions, sample_size = 5 } = req.body;
+    let conditions = rawConditions;
+    if (typeof conditions === 'string') { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      return res.status(400).json({ error: 'No conditions provided' });
+    }
+
+    // Fetch a reasonably large sample to find matches and non-matches
+    const rows = db.prepare(
+      `SELECT customer_number, customer_name, outstanding_balance,
+              last_unpaid_invoice_date, last_receipt_date, updated_date, created_date,
+              age_analysis, flag_color
+       FROM datarecord ORDER BY RANDOM() LIMIT 200`
+    ).all();
+
+    function evalCondition(cond, record) {
+      const raw = record[cond.field];
+      const ct = cond.condition_type;
+      if (ct === 'is_empty') return raw === null || raw === undefined || String(raw).trim() === '';
+      if (ct === 'is_not_empty') return raw !== null && raw !== undefined && String(raw).trim() !== '';
+      if (['contains','equals','starts_with','ends_with'].includes(ct)) {
+        const val = String(raw ?? '').toLowerCase();
+        const cmp = String(cond.condition_value ?? '').toLowerCase();
+        if (ct === 'contains') return val.includes(cmp);
+        if (ct === 'equals') return val === cmp;
+        if (ct === 'starts_with') return val.startsWith(cmp);
+        if (ct === 'ends_with') return val.endsWith(cmp);
+      }
+      if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(ct)) {
+        const num = parseFloat(String(raw ?? '').replace(/,/g, '').replace(/\s/g, ''));
+        if (isNaN(num)) return false;
+        const t = parseFloat(cond.condition_value);
+        if (ct === 'greater_than') return num > t;
+        if (ct === 'less_than') return num < t;
+        if (ct === 'greater_or_equal') return num >= t;
+        if (ct === 'less_or_equal') return num <= t;
+        if (ct === 'range_between') return num >= t && num <= parseFloat(cond.condition_value_secondary);
+      }
+      if (['date_older_than','date_newer_than','before_date','after_date'].includes(ct)) {
+        if (!raw) return false;
+        let _ds = String(raw).trim();
+        if (/^\d{8}$/.test(_ds)) _ds = `${_ds.slice(0,4)}-${_ds.slice(4,6)}-${_ds.slice(6,8)}`;
+        const d = new Date(_ds);
+        if (isNaN(d.getTime())) return false;
+        const now = new Date();
+        if (ct === 'date_older_than') return (now - d) / 86400000 > parseFloat(cond.condition_value);
+        if (ct === 'date_newer_than') return (now - d) / 86400000 < parseFloat(cond.condition_value);
+        if (ct === 'before_date') return d < new Date(cond.condition_value);
+        if (ct === 'after_date') return d > new Date(cond.condition_value);
+      }
+      return false;
+    }
+
+    function evalAll(conditions, record) {
+      let result = evalCondition(conditions[0], record);
+      for (let i = 1; i < conditions.length; i++) {
+        const op = (conditions[i].operator || 'AND').toUpperCase();
+        const val = evalCondition(conditions[i], record);
+        result = op === 'OR' ? result || val : result && val;
+      }
+      return result;
+    }
+
+    const matched = [];
+    const unmatched = [];
+    const limit = Math.min(parseInt(sample_size) || 5, 20);
+
+    for (const row of rows) {
+      // Per-condition results for display
+      const condResults = conditions.map(c => ({
+        field: c.field,
+        passed: evalCondition(c, row),
+        operator: c.operator,
+      }));
+      const passes = evalAll(conditions, row);
+      const entry = {
+        customer_number: row.customer_number,
+        customer_name: row.customer_name,
+        outstanding_balance: row.outstanding_balance,
+        last_unpaid_invoice_date: row.last_unpaid_invoice_date,
+        last_receipt_date: row.last_receipt_date,
+        updated_date: row.updated_date,
+        age_analysis: row.age_analysis,
+        flag_color: row.flag_color,
+        passes,
+        condition_results: condResults,
+      };
+      if (passes && matched.length < limit) matched.push(entry);
+      else if (!passes && unmatched.length < limit) unmatched.push(entry);
+      if (matched.length >= limit && unmatched.length >= limit) break;
+    }
+
+    res.json({ matched, unmatched, total_sampled: rows.length });
+  } catch (err) {
+    console.error('test-rule error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/top-balances?limit=30
 // Returns top customers by outstanding balance, sorted descending.
 // In hub mode, queries the hub_records table (cross-site).
@@ -1655,6 +1874,9 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           r.last_receipt_number,
           r.last_receipt_amount,
           r.last_receipt_date,
+          r.flag_color,
+          r.flag_reason,
+          r.auto_flagged,
           COALESCE(s.name, r.site_id) AS site_name
         FROM hub_records r
         LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -1678,6 +1900,9 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           last_receipt_number,
           last_receipt_amount,
           last_receipt_date,
+          flag_color,
+          flag_reason,
+          auto_flagged,
           source_table AS site_name
         FROM datarecord
         WHERE outstanding_balance IS NOT NULL
@@ -2974,6 +3199,55 @@ if (process.env.HUB_MODE === 'true') {
 
 
 // ==================== DYNAMIC CRUD ROUTES ====================
+
+app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
+  try {
+    const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
+    const activeRules = rules.map(r => {
+      try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
+      return r;
+    });
+    if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
+
+    const records = db.prepare(`SELECT * FROM datarecord`).all();
+    let flagged = 0, cleared = 0;
+
+    const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
+    const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
+
+    const applyAll = db.transaction(() => {
+      for (const record of records) {
+        const manuallyFlagged = record.flag_color && !record.auto_flagged && record.flag_created_by;
+        if (manuallyFlagged) continue;
+
+        const autoFlag = applyAutoFlagRulesToRecord(record, activeRules);
+        if (autoFlag) {
+          updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, record.id);
+          flagged++;
+        } else if (record.auto_flagged) {
+          clearFlag.run(record.id);
+          cleared++;
+        }
+      }
+    });
+    applyAll();
+    res.json({ flagged, cleared });
+  } catch (err) {
+    console.error('apply-auto-flags error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
+  try {
+    const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
+    res.json({ cleared: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/:table', requireAuth, (req, res) => {
   const { table } = req.params;
 
@@ -2991,7 +3265,19 @@ app.get('/api/:table', requireAuth, (req, res) => {
   }
 
   try {
-    const stmt = db.prepare(`SELECT * FROM "${table}"`);
+    // Optional sort: ?sort=priority (asc) or ?sort=-priority (desc)
+    const sortParam = req.query.sort;
+    let orderClause = '';
+    if (sortParam) {
+      const desc = sortParam.startsWith('-');
+      const col = desc ? sortParam.slice(1) : sortParam;
+      const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+      const validCols = new Set(tableInfo.map(c => c.name));
+      if (validCols.has(col)) {
+        orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
+      }
+    }
+    const stmt = db.prepare(`SELECT * FROM "${table}"${orderClause}`);
     const rows = stmt.all();
     let output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
     if (table === 'databaseconnection') output = output.map(sanitizeConnection);
@@ -3047,6 +3333,11 @@ app.post('/api/:table', requireAuth, (req, res) => {
 
   const data = sanitizeForSqlite(req.body);
 
+  // Serialize JSON fields that must be stored as strings
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
+  }
+
   if (table === 'databaseconnection' && data.status !== undefined) {
     const allowedStatuses = new Set(['active', 'inactive', 'error', 'testing']);
     if (!allowedStatuses.has(data.status)) {
@@ -3057,6 +3348,11 @@ app.post('/api/:table', requireAuth, (req, res) => {
   // Encrypt MSSQL password before storing
   if (table === 'databaseconnection' && data.encrypted_password) {
     data.encrypted_password = encryptPassword(data.encrypted_password);
+  }
+
+  // Serialize conditions array for autoflagrule
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
   }
 
   try {
@@ -3099,7 +3395,7 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Use dedicated routes instead' });
   }
 
-  const data = sanitizeForSqlite(req.body);
+  let data = sanitizeForSqlite(req.body);
 
   if (table === 'databaseconnection' && data.status !== undefined) {
     const allowedStatuses = new Set(['active', 'inactive', 'error', 'testing']);
@@ -3111,6 +3407,11 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
   // Encrypt MSSQL password before storing
   if (table === 'databaseconnection' && data.encrypted_password) {
     data.encrypted_password = encryptPassword(data.encrypted_password);
+  }
+
+  // Serialize conditions array for autoflagrule
+  if (table === 'autoflagrule' && data.conditions !== undefined && typeof data.conditions !== 'string') {
+    data.conditions = JSON.stringify(data.conditions);
   }
 
   try {
@@ -3146,6 +3447,9 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
         );
       }
     }
+
+    // Sanitize booleans/undefined to SQLite-compatible types
+    data = sanitizeForSqlite(data);
 
     const keys = Object.keys(data);
     if (keys.length === 0) {

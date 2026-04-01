@@ -11,13 +11,11 @@
  * 
  *   import HomePage from './pages/HomePage';
  *   import Dashboard from './pages/Dashboard';
- *   import Settings from './pages/Settings';
- *   
+ *    *   
  *   export const PAGES = {
  *       "HomePage": HomePage,
  *       "Dashboard": Dashboard,
- *       "Settings": Settings,
- *   }
+ *    *   }
  *   
  *   export const pagesConfig = {
  *       mainPage: "HomePage",
@@ -27,13 +25,11 @@
  * Example with Layout (wraps all pages):
  *
  *   import Home from './pages/Home';
- *   import Settings from './pages/Settings';
- *   import __Layout from './Layout.jsx';
+ *    *   import __Layout from './Layout.jsx';
  *
  *   export const PAGES = {
  *       "Home": Home,
- *       "Settings": Settings,
- *   }
+ *    *   }
  *
  *   export const pagesConfig = {
  *       mainPage: "Home",
@@ -57,7 +53,6 @@ import Dashboard from './pages/Dashboard';
 import Fields from './pages/Fields';
 import Records from './pages/Records';
 import Reports from './pages/Reports';
-import Settings from './pages/Settings';
 import Users from './pages/Users';
 import Inventory from './pages/Inventory';
 import __Layout from './Layout.jsx';
@@ -75,7 +70,6 @@ export const PAGES = {
     "Fields": Fields,
     "Records": Records,
     "Reports": Reports,
-    "Settings": Settings,
     "Users": Users,
 }
 

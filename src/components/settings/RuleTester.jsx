@@ -1,213 +1,203 @@
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { CheckCircle2, AlertCircle, Zap } from "lucide-react";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { CheckCircle2, XCircle, Zap, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/api/apiClient";
+import { RULE_FIELDS } from "./RuleConditionBuilder";
 
-const flagColors = {
-  red: { bg: "bg-red-100", text: "text-red-700", label: "Red Flag" },
-  green: { bg: "bg-green-100", text: "text-green-700", label: "Green Flag" },
-  orange: { bg: "bg-orange-100", text: "text-orange-700", label: "Orange Flag" },
+const FLAG_COLORS = {
+  red:    { dot: "bg-red-500",    text: "text-red-400" },
+  orange: { dot: "bg-orange-400", text: "text-orange-400" },
+  green:  { dot: "bg-green-500",  text: "text-green-400" },
+  none:   { dot: "bg-gray-600",   text: "text-gray-500" },
 };
 
+function ConditionBreakdown({ conditionResults, conditions }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-xs mt-1">
+      {conditionResults.map((r, i) => {
+        const fieldLabel = RULE_FIELDS.find(f => f.value === r.field)?.label ?? r.field;
+        return (
+          <span key={i} className="flex items-center gap-1">
+            {i > 0 && (
+              <span className={cn(
+                "font-bold tracking-widest px-1",
+                (r.operator ?? "AND") === "OR" ? "text-indigo-400" : "text-gray-500"
+              )}>
+                {r.operator ?? "AND"}
+              </span>
+            )}
+            <span className={cn(
+              "px-1.5 py-0.5 rounded border",
+              r.passed
+                ? "bg-green-900/30 border-green-800 text-green-300"
+                : "bg-red-900/30 border-red-800 text-red-400"
+            )}>
+              {fieldLabel} {r.passed ? "✓" : "✗"}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+function RecordRow({ record, conditions, index }) {
+  const [expanded, setExpanded] = useState(false);
+  const flagStyle = FLAG_COLORS[record.flag_color] ?? FLAG_COLORS.none;
+
+  return (
+    <div className={cn(
+      "rounded-lg border p-3 text-sm",
+      record.passes
+        ? "bg-green-900/10 border-green-800/50"
+        : "bg-gray-900/60 border-gray-700"
+    )}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          {record.passes
+            ? <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+            : <XCircle className="w-4 h-4 text-gray-600 flex-shrink-0" />
+          }
+          <div className="min-w-0">
+            <span className="font-medium text-gray-200 truncate">{record.customer_name}</span>
+            <span className="text-gray-500 ml-2 text-xs">#{record.customer_number}</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {record.flag_color && record.flag_color !== "none" && (
+            <div className={cn("w-2 h-2 rounded-full", flagStyle.dot)} title={`Currently: ${record.flag_color}`} />
+          )}
+          <button
+            onClick={() => setExpanded(v => !v)}
+            className="text-gray-500 hover:text-gray-300"
+          >
+            {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+      </div>
+
+      {/* Always show condition breakdown */}
+      <ConditionBreakdown conditionResults={record.condition_results} conditions={conditions} />
+
+      {/* Expanded: show relevant field values */}
+      {expanded && (
+        <div className="mt-2 pt-2 border-t border-gray-700 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-gray-400">
+          {record.condition_results.map((r, i) => {
+            const fieldLabel = RULE_FIELDS.find(f => f.value === r.field)?.label ?? r.field;
+            const val = record[r.field];
+            return (
+              <div key={i}>
+                <span className="text-gray-500">{fieldLabel}: </span>
+                <span className={r.passed ? "text-green-300" : "text-red-400"}>
+                  {val !== null && val !== undefined && val !== "" ? String(val) : "(empty)"}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function RuleTester({ rule }) {
-  const [testData, setTestData] = useState({
-    age_analysis: "",
-    custom_number: "",
-    custom_date: "",
-  });
-  const [testResults, setTestResults] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+  const [showUnmatched, setShowUnmatched] = useState(false);
 
-  const evaluateCondition = (condition, data) => {
-    const value = data[condition.field] || "";
-    const condValue = condition.condition_value;
-    const condValueSec = condition.condition_value_secondary;
+  const runTest = async () => {
+    setLoading(true);
+    setError(null);
+    setResults(null);
+    try {
+      let conditions = rule?.conditions ?? [];
+      if (typeof conditions === "string") { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
+      if (!conditions.length) { setError("Add at least one condition first."); return; }
 
-    switch (condition.condition_type) {
-      // Text conditions
-      case "contains":
-        return String(value).toLowerCase().includes(String(condValue).toLowerCase());
-      case "equals":
-        return String(value).toLowerCase() === String(condValue).toLowerCase();
-      case "starts_with":
-        return String(value).toLowerCase().startsWith(String(condValue).toLowerCase());
-      case "ends_with":
-        return String(value).toLowerCase().endsWith(String(condValue).toLowerCase());
+      const data = await fetch("/api/test-rule", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ conditions, sample_size: 5 }),
+      }).then(r => r.json());
 
-      // Number conditions
-      case "greater_than":
-        return parseFloat(value) > parseFloat(condValue);
-      case "less_than":
-        return parseFloat(value) < parseFloat(condValue);
-      case "greater_or_equal":
-        return parseFloat(value) >= parseFloat(condValue);
-      case "less_or_equal":
-        return parseFloat(value) <= parseFloat(condValue);
-      case "range_between":
-        const num = parseFloat(value);
-        return num >= parseFloat(condValue) && num <= parseFloat(condValueSec);
-
-      // Date conditions
-      case "date_older_than": {
-        const date = new Date(value);
-        const now = new Date();
-        const daysDiff = (now - date) / (1000 * 60 * 60 * 24);
-        return daysDiff > parseFloat(condValue);
-      }
-      case "date_newer_than": {
-        const date = new Date(value);
-        const now = new Date();
-        const daysDiff = (now - date) / (1000 * 60 * 60 * 24);
-        return daysDiff < parseFloat(condValue);
-      }
-
-      default:
-        return false;
+      if (data.error) throw new Error(data.error);
+      setResults(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
     }
-  };
-
-  const testRule = () => {
-    if (!rule?.conditions || rule.conditions.length === 0) {
-      setTestResults({ passed: false, message: "Rule has no conditions" });
-      return;
-    }
-
-    const results = rule.conditions.map(cond => ({
-      condition: cond,
-      passed: evaluateCondition(cond, testData),
-    }));
-
-    const finalPassed =
-      rule.logic === "AND"
-        ? results.every(r => r.passed)
-        : results.some(r => r.passed);
-
-    setTestResults({
-      passed: finalPassed,
-      message: finalPassed
-        ? `Rule MATCHED - Will apply ${flagColors[rule.flag_color]?.label}`
-        : "Rule did not match",
-      conditions: results,
-    });
-  };
-
-  const conditionTypeLabels = {
-    contains: "Contains",
-    equals: "Equals",
-    starts_with: "Starts With",
-    ends_with: "Ends With",
-    greater_than: "> (Greater Than)",
-    less_than: "< (Less Than)",
-    greater_or_equal: "≥ (Greater or Equal)",
-    less_or_equal: "≤ (Less or Equal)",
-    range_between: "Between",
-    date_older_than: "Older Than (days)",
-    date_newer_than: "Newer Than (days)",
   };
 
   return (
     <Card className="bg-gray-800 border-gray-700">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-lg text-white">
-          <Zap className="w-5 h-5 text-gray-400" />
-          Test Rule
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base text-white">
+          <Zap className="w-4 h-4 text-gray-400" />
+          Test Against Real Records
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label className="text-gray-300 text-sm">Age Analysis</Label>
-            <Textarea
-              value={testData.age_analysis}
-              onChange={(e) => setTestData({ ...testData, age_analysis: e.target.value })}
-              placeholder="e.g., 90+ days overdue"
-              className="bg-gray-900 border-gray-700 text-gray-100 h-24 text-sm resize-none"
-            />
-          </div>
+        <p className="text-xs text-gray-400">
+          Runs this rule against a random sample of your records and shows which ones would match.
+        </p>
 
-          <div className="space-y-2">
-            <Label className="text-gray-300 text-sm">Number Value</Label>
-            <Input
-              type="number"
-              value={testData.custom_number}
-              onChange={(e) => setTestData({ ...testData, custom_number: e.target.value })}
-              placeholder="e.g., 250"
-              className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-gray-300 text-sm">Date Value</Label>
-            <Input
-              type="date"
-              value={testData.custom_date}
-              onChange={(e) => setTestData({ ...testData, custom_date: e.target.value })}
-              className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
-            />
-          </div>
-        </div>
-
-        <Button
-          onClick={testRule}
-          className="w-full bg-white hover:bg-gray-100 text-gray-900 font-medium"
-        >
+        <Button onClick={runTest} disabled={loading}
+          className="w-full bg-white hover:bg-gray-100 text-gray-900 font-medium">
           <Zap className="w-4 h-4 mr-2" />
-          Test Rule
+          {loading ? "Testing..." : "Run Test (5 samples)"}
         </Button>
 
-        {testResults && (
-          <div className="space-y-3">
-            <Alert className={testResults.passed ? "bg-green-900/20 border-green-800" : "bg-orange-900/20 border-orange-800"}>
-              <div className="flex items-center gap-2">
-                {testResults.passed ? (
-                  <>
-                    <CheckCircle2 className="w-4 h-4 text-green-500" />
-                    <AlertDescription className="text-green-300">{testResults.message}</AlertDescription>
-                  </>
-                ) : (
-                  <>
-                    <AlertCircle className="w-4 h-4 text-orange-500" />
-                    <AlertDescription className="text-orange-300">{testResults.message}</AlertDescription>
-                  </>
-                )}
-              </div>
-            </Alert>
+        {error && (
+          <Alert className="bg-red-900/20 border-red-800">
+            <AlertDescription className="text-red-300">{error}</AlertDescription>
+          </Alert>
+        )}
 
-            {testResults.conditions && (
+        {results && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 text-xs text-gray-400">
+              <span>Sampled <strong className="text-gray-200">{results.total_sampled}</strong> records</span>
+              <span>·</span>
+              <span className="text-green-400"><strong>{results.matched.length}</strong> matched</span>
+              <span>·</span>
+              <span className="text-gray-500"><strong>{results.unmatched.length}</strong> didn't match</span>
+            </div>
+
+            {results.matched.length === 0 && (
+              <Alert className="bg-orange-900/20 border-orange-800">
+                <AlertDescription className="text-orange-300">
+                  No records matched in the sample of {results.total_sampled}. Try relaxing the conditions.
+                </AlertDescription>
+              </Alert>
+            )}
+
+            {results.matched.length > 0 && (
               <div className="space-y-2">
-                <p className="text-sm text-gray-400 font-medium">Condition Results ({rule.logic} logic):</p>
-                <div className="space-y-2">
-                  {testResults.conditions.map((result, idx) => (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "p-3 rounded-lg border",
-                        result.passed
-                          ? "bg-green-900/20 border-green-800 text-green-300"
-                          : "bg-red-900/20 border-red-800 text-red-300"
-                      )}
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className={cn(
-                          "w-2 h-2 rounded-full",
-                          result.passed ? "bg-green-500" : "bg-red-500"
-                        )} />
-                        <span className="text-sm">
-                          <strong>{result.condition.field}</strong> {conditionTypeLabels[result.condition.condition_type]}
-                          {result.condition.condition_value_secondary
-                            ? ` ${result.condition.condition_value} and ${result.condition.condition_value_secondary}`
-                            : ` "${result.condition.condition_value}"`
-                          }
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <p className="text-xs font-semibold text-green-400 uppercase tracking-wider">Would be flagged</p>
+                {results.matched.map((r, i) => (
+                  <RecordRow key={i} record={r} conditions={rule?.conditions} index={i} />
+                ))}
+              </div>
+            )}
+
+            {results.unmatched.length > 0 && (
+              <div className="space-y-2">
+                <button
+                  onClick={() => setShowUnmatched(v => !v)}
+                  className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-300"
+                >
+                  {showUnmatched ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                  {showUnmatched ? "Hide" : "Show"} non-matching samples ({results.unmatched.length})
+                </button>
+                {showUnmatched && results.unmatched.map((r, i) => (
+                  <RecordRow key={i} record={r} conditions={rule?.conditions} index={i} />
+                ))}
               </div>
             )}
           </div>

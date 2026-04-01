@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,218 +12,241 @@ import {
 import { Trash2, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const conditionOptions = {
+export const RULE_FIELDS = [
+  { value: "age_analysis",             label: "Age Analysis",             type: "text" },
+  { value: "outstanding_balance",      label: "Outstanding Balance",      type: "number" },
+  { value: "last_unpaid_invoice_date", label: "Last Unpaid Invoice Date", type: "date" },
+  { value: "last_receipt_date",        label: "Last Receipt Date",        type: "date" },
+  { value: "updated_date",             label: "Last Updated",             type: "date" },
+  { value: "created_date",             label: "Date Created",             type: "date" },
+];
+
+export const conditionOptions = {
   text: [
-    { value: "contains", label: "Contains" },
-    { value: "equals", label: "Equals" },
-    { value: "starts_with", label: "Starts With" },
-    { value: "ends_with", label: "Ends With" },
+    { value: "contains",     label: "Contains" },
+    { value: "equals",       label: "Equals" },
+    { value: "starts_with",  label: "Starts With" },
+    { value: "ends_with",    label: "Ends With" },
+    { value: "is_empty",     label: "Is Empty" },
+    { value: "is_not_empty", label: "Is Not Empty" },
   ],
   number: [
-    { value: "greater_than", label: "Greater Than (>)" },
-    { value: "less_than", label: "Less Than (<)" },
+    { value: "greater_than",     label: "Greater Than (>)" },
+    { value: "less_than",        label: "Less Than (<)" },
     { value: "greater_or_equal", label: "Greater or Equal (≥)" },
-    { value: "less_or_equal", label: "Less or Equal (≤)" },
-    { value: "range_between", label: "Between" },
+    { value: "less_or_equal",    label: "Less or Equal (≤)" },
+    { value: "range_between",    label: "Between" },
+    { value: "is_empty",         label: "Is Empty" },
+    { value: "is_not_empty",     label: "Is Not Empty" },
   ],
   date: [
-    { value: "date_older_than", label: "Older Than (days)" },
-    { value: "date_newer_than", label: "Newer Than (days)" },
+    { value: "date_older_than", label: "Older Than (days ago)" },
+    { value: "date_newer_than", label: "Newer Than (days ago)" },
+    { value: "before_date",     label: "Before Date" },
+    { value: "after_date",      label: "After Date" },
+    { value: "is_empty",        label: "Is Empty / No Date" },
+    { value: "is_not_empty",    label: "Has a Date" },
   ],
 };
 
-export default function RuleConditionBuilder({
-  conditions = [],
-  logic = "AND",
-  onConditionsChange,
-  onLogicChange,
-  isAdmin,
-}) {
-  // Parse conditions if coming from DB as JSON string
-  let parsedConditions = Array.isArray(conditions) ? conditions : [];
+const NO_VALUE_TYPES = ["is_empty", "is_not_empty"];
+
+export function getFieldType(fieldValue) {
+  return RULE_FIELDS.find(f => f.value === fieldValue)?.type || "text";
+}
+
+function newCondition(operator = "AND") {
+  return {
+    id: `cond-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    operator,           // "AND" | "OR" — how this condition connects to the previous one
+    field: "age_analysis",
+    condition_type: "contains",
+    condition_value: "",
+    condition_value_secondary: "",
+  };
+}
+
+export default function RuleConditionBuilder({ conditions = [], onConditionsChange, isAdmin }) {
+  let parsed = Array.isArray(conditions) ? conditions : [];
   if (typeof conditions === "string") {
-    try {
-      parsedConditions = JSON.parse(conditions);
-    } catch (e) {
-      console.error("Failed to parse conditions:", e);
-      parsedConditions = [];
-    }
+    try { parsed = JSON.parse(conditions); } catch { parsed = []; }
   }
+  // Migrate legacy conditions (no operator) — first gets none, rest default AND
+  parsed = parsed.map((c, i) => ({ operator: i === 0 ? undefined : "AND", ...c }));
 
   const addCondition = () => {
-    const newCondition = {
-      id: `cond-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      field: "age_analysis",
-      condition_type: "contains",
-      condition_value: "",
-      condition_value_secondary: "", // for range_between
-    };
-    onConditionsChange([...parsedConditions, newCondition]);
+    onConditionsChange([...parsed, newCondition("AND")]);
   };
 
   const removeCondition = (id) => {
-    onConditionsChange(parsedConditions.filter((c) => c.id !== id));
+    const remaining = parsed.filter(c => c.id !== id);
+    // First condition should never have an operator displayed
+    onConditionsChange(remaining);
   };
 
   const updateCondition = (id, updates) => {
-    onConditionsChange(
-      parsedConditions.map((c) => (c.id === id ? { ...c, ...updates } : c))
-    );
+    onConditionsChange(parsed.map(c => c.id === id ? { ...c, ...updates } : c));
   };
 
-  const getConditionOptions = (field) => {
-    if (field.includes("number")) return conditionOptions.number;
-    if (field.includes("date")) return conditionOptions.date;
-    return conditionOptions.text;
+  const toggleOperator = (id) => {
+    const current = parsed.find(c => c.id === id)?.operator;
+    updateCondition(id, { operator: current === "AND" ? "OR" : "AND" });
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="space-y-1">
+      <div className="flex items-center justify-between mb-3">
         <Label className="text-gray-300">Conditions</Label>
         {isAdmin && (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={addCondition}
-            className="border-gray-700 text-gray-300 hover:bg-gray-800"
-          >
-            <Plus className="w-4 h-4 mr-1" />
-            Add Condition
+          <Button type="button" size="sm" variant="outline" onClick={addCondition}
+            className="border-gray-700 text-gray-300 hover:bg-gray-800">
+            <Plus className="w-4 h-4 mr-1" /> Add Condition
           </Button>
         )}
       </div>
 
-      {parsedConditions.length === 0 && (
-        <div className="p-3 bg-gray-850 rounded-lg border border-gray-700 text-center">
+      {parsed.length === 0 && (
+        <div className="p-3 rounded-lg border border-gray-700 text-center">
           <p className="text-sm text-gray-400">No conditions yet. Add one to get started.</p>
         </div>
       )}
 
-      {parsedConditions.map((condition, index) => (
-        <Card
-          // Guaranteed unique key: use id if available, otherwise index + random suffix
-          key={condition.id ?? `condition-${index}-${Math.random().toString(36).slice(2, 8)}`}
-          className="bg-gray-850 border-gray-700"
-        >
-          <CardContent className="pt-6">
-            <div className="space-y-3">
-              {index > 0 && (
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-px bg-gray-700"></div>
-                  <Select value={logic} onValueChange={onLogicChange} disabled={!isAdmin}>
-                    <SelectTrigger className="w-20 bg-gray-900 border-gray-700 text-white h-8">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700">
-                      <SelectItem value="AND">AND</SelectItem>
-                      <SelectItem value="OR">OR</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <div className="flex-1 h-px bg-gray-700"></div>
-                </div>
-              )}
+      {parsed.map((condition, index) => {
+        const fieldType = getFieldType(condition.field);
+        const opts = conditionOptions[fieldType] || conditionOptions.text;
+        const noValue = NO_VALUE_TYPES.includes(condition.condition_type);
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="space-y-1">
-                  <Label className="text-xs text-gray-400">Field</Label>
-                  <Select
-                    value={condition.field}
-                    onValueChange={(val) =>
-                      updateCondition(condition.id, { field: val, condition_type: "contains" })
-                    }
-                    disabled={!isAdmin}
-                  >
-                    <SelectTrigger className="bg-gray-900 border-gray-700 text-white text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700">
-                      <SelectItem value="age_analysis">Age Analysis</SelectItem>
-                      <SelectItem value="custom_number">Numerical Value</SelectItem>
-                      <SelectItem value="custom_date">Date</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs text-gray-400">Type</Label>
-                  <Select
-                    value={condition.condition_type}
-                    onValueChange={(val) => updateCondition(condition.id, { condition_type: val })}
-                    disabled={!isAdmin}
-                  >
-                    <SelectTrigger className="bg-gray-900 border-gray-700 text-white text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent className="bg-gray-800 border-gray-700">
-                      {getConditionOptions(condition.field).map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-1">
-                  <Label className="text-xs text-gray-400">
-                    {condition.condition_type === "range_between"
-                      ? "Min"
-                      : condition.condition_type?.includes("date")
-                      ? "Days"
-                      : "Value"}
-                  </Label>
-                  <Input
-                    disabled={!isAdmin}
-                    value={condition.condition_value || ""}
-                    onChange={(e) => updateCondition(condition.id, { condition_value: e.target.value })}
-                    placeholder={
-                      condition.field.includes("number")
-                        ? "e.g., 100"
-                        : condition.field.includes("date")
-                        ? "e.g., 30"
-                        : "e.g., overdue"
-                    }
-                    className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
-                  />
-                </div>
-              </div>
-
-              {condition.condition_type === "range_between" && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-gray-400">Max</Label>
-                    <Input
-                      disabled={!isAdmin}
-                      value={condition.condition_value_secondary || ""}
-                      onChange={(e) =>
-                        updateCondition(condition.id, { condition_value_secondary: e.target.value })
-                      }
-                      placeholder="e.g., 500"
-                      className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
-                    />
-                  </div>
-                </div>
-              )}
-
-              {isAdmin && (
-                <div className="flex justify-end">
-                  <Button
+        return (
+          <div key={condition.id ?? `cond-${index}`}>
+            {/* Operator connector — shown between conditions */}
+            {index > 0 && (
+              <div className="flex items-center gap-3 my-2">
+                <div className="flex-1 h-px bg-gray-700" />
+                {isAdmin ? (
+                  <button
                     type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => removeCondition(condition.id)}
-                    className="text-rose-400 hover:text-rose-300 hover:bg-rose-900/20"
+                    onClick={() => toggleOperator(condition.id)}
+                    className={cn(
+                      "px-4 py-1 text-xs font-bold rounded-full border tracking-widest transition-colors",
+                      condition.operator === "OR"
+                        ? "bg-indigo-900/50 text-indigo-300 border-indigo-600 hover:bg-indigo-800/60"
+                        : "bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700"
+                    )}
                   >
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+                    {condition.operator ?? "AND"}
+                  </button>
+                ) : (
+                  <span className={cn(
+                    "px-4 py-1 text-xs font-bold rounded-full border tracking-widest",
+                    condition.operator === "OR"
+                      ? "bg-indigo-900/50 text-indigo-300 border-indigo-600"
+                      : "bg-gray-800 text-gray-300 border-gray-600"
+                  )}>
+                    {condition.operator ?? "AND"}
+                  </span>
+                )}
+                <div className="flex-1 h-px bg-gray-700" />
+              </div>
+            )}
+
+            <Card className="bg-gray-850 border-gray-700">
+              <CardContent className="pt-4 pb-3">
+                <div className={`grid gap-3 ${noValue ? "grid-cols-2" : "grid-cols-1 sm:grid-cols-3"}`}>
+                  {/* Field */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-400">Field</Label>
+                    <Select
+                      value={condition.field}
+                      onValueChange={(val) => {
+                        const newType = getFieldType(val);
+                        const defaultCond = conditionOptions[newType][0].value;
+                        updateCondition(condition.id, { field: val, condition_type: defaultCond, condition_value: "", condition_value_secondary: "" });
+                      }}
+                      disabled={!isAdmin}
+                    >
+                      <SelectTrigger className="bg-gray-900 border-gray-700 text-white text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700">
+                        {RULE_FIELDS.map(f => (
+                          <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Condition type */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-gray-400">Condition</Label>
+                    <Select
+                      value={condition.condition_type}
+                      onValueChange={(val) => updateCondition(condition.id, { condition_type: val })}
+                      disabled={!isAdmin}
+                    >
+                      <SelectTrigger className="bg-gray-900 border-gray-700 text-white text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-gray-800 border-gray-700">
+                        {opts.map(opt => (
+                          <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Value */}
+                  {!noValue && (
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-400">
+                        {condition.condition_type === "range_between" ? "Min" :
+                         ["date_older_than","date_newer_than"].includes(condition.condition_type) ? "Days" :
+                         ["before_date","after_date"].includes(condition.condition_type) ? "Date" :
+                         "Value"}
+                      </Label>
+                      <Input
+                        disabled={!isAdmin}
+                        type={["before_date","after_date"].includes(condition.condition_type) ? "date" : "text"}
+                        value={condition.condition_value || ""}
+                        onChange={(e) => updateCondition(condition.id, { condition_value: e.target.value })}
+                        placeholder={
+                          fieldType === "number" ? "e.g., 1000" :
+                          fieldType === "date" && ["date_older_than","date_newer_than"].includes(condition.condition_type) ? "e.g., 30" :
+                          "e.g., overdue"
+                        }
+                        className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+
+                {condition.condition_type === "range_between" && (
+                  <div className="mt-3 max-w-xs">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-400">Max</Label>
+                      <Input
+                        disabled={!isAdmin}
+                        value={condition.condition_value_secondary || ""}
+                        onChange={(e) => updateCondition(condition.id, { condition_value_secondary: e.target.value })}
+                        placeholder="e.g., 5000"
+                        className="bg-gray-900 border-gray-700 text-gray-100 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {isAdmin && (
+                  <div className="flex justify-end mt-2">
+                    <Button type="button" variant="ghost" size="sm" onClick={() => removeCondition(condition.id)}
+                      className="text-rose-400 hover:text-rose-300 hover:bg-rose-900/20 h-7">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })}
     </div>
   );
 }

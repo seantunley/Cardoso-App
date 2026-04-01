@@ -18,6 +18,7 @@ import {
   User,
   Calendar,
   Flag,
+  Zap,
   Shield,
   Trash2,
   History,
@@ -581,15 +582,34 @@ export default function CustomerLookup({
               <Badge
                 className={cn(
                   "ml-auto border text-xs",
-                  flagColors[customer?.flag_color || "none"].bg,
-                  flagColors[customer?.flag_color || "none"].text
+                  (flagColors[customer?.flag_color] || flagColors["none"]).bg,
+                  (flagColors[customer?.flag_color] || flagColors["none"]).text
                 )}
               >
                 <Flag className="mr-1 h-3 w-3" />
-                {flagColors[customer?.flag_color || "none"].label}
+                {(flagColors[customer?.flag_color] || flagColors["none"]).label}
               </Badge>
             </DialogTitle>
           </DialogHeader>
+
+          {!!customer?.auto_flagged && (
+            <div className={cn(
+              "flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-xs font-medium",
+              customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
+              customer?.flag_color === "green" && "bg-green-950/70 border-green-700 text-green-300",
+              customer?.flag_color === "orange" && "bg-orange-950/70 border-orange-700 text-orange-300",
+              (!customer?.flag_color || customer?.flag_color === "none") && "bg-slate-800 border-slate-600 text-slate-300",
+            )}>
+              <Zap className="w-3.5 h-3.5 shrink-0" />
+              <span>Auto-flagged</span>
+              {customer?.flag_reason && (
+                <>
+                  <span className="opacity-40">·</span>
+                  <span className="opacity-80">{customer.flag_reason.replace(/^Auto-flagged:\s*/i, "")}</span>
+                </>
+              )}
+            </div>
+          )}
 
           <div className="space-y-4 pt-2 overflow-y-auto flex-1 pr-1">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}

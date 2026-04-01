@@ -33,10 +33,11 @@ export const api = {
         const table = entityName.toLowerCase();
 
         return {
-          list: async () => {
-            const res = await fetch(`${API_BASE}/${table}`, {
-              credentials: "include",
-            });
+          list: async (sort) => {
+            const url = sort
+              ? `${API_BASE}/${table}?sort=${encodeURIComponent(sort)}`
+              : `${API_BASE}/${table}`;
+            const res = await fetch(url, { credentials: "include" });
             return readResponse(res, `List ${entityName}`);
           },
 

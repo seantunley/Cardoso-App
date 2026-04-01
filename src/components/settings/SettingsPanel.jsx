@@ -4,6 +4,7 @@ import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
+import { checkAutoFlagRules } from "@/lib/evalFlagRules";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -523,6 +524,29 @@ function AutoFlagTab() {
   const updateMutation = useMutation({ mutationFn: ({ id, data }) => api.entities.AutoFlagRule.update(id, data), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] }); toast.success("Rule updated"); } });
   const deleteMutation = useMutation({ mutationFn: (id) => api.entities.AutoFlagRule.delete(id), onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["autoFlagRules"] }); toast.success("Rule deleted"); } });
 
+  const applyMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/apply-auto-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: ({ flagged, cleared }) => {
+      queryClient.invalidateQueries({ queryKey: ["records"] });
+      toast.success(`Flagged ${flagged} record(s), cleared ${cleared}`);
+    },
+    onError: (e) => toast.error(`Failed: ${e.message}`),
+  });
+
+  const clearMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/clear-auto-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    onSuccess: ({ cleared }) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Cleared ${cleared} auto-flagged record(s)`); },
+    onError: (e) => toast.error(`Failed to clear: ${e.message}`),
+  });
+
   const handleSave = (data, id) => {
     if (!canManageRules) { toast.error("No permission"); return; }
     id ? updateMutation.mutate({ id, data }) : createMutation.mutate(data);
@@ -535,6 +559,16 @@ function AutoFlagTab() {
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending} className="gap-1.5">
+            <Zap className="h-3.5 w-3.5" />{applyMutation.isPending ? "Applying…" : "Apply Now"}
+          </Button>
+        )}
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={() => { if (confirm("Clear all auto-flagged records?")) clearMutation.mutate(); }} disabled={clearMutation.isPending} className="gap-1.5 border-rose-700 text-rose-400 hover:bg-rose-900/20">
+            {clearMutation.isPending ? "Clearing…" : "Clear Auto Flags"}
+          </Button>
+        )}
         {canManageRules && (
           <Button size="sm" variant="outline" onClick={() => setShowNewRule(true)} className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Add Rule
