@@ -516,21 +516,8 @@ function AutoFlagTab() {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
-  const handleExport = async () => {
-    try {
-      const res = await fetch('/api/autoflagrule/export', { credentials: 'include' });
-      if (!res.ok) { toast.error('Export failed'); return; }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'cardoso-rules-export.json';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success('Rules exported');
-    } catch (e) { toast.error(`Export error: ${e.message}`); }
+  const handleExport = () => {
+    window.location.href = '/api/autoflagrule/export';
   };
 
   const handleImport = (e) => {
