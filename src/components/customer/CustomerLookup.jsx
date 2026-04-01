@@ -792,7 +792,7 @@ export default function CustomerLookup({
           )}
         >
           {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "860px", height: "80vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
+          <div style={{ width: "860px", height: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
