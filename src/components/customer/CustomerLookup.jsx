@@ -338,8 +338,8 @@ function analyseInvoiceCredit(record) {
   }
 
   // ── RULE 4: Coverage ratio (total receipts vs total invoiced) ────────────
-  const totalInvoiced = invoices.reduce((s, x) => s + x.amount, 0);
-  const totalReceipted = receipts.reduce((s, x) => s + x.amount, 0);
+  const totalInvoiced = invoices.reduce((s, x) => s + Math.abs(x.amount), 0);
+  const totalReceipted = receipts.reduce((s, x) => s + Math.abs(x.amount), 0); // amounts may be stored as negatives
   if (totalInvoiced > 0) {
     const coverage = totalReceipted / totalInvoiced;
     if (coverage < 0.5) {
