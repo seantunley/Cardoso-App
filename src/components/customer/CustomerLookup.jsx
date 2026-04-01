@@ -783,8 +783,9 @@ export default function CustomerLookup({
               closeAndReset();
             }
           }}
+          style={{ width: "900px", maxWidth: "900px", height: "82vh", maxHeight: "82vh", minHeight: "82vh", display: "flex", flexDirection: "column", overflow: "hidden" }}
           className={cn(
-            "max-w-4xl w-[900px] border-4 bg-gray-900 flex flex-col overflow-hidden",
+            "border-4 bg-gray-900",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
