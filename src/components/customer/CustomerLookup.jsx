@@ -792,7 +792,7 @@ export default function CustomerLookup({
           )}
         >
           {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "780px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
+          <div style={{ width: "780px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "16px 16px 12px 16px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
@@ -834,7 +834,7 @@ export default function CustomerLookup({
 
           <div style={{ display: "flex", gap: "16px", flex: 1, minHeight: 0, paddingTop: "8px" }}>
             {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div style={{ width: "320px", flexShrink: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
+            <div style={{ flex: 1, minWidth: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
