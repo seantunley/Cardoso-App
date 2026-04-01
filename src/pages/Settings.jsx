@@ -481,7 +481,7 @@ export default function Settings() {
                   {canManageRules && (
                     <Button
                       onClick={() => applyRulesMutation.mutate()}
-                      disabled={applyRulesMutation.isPending || autoFlagRules.length === 0}
+                      disabled={applyRulesMutation.isPending}
                       variant="outline"
                       className="border-white text-gray-900 bg-white hover:bg-gray-100"
                     >
