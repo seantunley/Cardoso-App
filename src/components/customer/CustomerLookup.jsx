@@ -217,6 +217,154 @@ function formatHistoryDate(value) {
   }
 }
 
+
+// ── Invoice Credit Analysis ────────────────────────────────────────────────
+function parseDateField(val) {
+  if (!val) return null;
+  const s = String(val).trim();
+  // YYYYMMDD
+  if (/^\d{8}$/.test(s)) {
+    return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
+  }
+  // ISO or locale strings
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function analyseInvoiceCredit(record) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  // Build invoice and receipt slot arrays (5 slots each)
+  const invoices = [1,2,3,4,5].map(i => ({
+    number: record[`last_unpaid_invoice_${i}`] || record.data?.[`last_unpaid_invoice_${i}`],
+    amount: parseAmount(record[`last_unpaid_invoice_${i}_amount`] || record.data?.[`last_unpaid_invoice_${i}_amount`]),
+    date:   parseDateField(record[`last_unpaid_invoice_${i}_date`] || record.data?.[`last_unpaid_invoice_${i}_date`]),
+  })).filter(x => x.number || x.amount);
+
+  const receipts = [1,2,3,4,5].map(i => ({
+    number: record[`last_receipt_${i}`] || record.data?.[`last_receipt_${i}`],
+    amount: parseAmount(record[`last_receipt_${i}_amount`] || record.data?.[`last_receipt_${i}_amount`]),
+    date:   parseDateField(record[`last_receipt_${i}_date`] || record.data?.[`last_receipt_${i}_date`]),
+  })).filter(x => x.number || x.amount);
+
+  const outstandingBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
+
+  // No data at all
+  if (invoices.length === 0 && receipts.length === 0) {
+    return {
+      verdict: "approve",
+      title: "New Customer",
+      summary: "No invoice or receipt history. Safe to issue a first invoice.",
+      factors: [],
+      score: 100,
+    };
+  }
+
+  const factors = [];
+  let deductions = 0;
+
+  // ── RULE 1: Sequential gate ─────────────────────────────────────────────
+  // The most recent invoice must have a receipt dated AFTER it before issuing a new one.
+  // Sort by date descending
+  const invoicesSorted = [...invoices].sort((a, b) => (b.date || 0) - (a.date || 0));
+  const receiptsSorted = [...receipts].sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  const latestInvoice = invoicesSorted[0];
+  const latestReceipt = receiptsSorted[0];
+
+  let sequentialFail = false;
+  if (latestInvoice) {
+    if (!latestReceipt) {
+      sequentialFail = true;
+      factors.push({ type: "block", text: "No receipts on record — outstanding invoice with zero payments." });
+      deductions += 60;
+    } else if (latestInvoice.date && latestReceipt.date && latestReceipt.date < latestInvoice.date) {
+      sequentialFail = true;
+      factors.push({ type: "block", text: "Latest invoice has no payment after it (1-in, 1-out rule violated)." });
+      deductions += 60;
+    }
+  }
+
+  // ── RULE 2: Days since last receipt ─────────────────────────────────────
+  if (latestReceipt && latestReceipt.date) {
+    const daysSincePayment = Math.floor((today - latestReceipt.date) / 86400000);
+    if (daysSincePayment >= 21) {
+      factors.push({ type: "bad", text: `Last payment was ${daysSincePayment} days ago — critically overdue (threshold: 21 days).` });
+      deductions += 40;
+    } else if (daysSincePayment >= 7) {
+      factors.push({ type: "warn", text: `Last payment was ${daysSincePayment} days ago (target: 7 days).` });
+      deductions += 20;
+    } else {
+      factors.push({ type: "good", text: `Last payment received ${daysSincePayment} day${daysSincePayment === 1 ? "" : "s"} ago — within terms.` });
+    }
+  } else if (receipts.length > 0) {
+    factors.push({ type: "warn", text: "Payment dates unavailable — cannot verify recency." });
+    deductions += 15;
+  }
+
+  // ── RULE 3: Days oldest outstanding invoice has been open ───────────────
+  if (latestInvoice && latestInvoice.date) {
+    // If sequential gate passed, check how long the latest invoice has been open
+    const daysOpen = Math.floor((today - latestInvoice.date) / 86400000);
+    if (!sequentialFail) {
+      if (daysOpen >= 21) {
+        factors.push({ type: "bad", text: `Latest invoice is ${daysOpen} days old with no payment — critically overdue.` });
+        deductions += 40;
+      } else if (daysOpen >= 7) {
+        factors.push({ type: "warn", text: `Latest invoice is ${daysOpen} days old (payment expected by 7 days).` });
+        deductions += 15;
+      }
+    }
+  }
+
+  // ── RULE 4: Coverage ratio (total receipts vs total invoiced) ────────────
+  const totalInvoiced = invoices.reduce((s, x) => s + x.amount, 0);
+  const totalReceipted = receipts.reduce((s, x) => s + x.amount, 0);
+  if (totalInvoiced > 0) {
+    const coverage = totalReceipted / totalInvoiced;
+    if (coverage < 0.5) {
+      factors.push({ type: "bad", text: `Only ${Math.round(coverage * 100)}% of recent invoices covered by receipts.` });
+      deductions += 25;
+    } else if (coverage < 0.85) {
+      factors.push({ type: "warn", text: `${Math.round(coverage * 100)}% of recent invoices covered by receipts.` });
+      deductions += 10;
+    } else {
+      factors.push({ type: "good", text: `${Math.round(coverage * 100)}% of recent invoices covered — strong payment record.` });
+    }
+  }
+
+  // ── RULE 5: Outstanding balance vs recent invoice size ───────────────────
+  if (outstandingBalance > 0 && totalInvoiced > 0) {
+    const avgInvoice = totalInvoiced / invoices.length;
+    if (outstandingBalance > avgInvoice * 2) {
+      factors.push({ type: "bad", text: `Outstanding balance (R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})}) is more than 2× the average invoice — exposure is high.` });
+      deductions += 20;
+    }
+  }
+
+  // ── Verdict ──────────────────────────────────────────────────────────────
+  const score = Math.max(0, 100 - deductions);
+  let verdict, title, summary;
+
+  if (score >= 75) {
+    verdict = "approve";
+    title = "Approve Invoice";
+    summary = "Customer is paying consistently and within terms.";
+  } else if (score >= 45) {
+    verdict = "caution";
+    title = "Proceed with Caution";
+    summary = "Some payment concerns — consider a smaller invoice or confirm intent to pay first.";
+  } else {
+    verdict = "hold";
+    title = "Hold — Do Not Invoice";
+    summary = "Significant unpaid exposure or terms breach. Resolve outstanding balance before issuing a new invoice.";
+  }
+
+  return { verdict, title, summary, factors, score };
+}
+// ── End Invoice Credit Analysis ────────────────────────────────────────────
+
 export default function CustomerLookup({
   onRecordSelect,
   triggerLookup,
@@ -793,8 +941,45 @@ export default function CustomerLookup({
             )}
 
             </div>{/* end left col */}
-            {/* ── RIGHT COLUMN: flag management ── */}
+            {/* ── RIGHT COLUMN: analysis + flag management ── */}
             <div className="w-72 shrink-0 space-y-3">
+            {/* ── Credit Analysis Panel ── */}
+            {(() => {
+              const analysis = analyseInvoiceCredit(customer || {});
+              const verdictStyles = {
+                approve: { border: "border-emerald-600", bg: "bg-emerald-900/30", icon: "✅", titleColor: "text-emerald-400", badgeColor: "bg-emerald-700 text-emerald-100" },
+                caution: { border: "border-yellow-600", bg: "bg-yellow-900/20", icon: "⚠️", titleColor: "text-yellow-400", badgeColor: "bg-yellow-700 text-yellow-100" },
+                hold:    { border: "border-red-600",     bg: "bg-red-900/20",     icon: "🔴", titleColor: "text-red-400",     badgeColor: "bg-red-700 text-red-100" },
+              };
+              const s = verdictStyles[analysis.verdict];
+              const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
+              const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
+              return (
+                <div className={`rounded-xl border ${s.border} ${s.bg} p-3`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    <span className="text-base">{s.icon}</span>
+                    <div className="flex-1">
+                      <div className={`text-sm font-bold ${s.titleColor}`}>{analysis.title}</div>
+                      <div className="text-[10px] text-gray-400">Invoice Recommendation</div>
+                    </div>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.badgeColor}`}>
+                      {analysis.score}/100
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-300 mb-2 leading-snug">{analysis.summary}</p>
+                  {analysis.factors.length > 0 && (
+                    <ul className="space-y-1">
+                      {analysis.factors.map((f, i) => (
+                        <li key={i} className="flex gap-1.5 text-xs leading-snug">
+                          <span className={`shrink-0 ${factorColor[f.type]}`}>{factorIcon[f.type]}</span>
+                          <span className={factorColor[f.type]}>{f.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
             <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
               <div className="mb-3 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
