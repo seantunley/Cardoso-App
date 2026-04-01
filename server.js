@@ -3241,12 +3241,18 @@ if (process.env.HUB_MODE === 'true') {
   // --- Hub API routes ---
 
   // GET /api/hub/sites
+  // Accessible via session (dashboard) OR x-reporting-token (scripts/hub-pull-backups.ps1)
   app.get('/api/hub/sites', (req, res) => {
-    const sites = db.prepare('SELECT * FROM hub_sites').all();
-    res.json(sites.map(s => ({
-      ...s,
-      last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
-    })));
+    const tokenHeader = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    const authedByToken = expectedToken && tokenHeader === expectedToken;
+    if (!authedByToken && !req.session?.userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const rawSites = db.prepare('SELECT * FROM hub_sites').all();
+    const mapped = rawSites.map(s => ({ ...s, last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null }));
+    // Returns JSON array — compatible with both the UI and hub-pull-backups.ps1
+    res.json(mapped);
   });
 
   // GET /api/hub/records
@@ -4067,6 +4073,45 @@ if (IS_PRODUCTION) {
     }
   });
 }
+
+
+// ==================== BACKUP ====================
+// GET /api/backup/download
+// Streams the live SQLite database to the caller as a binary file.
+// Protected by x-reporting-token header — same token used for hub reporting.
+// The database is checkpointed (WAL → main file) before streaming so the
+// downloaded file is consistent and can be opened directly with any SQLite tool.
+app.get('/api/backup/download', (req, res) => {
+  const token = req.headers['x-reporting-token'];
+  const expectedToken = process.env.REPORTING_TOKEN;
+
+  if (!expectedToken || token !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
+  }
+
+  try {
+    // Flush WAL to main DB file so the file on disk is complete
+    db.pragma('wal_checkpoint(TRUNCATE)');
+
+    const resolvedDbPath = path.resolve(dbPath);
+    const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0,10)}.db`;
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
+    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
+
+    const stream = require('fs').createReadStream(resolvedDbPath);
+    stream.on('error', (err) => {
+      console.error('[backup] Stream error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to stream database' });
+    });
+    stream.pipe(res);
+  } catch (err) {
+    console.error('[backup] Error preparing backup:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ==================== STARTUP ====================
 recoverAbandonedSyncs();
