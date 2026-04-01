@@ -26,7 +26,7 @@ export function evaluateCondition(condition, record) {
 
   // NUMBER
   if (["greater_than","less_than","greater_or_equal","less_or_equal","range_between"].includes(condition_type)) {
-    const num = parseFloat(String(raw ?? "").replace(/,/g, ""));
+    const num = parseFloat(String(raw ?? "").replace(/,/g, "").replace(/\s/g, ""));
     if (isNaN(num)) return false;
     const threshold = parseFloat(condition_value);
     switch (condition_type) {

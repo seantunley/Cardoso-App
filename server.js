@@ -675,7 +675,7 @@ function _evalCondition(condition, record) {
   }
 
   if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(condition_type)) {
-    const num = parseFloat(String(raw ?? '').replace(/,/g, ''));
+    const num = parseFloat(String(raw ?? '').replace(/,/g, '').replace(/\s/g, ''));
     if (isNaN(num)) return false;
     const threshold = parseFloat(condition_value);
     if (condition_type === 'greater_than')     return num > threshold;
@@ -1778,7 +1778,7 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
         if (ct === 'ends_with') return val.endsWith(cmp);
       }
       if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(ct)) {
-        const num = parseFloat(String(raw ?? '').replace(/,/g, ''));
+        const num = parseFloat(String(raw ?? '').replace(/,/g, '').replace(/\s/g, ''));
         if (isNaN(num)) return false;
         const t = parseFloat(cond.condition_value);
         if (ct === 'greater_than') return num > t;
@@ -1870,6 +1870,9 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           r.last_receipt_number,
           r.last_receipt_amount,
           r.last_receipt_date,
+          r.flag_color,
+          r.flag_reason,
+          r.auto_flagged,
           COALESCE(s.name, r.site_id) AS site_name
         FROM hub_records r
         LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -1893,6 +1896,9 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           last_receipt_number,
           last_receipt_amount,
           last_receipt_date,
+          flag_color,
+          flag_reason,
+          auto_flagged,
           source_table AS site_name
         FROM datarecord
         WHERE outstanding_balance IS NOT NULL

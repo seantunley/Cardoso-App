@@ -18,6 +18,28 @@ function formatAmount(val) {
   });
 }
 
+const FLAG_DOT = {
+  red:    "bg-red-500",
+  orange: "bg-orange-400",
+  yellow: "bg-yellow-400",
+  green:  "bg-green-500",
+  blue:   "bg-blue-500",
+  purple: "bg-purple-500",
+  pink:   "bg-pink-400",
+  gray:   "bg-gray-400",
+};
+
+function FlagDot({ color, reason }) {
+  if (!color || color === "none") return null;
+  const cls = FLAG_DOT[color] || "bg-gray-400";
+  return (
+    <span
+      title={reason || color}
+      className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${cls}`}
+    />
+  );
+}
+
 async function fetchTopBalances(limit) {
   const res = await fetch(`/api/top-balances?limit=${limit}`, {
     credentials: "include",
@@ -167,9 +189,12 @@ export default function CustomerBalances() {
                     >
                       <td className="px-2 py-1 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-2 py-1">
-                        <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
-                          {row.customer_name || "—"}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <FlagDot color={row.flag_color} reason={row.flag_reason} />
+                          <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
+                            {row.customer_name || "—"}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-2 py-1 text-xs text-muted-foreground font-mono">
                         {row.customer_number || "—"}
