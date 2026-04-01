@@ -38,6 +38,7 @@ export default function Layout({ children, currentPageName }) {
     latestVersion:  APP_VERSION,
     updateAvailable: false,
   });
+  const [updateInstalling, setUpdateInstalling] = useState(false);
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -64,6 +65,25 @@ export default function Layout({ children, currentPageName }) {
       .catch(() => {});
     return () => { isMounted = false; };
   }, [currentUser]);
+
+  const triggerUpdate = async () => {
+    if (!isAdmin || updateInstalling) return;
+    if (!confirm("Install update now? The app will restart automatically.")) return;
+    setUpdateInstalling(true);
+    try {
+      const res = await fetch('/api/app-update-trigger', { method: 'POST', credentials: 'include' });
+      const data = await res.json();
+      if (res.ok) {
+        alert("Update started. The app will restart in a few moments.");
+      } else {
+        alert("Update failed: " + (data.error || "Unknown error"));
+        setUpdateInstalling(false);
+      }
+    } catch (e) {
+      alert("Update failed: " + e.message);
+      setUpdateInstalling(false);
+    }
+  };
 
   const handleChangePassword = async (userId, newPassword) => {
     setIsSavingPassword(true);
@@ -180,15 +200,31 @@ export default function Layout({ children, currentPageName }) {
           </Button>
 
           {!isCollapsed && (
-            <div className={cn(
-              "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-              versionStatus.updateAvailable
-                ? "border-yellow-300 bg-yellow-100 text-yellow-900"
-                : "border-transparent text-muted-foreground/50"
-            )} title={versionStatus.updateAvailable ? `New: v${versionStatus.latestVersion}` : `v${versionStatus.currentVersion}`}>
+            <div
+              className={cn(
+                "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
+                versionStatus.updateAvailable && isAdmin
+                  ? "border-yellow-300 bg-yellow-100 text-yellow-900 cursor-pointer hover:bg-yellow-200"
+                  : versionStatus.updateAvailable
+                  ? "border-yellow-300 bg-yellow-100 text-yellow-900"
+                  : "border-transparent text-muted-foreground/50"
+              )}
+              title={
+                versionStatus.updateAvailable
+                  ? isAdmin
+                    ? updateInstalling
+                      ? "Installing update…"
+                      : `New: v${versionStatus.latestVersion} — click to install`
+                    : `New: v${versionStatus.latestVersion}`
+                  : `v${versionStatus.currentVersion}`
+              }
+              onClick={versionStatus.updateAvailable && isAdmin ? triggerUpdate : undefined}
+            >
               <p>v{versionStatus.currentVersion}</p>
               {versionStatus.updateAvailable && (
-                <><p className="font-medium">Update available</p><p className="font-semibold">New: v{versionStatus.latestVersion}</p></>
+                updateInstalling
+                  ? <p className="font-medium animate-pulse">Installing…</p>
+                  : <><p className="font-medium">Update available</p><p className="font-semibold">v{versionStatus.latestVersion}{isAdmin ? " — click" : ""}</p></>
               )}
             </div>
           )}
