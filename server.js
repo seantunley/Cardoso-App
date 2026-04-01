@@ -555,6 +555,8 @@ ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
+// Back-fill: existing admin users should have can_manage_rules = 1
+db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
 ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
 ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
