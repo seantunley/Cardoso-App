@@ -40,6 +40,21 @@ function FlagDot({ color, reason }) {
   );
 }
 
+function FilterToggle({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+        active
+          ? "border-amber-500 bg-amber-500/15 text-amber-400"
+          : "border-border bg-card text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
 async function fetchTopBalances(limit) {
   const res = await fetch(`/api/top-balances?limit=${limit}`, {
     credentials: "include",
@@ -55,6 +70,8 @@ export default function CustomerBalances() {
   const [limit] = useState(LIMIT);
   const [siteFilter, setSiteFilter] = useState("all");
   const [hubMode, setHubMode] = useState(false);
+  // Toggle: hide customers where invoice ≈ balance (within R0.10)
+  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
 
   useEffect(() => {
     fetch("/api/hub/sites", { credentials: "include" })
@@ -75,11 +92,19 @@ export default function CustomerBalances() {
     return names;
   }, [rows]);
 
-  // Apply site filter
+  // Apply filters
   const filtered = useMemo(() => {
-    if (siteFilter === "all") return rows;
-    return rows.filter((r) => r.site_name === siteFilter);
-  }, [rows, siteFilter]);
+    let result = rows;
+    if (siteFilter !== "all") result = result.filter((r) => r.site_name === siteFilter);
+    if (hideInvoiceMatchesBalance) {
+      result = result.filter((r) => {
+        const balance = parseAmount(r.outstanding_balance);
+        const invoice = parseAmount(r.last_unpaid_invoice_1_amount);
+        return Math.abs(balance - invoice) > 0.10;
+      });
+    }
+    return result;
+  }, [rows, siteFilter, hideInvoiceMatchesBalance]);
 
   const grandTotal = filtered.reduce((s, r) => s + parseAmount(r.outstanding_balance), 0);
 
@@ -107,27 +132,38 @@ export default function CustomerBalances() {
         </div>
 
         {/* Filters row */}
-        {!isLoading && !isError && sites.length > 1 && (
-          <div className="mb-4 flex items-center gap-3">
-            <label className="text-xs text-muted-foreground whitespace-nowrap">Filter by site:</label>
-            <select
-              value={siteFilter}
-              onChange={(e) => setSiteFilter(e.target.value)}
-              className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="all">All sites</option>
-              {sites.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
-            {siteFilter !== "all" && (
-              <button
-                onClick={() => setSiteFilter("all")}
-                className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-              >
-                Clear
-              </button>
+        {!isLoading && !isError && (
+          <div className="mb-4 flex flex-wrap items-center gap-3">
+            {sites.length > 1 && (
+              <>
+                <label className="text-xs text-muted-foreground whitespace-nowrap">Site:</label>
+                <select
+                  value={siteFilter}
+                  onChange={(e) => setSiteFilter(e.target.value)}
+                  className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  <option value="all">All sites</option>
+                  {sites.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+                {siteFilter !== "all" && (
+                  <button
+                    onClick={() => setSiteFilter("all")}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    Clear
+                  </button>
+                )}
+                <div className="h-4 w-px bg-border mx-1" />
+              </>
             )}
+            <FilterToggle
+              active={hideInvoiceMatchesBalance}
+              onClick={() => setHideInvoiceMatchesBalance((v) => !v)}
+            >
+              {hideInvoiceMatchesBalance ? "⊘ " : ""}Hide invoice ≈ balance
+            </FilterToggle>
           </div>
         )}
 
