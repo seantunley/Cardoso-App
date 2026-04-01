@@ -21,10 +21,10 @@ import SettingsPanel from "@/components/settings/SettingsPanel";
 const APP_VERSION = "2026.2.3";
 
 const navItems = [
-  { name: "Customer Management", icon: Search,  page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
-  { name: "Customer Management", icon: Globe,   page: "HubDashboard",     hubOnly: true },
-  { name: "Customer Balances",   icon: Wallet,  page: "CustomerBalances", permission: "can_access_customer_search" },
-  { name: "Inventory", icon: Package, page: "Inventory", permission: "can_access_customer_search" },
+  { name: "Customer Management", icon: Search,  color: "#3b82f6", page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
+  { name: "Customer Management", icon: Globe,   color: "#818cf8", page: "HubDashboard",     hubOnly: true },
+  { name: "Customer Balances",   icon: Wallet,  color: "#10b981", page: "CustomerBalances", permission: "can_access_customer_search" },
+  { name: "Inventory",           icon: Package, color: "#f97316", page: "Inventory",        permission: "can_access_customer_search" },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -161,7 +161,10 @@ export default function Layout({ children, currentPageName }) {
                   isCollapsed && "justify-center px-0"
                 )}
               >
-                <item.icon className="h-3.5 w-3.5 shrink-0" />
+                <item.icon
+                  className="h-3.5 w-3.5 shrink-0"
+                  style={!isActive && item.color ? { color: item.color } : undefined}
+                />
                 {!isCollapsed && item.name}
               </Link>
             );
@@ -172,7 +175,7 @@ export default function Layout({ children, currentPageName }) {
             <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
               className={cn("w-full h-8", !isCollapsed && "justify-start")}
               onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
-              <Settings className="h-3.5 w-3.5 shrink-0" />
+              <Settings className="h-3.5 w-3.5 shrink-0" style={{ color: "#f59e0b" }} />
               {!isCollapsed && <span className="ml-1.5 text-xs">Settings</span>}
             </Button>
           )}
@@ -180,14 +183,14 @@ export default function Layout({ children, currentPageName }) {
           <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
-            <KeyRound className="h-3.5 w-3.5 shrink-0" />
+            <KeyRound className="h-3.5 w-3.5 shrink-0" style={{ color: "#14b8a6" }} />
             {!isCollapsed && <span className="ml-1.5 text-xs">Change Password</span>}
           </Button>
 
           <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
-            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            <LogOut className="h-3.5 w-3.5 shrink-0" style={{ color: "#f43f5e" }} />
             {!isCollapsed && <span className="ml-1.5 text-xs">Logout</span>}
           </Button>
 
@@ -236,7 +239,7 @@ export default function Layout({ children, currentPageName }) {
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
         {canSeeSettings && (
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" /></Button>
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" style={{ color: "#f59e0b" }} /></Button>
         )}
       </header>
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">
@@ -245,7 +248,7 @@ export default function Layout({ children, currentPageName }) {
           return (
             <Link key={item.page} to={`/${item.page}`}
               className={cn("flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all", isActive ? "text-foreground" : "text-muted-foreground")}>
-              <item.icon className="h-5 w-5" />
+              <item.icon className="h-5 w-5" style={!isActive && item.color ? { color: item.color } : undefined} />
               <span className="text-xs font-medium">{item.name}</span>
             </Link>
           );
