@@ -1412,12 +1412,18 @@ async function runConnectionImport(connectionId) {
               syncTimestamp,
               existing.id
             );
-             // Apply auto-flag rules if user hasn't manually flagged this record
-             if (activeAutoFlagRules.length > 0) {
+             // Apply auto-flag rules only if the record was NOT manually flagged by a user
+             // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
+             const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
+             if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
                const mergedRecord = { ...existing, ...baseRecordData };
                const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
-               if (autoFlag && autoFlag.flag_color !== existing.flag_color) {
+               if (autoFlag) {
+                 // Flag it (or update the auto-flag if the rule result changed)
                  updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, existing.id);
+               } else if (existing.auto_flagged) {
+                 // Rule no longer matches — clear the auto-flag
+                 updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
           } else {
