@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Flag, ChevronDown, ChevronUp, Edit2, Lock } from "lucide-react";
+import { Flag, ChevronDown, ChevronUp, Edit2, Lock, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,14 +25,48 @@ const flagLabels = {
   orange: "Orange Flag",
 };
 
+const autoBannerColors = {
+  none: "bg-slate-800/80 border-slate-600 text-slate-300",
+  red: "bg-red-950/70 border-red-700 text-red-300",
+  green: "bg-green-950/70 border-green-700 text-green-300",
+  orange: "bg-orange-950/70 border-orange-700 text-orange-300",
+};
+
+const autoDot = {
+  none: "bg-slate-400",
+  red: "bg-red-500",
+  green: "bg-green-500",
+  orange: "bg-orange-500",
+};
+
 export default function RecordCard({ record, customFields, onFlagChange, onEdit, isSelected }) {
   const [expanded, setExpanded] = useState(false);
 
   const canFlag = typeof onFlagChange === "function";
   const canEdit = typeof onEdit === "function";
+  const color = record.flag_color || "none";
 
   return (
     <div className={cn("group bg-gray-900 rounded-xl border overflow-hidden transition-all duration-300 hover:shadow-lg hover:shadow-gray-800", isSelected ? "border-blue-500 bg-blue-900/10" : "border-gray-700 hover:border-gray-600")}>
+
+      {/* Auto-flag banner */}
+      {record.auto_flagged ? (
+        <div className={cn("flex items-center justify-center gap-2.5 px-4 py-2 border-b text-xs font-medium", autoBannerColors[color])}>
+          <Zap className="w-3.5 h-3.5 shrink-0" />
+          <span className="flex items-center gap-1.5">
+            <span className={cn("w-2 h-2 rounded-full shrink-0", autoDot[color])} />
+            Auto-flagged
+            {color !== "none" && <span className="capitalize">· {color}</span>}
+          </span>
+          {record.flag_reason && (
+            <>
+              <span className="opacity-40">·</span>
+              <span className="opacity-80 truncate max-w-[200px]">{record.flag_reason}</span>
+            </>
+          )}
+        </div>
+      ) : null}
+
       <div className="p-5">
         <div className="flex items-start justify-between gap-4">
           <div className="flex-1 min-w-0">
@@ -52,13 +86,10 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
                     <Button 
                       variant="outline" 
                       size="sm"
-                      className={cn("border gap-2", flagColors[record.flag_color || "none"])}
+                      className={cn("border gap-2", flagColors[color])}
                     >
                       <Flag className="w-3.5 h-3.5" />
-                      {flagLabels[record.flag_color || "none"]}
-                      {record.auto_flagged ? (
-                        <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">auto</span>
-                      ) : null}
+                      {flagLabels[color]}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
@@ -83,14 +114,11 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
                 <span
                   className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs",
-                    flagColors[record.flag_color || "none"]
+                    flagColors[color]
                   )}
                 >
                   <Flag className="w-3 h-3" />
-                  {flagLabels[record.flag_color || "none"]}
-                  {record.auto_flagged ? (
-                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">auto</span>
-                  ) : null}
+                  {flagLabels[color]}
                 </span>
               )}
 
