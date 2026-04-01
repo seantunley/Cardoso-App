@@ -812,16 +812,7 @@ export default function CustomerLookup({
                 <div className="text-base text-white leading-none">{customer?.customer_name}</div>
                 <div className="text-xs text-gray-400 mt-0.5">Customer #{customer?.customer_number}</div>
               </div>
-              <Badge
-                className={cn(
-                  "ml-auto border text-xs",
-                  (flagColors[customer?.flag_color] || flagColors["none"]).bg,
-                  (flagColors[customer?.flag_color] || flagColors["none"]).text
-                )}
-              >
-                <Flag className="mr-1 h-3 w-3" />
-                {(flagColors[customer?.flag_color] || flagColors["none"]).label}
-              </Badge>
+
             </DialogTitle>
           </DialogHeader>
 
