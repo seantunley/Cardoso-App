@@ -162,7 +162,7 @@ export default function CustomerBalances() {
               active={hideInvoiceMatchesBalance}
               onClick={() => setHideInvoiceMatchesBalance((v) => !v)}
             >
-              {hideInvoiceMatchesBalance ? "⊘ " : ""}Hide invoice ≈ balance
+              {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
             </FilterToggle>
           </div>
         )}
