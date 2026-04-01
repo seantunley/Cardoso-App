@@ -352,6 +352,29 @@ export default function Settings() {
     },
   });
 
+  const clearAutoFlagsMutation = useMutation({
+    mutationFn: async () => {
+      const allRecords = await api.entities.DataRecord.list();
+      const autoFlagged = allRecords.filter((r) => r.auto_flagged);
+      let count = 0;
+      for (const record of autoFlagged) {
+        await api.entities.DataRecord.update(record.id, {
+          flag_color: "none",
+          flag_reason: null,
+          flag_created_by: null,
+          auto_flagged: false,
+        });
+        count++;
+      }
+      return count;
+    },
+    onSuccess: (count) => {
+      queryClient.invalidateQueries({ queryKey: ["records"] });
+      toast.success(`Cleared ${count} auto-flagged record(s)`);
+    },
+    onError: (e) => toast.error(`Failed to clear: ${e.message}`),
+  });
+
   const themeUpdateMutation = useMutation({
     mutationFn: (theme) => api.auth.updateMe({ theme_preference: theme }),
     onSuccess: (_, theme) => {
@@ -467,6 +490,20 @@ export default function Settings() {
                       ) : (
                         <><Zap className="w-4 h-4 mr-2" />Apply Now</>
                       )}
+                    </Button>
+                  )}
+                  {canManageRules && (
+                    <Button
+                      onClick={() => {
+                        if (confirm("Clear all auto-flagged records? Manually set flags will not be touched.")) {
+                          clearAutoFlagsMutation.mutate();
+                        }
+                      }}
+                      disabled={clearAutoFlagsMutation.isPending}
+                      variant="outline"
+                      className="border-rose-700 text-rose-400 hover:bg-rose-900/20"
+                    >
+                      {clearAutoFlagsMutation.isPending ? "Clearing…" : "Clear Auto Flags"}
                     </Button>
                   )}
                   {canManageRules && (

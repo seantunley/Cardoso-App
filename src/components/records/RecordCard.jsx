@@ -56,6 +56,9 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
                     >
                       <Flag className="w-3.5 h-3.5" />
                       {flagLabels[record.flag_color || "none"]}
+                      {record.auto_flagged ? (
+                        <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">auto</span>
+                      ) : null}
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="start">
@@ -85,6 +88,9 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
                 >
                   <Flag className="w-3 h-3" />
                   {flagLabels[record.flag_color || "none"]}
+                  {record.auto_flagged ? (
+                    <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">auto</span>
+                  ) : null}
                 </span>
               )}
 

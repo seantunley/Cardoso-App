@@ -587,6 +587,9 @@ export default function CustomerLookup({
               >
                 <Flag className="mr-1 h-3 w-3" />
                 {flagColors[customer?.flag_color || "none"].label}
+                {customer?.auto_flagged ? (
+                  <span className="ml-1 text-[10px] font-semibold uppercase tracking-wider opacity-60">auto</span>
+                ) : null}
               </Badge>
             </DialogTitle>
           </DialogHeader>
