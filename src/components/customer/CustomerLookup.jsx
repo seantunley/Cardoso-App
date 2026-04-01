@@ -700,161 +700,78 @@ export default function CustomerLookup({
                 })),
               ];
 
-              // Shared table renderer for invoice and receipt blocks
-              const renderTransactionTable = ({ title, icon: Icon, iconColor, accounts, getFields }) => (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Icon className={cn("h-4 w-4", iconColor)} />
-                    <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
-                  </div>
-                  <div className="space-y-1.5">
-                    {/* 4 cols: Account | No. | Amount | Date */}
-                    <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.0fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1">
-                      <span>Account</span>
-                      <span>No.</span>
-                      <span>Amount</span>
-                      <span>Date</span>
+              // Compact multi-slot table: rows = accounts, cols = invoice/receipt slots (only populated slots shown)
+              const renderMultiSlotTable = ({ title, icon: Icon, iconColor, accounts, slots }) => {
+                const activeSlots = slots.filter(({ numField }) =>
+                  accounts.some(({ record: r }) => r?.[numField])
+                );
+                if (activeSlots.length === 0) return null;
+                return (
+                  <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Icon className={cn("h-4 w-4", iconColor)} />
+                      <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
                     </div>
-                    {accounts.map(({ label, record: r, isMain }) => {
-                      const { ref, amt, date } = getFields(r);
-                      return (
+                    <div className="space-y-1.5">
+                      {accounts.map(({ label, record: r, isMain }) => (
                         <div
                           key={label}
                           className={cn(
-                            "grid grid-cols-[minmax(0,0.8fr)_minmax(0,1.0fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg px-2 py-1.5",
+                            "rounded-lg px-2 py-1.5",
                             isMain ? "bg-gray-700" : "bg-gray-900"
                           )}
                         >
-                          <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
+                          <span className={cn("block text-xs font-medium mb-1", isMain ? "text-white" : "text-gray-400")}>
                             {label}
                           </span>
-                          <span className={cn("text-xs truncate", ref ? iconColor : "text-gray-600")}>
-                            {ref || "—"}
-                          </span>
-                          <span className={cn("text-xs font-medium truncate", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>
-                            {formatAmount(amt)}
-                          </span>
-                          <span className={cn("text-xs truncate", date ? "text-gray-300" : "text-gray-600")}>
-                            {date || "—"}
-                          </span>
+                          <div className="space-y-0.5">
+                            {activeSlots.map(({ numField, amtField, dateField }, i) => {
+                              const ref = r?.[numField];
+                              const amt = r?.[amtField];
+                              const date = r?.[dateField];
+                              if (!ref && !amt && !date) return null;
+                              return (
+                                <div key={i} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-2 text-xs">
+                                  <span className={cn("truncate font-mono", iconColor)}>{ref || "—"}</span>
+                                  <span className={cn("truncate", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>{formatAmount(amt)}</span>
+                                  <span className={cn("truncate", date ? "text-gray-300" : "text-gray-600")}>{date || "—"}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      );
-                    })}
+                      ))}
+                    </div>
                   </div>
-                </div>
-              );
+                );
+              };
+
+              const invoiceSlots = [1,2,3,4,5].map(i => ({
+                numField: `last_unpaid_invoice_${i}`,
+                amtField: `last_unpaid_invoice_${i}_amount`,
+                dateField: `last_unpaid_invoice_${i}_date`,
+              }));
+              const receiptSlots = [1,2,3,4,5].map(i => ({
+                numField: `last_receipt_${i}`,
+                amtField: `last_receipt_${i}_amount`,
+                dateField: `last_receipt_${i}_date`,
+              }));
 
               return (
                 <div className="flex flex-col gap-2">
-                  {renderTransactionTable({
-                    title: "Invoice 1",
+                  {renderMultiSlotTable({
+                    title: "Invoices",
                     icon: Flag,
                     iconColor: "text-orange-400",
                     accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_unpaid_invoice_1,
-                      amt: r?.last_unpaid_invoice_1_amount,
-                      date: r?.last_unpaid_invoice_1_date,
-                    }),
+                    slots: invoiceSlots,
                   })}
-                  {renderTransactionTable({
-                    title: "Invoice 2",
-                    icon: Flag,
-                    iconColor: "text-orange-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_unpaid_invoice_2,
-                      amt: r?.last_unpaid_invoice_2_amount,
-                      date: r?.last_unpaid_invoice_2_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Invoice 3",
-                    icon: Flag,
-                    iconColor: "text-orange-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_unpaid_invoice_3,
-                      amt: r?.last_unpaid_invoice_3_amount,
-                      date: r?.last_unpaid_invoice_3_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Invoice 4",
-                    icon: Flag,
-                    iconColor: "text-orange-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_unpaid_invoice_4,
-                      amt: r?.last_unpaid_invoice_4_amount,
-                      date: r?.last_unpaid_invoice_4_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Invoice 5",
-                    icon: Flag,
-                    iconColor: "text-orange-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_unpaid_invoice_5,
-                      amt: r?.last_unpaid_invoice_5_amount,
-                      date: r?.last_unpaid_invoice_5_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Receipt 1",
+                  {renderMultiSlotTable({
+                    title: "Receipts",
                     icon: CheckCircle,
                     iconColor: "text-emerald-400",
                     accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_receipt_1,
-                      amt: r?.last_receipt_1_amount,
-                      date: r?.last_receipt_1_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Receipt 2",
-                    icon: CheckCircle,
-                    iconColor: "text-emerald-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_receipt_2,
-                      amt: r?.last_receipt_2_amount,
-                      date: r?.last_receipt_2_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Receipt 3",
-                    icon: CheckCircle,
-                    iconColor: "text-emerald-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_receipt_3,
-                      amt: r?.last_receipt_3_amount,
-                      date: r?.last_receipt_3_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Receipt 4",
-                    icon: CheckCircle,
-                    iconColor: "text-emerald-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_receipt_4,
-                      amt: r?.last_receipt_4_amount,
-                      date: r?.last_receipt_4_date,
-                    }),
-                  })}
-                  {renderTransactionTable({
-                    title: "Receipt 5",
-                    icon: CheckCircle,
-                    iconColor: "text-emerald-400",
-                    accounts: allAccounts,
-                    getFields: (r) => ({
-                      ref: r?.last_receipt_5,
-                      amt: r?.last_receipt_5_amount,
-                      date: r?.last_receipt_5_date,
-                    }),
+                    slots: receiptSlots,
                   })}
                 </div>
               );
