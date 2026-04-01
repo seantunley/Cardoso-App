@@ -3251,10 +3251,8 @@ app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
 
 // ─── Auto-Flag Rules Export / Import ─────────────────────────────────────────
 
-app.get('/api/autoflagrule/export', requireAuth, (req, res) => {
+app.get('/api/autoflagrule/export', requireAuth, requireAdmin, (req, res) => {
   try {
-    const user = req.currentUser;
-    if (!user.can_manage_rules) return res.status(403).json({ error: 'Admin only' });
     const rules = db.prepare(`SELECT name, priority, conditions, color, is_active FROM autoflagrule ORDER BY priority DESC`).all();
     const exportData = rules.map(r => ({
       ...r,
@@ -3268,10 +3266,8 @@ app.get('/api/autoflagrule/export', requireAuth, (req, res) => {
   }
 });
 
-app.post('/api/autoflagrule/import', requireAuth, (req, res) => {
+app.post('/api/autoflagrule/import', requireAuth, requireAdmin, (req, res) => {
   try {
-    const user = req.currentUser;
-    if (!user.can_manage_rules) return res.status(403).json({ error: 'Admin only' });
     const rules = req.body;
     if (!Array.isArray(rules)) return res.status(400).json({ error: 'Expected array of rules' });
 
