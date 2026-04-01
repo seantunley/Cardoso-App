@@ -584,7 +584,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-2xl border-4 bg-gray-900 max-h-[90vh] flex flex-col",
+            "max-w-4xl border-4 bg-gray-900 max-h-[90vh] flex flex-col",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
@@ -630,7 +630,10 @@ export default function CustomerLookup({
             </div>
           )}
 
-          <div className="space-y-4 pt-2 overflow-y-auto flex-1 pr-1">
+          <div className="pt-2 overflow-y-auto flex-1 pr-1">
+            <div className="flex gap-4 items-start">
+            {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
+            <div className="flex-1 min-w-0 space-y-4">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -789,6 +792,9 @@ export default function CustomerLookup({
               </div>
             )}
 
+            </div>{/* end left col */}
+            {/* ── RIGHT COLUMN: flag management ── */}
+            <div className="w-72 shrink-0 space-y-3">
             <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
               <div className="mb-3 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
@@ -906,7 +912,9 @@ export default function CustomerLookup({
                   )}
                 </div>
               )}
-            </div>
+            </div>{/* end flag card */}
+            </div>{/* end right col */}
+            </div>{/* end two-col flex */}
           </div>
         </DialogContent>
       </Dialog>
