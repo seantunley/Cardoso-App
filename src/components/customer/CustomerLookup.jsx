@@ -834,7 +834,7 @@ export default function CustomerLookup({
 
           <div style={{ display: "flex", gap: "16px", flex: 1, minHeight: 0, paddingTop: "8px" }}>
             {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div style={{ flex: 1, minWidth: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
+            <div style={{ width: "420px", flexShrink: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
             {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
             {(() => {
               const allAccounts = [
@@ -995,7 +995,7 @@ export default function CustomerLookup({
 
             </div>{/* end left col */}
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div style={{ width: "288px", flexShrink: 0, display: "flex", flexDirection: "column", gap: "12px", minHeight: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: "12px", minHeight: 0 }}>
             {/* ── Credit Analysis Panel ── */}
             {(() => {
               const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
