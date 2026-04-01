@@ -1631,6 +1631,108 @@ app.get('/api/app-info', (req, res) => {
   });
 });
 
+// POST /api/test-rule
+// Accepts { conditions, sample_size } and runs the rule logic against real records.
+// Returns up to sample_size records (default 5) that matched, plus up to sample_size that didn't.
+app.post('/api/test-rule', requireAuth, (req, res) => {
+  try {
+    const { conditions: rawConditions, sample_size = 5 } = req.body;
+    let conditions = rawConditions;
+    if (typeof conditions === 'string') { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
+    if (!Array.isArray(conditions) || conditions.length === 0) {
+      return res.status(400).json({ error: 'No conditions provided' });
+    }
+
+    // Fetch a reasonably large sample to find matches and non-matches
+    const rows = db.prepare(
+      `SELECT customer_number, customer_name, outstanding_balance,
+              last_unpaid_invoice_date, last_receipt_date, updated_date, created_date,
+              age_analysis, flag_color
+       FROM datarecord ORDER BY RANDOM() LIMIT 200`
+    ).all();
+
+    function evalCondition(cond, record) {
+      const raw = record[cond.field];
+      const ct = cond.condition_type;
+      if (ct === 'is_empty') return raw === null || raw === undefined || String(raw).trim() === '';
+      if (ct === 'is_not_empty') return raw !== null && raw !== undefined && String(raw).trim() !== '';
+      if (['contains','equals','starts_with','ends_with'].includes(ct)) {
+        const val = String(raw ?? '').toLowerCase();
+        const cmp = String(cond.condition_value ?? '').toLowerCase();
+        if (ct === 'contains') return val.includes(cmp);
+        if (ct === 'equals') return val === cmp;
+        if (ct === 'starts_with') return val.startsWith(cmp);
+        if (ct === 'ends_with') return val.endsWith(cmp);
+      }
+      if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(ct)) {
+        const num = parseFloat(String(raw ?? '').replace(/,/g, ''));
+        if (isNaN(num)) return false;
+        const t = parseFloat(cond.condition_value);
+        if (ct === 'greater_than') return num > t;
+        if (ct === 'less_than') return num < t;
+        if (ct === 'greater_or_equal') return num >= t;
+        if (ct === 'less_or_equal') return num <= t;
+        if (ct === 'range_between') return num >= t && num <= parseFloat(cond.condition_value_secondary);
+      }
+      if (['date_older_than','date_newer_than','before_date','after_date'].includes(ct)) {
+        if (!raw) return false;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return false;
+        const now = new Date();
+        if (ct === 'date_older_than') return (now - d) / 86400000 > parseFloat(cond.condition_value);
+        if (ct === 'date_newer_than') return (now - d) / 86400000 < parseFloat(cond.condition_value);
+        if (ct === 'before_date') return d < new Date(cond.condition_value);
+        if (ct === 'after_date') return d > new Date(cond.condition_value);
+      }
+      return false;
+    }
+
+    function evalAll(conditions, record) {
+      let result = evalCondition(conditions[0], record);
+      for (let i = 1; i < conditions.length; i++) {
+        const op = (conditions[i].operator || 'AND').toUpperCase();
+        const val = evalCondition(conditions[i], record);
+        result = op === 'OR' ? result || val : result && val;
+      }
+      return result;
+    }
+
+    const matched = [];
+    const unmatched = [];
+    const limit = Math.min(parseInt(sample_size) || 5, 20);
+
+    for (const row of rows) {
+      // Per-condition results for display
+      const condResults = conditions.map(c => ({
+        field: c.field,
+        passed: evalCondition(c, row),
+        operator: c.operator,
+      }));
+      const passes = evalAll(conditions, row);
+      const entry = {
+        customer_number: row.customer_number,
+        customer_name: row.customer_name,
+        outstanding_balance: row.outstanding_balance,
+        last_unpaid_invoice_date: row.last_unpaid_invoice_date,
+        last_receipt_date: row.last_receipt_date,
+        updated_date: row.updated_date,
+        age_analysis: row.age_analysis,
+        flag_color: row.flag_color,
+        passes,
+        condition_results: condResults,
+      };
+      if (passes && matched.length < limit) matched.push(entry);
+      else if (!passes && unmatched.length < limit) unmatched.push(entry);
+      if (matched.length >= limit && unmatched.length >= limit) break;
+    }
+
+    res.json({ matched, unmatched, total_sampled: rows.length });
+  } catch (err) {
+    console.error('test-rule error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/top-balances?limit=30
 // Returns top customers by outstanding balance, sorted descending.
 // In hub mode, queries the hub_records table (cross-site).
