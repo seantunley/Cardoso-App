@@ -310,7 +310,7 @@ function analyseInvoiceCredit(record) {
   if (oldestUnpaidAge !== null && oldestUnpaidAge > 21) {
     factors.push({ type: "block", text: `Unpaid invoice is ${oldestUnpaidAge} days old — exceeds the 21-day limit. Resolve before issuing a new invoice.` });
     deductions += 70;
-  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > 7) {
+  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > 14) {
     factors.push({ type: "warn", text: `Unpaid invoice is ${oldestUnpaidAge} days old — approaching the 21-day limit.` });
     deductions += 25;
   } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
@@ -327,10 +327,10 @@ function analyseInvoiceCredit(record) {
       : null;
 
     if (avgLag !== null) {
-      if (avgLag <= 7) {
-        factors.push({ type: "good", text: `Pays in full — average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} (within 7-day terms).` });
+      if (avgLag <= 14) {
+        factors.push({ type: "good", text: `Pays in full — average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} (within 14-day terms).` });
       } else if (avgLag <= 21) {
-        factors.push({ type: "warn", text: `Pays in full but slowly — average lag ${avgLag} days (target: 7 days).` });
+        factors.push({ type: "warn", text: `Pays in full but slowly — average lag ${avgLag} days (target: 14 days).` });
         deductions += 20;
       } else {
         factors.push({ type: "warn", text: `Pays in full but very slowly — average lag ${avgLag} days.` });
