@@ -523,7 +523,11 @@ function AutoFlagTab() {
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'cardoso-rules-export.json'; a.click();
+      a.href = url;
+      a.download = 'cardoso-rules-export.json';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
       toast.success('Rules exported');
     } catch (e) { toast.error(`Export error: ${e.message}`); }
