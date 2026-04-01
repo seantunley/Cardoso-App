@@ -85,7 +85,7 @@ export default function CustomerBalances() {
         </div>
 
         {/* Filters row */}
-        {!isLoading && !isError && hubMode && sites.length > 0 && (
+        {!isLoading && !isError && sites.length > 1 && (
           <div className="mb-4 flex items-center gap-3">
             <label className="text-xs text-muted-foreground whitespace-nowrap">Filter by site:</label>
             <select
