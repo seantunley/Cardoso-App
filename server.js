@@ -509,6 +509,7 @@ ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_number', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_amount', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
+ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
@@ -654,6 +655,84 @@ function getMappedOrFallbackValue(row, fieldMappings, localKey, fallbacks = []) 
 
   return '';
 }
+
+
+// ── Inline auto-flag rule evaluator (mirrors src/lib/evalFlagRules.js) ────────
+function _evalCondition(condition, record) {
+  const { field, condition_type, condition_value, condition_value_secondary } = condition;
+  const raw = record[field];
+
+  if (condition_type === 'is_empty')     return raw === null || raw === undefined || String(raw).trim() === '';
+  if (condition_type === 'is_not_empty') return raw !== null && raw !== undefined && String(raw).trim() !== '';
+
+  if (['contains','equals','starts_with','ends_with'].includes(condition_type)) {
+    const val = String(raw ?? '').toLowerCase();
+    const cmp = String(condition_value ?? '').toLowerCase();
+    if (condition_type === 'contains')    return val.includes(cmp);
+    if (condition_type === 'equals')      return val === cmp;
+    if (condition_type === 'starts_with') return val.startsWith(cmp);
+    if (condition_type === 'ends_with')   return val.endsWith(cmp);
+  }
+
+  if (['greater_than','less_than','greater_or_equal','less_or_equal','range_between'].includes(condition_type)) {
+    const num = parseFloat(String(raw ?? '').replace(/,/g, ''));
+    if (isNaN(num)) return false;
+    const threshold = parseFloat(condition_value);
+    if (condition_type === 'greater_than')     return num > threshold;
+    if (condition_type === 'less_than')        return num < threshold;
+    if (condition_type === 'greater_or_equal') return num >= threshold;
+    if (condition_type === 'less_or_equal')    return num <= threshold;
+    if (condition_type === 'range_between') {
+      const hi = parseFloat(condition_value_secondary);
+      return num >= threshold && num <= hi;
+    }
+  }
+
+  if (['date_older_than','date_newer_than','before_date','after_date'].includes(condition_type)) {
+    if (!raw) return false;
+    const recordDate = new Date(raw);
+    if (isNaN(recordDate.getTime())) return false;
+    const now = new Date();
+    if (condition_type === 'date_older_than') return (now - recordDate) / 86400000 > parseFloat(condition_value);
+    if (condition_type === 'date_newer_than') return (now - recordDate) / 86400000 < parseFloat(condition_value);
+    if (condition_type === 'before_date')     return recordDate < new Date(condition_value);
+    if (condition_type === 'after_date')      return recordDate > new Date(condition_value);
+  }
+
+  return false;
+}
+
+function _evalRuleConditions(conditions, record) {
+  if (!Array.isArray(conditions) || conditions.length === 0) return false;
+  let result = _evalCondition(conditions[0], record);
+  for (let i = 1; i < conditions.length; i++) {
+    const op = (conditions[i].operator ?? 'AND').toUpperCase();
+    const val = _evalCondition(conditions[i], record);
+    result = op === 'OR' ? (result || val) : (result && val);
+  }
+  return result;
+}
+
+/**
+ * Check active auto-flag rules against a record object.
+ * Returns { flag_color, flag_reason, auto_flagged: 1 } or null.
+ * Only applies if the record has NOT been manually flagged by a user.
+ */
+function applyAutoFlagRulesToRecord(record, activeRules) {
+  // Never overwrite a manual flag (flag exists AND was set by a real user AND not auto-flagged)
+  if (record.flag_color && record.flag_color !== 'none' && record.flag_created_by && !record.auto_flagged) return null;
+
+  for (const rule of activeRules) {
+    let conditions = rule.conditions;
+    if (typeof conditions === 'string') { try { conditions = JSON.parse(conditions); } catch { conditions = []; } }
+    if (!Array.isArray(conditions) || conditions.length === 0) continue;
+    if (_evalRuleConditions(conditions, record)) {
+      return { flag_color: rule.flag_color, flag_reason: `Auto-flagged: ${rule.rule_name}`, auto_flagged: 1 };
+    }
+  }
+  return null;
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 function shouldApplyMappedValue(mode, existingValue, incomingValue) {
   if (mode === 'local-only') return false;
@@ -1259,6 +1338,15 @@ async function runConnectionImport(connectionId) {
 
       const syncTimestamp = new Date().toISOString();
 
+      // Load active auto-flag rules once for the entire sync batch
+      const activeAutoFlagRules = db.prepare(
+        `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
+      ).all();
+
+      const updateRecordFlag = db.prepare(`
+        UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
+      `);
+
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
@@ -1324,6 +1412,14 @@ async function runConnectionImport(connectionId) {
               syncTimestamp,
               existing.id
             );
+             // Apply auto-flag rules if user hasn't manually flagged this record
+             if (activeAutoFlagRules.length > 0) {
+               const mergedRecord = { ...existing, ...baseRecordData };
+               const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
+               if (autoFlag && autoFlag.flag_color !== existing.flag_color) {
+                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, existing.id);
+               }
+             }
           } else {
             insertNewRecord.run(
               baseRecordData.created_by,
@@ -1355,13 +1451,22 @@ async function runConnectionImport(connectionId) {
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
+            // Apply auto-flag rules to new records (user hasn't touched them yet)
+            if (activeAutoFlagRules.length > 0) {
+              const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
+              if (newRecord) {
+                const autoFlag = applyAutoFlagRulesToRecord(newRecord, activeAutoFlagRules);
+                if (autoFlag) {
+                  updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
+                }
+              }
+            }
           }
         }
       });
 
       writeRowsTransaction(rows);
     };
-
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
       const syncQueryStripped = syncQuery
