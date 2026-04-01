@@ -222,11 +222,9 @@ function formatHistoryDate(value) {
 function parseDateField(val) {
   if (!val) return null;
   const s = String(val).trim();
-  // YYYYMMDD
   if (/^\d{8}$/.test(s)) {
     return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
   }
-  // ISO or locale strings
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
@@ -235,23 +233,22 @@ function analyseInvoiceCredit(record) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // Build invoice and receipt slot arrays (5 slots each)
   const invoices = [1,2,3,4,5].map(i => ({
     number: record[`last_unpaid_invoice_${i}`] || record.data?.[`last_unpaid_invoice_${i}`],
-    amount: parseAmount(record[`last_unpaid_invoice_${i}_amount`] || record.data?.[`last_unpaid_invoice_${i}_amount`]),
+    amount: Math.abs(parseAmount(record[`last_unpaid_invoice_${i}_amount`] || record.data?.[`last_unpaid_invoice_${i}_amount`])),
     date:   parseDateField(record[`last_unpaid_invoice_${i}_date`] || record.data?.[`last_unpaid_invoice_${i}_date`]),
-  })).filter(x => x.number || x.amount);
+  })).filter(x => x.number || x.amount > 0);
 
   const receipts = [1,2,3,4,5].map(i => ({
     number: record[`last_receipt_${i}`] || record.data?.[`last_receipt_${i}`],
-    amount: parseAmount(record[`last_receipt_${i}_amount`] || record.data?.[`last_receipt_${i}_amount`]),
+    amount: Math.abs(parseAmount(record[`last_receipt_${i}_amount`] || record.data?.[`last_receipt_${i}_amount`])),
     date:   parseDateField(record[`last_receipt_${i}_date`] || record.data?.[`last_receipt_${i}_date`]),
-  })).filter(x => x.number || x.amount);
+  })).filter(x => x.number || x.amount > 0);
 
   const rawBalance = parseAmount(record.outstanding_balance || record.data?.outstanding_balance);
-  const outstandingBalance = rawBalance < 1 ? 0 : rawBalance; // treat sub-R1 as rounding
+  const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
 
-  // Zero balance = fully settled, pass immediately regardless of dates
+  // ── Zero balance = instant pass ─────────────────────────────────────────
   if (outstandingBalance === 0) {
     const hasHistory = invoices.length > 0 || receipts.length > 0;
     return {
@@ -265,119 +262,128 @@ function analyseInvoiceCredit(record) {
     };
   }
 
-  // No data at all (balance > 0 but no slots)
+  // ── No slot data at all ─────────────────────────────────────────────────
   if (invoices.length === 0 && receipts.length === 0) {
     return {
-      verdict: "approve",
-      title: "New Customer",
-      summary: "No invoice or receipt history. Safe to issue a first invoice.",
-      factors: [],
-      score: 100,
+      verdict: "caution",
+      title: "Proceed with Caution",
+      summary: "Outstanding balance but no invoice/receipt history available to assess.",
+      factors: [{ type: "warn", text: `Outstanding balance of R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})} with no supporting history.` }],
+      score: 50,
     };
   }
 
   const factors = [];
   let deductions = 0;
 
-  // ── RULE 1: Sequential gate ─────────────────────────────────────────────
-  // The most recent invoice must have a receipt dated AFTER it before issuing a new one.
-  // Sort by date descending
-  const invoicesSorted = [...invoices].sort((a, b) => (b.date || 0) - (a.date || 0));
-  const receiptsSorted = [...receipts].sort((a, b) => (b.date || 0) - (a.date || 0));
+  // ── Match invoices → receipts (chronological pairing) ───────────────────
+  // Sort invoices oldest→newest so we pair them in order
+  const invByDate = [...invoices].sort((a, b) => (a.date || 0) - (b.date || 0));
+  const recByDate = [...receipts].sort((a, b) => (a.date || 0) - (b.date || 0));
 
-  const latestInvoice = invoicesSorted[0];
-  const latestReceipt = receiptsSorted[0];
-
-  let sequentialFail = false;
-  // If balance is zero the account is settled — skip sequential and age checks
-  if (outstandingBalance > 0 && latestInvoice) {
-    if (!latestReceipt) {
-      sequentialFail = true;
-      factors.push({ type: "block", text: "No receipts on record — outstanding invoice with zero payments." });
-      deductions += 60;
-    } else if (latestInvoice.date && latestReceipt.date && latestReceipt.date < latestInvoice.date) {
-      sequentialFail = true;
-      factors.push({ type: "block", text: "Latest invoice has no payment after it (1-in, 1-out rule violated)." });
-      deductions += 60;
+  const usedReceipts = new Set();
+  const pairs = invByDate.map(inv => {
+    // Find the earliest receipt dated on or after this invoice
+    const matchIdx = recByDate.findIndex((rec, idx) =>
+      !usedReceipts.has(idx) &&
+      rec.date && inv.date &&
+      rec.date >= inv.date
+    );
+    if (matchIdx !== -1) {
+      usedReceipts.add(matchIdx);
+      const rec = recByDate[matchIdx];
+      return { invoice: inv, receipt: rec, lagDays: Math.floor((rec.date - inv.date) / 86400000) };
     }
+    return { invoice: inv, receipt: null, lagDays: null };
+  });
+
+  const paidPairs   = pairs.filter(p => p.receipt !== null);
+  const unpaidPairs = pairs.filter(p => p.receipt === null);
+
+  // ── RULE 1: Age of oldest unmatched invoice ─────────────────────────────
+  // An unpaid invoice >21 days old is a hard block.
+  const unpaidAges = unpaidPairs
+    .map(p => p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null)
+    .filter(d => d !== null);
+  const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
+
+  if (oldestUnpaidAge !== null && oldestUnpaidAge > 21) {
+    factors.push({ type: "block", text: `Unpaid invoice is ${oldestUnpaidAge} days old — exceeds the 21-day limit. Resolve before issuing a new invoice.` });
+    deductions += 70;
+  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > 7) {
+    factors.push({ type: "warn", text: `Unpaid invoice is ${oldestUnpaidAge} days old — approaching the 21-day limit.` });
+    deductions += 25;
+  } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
+    factors.push({ type: "warn", text: `Latest invoice is ${oldestUnpaidAge} day${oldestUnpaidAge === 1 ? "" : "s"} old and awaiting payment.` });
+    deductions += 10;
   }
 
-  // ── RULE 2: Days since last receipt ─────────────────────────────────────
-  // If balance is zero, account is settled — payment recency is irrelevant
-  if (outstandingBalance === 0 && (invoices.length > 0 || receipts.length > 0)) {
-    factors.push({ type: "good", text: "Balance is zero — account fully settled." });
-  } else if (latestReceipt && latestReceipt.date) {
-    const daysSincePayment = Math.floor((today - latestReceipt.date) / 86400000);
-    if (daysSincePayment >= 21) {
-      factors.push({ type: "bad", text: `Last payment was ${daysSincePayment} days ago — critically overdue (threshold: 21 days).` });
-      deductions += 40;
-    } else if (daysSincePayment >= 7) {
-      factors.push({ type: "warn", text: `Last payment was ${daysSincePayment} days ago (target: 7 days).` });
-      deductions += 20;
-    } else {
-      factors.push({ type: "good", text: `Last payment received ${daysSincePayment} day${daysSincePayment === 1 ? "" : "s"} ago — within terms.` });
-    }
-  } else if (receipts.length > 0) {
-    factors.push({ type: "warn", text: "Payment dates unavailable — cannot verify recency." });
-    deductions += 15;
-  }
+  // ── RULE 2: Payment speed on matched pairs ──────────────────────────────
+  // A customer who pays in full but slowly is caution, not hold.
+  if (paidPairs.length > 0) {
+    const laggedPairs = paidPairs.filter(p => p.lagDays !== null);
+    const avgLag = laggedPairs.length > 0
+      ? Math.round(laggedPairs.reduce((s, p) => s + p.lagDays, 0) / laggedPairs.length)
+      : null;
 
-  // ── RULE 3: Days oldest outstanding invoice has been open ───────────────
-  if (latestInvoice && latestInvoice.date) {
-    // If sequential gate passed, check how long the latest invoice has been open
-    const daysOpen = Math.floor((today - latestInvoice.date) / 86400000);
-    if (!sequentialFail) {
-      if (daysOpen >= 21) {
-        factors.push({ type: "bad", text: `Latest invoice is ${daysOpen} days old with no payment — critically overdue.` });
-        deductions += 40;
-      } else if (daysOpen >= 7) {
-        factors.push({ type: "warn", text: `Latest invoice is ${daysOpen} days old (payment expected by 7 days).` });
-        deductions += 15;
+    if (avgLag !== null) {
+      if (avgLag <= 7) {
+        factors.push({ type: "good", text: `Pays in full — average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} (within 7-day terms).` });
+      } else if (avgLag <= 21) {
+        factors.push({ type: "warn", text: `Pays in full but slowly — average lag ${avgLag} days (target: 7 days).` });
+        deductions += 20;
+      } else {
+        factors.push({ type: "warn", text: `Pays in full but very slowly — average lag ${avgLag} days.` });
+        deductions += 30;
       }
-    }
-  }
-
-  // ── RULE 4: Coverage ratio (total receipts vs total invoiced) ────────────
-  const totalInvoiced = invoices.reduce((s, x) => s + Math.abs(x.amount), 0);
-  const totalReceipted = receipts.reduce((s, x) => s + Math.abs(x.amount), 0); // amounts may be stored as negatives
-  if (totalInvoiced > 0) {
-    const coverage = totalReceipted / totalInvoiced;
-    if (coverage < 0.5) {
-      factors.push({ type: "bad", text: `Only ${Math.round(coverage * 100)}% of recent invoices covered by receipts.` });
-      deductions += 25;
-    } else if (coverage < 0.85) {
-      factors.push({ type: "warn", text: `${Math.round(coverage * 100)}% of recent invoices covered by receipts.` });
-      deductions += 10;
     } else {
-      factors.push({ type: "good", text: `${Math.round(coverage * 100)}% of recent invoices covered — strong payment record.` });
+      factors.push({ type: "good", text: `${paidPairs.length} of ${pairs.length} invoice${pairs.length > 1 ? "s" : ""} matched with a receipt.` });
     }
   }
 
-  // ── RULE 5: Outstanding balance vs recent invoice size ───────────────────
-  if (outstandingBalance > 0 && totalInvoiced > 0) {
+  // ── RULE 3: Overall coverage ratio ─────────────────────────────────────
+  const totalInvoiced  = invoices.reduce((s, x) => s + x.amount, 0);
+  const totalReceipted = receipts.reduce((s, x) => s + x.amount, 0);
+  if (totalInvoiced > 0 && receipts.length > 0) {
+    const coverage = totalReceipted / totalInvoiced;
+    if (coverage >= 0.9) {
+      factors.push({ type: "good", text: `${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
+    } else if (coverage >= 0.5) {
+      factors.push({ type: "warn", text: `${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
+      deductions += 15;
+    } else {
+      factors.push({ type: "bad", text: `Only ${Math.round(coverage * 100)}% of recent invoiced amount covered by receipts.` });
+      deductions += 30;
+    }
+  } else if (receipts.length === 0) {
+    factors.push({ type: "block", text: "No receipts on record against this outstanding balance." });
+    deductions += 50;
+  }
+
+  // ── RULE 4: Balance exposure ────────────────────────────────────────────
+  if (totalInvoiced > 0) {
     const avgInvoice = totalInvoiced / invoices.length;
     if (outstandingBalance > avgInvoice * 2) {
-      factors.push({ type: "bad", text: `Outstanding balance (R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})}) is more than 2× the average invoice — exposure is high.` });
-      deductions += 20;
+      factors.push({ type: "bad", text: `Outstanding balance (R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})}) exceeds 2× the average invoice — high exposure.` });
+      deductions += 15;
     }
   }
 
-  // ── Verdict ──────────────────────────────────────────────────────────────
+  // ── Verdict ─────────────────────────────────────────────────────────────
   const score = Math.max(0, 100 - deductions);
   let verdict, title, summary;
-
   if (score >= 75) {
     verdict = "approve";
     title = "Approve Invoice";
-    summary = "Customer is paying consistently and within terms.";
-  } else if (score >= 45) {
+    summary = "Customer is paying reliably and within terms.";
+  } else if (score >= 40) {
     verdict = "caution";
     title = "Proceed with Caution";
-    summary = "Some payment concerns — consider a smaller invoice or confirm intent to pay first.";
+    summary = "Customer pays but slowly — consider confirming payment intent before issuing.";
   } else {
     verdict = "hold";
     title = "Hold — Do Not Invoice";
-    summary = "Significant unpaid exposure or terms breach. Resolve outstanding balance before issuing a new invoice.";
+    summary = "Outstanding debt is overdue. Resolve before issuing a new invoice.";
   }
 
   return { verdict, title, summary, factors, score };
