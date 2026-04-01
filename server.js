@@ -538,6 +538,27 @@ ensureColumn('datarecord', 'last_receipt_5', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_5_amount', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_5_date', 'TEXT');
 ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
+
+// One-time data migration: copy old singular field names into new _1 slots if new slots are empty
+{
+  const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
+  const migrations = [
+    // old column name -> new column name
+    ['last_unpaid_invoice_1_date', null],  // already existed, no old name for the number/amount
+    ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
+    ['last_receipt_number', 'last_receipt_1'],
+    ['last_receipt_amount', 'last_receipt_1_amount'],
+    ['last_receipt_date', 'last_receipt_1_date'],
+  ];
+  for (const [oldCol, newCol] of migrations) {
+    if (!newCol) continue;
+    if (colNames.includes(oldCol) && colNames.includes(newCol)) {
+      try {
+        db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
+      } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
+    }
+  }
+}
 ensureColumn('datarecord', 'terms', 'TEXT');
 // Query-mode columns
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
