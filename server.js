@@ -3220,7 +3220,7 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     return res.status(403).json({ error: 'Use dedicated routes instead' });
   }
 
-  const data = sanitizeForSqlite(req.body);
+  let data = sanitizeForSqlite(req.body);
 
   if (table === 'databaseconnection' && data.status !== undefined) {
     const allowedStatuses = new Set(['active', 'inactive', 'error', 'testing']);
