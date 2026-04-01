@@ -784,7 +784,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-5xl border-4 bg-gray-900 p-0",
+            "max-w-[820px] w-full border-4 bg-gray-900 p-0",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
@@ -792,7 +792,7 @@ export default function CustomerLookup({
           )}
         >
           {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "780px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "16px 16px 12px 16px" }}>
+          <div style={{ width: "100%", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "16px 16px 12px 16px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
