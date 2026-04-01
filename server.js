@@ -3268,6 +3268,9 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
       }
     }
 
+    // Sanitize booleans/undefined to SQLite-compatible types
+    data = sanitizeForSqlite(data);
+
     const keys = Object.keys(data);
     if (keys.length === 0) {
       return res.status(400).json({ error: 'No data provided' });
