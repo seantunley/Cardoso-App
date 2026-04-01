@@ -792,7 +792,7 @@ export default function CustomerLookup({
           )}
         >
           {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "860px", height: "92vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
+          <div style={{ width: "860px", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "24px 24px 16px 24px" }}>
           <DialogHeader className="pb-0">
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4 text-gray-400 shrink-0" />
@@ -995,7 +995,7 @@ export default function CustomerLookup({
 
             </div>{/* end left col */}
             {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div style={{ width: "288px", flexShrink: 0, overflowY: "auto" }} className="space-y-3">
+            <div style={{ width: "288px", flexShrink: 0, display: "flex", flexDirection: "column", gap: "12px", minHeight: 0 }}>
             {/* ── Credit Analysis Panel ── */}
             {(() => {
               const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
@@ -1009,7 +1009,7 @@ export default function CustomerLookup({
               const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
               const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
               return (
-                <div className={`rounded-xl border ${s.border} ${s.bg} p-3`}>
+                <div className={`rounded-xl border ${s.border} ${s.bg} p-3`} style={{ flexShrink: 0 }}>
                   <div className="flex items-center gap-2 mb-2">
                     <span className="text-base">{s.icon}</span>
                     <div className="flex-1">
@@ -1034,7 +1034,7 @@ export default function CustomerLookup({
                 </div>
               );
             })()}
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3" style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
               <div className="mb-3 flex items-center justify-between">
                 <h4 className="text-sm font-semibold text-gray-300">
                   Flag Management
@@ -1097,7 +1097,7 @@ export default function CustomerLookup({
                 </div>
 
                 {/* Right: last 2 actions */}
-                <div className="flex-1 rounded-lg border border-gray-700 bg-gray-900 p-2">
+                <div className="flex-1 rounded-lg border border-gray-700 bg-gray-900 p-2" style={{ overflow: "auto" }}>
                   <div className="mb-2 flex items-center gap-1.5">
                     <History className="h-3.5 w-3.5 text-gray-400" />
                     <p className="text-xs font-medium text-gray-300">Last 2 actions</p>
