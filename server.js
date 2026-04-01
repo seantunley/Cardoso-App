@@ -505,9 +505,15 @@ ensureColumn('datarecord', 'age_7_days', 'TEXT');
 ensureColumn('datarecord', 'age_14_days', 'TEXT');
 ensureColumn('datarecord', 'age_21_days', 'TEXT');
 ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
-// Invoice per-item dates (4+5 are new)
+// Invoice fields 1-5 (number, amount, date) — ensure all exist for existing DBs
+ensureColumn('datarecord', 'last_unpaid_invoice_1', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_1_amount', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_1_date', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_2', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_2_amount', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_2_date', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_3', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_3_amount', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_3_date', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_4', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_4_amount', 'TEXT');
@@ -515,7 +521,7 @@ ensureColumn('datarecord', 'last_unpaid_invoice_4_date', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_5', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_5_amount', 'TEXT');
 ensureColumn('datarecord', 'last_unpaid_invoice_5_date', 'TEXT');
-// Receipt fields (renamed + expanded)
+// Receipt fields 1-5 (number, amount, date) — ensure all exist for existing DBs
 ensureColumn('datarecord', 'last_receipt_1', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_1_amount', 'TEXT');
 ensureColumn('datarecord', 'last_receipt_1_date', 'TEXT');
