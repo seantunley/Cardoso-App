@@ -751,12 +751,12 @@ export default function CustomerLookup({
                 );
               };
 
-              const invoiceSlots = [1,2,3,4,5].map(i => ({
+              const invoiceSlots = [1,2,3].map(i => ({
                 numField: `last_unpaid_invoice_${i}`,
                 amtField: `last_unpaid_invoice_${i}_amount`,
                 dateField: `last_unpaid_invoice_${i}_date`,
               }));
-              const receiptSlots = [1,2,3,4,5].map(i => ({
+              const receiptSlots = [1,2,3].map(i => ({
                 numField: `last_receipt_${i}`,
                 amtField: `last_receipt_${i}_amount`,
                 dateField: `last_receipt_${i}_date`,
