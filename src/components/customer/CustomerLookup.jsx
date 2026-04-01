@@ -18,6 +18,7 @@ import {
   User,
   Calendar,
   Flag,
+  Zap,
   Shield,
   Trash2,
   History,
