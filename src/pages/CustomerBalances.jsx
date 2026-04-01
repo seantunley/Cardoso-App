@@ -71,7 +71,7 @@ export default function CustomerBalances() {
   const [siteFilter, setSiteFilter] = useState("all");
   const [hubMode, setHubMode] = useState(false);
   // Toggle: hide customers where invoice ≈ balance (within R0.10)
-  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
+  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(true);
 
   useEffect(() => {
     fetch("/api/hub/sites", { credentials: "include" })
