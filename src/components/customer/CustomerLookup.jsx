@@ -592,7 +592,7 @@ export default function CustomerLookup({
             </DialogTitle>
           </DialogHeader>
 
-          {customer?.auto_flagged && (
+          {!!customer?.auto_flagged && (
             <div className={cn(
               "flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-xs font-medium",
               customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
