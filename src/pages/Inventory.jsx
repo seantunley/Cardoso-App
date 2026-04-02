@@ -28,6 +28,10 @@ const formatNum = (val, decimals = 2) => {
   if (isNaN(n)) return val;
   return n.toLocaleString('en-ZA', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 };
+const formatCurrency = (val) => {
+  const f = formatNum(val);
+  return f === '—' ? '—' : `R ${f}`;
+};
 
 export default function Inventory() {
   const [hubMode, setHubMode] = useState(false);
@@ -184,9 +188,9 @@ export default function Inventory() {
                       <td className="px-2 py-1 text-xs font-mono text-foreground">{row.item_number || "—"}</td>
                       <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.qty_on_hand)}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.last_cost)}</td>
+                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.last_cost)}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price)}</td>
+                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.price)}</td>
                       {hubMode && (
                         <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
                       )}
