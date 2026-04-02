@@ -1524,6 +1524,8 @@ async function runConnectionImport(connectionId) {
         console.log('[INV DEBUG] commodity mapping:', JSON.stringify(getMappingForKey(mappings, 'commodity')));
         const r0 = rows[0]; const su = getMappingForKey(mappings, 'stocking_uom');
         console.log('[INV DEBUG] stocking_uom value:', su ? r0[su.sourceField] : 'no mapping');
+        console.log('[INV DEBUG] getMapped stocking_uom:', String(getMappedOrFallbackValue(r0, mappings, 'stocking_uom', inventoryMappingConfig.stocking_uom.fallbacks) || ''));
+        console.log('[INV DEBUG] getMapped commodity:', String(getMappedOrFallbackValue(r0, mappings, 'commodity', inventoryMappingConfig.commodity.fallbacks) || ''));
       }
       const writeInventory = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
