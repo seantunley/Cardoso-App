@@ -3493,6 +3493,18 @@ if (process.env.HUB_MODE === 'true') {
     res.json(rows);
   });
 
+  // POST /api/hub/force-resync — clears sync history and hub_records, triggers full re-pull
+  app.post('/api/hub/force-resync', requireAuth, requireAdmin, (req, res) => {
+    try {
+      db.prepare('DELETE FROM hub_sync_log').run();
+      db.prepare('DELETE FROM hub_records').run();
+      res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
+      syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/sync
   app.post('/api/hub/sync', (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });

@@ -431,6 +431,15 @@ export default function HubDashboard() {
     } catch { setSyncing(false); }
   };
 
+  const forceResync = async () => {
+    if (!window.confirm('This will clear all synced data and do a full re-pull from all sites. Continue?')) return;
+    setSyncing(true);
+    try {
+      await fetch("/api/hub/force-resync", { method: "POST", credentials: "include" });
+      setTimeout(() => { fetchAll(); setSyncing(false); }, 5000);
+    } catch { setSyncing(false); }
+  };
+
   if (loading) return (
     <div className="flex h-screen items-center justify-center">
       <div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-foreground" />
@@ -460,6 +469,9 @@ export default function HubDashboard() {
         <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
           <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
           {syncing ? "Syncing…" : "Sync Now"}
+        </Button>
+        <Button onClick={forceResync} disabled={syncing} variant="ghost" className="gap-2 text-muted-foreground text-xs" title="Clear all synced data and re-pull from all sites">
+          Force Resync
         </Button>
       </div>
 
