@@ -1763,6 +1763,8 @@ async function runConnectionImport(connectionId) {
       const sourceName = `query::${connConfig.id}`;
 
       if (connConfig.record_type === 'inventory') {
+        // Clear stale records for this connection before upserting fresh data
+        db.prepare('DELETE FROM inventoryrecord WHERE source_table = ?').run(sourceName);
         runInventoryRows(rows, sourceName, queryFieldMappings);
       } else {
         runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
@@ -3307,6 +3309,8 @@ if (process.env.HUB_MODE === 'true') {
           });
         }
       });
+      // Clear stale inventory for this site before re-pulling (handles deleted/filtered-out items)
+      db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(site.id);
       let invOffset = 0;
       let invHasMore = true;
       while (invHasMore) {
