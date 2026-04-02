@@ -881,9 +881,9 @@ export default function CustomerLookup({
                     if (!ref && !amt && !date) return null;
                     return (
                       <tr key={`${label}-${i}`} className="border-b border-border/50 last:border-0">
-                        <td className={cn("text-sm py-1.5 pr-4 font-mono", iconColor)}>{ref || "—"}</td>
-                        <td className={cn("text-sm py-1.5 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
-                        <td className={cn("text-sm py-1.5 text-right", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
+                        <td className={cn("text-base py-1.5 pr-4 font-mono", iconColor)}>{ref || "—"}</td>
+                        <td className={cn("text-base py-1.5 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
+                        <td className={cn("text-base py-1.5 text-right", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
                       </tr>
                     );
                   })
