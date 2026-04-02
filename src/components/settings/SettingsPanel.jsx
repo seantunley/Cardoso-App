@@ -71,6 +71,7 @@ function ConnectionsTab({ currentUser }) {
   const [syncingId, setSyncingId] = useState(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -127,7 +128,7 @@ function ConnectionsTab({ currentUser }) {
   };
 
   const handleEdit = (conn) => { setEditingConnection(conn); setModalOpen(true); };
-  const handleDelete = (conn) => { if (confirm("Delete this connection?")) deleteMutation.mutate(conn.id); };
+  const handleDelete = (conn) => { setDeleteConfirmId(conn.id); };
 
   return (
     <div className="space-y-5">
@@ -139,7 +140,7 @@ function ConnectionsTab({ currentUser }) {
         </Button>
         {isAdmin && (
           <Button onClick={() => { setEditingConnection(null); setModalOpen(true); }} size="sm"
-            className="bg-white hover:bg-gray-100 text-gray-900">
+            variant="default">
             <Plus className="w-4 h-4 mr-2" />New Connection
           </Button>
         )}
@@ -157,7 +158,7 @@ function ConnectionsTab({ currentUser }) {
             {isAdmin ? "No connections yet. Add one to start syncing." : "No connections configured. Contact an admin."}
           </p>
           {isAdmin && (
-            <Button onClick={() => setModalOpen(true)} size="sm" className="mt-4 bg-white hover:bg-gray-100 text-gray-900">
+            <Button onClick={() => setModalOpen(true)} size="sm" variant="default" className="mt-4">
               <Plus className="w-4 h-4 mr-2" />Add Connection
             </Button>
           )}
@@ -178,6 +179,19 @@ function ConnectionsTab({ currentUser }) {
                 <ConnectionCard connection={conn} onSync={handleSync}
                   onEdit={isAdmin ? handleEdit : null} onDelete={isAdmin ? handleDelete : null}
                   isSyncing={syncingId === conn.id} />
+                {deleteConfirmId === conn.id && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm">
+                    <span className="flex-1 text-rose-400">Delete this connection?</span>
+                    <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(conn.id); setDeleteConfirmId(null); }}
+                      className="rounded px-2 py-1 text-xs font-medium bg-rose-600 hover:bg-rose-700 text-white transition-colors">
+                      Confirm Delete
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
+                      className="rounded px-2 py-1 text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
