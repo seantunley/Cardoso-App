@@ -868,7 +868,7 @@ export default function CustomerLookup({
               <tr className="border-b border-border">
                 <th className="text-left text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2 pr-4">Number</th>
                 <th className="text-right text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2 pr-4">Amount</th>
-                <th className="text-left text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2">Date</th>
+                <th className="text-right text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2">Date</th>
               </tr>
             </thead>
             <tbody>
@@ -883,7 +883,7 @@ export default function CustomerLookup({
                       <tr key={`${label}-${i}`} className="border-b border-border/50 last:border-0">
                         <td className={cn("text-sm py-1.5 pr-4 font-mono", iconColor)}>{ref || "—"}</td>
                         <td className={cn("text-sm py-1.5 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
-                        <td className={cn("text-sm py-1.5", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
+                        <td className={cn("text-sm py-1.5 text-right", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
                       </tr>
                     );
                   })
