@@ -202,8 +202,17 @@ export default function Inventory() {
           </div>
         )}
 
-        {/* State: empty */}
-        {!isLoading && !isError && rows.length === 0 && (
+        {/* State: empty (no data at all) */}
+        {!isLoading && !isError && allRows.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
+            <Package className="w-12 h-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium text-foreground">No inventory data yet</h3>
+            <p className="text-sm text-muted-foreground mt-1">Sync your connections to see inventory.</p>
+          </div>
+        )}
+
+        {/* State: empty (filtered) */}
+        {!isLoading && !isError && allRows.length > 0 && rows.length === 0 && (
           <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
             {debouncedSearch ? `No inventory items matching "${debouncedSearch}".` : "No inventory records found."}
           </div>
