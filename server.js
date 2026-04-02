@@ -2151,14 +2151,20 @@ app.get('/api/kpis', requireAuth, (req, res) => {
 });
 
 app.get('/api/top-balances', requireAuth, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = (page - 1) * limit;
   const isHub = process.env.HUB_MODE === 'true';
 
+  const balanceWhere = `outstanding_balance IS NOT NULL
+          AND outstanding_balance != ''
+          AND outstanding_balance != '0'
+          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
+
   try {
-    let rows;
+    let rows, total;
     if (isHub) {
-      // hub_records has site_id, customer_number, customer_name, outstanding_balance
-      // join hub_sites for a friendly site name
+      total = db.prepare(`SELECT COUNT(*) AS count FROM hub_records r WHERE r.${balanceWhere}`).get().count;
       const stmt = db.prepare(`
         SELECT
           r.customer_number,
@@ -2176,15 +2182,13 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           COALESCE(s.name, r.site_id) AS site_name
         FROM hub_records r
         LEFT JOIN hub_sites s ON s.id = r.site_id
-        WHERE r.outstanding_balance IS NOT NULL
-          AND r.outstanding_balance != ''
-          AND r.outstanding_balance != '0'
-          AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        WHERE r.${balanceWhere}
         ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(limit);
+      rows = stmt.all(limit, offset);
     } else {
+      total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
       const stmt = db.prepare(`
         SELECT
           customer_number,
@@ -2201,16 +2205,14 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           auto_flagged,
           ? AS site_name
         FROM datarecord
-        WHERE outstanding_balance IS NOT NULL
-          AND outstanding_balance != ''
-          AND outstanding_balance != '0'
-          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        WHERE ${balanceWhere}
         ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(SITE_NAME, limit);
+      rows = stmt.all(SITE_NAME, limit, offset);
     }
-    res.json(rows);
+    const totalPages = Math.ceil(total / limit);
+    res.json({ records: rows, total, page, totalPages });
   } catch (err) {
     console.error('top-balances error', err);
     res.status(500).json({ error: 'Failed to fetch top balances' });

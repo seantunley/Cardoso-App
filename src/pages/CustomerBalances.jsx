@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Scale } from "lucide-react";
 
-const LIMIT = 200;
+const PAGE_SIZE = 50;
 
 /* ── print styles (injected once) ── */
 const PRINT_STYLE = `
@@ -102,8 +102,8 @@ function FilterToggle({ active, onClick, children }) {
   );
 }
 
-async function fetchTopBalances(limit) {
-  const res = await fetch(`/api/top-balances?limit=${limit}`, { credentials: "include" });
+async function fetchTopBalances(page, limit) {
+  const res = await fetch(`/api/top-balances?page=${page}&limit=${limit}`, { credentials: "include" });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     throw new Error(d.error || "Failed to load balances");
@@ -112,7 +112,7 @@ async function fetchTopBalances(limit) {
 }
 
 export default function CustomerBalances() {
-  const [limit] = useState(LIMIT);
+  const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
   const [hubMode, setHubMode] = useState(false);
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(true);
@@ -133,11 +133,16 @@ export default function CustomerBalances() {
       .then((d) => { if (d?.hub_mode) setHubMode(true); });
   }, []);
 
-  const { data: rows = [], isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", limit],
-    queryFn: () => fetchTopBalances(limit),
+  const { data, isLoading, isError, error, refetch } = useQuery({
+    queryKey: ["top-balances", page, PAGE_SIZE],
+    queryFn: () => fetchTopBalances(page, PAGE_SIZE),
     staleTime: 60_000,
+    keepPreviousData: true,
   });
+
+  const rows = data?.records ?? [];
+  const totalRecords = data?.total ?? 0;
+  const totalPages = data?.totalPages ?? 1;
 
   const sites = useMemo(() => {
     const names = [...new Set(rows.map((r) => r.site_name).filter(Boolean))].sort();
@@ -163,6 +168,12 @@ export default function CustomerBalances() {
   const printDate  = new Date().toLocaleString("en-ZA", {
     year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+
+  /* ── filter subtitle ── */
+  const subtitleParts = [];
+  subtitleParts.push(`${totalRecords} customer${totalRecords !== 1 ? "s" : ""}`);
+  if (siteFilter && siteFilter !== "all") subtitleParts.push(siteFilter);
+  if (hideInvoiceMatchesBalance) subtitleParts.push("Invoice ≠ Balance");
 
   return (
     <>
@@ -228,7 +239,7 @@ export default function CustomerBalances() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Customer Balances</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">Top {limit} customers by outstanding balance</p>
+              <p className="text-sm text-muted-foreground mt-0.5">{subtitleParts.join(" · ")}</p>
             </div>
             <div className="flex items-center gap-2">
               {filtered.length > 0 && (
@@ -266,19 +277,19 @@ export default function CustomerBalances() {
                   <label className="text-xs text-muted-foreground whitespace-nowrap">Site:</label>
                   <select
                     value={siteFilter}
-                    onChange={(e) => setSiteFilter(e.target.value)}
+                    onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
                     className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                   >
                     <option value="all">All sites</option>
                     {sites.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                   {siteFilter !== "all" && (
-                    <button onClick={() => setSiteFilter("all")} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Clear</button>
+                    <button onClick={() => { setSiteFilter("all"); setPage(1); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Clear</button>
                   )}
                   <div className="h-4 w-px bg-border mx-1" />
                 </>
               )}
-              <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => setHideInvoiceMatchesBalance((v) => !v)}>
+              <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
                 {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
               </FilterToggle>
             </div>
@@ -305,7 +316,7 @@ export default function CustomerBalances() {
               {error?.message || "Failed to load data"}
             </div>
           )}
-          {!isLoading && !isError && rows.length === 0 && (
+          {!isLoading && !isError && rows.length === 0 && totalRecords === 0 && (
             <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
               <Scale className="w-12 h-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium text-foreground">No balance data yet</h3>
@@ -342,13 +353,14 @@ export default function CustomerBalances() {
                 <tbody>
                   {filtered.map((row, idx) => {
                     const amount = parseAmount(row.outstanding_balance);
-                    const isTop  = idx === 0;
+                    const globalIdx = (page - 1) * PAGE_SIZE + idx;
+                    const isTop  = globalIdx === 0;
                     return (
                       <tr
                         key={`${row.customer_number}-${row.site_name}-${idx}`}
                         className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
                       >
-                        <td className="px-2 py-1 text-xs text-muted-foreground">{idx + 1}</td>
+                        <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
                         <td className="px-2 py-1">
                           <div className="flex items-center gap-1.5">
                             <FlagDot color={row.flag_color} reason={row.flag_reason} />
@@ -379,6 +391,29 @@ export default function CustomerBalances() {
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {!isLoading && !isError && totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-4">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Previous
+              </button>
+              <span className="text-sm text-muted-foreground">
+                Page {page} of {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
             </div>
           )}
         </div>
