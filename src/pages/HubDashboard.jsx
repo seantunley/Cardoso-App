@@ -52,7 +52,7 @@ function fuzzyMatch(str, pattern) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
-function SiteCard({ site, onFlagClick }) {
+function SiteCard({ site, onFlagClick, onResync }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
@@ -64,9 +64,19 @@ function SiteCard({ site, onFlagClick }) {
           <Building2 className="h-4 w-4 text-muted-foreground" />
           <span className="font-semibold text-foreground">{site.site_name || site.site_slug}</span>
         </div>
-        <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
-          {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-          {isOnline ? "Online" : "Offline"}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={(e) => { e.stopPropagation(); onResync(site); }}
+            className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            title={`Resync ${site.site_name || site.site_slug}`}
+          >
+            <RefreshCw className="h-3 w-3" />
+            Resync
+          </button>
+          <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
+            {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+            {isOnline ? "Online" : "Offline"}
+          </div>
         </div>
       </div>
 
@@ -431,6 +441,19 @@ export default function HubDashboard() {
     } catch { setSyncing(false); }
   };
 
+  const resyncSite = async (site) => {
+    const name = site.site_name || site.site_slug;
+    toast(`Resyncing ${name}...`);
+    try {
+      const res = await fetch(`/api/hub/force-resync/${site.site_id}`, { method: "POST", credentials: "include" });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Resync failed"); }
+      toast.success("Resync complete");
+      setTimeout(() => fetchAll(), 5000);
+    } catch (err) {
+      toast.error(err.message || "Resync failed");
+    }
+  };
+
   const forceResync = async () => {
     if (!window.confirm('This will clear all synced data and do a full re-pull from all sites. Continue?')) return;
     setSyncing(true);
@@ -483,7 +506,7 @@ export default function HubDashboard() {
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sites</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} />)}
+            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} onResync={resyncSite} />)}
           </div>
         </div>
       )}

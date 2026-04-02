@@ -584,6 +584,7 @@ ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
 ensureColumn('inventoryrecord', 'commodity', 'TEXT');
 ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
 ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
+ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
 
 // Migrate field_mappings from legacy flat format to per-table format
 // Legacy: { localKey: { sourceField, ... } }
@@ -3558,6 +3559,20 @@ if (process.env.HUB_MODE === 'true') {
     }
   });
 
+  // POST /api/hub/force-resync/:siteId — per-site force resync
+  app.post('/api/hub/force-resync/:siteId', requireAuth, requireAdmin, (req, res) => {
+    const { siteId } = req.params;
+    try {
+      db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
+      db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
+      db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      syncAllSites().catch(err => console.error("force-resync error:", err));
+      res.status(202).json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/sync
   app.post('/api/hub/sync', (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
@@ -4445,3 +4460,23 @@ ensureSeedUsers()
     console.error('Failed to seed users:', error);
     process.exit(1);
   });
+
+// Auto-sync scheduler: checks every 5 minutes
+setInterval(async () => {
+  try {
+    const conns = db.prepare(
+      "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
+    ).all();
+    const now = Date.now();
+    for (const conn of conns) {
+      const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
+      const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
+      if (now - lastSync >= intervalMs) {
+        console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
+        runConnectionImport(conn.id).catch(err => console.error(`[auto-sync] error for ${conn.id}:`, err));
+      }
+    }
+  } catch (err) {
+    console.error("[auto-sync] scheduler error:", err);
+  }
+}, 5 * 60 * 1000);
