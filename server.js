@@ -1763,9 +1763,17 @@ async function runConnectionImport(connectionId) {
       const sourceName = `query::${connConfig.id}`;
 
       if (connConfig.record_type === 'inventory') {
-        // Clear stale records for this connection before upserting fresh data
-        db.prepare('DELETE FROM inventoryrecord WHERE source_table = ?').run(sourceName);
         runInventoryRows(rows, sourceName, queryFieldMappings);
+        // Prune items no longer returned by the query (upsert-then-prune keeps data live)
+        const freshItemNumbers = rows.map(r =>
+          String(getMappedOrFallbackValue(r, queryFieldMappings, 'item_number', inventoryMappingConfig.item_number.fallbacks) || '')
+        ).filter(Boolean);
+        if (freshItemNumbers.length > 0) {
+          const placeholders = freshItemNumbers.map(() => '?').join(',');
+          db.prepare(
+            `DELETE FROM inventoryrecord WHERE source_table = ? AND item_number NOT IN (${placeholders})`
+          ).run(sourceName, ...freshItemNumbers);
+        }
       } else {
         runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
       }
@@ -3309,8 +3317,7 @@ if (process.env.HUB_MODE === 'true') {
           });
         }
       });
-      // Clear stale inventory for this site before re-pulling (handles deleted/filtered-out items)
-      db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(site.id);
+      const syncedItemNumbers = [];
       let invOffset = 0;
       let invHasMore = true;
       while (invHasMore) {
@@ -3323,9 +3330,17 @@ if (process.env.HUB_MODE === 'true') {
         const invData = await invRes.json();
         if (invData.records && invData.records.length > 0) {
           insertInventory(invData.records);
+          invData.records.forEach(r => { if (r.item_number) syncedItemNumbers.push(r.item_number); });
           invOffset += invData.records.length;
         }
         invHasMore = invData.has_more === true;
+      }
+      // Prune hub_inventory rows no longer in the site's query (upsert-then-prune)
+      if (syncedItemNumbers.length > 0) {
+        const placeholders = syncedItemNumbers.map(() => '?').join(',');
+        db.prepare(
+          `DELETE FROM hub_inventory WHERE site_id = ? AND item_number NOT IN (${placeholders})`
+        ).run(site.id, ...syncedItemNumbers);
       }
 
       // Update hub_sites
