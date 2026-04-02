@@ -1498,8 +1498,8 @@ async function runConnectionImport(connectionId) {
       last_cost:        { fallbacks: ['last_cost', 'Last Cost', 'LastCost', 'LAST_COST', 'Cost', 'COST', 'RECENTCOST'] },
       price_list:       { fallbacks: ['price_list', 'Price List', 'PriceList', 'PRICE_LIST', 'Pricelist', 'PRICELIST'] },
       price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice', 'UNITPRICE'] },
-      stocking_uom:     { fallbacks: ['stocking_uom', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
-      commodity:        { fallbacks: ['commodity', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
+      stocking_uom:     { fallbacks: ['stocking_uom', 'StockingUnitOfMeasure', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
+      commodity:        { fallbacks: ['commodity', 'CommodityNumber', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
