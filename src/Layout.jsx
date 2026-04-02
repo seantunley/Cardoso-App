@@ -224,7 +224,7 @@ export default function Layout({ children, currentPageName }) {
         <div className={cn("border-t border-border", isCollapsed ? "p-2 flex flex-col items-center space-y-1" : "space-y-0.5 p-3")}>
           {canSeeSettings && (
             <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-              className={cn("w-full h-8", isCollapsed ? "w-8 h-8 justify-center p-0" : "w-full justify-start")}
+              className={cn(isCollapsed ? "w-8 h-8 mx-auto justify-center p-0" : "w-full justify-start")}
               onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
               <Settings className="h-3.5 w-3.5 shrink-0" />
               <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
@@ -232,21 +232,21 @@ export default function Layout({ children, currentPageName }) {
           )}
 
           <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-            className={cn("w-full h-8", isCollapsed ? "w-8 h-8 justify-center p-0" : "w-full justify-start")}
+            className={cn(isCollapsed ? "w-8 h-8 mx-auto justify-center p-0" : "w-full justify-start")}
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
             <KeyRound className="h-3.5 w-3.5 shrink-0" />
             <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
           </Button>
 
           <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
-            className={cn("w-full h-8", isCollapsed ? "w-8 h-8 justify-center p-0" : "w-full justify-start")}
+            className={cn(isCollapsed ? "w-8 h-8 mx-auto justify-center p-0" : "w-full justify-start")}
             onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
             <LogOut className="h-3.5 w-3.5 shrink-0" />
             <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
           </Button>
 
           <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-            className={cn("w-full h-8", isCollapsed ? "w-8 h-8 justify-center p-0" : "w-full justify-start")}
+            className={cn(isCollapsed ? "w-8 h-8 mx-auto justify-center p-0" : "w-full justify-start")}
             onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
             {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
             <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
