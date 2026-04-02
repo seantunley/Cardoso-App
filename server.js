@@ -654,7 +654,7 @@ function initPreparedStatements() {
   stmts.kpiTotalRecords  = db.prepare('SELECT COUNT(*) as count FROM datarecord');
   stmts.kpiFlagCounts    = db.prepare('SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color');
   stmts.kpiLastSync      = db.prepare('SELECT MAX(synced_at) as last_sync FROM datarecord');
-  stmts.kpiLastRun       = db.prepare('SELECT MAX(last_run) as last_run FROM databaseconnection');
+  stmts.kpiLastRun       = db.prepare('SELECT MAX(last_sync) as last_run FROM databaseconnection');
   stmts.kpiActiveConns   = db.prepare('SELECT COUNT(*) as count FROM databaseconnection WHERE is_active = 1');
 
   stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM auto_flag_rule WHERE is_active = 1 ORDER BY priority DESC');
