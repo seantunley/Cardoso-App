@@ -14,9 +14,7 @@ const flagColors = {
 };
 
 export default function FlaggedCustomersModal({ flagColor, open, onClose, onCustomerClick, siteName, customers: externalCustomers }) {
-  if (!flagColor) return null;
-
-  const config = flagColors[flagColor];
+  const config = flagColors[flagColor] || flagColors.none;
 
   // Self-fetch only when no external list is provided (hub passes its own pre-fetched records)
   const { data: fetchedCustomers = [], isFetching } = useQuery({
@@ -25,12 +23,14 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
       const all = await api.entities.DataRecord.list('-created_date', 2000);
       return all.filter(r => r.flag_color === flagColor);
     },
-    enabled: !!open && !!flagColor && !externalCustomers,
+    enabled: !!open && !!flagColor && !externalCustomers && !!flagColors[flagColor],
     staleTime: 30_000,
   });
 
   const displayCustomers = externalCustomers ?? fetchedCustomers;
   const isFetchingDisplay = !externalCustomers && isFetching;
+
+  if (!flagColor || !flagColors[flagColor]) return null;
 
   const sortedCustomers = [...displayCustomers].sort((a, b) => {
     const numA = a.customer_number || a.data?.customer_number || "";
