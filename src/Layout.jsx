@@ -223,34 +223,34 @@ export default function Layout({ children, currentPageName }) {
         </nav>
         <div className={cn("border-t border-border", isCollapsed ? "p-2 flex flex-col items-center space-y-1" : "space-y-0.5 p-3")}>
           {canSeeSettings && (
-            <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-              className={cn(isCollapsed ? "justify-center" : "w-full justify-start")}
-              onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
-              <Settings className="h-3.5 w-3.5 shrink-0" />
-              <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
-            </Button>
+            <button
+              onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}
+              className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
+              <Settings className="h-4 w-4 shrink-0" />
+              <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
+            </button>
           )}
 
-          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-            className={cn(isCollapsed ? "justify-center" : "w-full justify-start")}
-            onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
-            <KeyRound className="h-3.5 w-3.5 shrink-0" />
-            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
-          </Button>
+          <button
+            onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}
+            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
+            <KeyRound className="h-4 w-4 shrink-0" />
+            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
+          </button>
 
-          <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
-            className={cn(isCollapsed ? "justify-center" : "w-full justify-start")}
-            onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
-            <LogOut className="h-3.5 w-3.5 shrink-0" />
-            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
-          </Button>
+          <button
+            onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}
+            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
+            <LogOut className="h-4 w-4 shrink-0" />
+            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
+          </button>
 
-          <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
-            className={cn(isCollapsed ? "justify-center" : "w-full justify-start")}
-            onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
-            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
-          </Button>
+          <button
+            onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}
+            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
+            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
+          </button>
 
           <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-20 opacity-100")}>
             <div
