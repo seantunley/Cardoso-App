@@ -3045,6 +3045,25 @@ if (process.env.HUB_MODE === 'true') {
   // Seed default hub settings
   db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
 
+  // Ensure hub_records has all columns (for existing DBs created before schema expansions)
+  const hubRecordsCols = [
+    ['last_unpaid_invoice_1', 'TEXT'], ['last_unpaid_invoice_1_amount', 'TEXT'], ['last_unpaid_invoice_1_date', 'TEXT'],
+    ['last_unpaid_invoice_2', 'TEXT'], ['last_unpaid_invoice_2_amount', 'TEXT'], ['last_unpaid_invoice_2_date', 'TEXT'],
+    ['last_unpaid_invoice_3', 'TEXT'], ['last_unpaid_invoice_3_amount', 'TEXT'], ['last_unpaid_invoice_3_date', 'TEXT'],
+    ['last_unpaid_invoice_4', 'TEXT'], ['last_unpaid_invoice_4_amount', 'TEXT'], ['last_unpaid_invoice_4_date', 'TEXT'],
+    ['last_unpaid_invoice_5', 'TEXT'], ['last_unpaid_invoice_5_amount', 'TEXT'], ['last_unpaid_invoice_5_date', 'TEXT'],
+    ['last_receipt_1', 'TEXT'], ['last_receipt_1_amount', 'TEXT'], ['last_receipt_1_date', 'TEXT'],
+    ['last_receipt_2', 'TEXT'], ['last_receipt_2_amount', 'TEXT'], ['last_receipt_2_date', 'TEXT'],
+    ['last_receipt_3', 'TEXT'], ['last_receipt_3_amount', 'TEXT'], ['last_receipt_3_date', 'TEXT'],
+    ['last_receipt_4', 'TEXT'], ['last_receipt_4_amount', 'TEXT'], ['last_receipt_4_date', 'TEXT'],
+    ['last_receipt_5', 'TEXT'], ['last_receipt_5_amount', 'TEXT'], ['last_receipt_5_date', 'TEXT'],
+    ['auto_flagged', 'INTEGER DEFAULT 0'], ['flag_color', 'TEXT'], ['flag_reason', 'TEXT'],
+    ['terms', 'TEXT'], ['updated_date', 'TEXT'], ['synced_at', 'TEXT'],
+  ];
+  for (const [col, def] of hubRecordsCols) {
+    ensureColumn('hub_records', col, def);
+  }
+
   // GET /api/hub/backup-settings
   app.get('/api/hub/backup-settings', (req, res) => {
     if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
