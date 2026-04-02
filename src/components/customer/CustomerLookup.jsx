@@ -990,28 +990,28 @@ export default function CustomerLookup({
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
-              <div className="flex items-start gap-3.5">
-                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
-                <div className="flex flex-col gap-2 min-w-0 flex-1">
-                  <div className="flex items-center gap-4">
-                    {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                      <span className="text-base font-bold px-4 py-1.5 rounded-full bg-white/20 text-white ring-2 ring-white/40 shrink-0">
-                        ⏱ {creditAnalysis.avgLag}d avg
-                      </span>
-                    )}
-                    <span className={cn(
-                      "text-sm font-semibold px-3 py-1.5 rounded-full opacity-80 shrink-0",
-                      verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
-                    )}>
-                      {creditAnalysis.score}/100
-                    </span>
-                  </div>
+              <div className="flex items-center gap-3.5">
+                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                <div className="flex-1 min-w-0">
                   <span className="text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
                   {creditAnalysis.summary && (
-                    <p className="text-sm font-semibold leading-snug opacity-90">{creditAnalysis.summary}</p>
+                    <p className="text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
                   )}
+                </div>
+                <div className="flex items-center gap-4 shrink-0 mr-2">
+                  {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
+                    <span className="text-base font-bold px-4 py-1.5 rounded-full bg-white/20 text-white ring-2 ring-white/40">
+                      ⏱ {creditAnalysis.avgLag}d avg
+                    </span>
+                  )}
+                  <span className={cn(
+                    "text-sm font-semibold px-3 py-1.5 rounded-full opacity-80",
+                    verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
+                  )}>
+                    {creditAnalysis.score}/100
+                  </span>
                 </div>
               </div>
             </div>
