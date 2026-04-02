@@ -1,4 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import {
+  BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer,
+  ComposedChart, Scatter,
+} from "recharts";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -26,6 +30,8 @@ import {
   ShieldCheck,
   AlertTriangle,
   XCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -319,6 +325,8 @@ function analyseInvoiceCredit(records, flagHistory = []) {
         : "No invoice or receipt history. Safe to issue a first invoice.") + inactiveNote,
       factors: [{ type: "good", text: "Outstanding balance is R0.00 — all accounts cleared." }, ...inactiveFactor],
       score: 100,
+      lagData: [],
+      timelineData: [],
     };
   }
 
@@ -330,6 +338,8 @@ function analyseInvoiceCredit(records, flagHistory = []) {
       summary: `Outstanding balance but no invoice/receipt history available to assess.${inactiveNote}`,
       factors: [{ type: "warn", text: `Outstanding balance of R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})} with no supporting history.` }, ...inactiveFactor],
       score: 50,
+      lagData: [],
+      timelineData: [],
     };
   }
 
@@ -462,9 +472,197 @@ function analyseInvoiceCredit(records, flagHistory = []) {
     summary = `Customer is paying reliably and within terms.${inactiveNote}`;
   }
 
-  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null };
+  // ── Build chart data ─────────────────────────────────────────────────────
+  // lagData: one entry per invoice, with days to pay or days outstanding
+  const lagData = invByDate.map((inv, idx) => {
+    const pair = pairs.find(p => p.invoice === inv);
+    const label = inv.number ? String(inv.number) : `#${idx + 1}`;
+    if (pair && pair.receipt) {
+      return { label, days: pair.lagDays ?? 0, paid: true };
+    } else {
+      const daysSince = inv.date ? Math.floor((today - inv.date) / 86400000) : 0;
+      return { label, days: daysSince, paid: false };
+    }
+  });
+
+  // timelineData: invoices + receipts on a time axis
+  const fmtMMDD = (d) => {
+    if (!d) return "";
+    return d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
+  };
+  const timelineData = [
+    ...invoices.map(inv => ({
+      date: inv.date ? inv.date.getTime() : null,
+      dateLabel: fmtMMDD(inv.date),
+      type: "invoice",
+      amount: inv.amount,
+      label: inv.number || "Inv",
+      y: 1,
+    })),
+    ...receipts.map(rec => ({
+      date: rec.date ? rec.date.getTime() : null,
+      dateLabel: fmtMMDD(rec.date),
+      type: "receipt",
+      amount: rec.amount,
+      label: rec.number || "Rec",
+      y: 1,
+    })),
+  ].filter(x => x.date !== null).sort((a, b) => a.date - b.date);
+
+  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData };
 }
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
+
+
+// ── Payment History Charts ─────────────────────────────────────────────────
+function getLagBarColor(days, paid) {
+  if (!paid) return "#f87171";
+  if (days <= 14) return "#4ade80";
+  if (days <= 30) return "#fb923c";
+  return "#f87171";
+}
+
+const DarkTooltip = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  const entry = payload[0]?.payload;
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl">
+      <p className="text-slate-300 font-semibold mb-1">{entry?.label || label}</p>
+      {entry?.paid === false ? (
+        <p className="text-red-400 font-bold">Unpaid · {entry.days}d outstanding</p>
+      ) : (
+        <p className="text-slate-200">{entry?.days}d to pay</p>
+      )}
+    </div>
+  );
+};
+
+const TimelineTooltip = ({ active, payload }) => {
+  if (!active || !payload?.length) return null;
+  const entry = payload[0]?.payload;
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl">
+      <p className="text-slate-300 font-semibold">{entry?.label}</p>
+      <p className={entry?.type === "invoice" ? "text-red-400" : "text-green-400"}>
+        {entry?.type === "invoice" ? "Invoice" : "Receipt"} · {entry?.dateLabel}
+      </p>
+      {entry?.amount > 0 && (
+        <p className="text-slate-200 mt-0.5">R {entry.amount.toLocaleString("en-ZA", { minimumFractionDigits: 2 })}</p>
+      )}
+    </div>
+  );
+};
+
+function PaymentHistoryCharts({ lagData, timelineData }) {
+  const [expanded, setExpanded] = useState(true);
+
+  const hasLagData = lagData && lagData.length > 0;
+  const hasTimelineData = timelineData && timelineData.length > 0;
+
+  if (!hasLagData && !hasTimelineData) return null;
+
+  const invoiceTimeline = timelineData.filter(x => x.type === "invoice");
+  const receiptTimeline = timelineData.filter(x => x.type === "receipt");
+
+  return (
+    <div className="bg-card border border-border rounded-xl mb-3 overflow-hidden">
+      <button
+        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/40 transition-colors"
+        onClick={() => setExpanded(v => !v)}
+      >
+        <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Payment History</span>
+        {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+      </button>
+
+      {expanded && (
+        <div className="px-4 pb-4 space-y-4">
+          {/* Chart 1: Payment Lag Bar Chart */}
+          {hasLagData && (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Days to Pay per Invoice</p>
+              <ResponsiveContainer width="100%" height={160}>
+                <BarChart data={lagData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: "#94a3b8", fontSize: 10 }}
+                    axisLine={{ stroke: "#334155" }}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    tick={{ fill: "#94a3b8", fontSize: 10 }}
+                    axisLine={{ stroke: "#334155" }}
+                    tickLine={false}
+                    allowDecimals={false}
+                  />
+                  <Tooltip content={<DarkTooltip />} cursor={{ fill: "rgba(99,102,241,0.08)" }} />
+                  <Bar dataKey="days" radius={[3, 3, 0, 0]}>
+                    {lagData.map((entry, index) => (
+                      <Cell
+                        key={`cell-${index}`}
+                        fill={getLagBarColor(entry.days, entry.paid)}
+                        fillOpacity={entry.paid ? 1 : 0.35}
+                        stroke={entry.paid ? undefined : "#f87171"}
+                        strokeWidth={entry.paid ? 0 : 1.5}
+                        strokeDasharray={entry.paid ? undefined : "4 2"}
+                      />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-1 text-xs text-slate-500">
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#4ade80]" />≤14d</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#fb923c]" />15–30d</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#f87171]" />&gt;30d / Unpaid</span>
+              </div>
+            </div>
+          )}
+
+          {/* Chart 2: Payment Timeline */}
+          {hasTimelineData && (
+            <div>
+              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Invoice &amp; Receipt Timeline</p>
+              <ResponsiveContainer width="100%" height={120}>
+                <ComposedChart margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                  <XAxis
+                    dataKey="dateLabel"
+                    type="category"
+                    allowDuplicatedCategory={false}
+                    tick={{ fill: "#94a3b8", fontSize: 10 }}
+                    axisLine={{ stroke: "#334155" }}
+                    tickLine={false}
+                  />
+                  <YAxis hide domain={[0, 2]} />
+                  <Tooltip content={<TimelineTooltip />} cursor={false} />
+                  {invoiceTimeline.length > 0 && (
+                    <Scatter
+                      name="Invoices"
+                      data={invoiceTimeline}
+                      fill="#f87171"
+                      r={5}
+                    />
+                  )}
+                  {receiptTimeline.length > 0 && (
+                    <Scatter
+                      name="Receipts"
+                      data={receiptTimeline}
+                      fill="#4ade80"
+                      r={5}
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+              <div className="flex gap-4 mt-1 text-xs text-slate-500">
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#f87171]" />Invoice</span>
+                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#4ade80]" />Receipt</span>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+// ── End Payment History Charts ─────────────────────────────────────────────
 
 const verdictBannerStyles = {
   approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
@@ -1095,6 +1293,14 @@ export default function CustomerLookup({
 
             {/* Scrollable: invoices + receipts */}
             <div className="flex-1 overflow-y-auto px-5 pt-1 pb-3">
+
+            {/* Payment History Charts */}
+            {creditAnalysis && (creditAnalysis.lagData?.length > 0 || creditAnalysis.timelineData?.length > 0) && (
+              <PaymentHistoryCharts
+                lagData={creditAnalysis.lagData || []}
+                timelineData={creditAnalysis.timelineData || []}
+              />
+            )}
 
             {/* Invoices + Receipts side by side */}
             <div className="grid grid-cols-2 gap-3 items-start">
