@@ -187,7 +187,7 @@ export default function Inventory() {
                     >
                       <td className="px-2 py-1 text-xs font-mono text-foreground">{row.item_number || "—"}</td>
                       <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.qty_on_hand)}</td>
+                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0) : formatNum(row.qty_on_hand)}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.last_cost)}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
                       <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.price)}</td>
