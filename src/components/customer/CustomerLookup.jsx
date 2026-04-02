@@ -1031,43 +1031,43 @@ export default function CustomerLookup({
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
             {/* Customer header card */}
             <div className="bg-card border border-border rounded-xl p-4 mb-3">
-              <div className="flex items-center gap-3">
-                <User className="h-5 w-5 text-muted-foreground shrink-0" />
+              <div className="flex items-start gap-3">
+                <User className="h-6 w-6 text-muted-foreground shrink-0 mt-1" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold text-foreground">{customer?.customer_name}</div>
-                  <div className="text-sm text-muted-foreground">Account #{customer?.customer_number}</div>
-                </div>
-                {customer?.terms && (
-                  <Badge variant="outline" className="shrink-0 text-sm">
-                    {customer.terms}
-                  </Badge>
-                )}
-                {hasSubAccounts && (
-                  <Badge variant="outline" className="shrink-0 text-sm border-indigo-600 text-indigo-400">
-                    Hub · {subAccounts.length} sub-account{subAccounts.length > 1 ? "s" : ""}
-                  </Badge>
-                )}
-              </div>
-            </div>
-
-            {/* Outstanding balance card */}
-            <div className="bg-card border border-border rounded-xl p-4 mb-3">
-              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Outstanding Balance</p>
-              <p className={cn("text-2xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
-                {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
-              </p>
-              {hasSubAccounts && (
-                <div className="mt-3 space-y-1">
-                  {allAccounts.map(({ label, record: r, isMain }) => (
-                    <div key={label} className="flex justify-between text-sm">
-                      <span className={isMain ? "text-foreground font-medium" : "text-muted-foreground"}>{label}</span>
-                      <span className={parseAmount(r?.outstanding_balance) !== 0 ? "text-foreground" : "text-muted-foreground"}>
-                        {formatAmount(r?.outstanding_balance)}
-                      </span>
+                  <div className="text-2xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
+                  <div className="text-sm text-muted-foreground mt-0.5">Account #{customer?.customer_number}</div>
+                  {hasSubAccounts && (
+                    <div className="mt-3 space-y-1">
+                      {allAccounts.map(({ label, record: r, isMain }) => (
+                        <div key={label} className="flex justify-between text-sm">
+                          <span className={isMain ? "text-foreground font-medium" : "text-muted-foreground"}>{label}</span>
+                          <span className={parseAmount(r?.outstanding_balance) !== 0 ? "text-foreground" : "text-muted-foreground"}>
+                            {formatAmount(r?.outstanding_balance)}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  <p className={cn("text-2xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                    {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
+                  </p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Outstanding</p>
+                  <div className="flex gap-1.5 flex-wrap justify-end">
+                    {customer?.terms && (
+                      <Badge variant="outline" className="text-xs">
+                        {customer.terms}
+                      </Badge>
+                    )}
+                    {hasSubAccounts && (
+                      <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
+                        Hub · {subAccounts.length} sub-account{subAccounts.length > 1 ? "s" : ""}
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
 
             {/* Auto-flag banner */}
