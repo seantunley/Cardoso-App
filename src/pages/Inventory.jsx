@@ -270,7 +270,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
                   <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
                   {hubMode && (
-                    <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
+                    <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || row.site_id || "—"}</td>
                   )}
                 </tr>
               );

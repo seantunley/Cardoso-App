@@ -3497,12 +3497,12 @@ if (process.env.HUB_MODE === 'true') {
   // GET /api/hub/inventory
   app.get('/api/hub/inventory', requireAuth, (req, res) => {
     const { site_id, search, commodity } = req.query;
-    let query = 'SELECT * FROM hub_inventory WHERE 1=1';
+    let query = 'SELECT hi.*, COALESCE(s.name, hi.site_id) AS site_name FROM hub_inventory hi LEFT JOIN hub_sites s ON s.id = hi.site_id WHERE 1=1';
     const params = [];
-    if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
-    if (search) { query += ' AND (item_number LIKE ? OR item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (site_id) { query += ' AND hi.site_id=?'; params.push(site_id); }
+    if (search) { query += ' AND (hi.item_number LIKE ? OR hi.item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     if (commodity) { query += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
-    query += ' ORDER BY item_number ASC';
+    query += ' ORDER BY hi.item_number ASC';
     try {
       const rows = db.prepare(query).all(...params);
       res.json({ count: rows.length, records: rows });
