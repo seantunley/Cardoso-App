@@ -420,6 +420,14 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
 `);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_auditlog_created_date ON auditlog(created_date)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_login_log_logged_in_at ON login_log(logged_in_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_syncrun_connection_id ON syncrun(connection_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
 
 // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
 function ensureFlexibleCustomFieldConfigTable() {
@@ -514,123 +522,131 @@ function ensureColumn(tableName, columnName, definition) {
   }
 }
 
-ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
-ensureColumn('databaseconnection', 'last_error', 'TEXT');
-ensureColumn('datarecord', 'age_current', 'TEXT');
-ensureColumn('datarecord', 'age_7_days', 'TEXT');
-ensureColumn('datarecord', 'age_14_days', 'TEXT');
-ensureColumn('datarecord', 'age_21_days', 'TEXT');
-ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
-// Invoice fields 1-5 (number, amount, date) — ensure all exist for existing DBs
-ensureColumn('datarecord', 'last_unpaid_invoice_1', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_1_amount', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_1_date', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_2', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_2_amount', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_2_date', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_3', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_3_amount', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_3_date', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_4', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_4_amount', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_4_date', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_5', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_5_amount', 'TEXT');
-ensureColumn('datarecord', 'last_unpaid_invoice_5_date', 'TEXT');
-// Receipt fields 1-5 (number, amount, date) — ensure all exist for existing DBs
-ensureColumn('datarecord', 'last_receipt_1', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_1_amount', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_1_date', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_2', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_2_amount', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_2_date', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_3', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_3_amount', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_3_date', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_4', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_4_amount', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_4_date', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_5', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_5_amount', 'TEXT');
-ensureColumn('datarecord', 'last_receipt_5_date', 'TEXT');
-ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
+const migrationTx = db.transaction(() => {
+  ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
+  ensureColumn('databaseconnection', 'last_error', 'TEXT');
+  ensureColumn('datarecord', 'age_current', 'TEXT');
+  ensureColumn('datarecord', 'age_7_days', 'TEXT');
+  ensureColumn('datarecord', 'age_14_days', 'TEXT');
+  ensureColumn('datarecord', 'age_21_days', 'TEXT');
+  ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
+  // Invoice fields 1-5 (number, amount, date) — ensure all exist for existing DBs
+  ensureColumn('datarecord', 'last_unpaid_invoice_1', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_1_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_1_date', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_2', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_2_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_2_date', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_3', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_3_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_3_date', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_4', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_4_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_4_date', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_5', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_5_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_unpaid_invoice_5_date', 'TEXT');
+  // Receipt fields 1-5 (number, amount, date) — ensure all exist for existing DBs
+  ensureColumn('datarecord', 'last_receipt_1', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_1_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_1_date', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_2', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_2_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_2_date', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_3', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_3_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_3_date', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_4', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_4_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_4_date', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_5', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_5_amount', 'TEXT');
+  ensureColumn('datarecord', 'last_receipt_5_date', 'TEXT');
+  ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
 
-// One-time data migration: copy old singular field names into new _1 slots if new slots are empty
-{
-  const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
-  const migrations = [
-    // old column name -> new column name
-    ['last_unpaid_invoice_1_date', null],  // already existed, no old name for the number/amount
-    ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
-    ['last_receipt_number', 'last_receipt_1'],
-    ['last_receipt_amount', 'last_receipt_1_amount'],
-    ['last_receipt_date', 'last_receipt_1_date'],
-  ];
-  for (const [oldCol, newCol] of migrations) {
-    if (!newCol) continue;
-    if (colNames.includes(oldCol) && colNames.includes(newCol)) {
-      try {
-        db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
-      } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
-    }
-  }
-}
-ensureColumn('datarecord', 'terms', 'TEXT');
-// Query-mode columns
-ensureColumn('databaseconnection', 'sync_query', 'TEXT');
-ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
-ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
-ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
-ensureColumn('inventoryrecord', 'commodity', 'TEXT');
-ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
-ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
-ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
-
-// Migrate field_mappings from legacy flat format to per-table format
-// Legacy: { localKey: { sourceField, ... } }
-// New:    { tableName: { localKey: { sourceField, ... } } }
-(function migrateFieldMappingsToPerTable() {
-  const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
-  for (const conn of connections) {
-    try {
-      const raw = JSON.parse(conn.field_mappings || '{}');
-      const isFlat = Object.keys(raw).length > 0 &&
-        Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
-      if (!isFlat) continue; // already per-table or empty
-
-      const tableConfigs = JSON.parse(conn.table_configs || '[]');
-      if (!tableConfigs.length) continue;
-
-      const migrated = {};
-      for (const t of tableConfigs) {
-        migrated[t.table_name] = raw;
+  // One-time data migration: copy old singular field names into new _1 slots if new slots are empty
+  {
+    const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
+    const migrations = [
+      // old column name -> new column name
+      ['last_unpaid_invoice_1_date', null],  // already existed, no old name for the number/amount
+      ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
+      ['last_receipt_number', 'last_receipt_1'],
+      ['last_receipt_amount', 'last_receipt_1_amount'],
+      ['last_receipt_date', 'last_receipt_1_date'],
+    ];
+    for (const [oldCol, newCol] of migrations) {
+      if (!newCol) continue;
+      if (colNames.includes(oldCol) && colNames.includes(newCol)) {
+        try {
+          db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
+        } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
       }
-
-      db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
-        .run(JSON.stringify(migrated), conn.id);
-
-      console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
-    } catch (e) {
-      console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
     }
   }
-})();
+  ensureColumn('datarecord', 'terms', 'TEXT');
+  // Query-mode columns
+  ensureColumn('databaseconnection', 'sync_query', 'TEXT');
+  ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
+  ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
+  ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
+  ensureColumn('inventoryrecord', 'commodity', 'TEXT');
+  ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
+  ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
+  ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
 
-ensureColumn('user', 'password_hash', 'TEXT');
-ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
-ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
-ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
-ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
-// Back-fill: existing admin users should have can_manage_rules = 1
-db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
-ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
-ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
-ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
+  // Migrate field_mappings from legacy flat format to per-table format
+  // Legacy: { localKey: { sourceField, ... } }
+  // New:    { tableName: { localKey: { sourceField, ... } } }
+  (function migrateFieldMappingsToPerTable() {
+    const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
+    for (const conn of connections) {
+      try {
+        const raw = JSON.parse(conn.field_mappings || '{}');
+        const isFlat = Object.keys(raw).length > 0 &&
+          Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
+        if (!isFlat) continue; // already per-table or empty
+
+        const tableConfigs = JSON.parse(conn.table_configs || '[]');
+        if (!tableConfigs.length) continue;
+
+        const migrated = {};
+        for (const t of tableConfigs) {
+          migrated[t.table_name] = raw;
+        }
+
+        db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
+          .run(JSON.stringify(migrated), conn.id);
+
+        console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
+      } catch (e) {
+        console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
+      }
+    }
+  })();
+
+  ensureColumn('user', 'password_hash', 'TEXT');
+  ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
+  ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
+  ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
+  ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
+  // Back-fill: existing admin users should have can_manage_rules = 1
+  db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
+  ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
+  ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
+  ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
+});
+try {
+  migrationTx();
+} catch (err) {
+  console.error("[startup] migration failed:", err);
+  process.exit(1);
+}
 
 // ==================== SCHEMA CACHE ====================
 // Pre-load and cache table schemas at startup so PRAGMA table_info is never
@@ -664,8 +680,8 @@ function initPreparedStatements() {
   stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC');
   stmts.autoRecordsForFlags  = db.prepare('SELECT * FROM datarecord');
   stmts.updateAutoFlag       = db.prepare('UPDATE datarecord SET flag_color = ?, flag_source = ? WHERE id = ?');
-  stmts.clearAutoFlag        = db.prepare('UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE id = ? AND flag_source = ?');
-  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE flag_source = 'auto'");
+  stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_source = NULL WHERE id = ? AND flag_source = ?");
+  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_source = NULL WHERE flag_source = 'auto'");
 
   if (process.env.HUB_MODE === 'true') {
     stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
@@ -3097,6 +3113,7 @@ if (process.env.HUB_MODE === 'true') {
     ['last_receipt_3', 'TEXT'], ['last_receipt_3_amount', 'TEXT'], ['last_receipt_3_date', 'TEXT'],
     ['last_receipt_4', 'TEXT'], ['last_receipt_4_amount', 'TEXT'], ['last_receipt_4_date', 'TEXT'],
     ['last_receipt_5', 'TEXT'], ['last_receipt_5_amount', 'TEXT'], ['last_receipt_5_date', 'TEXT'],
+    ['outstanding_balance', 'TEXT'],
     ['auto_flagged', 'INTEGER DEFAULT 0'], ['flag_color', 'TEXT'], ['flag_reason', 'TEXT'],
     ['terms', 'TEXT'], ['updated_date', 'TEXT'], ['synced_at', 'TEXT'],
   ];
@@ -3726,18 +3743,6 @@ if (process.env.HUB_MODE === 'true') {
 
     res.json({ created, updated, errors });
   });
-
-  // Migrate hub_records schema for existing databases
-  const hubFinancialCols = [
-    'outstanding_balance', 'last_unpaid_invoice_1', 'last_unpaid_invoice_1_amount', 'last_unpaid_invoice_1_date', 'last_unpaid_invoice_2', 'last_unpaid_invoice_2_amount', 'last_unpaid_invoice_2_date', 'last_unpaid_invoice_3', 'last_unpaid_invoice_3_amount', 'last_unpaid_invoice_3_date', 'last_unpaid_invoice_4', 'last_unpaid_invoice_4_amount', 'last_unpaid_invoice_4_date', 'last_unpaid_invoice_5', 'last_unpaid_invoice_5_amount', 'last_unpaid_invoice_5_date', 'last_receipt_1', 'last_receipt_1_amount', 'last_receipt_1_date', 'last_receipt_2', 'last_receipt_2_amount', 'last_receipt_2_date', 'last_receipt_3', 'last_receipt_3_amount', 'last_receipt_3_date', 'last_receipt_4', 'last_receipt_4_amount', 'last_receipt_4_date', 'last_receipt_5', 'last_receipt_5_amount', 'last_receipt_5_date',
-  ];
-  const existingCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
-  for (const col of hubFinancialCols) {
-    if (!existingCols.includes(col)) {
-      db.prepare(`ALTER TABLE hub_records ADD COLUMN ${col} TEXT`).run();
-      console.log(`[HUB] Migrated hub_records: added column ${col}`);
-    }
-  }
 
   console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
 }
