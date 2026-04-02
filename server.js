@@ -2202,21 +2202,27 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
   }
 });
 
-// GET /api/inventory?search=&limit=500
+// GET /api/inventory?search=&commodity=&limit=
 app.get('/api/inventory', requireAuth, (req, res) => {
-  const search = req.query.search || '';
-  const limit = Math.min(parseInt(req.query.limit, 10) || 500, 10000);
+  const search = (req.query.search || '').trim();
+  const commodity = (req.query.commodity || '').trim();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100000, 100000);
   try {
-    let rows;
+    const conditions = [];
+    const params = [];
     if (search) {
-      rows = db.prepare(
-        `SELECT * FROM inventoryrecord WHERE item_number LIKE ? OR item_description LIKE ? ORDER BY item_number ASC LIMIT ?`
-      ).all(`%${search}%`, `%${search}%`, limit);
-    } else {
-      rows = db.prepare(
-        `SELECT * FROM inventoryrecord ORDER BY item_number ASC LIMIT ?`
-      ).all(limit);
+      conditions.push('(item_number LIKE ? OR item_description LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
     }
+    if (commodity) {
+      conditions.push('CAST(commodity AS TEXT) = ?');
+      params.push(commodity);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+    const rows = db.prepare(
+      `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
+    ).all(...params);
     res.json({ count: rows.length, records: rows });
   } catch (err) {
     console.error('inventory error', err);
@@ -3490,13 +3496,13 @@ if (process.env.HUB_MODE === 'true') {
 
   // GET /api/hub/inventory
   app.get('/api/hub/inventory', requireAuth, (req, res) => {
-    const { site_id, search } = req.query;
-    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
+    const { site_id, search, commodity } = req.query;
     let query = 'SELECT * FROM hub_inventory WHERE 1=1';
     const params = [];
     if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
     if (search) { query += ' AND (item_number LIKE ? OR item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    query += ` ORDER BY item_number ASC LIMIT ${limit}`;
+    if (commodity) { query += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
+    query += ' ORDER BY item_number ASC';
     try {
       const rows = db.prepare(query).all(...params);
       res.json({ count: rows.length, records: rows });

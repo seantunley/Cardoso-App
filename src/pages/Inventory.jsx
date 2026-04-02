@@ -2,9 +2,10 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "lucide-react";
 
-async function fetchInventory({ isHub, search, siteId, limit }) {
-  const params = new URLSearchParams({ limit: String(limit) });
+async function fetchInventory({ isHub, search, siteId, commodity }) {
+  const params = new URLSearchParams();
   if (search) params.set("search", search);
+  if (commodity) params.set("commodity", commodity);
   const url = isHub
     ? `/api/hub/inventory?${siteId ? `site_id=${encodeURIComponent(siteId)}&` : ""}${params}`
     : `/api/inventory?${params}`;
@@ -63,19 +64,18 @@ export default function Inventory() {
   });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["inventory", hubMode, debouncedSearch, siteFilter === "all" ? "" : siteFilter],
+    queryKey: ["inventory", hubMode, debouncedSearch, siteFilter === "all" ? "" : siteFilter, commodityFilter === "all" ? "" : commodityFilter],
     queryFn: () =>
       fetchInventory({
         isHub: hubMode,
         search: debouncedSearch,
         siteId: siteFilter === "all" ? "" : siteFilter,
-        limit: 500,
+        commodity: commodityFilter === "all" ? "" : commodityFilter,
       }),
     staleTime: 60_000,
   });
 
   const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes' };
-
   const allRows = data?.records ?? [];
   const priceLists = useMemo(() => {
     const seen = new Set();
@@ -84,8 +84,7 @@ export default function Inventory() {
   }, [allRows]);
   const rows = allRows
     .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
-    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
-    .filter(r => commodityFilter === 'all' || String(r.commodity) === commodityFilter);
+    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -146,8 +145,8 @@ export default function Inventory() {
             className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="all">All</option>
-            <option value="1">Sweets</option>
-            <option value="2">Cigarettes</option>
+            <option value="1">{COMMODITY_LABELS['1'] || 'Commodity 1'}</option>
+            <option value="2">{COMMODITY_LABELS['2'] || 'Commodity 2'}</option>
           </select>
           {commodityFilter !== 'all' && (
             <button
