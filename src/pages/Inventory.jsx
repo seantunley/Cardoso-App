@@ -272,8 +272,8 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
         style={{ height: TABLE_HEIGHT, overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10">
-            <tr className="border-b border-border bg-muted/50">
+          <thead className="sticky top-0 z-20">
+            <tr className="border-b border-border bg-card">
               <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Item Number</th>
               <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Description</th>
               <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Qty on Hand</th>
@@ -281,14 +281,13 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
               <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price List</th>
               <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price</th>
               <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">UOM</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Commodity</th>
               {hubMode && (
                 <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
               )}
             </tr>
           </thead>
           <tbody>
-            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 9 : 8} /></tr>}
+            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
             {items.map((vRow) => {
               const row = rows[vRow.index];
               return (
@@ -303,14 +302,13 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.price)}</td>
                   <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
-                  <td className="px-2 py-1 text-xs text-foreground">{COMMODITY_LABELS[String(row.commodity ?? '')] || row.commodity || "—"}</td>
                   {hubMode && (
                     <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
                   )}
                 </tr>
               );
             })}
-            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 9 : 8} /></tr>}
+            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
           </tbody>
         </table>
       </div>
