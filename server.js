@@ -576,239 +576,30 @@ function ensureColumn(tableName, columnName, definition) {
   }
 }
 
-const MIGRATIONS = [
-  {
-    version: 1,
-    name: 'initial_schema_columns',
-    up() {
-      ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
-      ensureColumn('databaseconnection', 'last_error', 'TEXT');
-      ensureColumn('datarecord', 'age_current', 'TEXT');
-      ensureColumn('datarecord', 'age_7_days', 'TEXT');
-      ensureColumn('datarecord', 'age_14_days', 'TEXT');
-      ensureColumn('datarecord', 'age_21_days', 'TEXT');
-      ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
-    },
-  },
-  {
-    version: 2,
-    name: 'invoice_receipt_numbered_columns',
-    up() {
-      for (let i = 1; i <= 5; i++) {
-        ensureColumn('datarecord', `last_unpaid_invoice_${i}`, 'TEXT');
-        ensureColumn('datarecord', `last_unpaid_invoice_${i}_amount`, 'TEXT');
-        ensureColumn('datarecord', `last_unpaid_invoice_${i}_date`, 'TEXT');
-        ensureColumn('datarecord', `last_receipt_${i}`, 'TEXT');
-        ensureColumn('datarecord', `last_receipt_${i}_amount`, 'TEXT');
-        ensureColumn('datarecord', `last_receipt_${i}_date`, 'TEXT');
-      }
-      // One-time data migration: copy old singular field names into new _1 slots
-      const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
-      const renames = [
-        ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
-        ['last_receipt_number', 'last_receipt_1'],
-        ['last_receipt_amount', 'last_receipt_1_amount'],
-        ['last_receipt_date', 'last_receipt_1_date'],
-      ];
-      for (const [oldCol, newCol] of renames) {
-        if (colNames.includes(oldCol) && colNames.includes(newCol)) {
-          try {
-            db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
-          } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
-        }
-      }
-    },
-  },
-  {
-    version: 3,
-    name: 'flag_source_and_terms',
-    up() {
-      ensureColumn('datarecord', 'flag_source', `TEXT DEFAULT NULL`);
-      ensureColumn('datarecord', 'terms', 'TEXT');
-    },
-  },
-  {
-    version: 4,
-    name: 'query_mode_and_inventory_columns',
-    up() {
-      ensureColumn('databaseconnection', 'sync_query', 'TEXT');
-      ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
-      ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
-      ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
-      ensureColumn('inventoryrecord', 'commodity', 'TEXT');
-      ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
-      ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
-      ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
-    },
-  },
-  {
-    version: 5,
-    name: 'field_mappings_per_table_format',
-    up() {
-      const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
-      for (const conn of connections) {
-        try {
-          const raw = JSON.parse(conn.field_mappings || '{}');
-          const isFlat = Object.keys(raw).length > 0 &&
-            Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
-          if (!isFlat) continue;
-          const tableConfigs = JSON.parse(conn.table_configs || '[]');
-          if (!tableConfigs.length) continue;
-          const migrated = {};
-          for (const t of tableConfigs) {
-            migrated[t.table_name] = raw;
-          }
-          db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
-            .run(JSON.stringify(migrated), conn.id);
-          console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
-        } catch (e) {
-          console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
-        }
-      }
-    },
-  },
-  {
-    version: 6,
-    name: 'user_permissions',
-    up() {
-      ensureColumn('user', 'password_hash', 'TEXT');
-      ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
-      ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
-      ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
-      ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
-      db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
-      ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
-      ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
-      ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
-    },
-  },
-  {
-    version: 7,
-    name: 'invoice_receipt_json_columns',
-    up() {
-      // Add JSON array columns to datarecord
-      ensureColumn('datarecord', 'unpaid_invoices', 'TEXT');
-      ensureColumn('datarecord', 'receipts', 'TEXT');
+ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
+ensureColumn('databaseconnection', 'last_error', 'TEXT');
+ensureColumn('datarecord', 'age_current', 'TEXT');
+ensureColumn('datarecord', 'age_7_days', 'TEXT');
+ensureColumn('datarecord', 'age_14_days', 'TEXT');
+ensureColumn('datarecord', 'age_21_days', 'TEXT');
+ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
+ensureColumn('datarecord', 'last_unpaid_invoice_date', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_number', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_amount', 'TEXT');
+ensureColumn('datarecord', 'last_receipt_date', 'TEXT');
+ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
+// Query-mode columns
+ensureColumn('databaseconnection', 'sync_query', 'TEXT');
+ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
+ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
+ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
 
-      // Migrate existing numbered columns into JSON arrays
-      const rows = db.prepare(`
-        SELECT id,
-          last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date,
-          last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date,
-          last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date,
-          last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date,
-          last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-          last_receipt_1, last_receipt_1_amount, last_receipt_1_date,
-          last_receipt_2, last_receipt_2_amount, last_receipt_2_date,
-          last_receipt_3, last_receipt_3_amount, last_receipt_3_date,
-          last_receipt_4, last_receipt_4_amount, last_receipt_4_date,
-          last_receipt_5, last_receipt_5_amount, last_receipt_5_date
-        FROM datarecord WHERE unpaid_invoices IS NULL OR receipts IS NULL
-      `).all();
-      const updateStmt = db.prepare(`UPDATE datarecord SET unpaid_invoices = ?, receipts = ? WHERE id = ?`);
-      const migrateRows = db.transaction(() => {
-        for (const row of rows) {
-          const invoices = [];
-          const recs = [];
-          for (let i = 1; i <= 5; i++) {
-            const num = row[`last_unpaid_invoice_${i}`];
-            const amt = row[`last_unpaid_invoice_${i}_amount`];
-            const dt  = row[`last_unpaid_invoice_${i}_date`];
-            if (num || amt || dt) invoices.push({ date: dt || '', number: num || '', amount: amt || '' });
-            const rnum = row[`last_receipt_${i}`];
-            const ramt = row[`last_receipt_${i}_amount`];
-            const rdt  = row[`last_receipt_${i}_date`];
-            if (rnum || ramt || rdt) recs.push({ date: rdt || '', number: rnum || '', amount: ramt || '' });
-          }
-          updateStmt.run(JSON.stringify(invoices), JSON.stringify(recs), row.id);
-        }
-      });
-      migrateRows();
-      if (rows.length > 0) console.log(`[migration 7] Migrated ${rows.length} datarecord rows to JSON invoice/receipt columns`);
-
-      // Hub records migration (only if table exists — new DBs get correct schema from CREATE TABLE)
-      if (process.env.HUB_MODE === 'true') {
-        const hubExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
-        if (hubExists) {
-          ensureColumn('hub_records', 'unpaid_invoices', 'TEXT');
-          ensureColumn('hub_records', 'receipts', 'TEXT');
-          const hubRows = db.prepare(`
-            SELECT site_id, record_id,
-              last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date,
-              last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date,
-              last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date,
-              last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date,
-              last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-              last_receipt_1, last_receipt_1_amount, last_receipt_1_date,
-              last_receipt_2, last_receipt_2_amount, last_receipt_2_date,
-              last_receipt_3, last_receipt_3_amount, last_receipt_3_date,
-              last_receipt_4, last_receipt_4_amount, last_receipt_4_date,
-              last_receipt_5, last_receipt_5_amount, last_receipt_5_date
-            FROM hub_records WHERE unpaid_invoices IS NULL OR receipts IS NULL
-          `).all();
-          const updateHub = db.prepare(`UPDATE hub_records SET unpaid_invoices = ?, receipts = ? WHERE site_id = ? AND record_id = ?`);
-          const migrateHub = db.transaction(() => {
-            for (const row of hubRows) {
-              const invoices = [];
-              const recs = [];
-              for (let i = 1; i <= 5; i++) {
-                const num = row[`last_unpaid_invoice_${i}`];
-                const amt = row[`last_unpaid_invoice_${i}_amount`];
-                const dt  = row[`last_unpaid_invoice_${i}_date`];
-                if (num || amt || dt) invoices.push({ date: dt || '', number: num || '', amount: amt || '' });
-                const rnum = row[`last_receipt_${i}`];
-                const ramt = row[`last_receipt_${i}_amount`];
-                const rdt  = row[`last_receipt_${i}_date`];
-                if (rnum || ramt || rdt) recs.push({ date: rdt || '', number: rnum || '', amount: ramt || '' });
-              }
-              updateHub.run(JSON.stringify(invoices), JSON.stringify(recs), row.site_id, row.record_id);
-            }
-          });
-          migrateHub();
-          if (hubRows.length > 0) console.log(`[migration 7] Migrated ${hubRows.length} hub_records rows to JSON invoice/receipt columns`);
-        }
-      }
-    },
-  },
-  {
-    version: 8,
-    name: 'hub_schema_columns',
-    up() {
-      if (process.env.HUB_MODE !== 'true') return;
-      const hubInventoryExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
-      if (hubInventoryExists) {
-        ensureColumn('hub_inventory', 'stocking_uom', 'TEXT');
-        ensureColumn('hub_inventory', 'commodity', 'TEXT');
-      }
-      const hubRecordsExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
-      if (hubRecordsExists) {
-        ensureColumn('hub_records', 'unpaid_invoices', 'TEXT');
-        ensureColumn('hub_records', 'receipts', 'TEXT');
-        ensureColumn('hub_records', 'outstanding_balance', 'TEXT');
-        ensureColumn('hub_records', 'auto_flagged', 'INTEGER DEFAULT 0');
-        ensureColumn('hub_records', 'flag_color', 'TEXT');
-        ensureColumn('hub_records', 'flag_reason', 'TEXT');
-        ensureColumn('hub_records', 'terms', 'TEXT');
-        ensureColumn('hub_records', 'updated_date', 'TEXT');
-        ensureColumn('hub_records', 'synced_at', 'TEXT');
-      }
-    },
-  },
-];
-
-function runMigrations(db) {
-  for (const migration of MIGRATIONS) {
-    const already = db.prepare('SELECT id FROM schema_migrations WHERE version = ?').get(migration.version);
-    if (already) continue;
-    const run = db.transaction(() => {
-      migration.up();
-      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(migration.version, migration.name);
-    });
+// Migrate field_mappings from legacy flat format to per-table format
+// Legacy: { localKey: { sourceField, ... } }
+// New:    { tableName: { localKey: { sourceField, ... } } }
+(function migrateFieldMappingsToPerTable() {
+  const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
+  for (const conn of connections) {
     try {
       run();
       console.log(`[migration] Applied v${migration.version}: ${migration.name}`);
@@ -869,6 +660,21 @@ function initPreparedStatements() {
 }
 
 initPreparedStatements();
+ensureColumn('user', 'password_hash', 'TEXT');
+ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
+ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
+// Back-fill: existing admin users should have can_manage_rules = 1
+db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
+ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
+ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
 
 // ==================== HELPERS ====================
 const sanitizeForSqlite = (data) => {
@@ -1580,6 +1386,9 @@ async function runConnectionImport(connectionId) {
 
       // Load active auto-flag rules once for the entire sync batch
       const activeAutoFlagRules = stmts.activeAutoFlagRules.all();
+      const activeAutoFlagRules = db.prepare(
+        `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
+      ).all();
 
       const updateRecordFlag = db.prepare(`
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
@@ -1645,6 +1454,7 @@ async function runConnectionImport(connectionId) {
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
              if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
                const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
+               const mergedRecord = { ...existing, ...baseRecordData };
                const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
                if (autoFlag) {
                  // Flag it (or update the auto-flag if the rule result changed)
@@ -1988,6 +1798,7 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
     const rows = db.prepare(
       `SELECT customer_number, customer_name, outstanding_balance,
               last_unpaid_invoice_1_date, last_receipt_1_date, updated_date, created_date,
+              last_unpaid_invoice_date, last_receipt_date, updated_date, created_date,
               age_analysis, flag_color
        FROM datarecord ORDER BY RANDOM() LIMIT 200`
     ).all();
@@ -2058,6 +1869,8 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
         outstanding_balance: row.outstanding_balance,
         last_unpaid_invoice_1_date: row.last_unpaid_invoice_1_date,
         last_receipt_1_date: row.last_receipt_1_date,
+        last_unpaid_invoice_date: row.last_unpaid_invoice_date,
+        last_receipt_date: row.last_receipt_date,
         updated_date: row.updated_date,
         age_analysis: row.age_analysis,
         flag_color: row.flag_color,
@@ -2121,6 +1934,12 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           r.outstanding_balance,
           r.unpaid_invoices,
           r.receipts,
+          r.last_unpaid_invoice_1,
+          r.last_unpaid_invoice_1_amount,
+          r.last_unpaid_invoice_date,
+          r.last_receipt_number,
+          r.last_receipt_amount,
+          r.last_receipt_date,
           r.flag_color,
           r.flag_reason,
           r.auto_flagged,
@@ -2139,12 +1958,16 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           customer_number,
           customer_name,
           outstanding_balance,
-          unpaid_invoices,
-          receipts,
+          last_unpaid_invoice_1,
+          last_unpaid_invoice_1_amount,
+          last_unpaid_invoice_date,
+          last_receipt_number,
+          last_receipt_amount,
+          last_receipt_date,
           flag_color,
           flag_reason,
           auto_flagged,
-          ? AS site_name
+          source_table AS site_name
         FROM datarecord
         WHERE ${balanceWhere}
         ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
@@ -3575,6 +3398,7 @@ if (process.env.HUB_MODE !== 'true') {
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
     const rules = stmts.activeAutoFlagRules.all();
+    const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
       return r;
@@ -3586,6 +3410,11 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 
     const updateFlag = stmts.updateAutoFlag;
     const clearFlag = stmts.clearAutoFlag;
+    const records = db.prepare(`SELECT * FROM datarecord`).all();
+    let flagged = 0, cleared = 0;
+
+    const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
+    const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
 
     const applyAll = db.transaction(() => {
       for (const record of records) {
@@ -3614,6 +3443,7 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
   try {
     const result = stmts.clearAllAutoFlags.run();
+    const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
     res.json({ cleared: result.changes });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3696,6 +3526,8 @@ app.get('/api/:table', requireAuth, (req, res) => {
       const desc = sortParam.startsWith('-');
       const col = desc ? sortParam.slice(1) : sortParam;
       const validCols = getTableColumns(table);
+      const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
+      const validCols = new Set(tableInfo.map(c => c.name));
       if (validCols.has(col)) {
         orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
       }

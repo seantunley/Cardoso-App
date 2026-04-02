@@ -26,6 +26,20 @@ const flagDotColors = {
   orange: "bg-orange-500",
 };
 
+const autoBannerColors = {
+  none: "bg-slate-800/80 border-slate-600 text-slate-300",
+  red: "bg-red-950/70 border-red-700 text-red-300",
+  green: "bg-green-950/70 border-green-700 text-green-300",
+  orange: "bg-orange-950/70 border-orange-700 text-orange-300",
+};
+
+const autoDot = {
+  none: "bg-slate-400",
+  red: "bg-red-500",
+  green: "bg-green-500",
+  orange: "bg-orange-500",
+};
+
 export default function RecordCard({ record, customFields, onFlagChange, onEdit, isSelected }) {
   const [expanded, setExpanded] = useState(false);
 
