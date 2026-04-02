@@ -1034,7 +1034,7 @@ export default function CustomerLookup({
               <div className="flex items-start gap-3">
                 <User className="h-6 w-6 text-muted-foreground shrink-0 mt-1" />
                 <div className="flex-1 min-w-0">
-                  <div className="text-2xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
+                  <div className="text-xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
                   <div className="text-sm text-muted-foreground mt-0.5">Account #{customer?.customer_number}</div>
                   {hasSubAccounts && (
                     <div className="mt-3 space-y-1">
@@ -1050,7 +1050,7 @@ export default function CustomerLookup({
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  <p className={cn("text-2xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                  <p className={cn("text-3xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
                     {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
                   </p>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Outstanding</p>
