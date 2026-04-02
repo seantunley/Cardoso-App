@@ -74,7 +74,7 @@ export default function Inventory() {
     staleTime: 60_000,
   });
 
-  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes' };
+  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco' };
   const allRows = data?.records ?? [];
   const priceLists = useMemo(() => {
     const seen = new Set();
