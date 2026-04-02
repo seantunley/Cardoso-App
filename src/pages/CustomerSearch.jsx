@@ -190,40 +190,7 @@ export default function CustomerSearch() {
               onClose={() => setActivityLogOpen(false)}
             />
 
-        {/* Connection Selector */}
-        {connections.length > 1 && (
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <CardContent className="p-4">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Select Database Connection</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {connections.map((conn) => (
-                    <button
-                      key={conn.id}
-                      onClick={() => setSelectedConnectionId(conn.id)}
-                      className={`p-2.5 rounded-lg border-2 transition-all text-left ${
-                        selectedConnectionId === conn.id
-                          ? "border-[var(--text-primary)] bg-[var(--text-primary)]/10 ring-1 ring-[var(--text-primary)]/20"
-                          : "border-[var(--border-color)] hover:border-[var(--border-color)]/70 hover:bg-[var(--bg-tertiary)]/50"
-                      }`}
-                    >
-                      <p className="font-medium text-[var(--text-primary)] text-xs">{conn.name}</p>
-                      <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{conn.database_name}</p>
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <div className={`w-1.5 h-1.5 rounded-full ${
-                          conn.status === "active" ? "bg-green-500" : 
-                          conn.status === "error" ? "bg-red-500" : 
-                          "bg-gray-500"
-                        }`} />
-                        <span className="text-[10px] text-gray-400 capitalize">{conn.status}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
 
         {/* Customer Lookup + Last Sync side by side */}
         <div className="flex gap-3 items-stretch">
