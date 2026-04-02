@@ -247,8 +247,8 @@ export default function Inventory() {
 }
 
 // ─── Virtualised table ────────────────────────────────────────────────────────
-const ROW_HEIGHT = 30; // px — adjust if row padding changes
-const TABLE_HEIGHT = 600; // px visible window
+const ROW_HEIGHT = 30;
+const TABLE_HEIGHT = 600;
 
 function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS }) {
   const parentRef = useRef(null);
@@ -262,82 +262,57 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
 
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
+  const paddingTop = items.length > 0 ? items[0].start : 0;
+  const paddingBottom = items.length > 0 ? totalHeight - items[items.length - 1].end : 0;
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* sticky header — outside scroll container */}
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/50">
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-28">Item Number</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Description</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground w-20">Qty on Hand</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground w-24">Last Cost</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground w-20">Price List</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground w-24">Price</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-16">UOM</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-24">Commodity</th>
-              {hubMode && (
-                <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-24">Site</th>
-              )}
-            </tr>
-          </thead>
-        </table>
-      </div>
-
-      {/* scrollable virtual body */}
       <div
         ref={parentRef}
         style={{ height: TABLE_HEIGHT, overflowY: "auto", overflowX: "auto" }}
       >
-        <div style={{ height: totalHeight, position: "relative" }}>
-          <table className="w-full text-sm" style={{ tableLayout: "fixed" }}>
-            <colgroup>
-              <col style={{ width: "7rem" }} />
-              <col />
-              <col style={{ width: "5rem" }} />
-              <col style={{ width: "6rem" }} />
-              <col style={{ width: "5rem" }} />
-              <col style={{ width: "6rem" }} />
-              <col style={{ width: "4rem" }} />
-              <col style={{ width: "6rem" }} />
-              {hubMode && <col style={{ width: "6rem" }} />}
-            </colgroup>
-            <tbody>
-              {items.map((vRow) => {
-                const row = rows[vRow.index];
-                return (
-                  <tr
-                    key={vRow.key}
-                    data-index={vRow.index}
-                    ref={virtualizer.measureElement}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: "100%",
-                      transform: `translateY(${vRow.start}px)`,
-                    }}
-                    className="border-b border-border transition-colors hover:bg-muted/30"
-                  >
-                    <td className="px-2 py-1 text-xs font-mono text-foreground overflow-hidden text-ellipsis whitespace-nowrap" style={{ width: "7rem" }}>{row.item_number || "—"}</td>
-                    <td className="px-2 py-1 text-xs text-foreground overflow-hidden text-ellipsis whitespace-nowrap">{row.item_description || "—"}</td>
-                    <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground" style={{ width: "5rem" }}>{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
-                    <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground" style={{ width: "6rem" }}>{formatCurrency(row.last_cost)}</td>
-                    <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground" style={{ width: "5rem" }}>{formatNum(row.price_list)}</td>
-                    <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground" style={{ width: "6rem" }}>{formatCurrency(row.price)}</td>
-                    <td className="px-2 py-1 text-xs text-foreground" style={{ width: "4rem" }}>{row.stocking_uom || "—"}</td>
-                    <td className="px-2 py-1 text-xs text-foreground" style={{ width: "6rem" }}>{COMMODITY_LABELS[String(row.commodity ?? '')] || row.commodity || "—"}</td>
-                    {hubMode && (
-                      <td className="px-2 py-1 text-xs text-muted-foreground" style={{ width: "6rem" }}>{row.site_id || "—"}</td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-10">
+            <tr className="border-b border-border bg-muted/50">
+              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Item Number</th>
+              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Description</th>
+              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Qty on Hand</th>
+              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Last Cost</th>
+              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price List</th>
+              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price</th>
+              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">UOM</th>
+              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Commodity</th>
+              {hubMode && (
+                <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 9 : 8} /></tr>}
+            {items.map((vRow) => {
+              const row = rows[vRow.index];
+              return (
+                <tr
+                  key={vRow.key}
+                  className="border-b border-border transition-colors hover:bg-muted/30"
+                >
+                  <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap">{row.item_number || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.last_cost)}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.price)}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{COMMODITY_LABELS[String(row.commodity ?? '')] || row.commodity || "—"}</td>
+                  {hubMode && (
+                    <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
+                  )}
+                </tr>
+              );
+            })}
+            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 9 : 8} /></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   );
