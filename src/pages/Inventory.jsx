@@ -26,7 +26,7 @@ const formatNum = (val, decimals = 2) => {
   if (val === null || val === undefined || val === '') return '—';
   const n = parseFloat(String(val).replace(/,/g, ''));
   if (isNaN(n)) return val;
-  return n.toLocaleString('en-ZA', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 };
 const formatCurrency = (val) => {
   const f = formatNum(val);
