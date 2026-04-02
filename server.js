@@ -643,6 +643,31 @@ function invalidateSchemaCache(table) { _schemaCache.delete(table); }
 for (const t of allowedTables) {
   try { getTableColumns(t); } catch {}
 }
+
+// ==================== PRE-COMPILED STATEMENTS ====================
+let stmts = {};
+function initPreparedStatements() {
+  stmts.getUserById        = db.prepare('SELECT * FROM "user" WHERE id = ?');
+  stmts.getUserByEmail     = db.prepare('SELECT * FROM "user" WHERE email = ?');
+  stmts.updateUserPassword = db.prepare('UPDATE "user" SET password_hash = ? WHERE id = ?');
+
+  stmts.kpiTotalRecords  = db.prepare('SELECT COUNT(*) as count FROM datarecord');
+  stmts.kpiFlagCounts    = db.prepare('SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color');
+  stmts.kpiLastSync      = db.prepare('SELECT MAX(synced_at) as last_sync FROM datarecord');
+  stmts.kpiLastRun       = db.prepare('SELECT MAX(last_run) as last_run FROM databaseconnection');
+  stmts.kpiActiveConns   = db.prepare('SELECT COUNT(*) as count FROM databaseconnection WHERE is_active = 1');
+
+  stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM auto_flag_rule WHERE is_active = 1 ORDER BY priority DESC');
+  stmts.autoRecordsForFlags  = db.prepare('SELECT id, customer_number, customer_name, flag_color, flag_source, outstanding_balance, last_invoice_1_amount, last_invoice_1_date, last_invoice_1_number, last_invoice_2_amount, last_invoice_2_date, last_invoice_2_number, last_invoice_3_amount, last_invoice_3_date, last_invoice_3_number, last_invoice_4_amount, last_invoice_4_date, last_invoice_4_number, last_invoice_5_amount, last_invoice_5_date, last_invoice_5_number, last_receipt_1_amount, last_receipt_1_date, last_receipt_1_number, last_receipt_2_amount, last_receipt_2_date, last_receipt_2_number, last_receipt_3_amount, last_receipt_3_date, last_receipt_3_number, last_receipt_4_amount, last_receipt_4_date, last_receipt_4_number, last_receipt_5_amount, last_receipt_5_date, last_receipt_5_number FROM datarecord');
+  stmts.updateAutoFlag       = db.prepare('UPDATE datarecord SET flag_color = ?, flag_source = ? WHERE id = ?');
+  stmts.clearAutoFlag        = db.prepare('UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE id = ? AND flag_source = ?');
+  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE flag_source = 'auto'");
+
+  stmts.getHubSetting  = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
+  stmts.setHubSetting  = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+  stmts.hubSitesForBackup = db.prepare('SELECT id, name, api_url, reporting_token FROM hub_site WHERE is_active = 1');
+}
+
 initPreparedStatements();
 
 // ==================== HELPERS ====================
