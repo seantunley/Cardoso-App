@@ -330,7 +330,7 @@ export default function CustomerBalances() {
           )}
 
           {/* Table */}
-          {rows.length >= LIMIT && (
+          {false && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
               <span>⚠️</span>
               <span>Showing top {LIMIT} customers only. There may be more records not shown.</span>
