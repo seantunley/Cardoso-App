@@ -984,15 +984,15 @@ export default function CustomerLookup({
           </DialogHeader>
 
           {/* ── 1. Verdict Banner ── */}
-          {(() => {
-            const VerdictIcon = creditAnalysis ? (verdictIcons[creditAnalysis.verdict] || ShieldCheck) : null;
-            return creditAnalysis ? (
+          {creditAnalysis ? (
             <div className={cn(
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
               <div className="flex items-center gap-3.5">
-                <VerdictIcon className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />
+                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2.5">
                     <span className="text-lg font-bold tracking-tight leading-tight">{creditAnalysis.title}</span>
@@ -1000,22 +1000,16 @@ export default function CustomerLookup({
                       "text-xs font-semibold px-2 py-0.5 rounded-full shrink-0",
                       verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
                     )}>
-                      {creditAnalysis.score}
+                      {creditAnalysis.score}/100
                     </span>
                   </div>
-                  {creditAnalysis.factors.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 mt-1.5">
-                      {creditAnalysis.factors.slice(0, 2).map((f, i) => (
-                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-black/20 max-w-[340px] truncate opacity-80">
-                          {f.text || f.label}
-                        </span>
-                      ))}
-                    </div>
+                  {creditAnalysis.summary && (
+                    <p className="text-sm mt-1 opacity-80 leading-snug">{creditAnalysis.summary}</p>
                   )}
                 </div>
               </div>
             </div>
-            ) : (
+          ) : (
             <div className="w-full px-5 py-4 border-b border-border bg-muted/30 shrink-0">
               <div className="flex items-center gap-4 animate-pulse">
                 <div className="h-8 w-12 bg-muted rounded" />
@@ -1025,7 +1019,7 @@ export default function CustomerLookup({
                 </div>
               </div>
             </div>
-          )})()}
+          )}
 
           {/* ── 2. Scrollable Body ── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
@@ -1113,7 +1107,7 @@ export default function CustomerLookup({
               <div className="bg-card border border-border rounded-xl p-4 mb-3">
                 <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
                   <Shield className="h-4 w-4" />
-                  Credit Analysis
+                  Assessment Details
                 </p>
                 <p className="text-sm text-muted-foreground mb-3 leading-snug">{creditAnalysis.summary}</p>
                 <ul className="space-y-1.5">
