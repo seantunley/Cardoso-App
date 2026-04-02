@@ -23,6 +23,9 @@ import {
   Trash2,
   History,
   CheckCircle,
+  ShieldCheck,
+  AlertTriangle,
+  XCircle,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -463,9 +466,21 @@ function analyseInvoiceCredit(records, flagHistory = []) {
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
 
 const verdictBannerStyles = {
-  approve: "bg-emerald-950 border-emerald-700 text-emerald-300",
-  caution: "bg-amber-950 border-amber-700 text-amber-300",
-  hold: "bg-red-950 border-red-700 text-red-300",
+  approve: "bg-emerald-950/80 border-emerald-700/60 text-emerald-300",
+  caution: "bg-amber-950/80 border-amber-700/60 text-amber-300",
+  hold: "bg-red-950/80 border-red-700/60 text-red-300",
+};
+
+const verdictIcons = {
+  approve: ShieldCheck,
+  caution: AlertTriangle,
+  hold: XCircle,
+};
+
+const verdictScoreStyles = {
+  approve: "bg-emerald-800/60 text-emerald-200 ring-1 ring-emerald-600/40",
+  caution: "bg-amber-800/60 text-amber-200 ring-1 ring-amber-600/40",
+  hold: "bg-red-800/60 text-red-200 ring-1 ring-red-600/40",
 };
 
 const flagDotColor = {
@@ -969,19 +984,29 @@ export default function CustomerLookup({
           </DialogHeader>
 
           {/* ── 1. Verdict Banner ── */}
-          {creditAnalysis ? (
+          {creditAnalysis ? (() => {
+            const VerdictIcon = verdictIcons[creditAnalysis.verdict] || ShieldCheck;
+            return (
             <div className={cn(
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
-              <div className="flex items-center gap-4">
-                <span className="text-2xl font-bold">{creditAnalysis.score}</span>
+              <div className="flex items-center gap-3.5">
+                <VerdictIcon className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-semibold">{creditAnalysis.title}</div>
+                  <div className="flex items-center gap-2.5">
+                    <span className="text-lg font-bold tracking-tight leading-tight">{creditAnalysis.title}</span>
+                    <span className={cn(
+                      "text-xs font-semibold px-2 py-0.5 rounded-full shrink-0",
+                      verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
+                    )}>
+                      {creditAnalysis.score}
+                    </span>
+                  </div>
                   {creditAnalysis.factors.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
                       {creditAnalysis.factors.slice(0, 2).map((f, i) => (
-                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-black/20 max-w-[340px] truncate">
+                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-black/20 max-w-[340px] truncate opacity-80">
                           {f.text || f.label}
                         </span>
                       ))}
@@ -989,7 +1014,8 @@ export default function CustomerLookup({
                   )}
                 </div>
               </div>
-            </div>
+            </div>);
+          })()
           ) : (
             <div className="w-full px-5 py-4 border-b border-border bg-muted/30 shrink-0">
               <div className="flex items-center gap-4 animate-pulse">
