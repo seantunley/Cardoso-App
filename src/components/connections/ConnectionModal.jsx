@@ -104,6 +104,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [queryTestStatus, setQueryTestStatus] = useState(null); // null | 'testing' | 'ok' | 'error'
+  const [queryErrorMsg, setQueryErrorMsg] = useState('');
   const [queryColumns, setQueryColumns] = useState([]);
   const [queryPreview, setQueryPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
@@ -243,6 +244,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     }
 
     setQueryTestStatus("testing");
+    setQueryErrorMsg('');
     setQueryColumns([]);
     setQueryPreview([]);
 
@@ -283,6 +285,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       toast.success(`Query OK — ${data.columns?.length || 0} columns, ${data.preview?.length || 0} preview rows`);
     } catch (error) {
       setQueryTestStatus("error");
+      setQueryErrorMsg(error.message || 'Unknown error');
       toast.error(`Query failed: ${error.message}`);
     }
   };
@@ -502,6 +505,9 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <><Play className="w-4 h-4 mr-2" />Test Query (preview 5 rows)</>
               )}
             </Button>
+          {queryTestStatus === "error" && queryErrorMsg && (
+            <p className="text-xs text-red-400 mt-2 break-words">{queryErrorMsg}</p>
+          )}
           </div>
 
           {/* ── Index field ── */}

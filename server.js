@@ -582,6 +582,7 @@ ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
 ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
 ensureColumn('inventoryrecord', 'commodity', 'TEXT');
+ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
 ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
 
 // Migrate field_mappings from legacy flat format to per-table format
@@ -1493,18 +1494,19 @@ async function runConnectionImport(connectionId) {
 
     const inventoryMappingConfig = {
       item_number:      { fallbacks: ['item_number', 'Item Number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
-      item_description: { fallbacks: ['item_description', 'Item Description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc'] },
-      qty_on_hand:      { fallbacks: ['qty_on_hand', 'Qty on Hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand', 'QTYONHAND'] },
-      last_cost:        { fallbacks: ['last_cost', 'Last Cost', 'LastCost', 'LAST_COST', 'Cost', 'COST', 'RECENTCOST'] },
+      item_description: { fallbacks: ['item_description', 'Item Description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc', 'ItemName'] },
+      qty_on_hand:      { fallbacks: ['qty_on_hand', 'Qty on Hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand', 'QTYONHAND', 'TotalLiveQtyOnHand'] },
+      last_cost:        { fallbacks: ['last_cost', 'Last Cost', 'LastCost', 'LAST_COST', 'Cost', 'COST', 'RECENTCOST', 'LowestRecentCost'] },
       price_list:       { fallbacks: ['price_list', 'Price List', 'PriceList', 'PRICE_LIST', 'Pricelist', 'PRICELIST'] },
-      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice', 'UNITPRICE'] },
+      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice', 'UNITPRICE', 'HighestUnitPrice'] },
       stocking_uom:     { fallbacks: ['stocking_uom', 'StockingUnitOfMeasure', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
       commodity:        { fallbacks: ['commodity', 'CommodityNumber', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
+      inventory_value:  { fallbacks: ['inventory_value', 'InventoryValue', 'TotalInventoryValueAtCost', 'TotalValue', 'inventory_value_at_cost'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_table, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
@@ -1513,6 +1515,7 @@ async function runConnectionImport(connectionId) {
         price=excluded.price,
         stocking_uom=excluded.stocking_uom,
         commodity=excluded.commodity,
+        inventory_value=excluded.inventory_value,
         updated_date=excluded.updated_date
     `);
 
@@ -1534,6 +1537,7 @@ async function runConnectionImport(connectionId) {
             String(getMappedOrFallbackValue(row, mappings, 'price', inventoryMappingConfig.price.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'stocking_uom', inventoryMappingConfig.stocking_uom.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'commodity', inventoryMappingConfig.commodity.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'inventory_value', inventoryMappingConfig.inventory_value.fallbacks) || ''),
             syncTimestamp
           );
         }
@@ -3272,8 +3276,8 @@ if (process.env.HUB_MODE === 'true') {
 
       // Inventory — full refresh
       const upsertInv = db.prepare(`
-        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, synced_at)
-        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @synced_at)
+        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, synced_at)
+        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @inventory_value, @synced_at)
         ON CONFLICT(site_id, item_number) DO UPDATE SET
           item_description=excluded.item_description,
           qty_on_hand=excluded.qty_on_hand,
@@ -3282,6 +3286,7 @@ if (process.env.HUB_MODE === 'true') {
           price=excluded.price,
           stocking_uom=excluded.stocking_uom,
           commodity=excluded.commodity,
+          inventory_value=excluded.inventory_value,
           synced_at=excluded.synced_at
       `);
       const insertInventory = db.transaction((invRecords) => {
@@ -3297,6 +3302,7 @@ if (process.env.HUB_MODE === 'true') {
             price: r.price || null,
             stocking_uom: r.stocking_uom || null,
             commodity: r.commodity || null,
+            inventory_value: r.inventory_value || null,
             synced_at: now,
           });
         }
