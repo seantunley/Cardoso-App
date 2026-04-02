@@ -114,10 +114,20 @@ export default function Inventory() {
             </div>
             <div>
               <h1 className="text-xl font-semibold text-foreground">Inventory</h1>
-              <p className="text-xs text-muted-foreground">
-                {rows.length.toLocaleString()} item{rows.length !== 1 ? "s" : ""}
-                {debouncedSearch ? ` · "${debouncedSearch}"` : ""}
-                {allRows.length > rows.length ? ` of ${allRows.length.toLocaleString()}` : ""}
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {(() => {
+                  const subtitleParts = [];
+                  subtitleParts.push(`${rows.length}${allRows.length !== rows.length ? " of " + allRows.length : ""} item${rows.length !== 1 ? "s" : ""}`);
+                  if (debouncedSearch) subtitleParts.push(`"${debouncedSearch}"`);
+                  if (commodityFilter !== "all") subtitleParts.push(COMMODITY_LABELS[commodityFilter] || commodityFilter);
+                  if (priceListFilter !== "all") subtitleParts.push(priceListFilter);
+                  if (hubMode && siteFilter !== "all") {
+                    const siteName = sites.find(s => String(s.id) === String(siteFilter))?.name || siteFilter;
+                    subtitleParts.push(siteName);
+                  }
+                  if (highlightBelowCost) subtitleParts.push("Price \u2264 cost");
+                  return subtitleParts.join(" \u00b7 ");
+                })()}
               </p>
             </div>
           </div>
