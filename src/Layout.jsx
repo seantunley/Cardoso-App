@@ -169,7 +169,7 @@ export default function Layout({ children, currentPageName }) {
     <div className="min-h-screen bg-background text-foreground">
       <aside className={cn(
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-200 ease-out",
-        isCollapsed ? "w-12" : "w-56"
+        isCollapsed ? "w-14" : "w-56"
       )}>
         <div className="border-b border-border px-3 pt-6 pb-3">
           <div className={cn("flex items-center gap-3 mb-0", isCollapsed && "justify-center")}>
@@ -195,7 +195,7 @@ export default function Layout({ children, currentPageName }) {
             </div>
           )}
         </div>
-        <nav className="flex-1 space-y-0.5 p-3">
+        <nav className={cn("flex-1 space-y-1", isCollapsed ? "p-2 flex flex-col items-center" : "p-3")}>
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
             return (
@@ -204,11 +204,13 @@ export default function Layout({ children, currentPageName }) {
                 to={`/${item.page}`}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
-                  "flex items-center gap-2.5 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-200",
+                  "flex items-center rounded-lg text-xs font-medium transition-all duration-200",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  isCollapsed && "justify-center px-0 py-2"
+                  isCollapsed
+                    ? "justify-center w-8 h-8 mx-auto"
+                    : "gap-2.5 px-3 py-2 w-full"
                 )}
               >
                 <item.icon
