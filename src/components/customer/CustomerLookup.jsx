@@ -31,7 +31,6 @@ import {
   AlertTriangle,
   XCircle,
   ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -526,7 +525,7 @@ const DarkTooltip = ({ active, payload, label }) => {
   if (!active || !payload?.length) return null;
   const entry = payload[0]?.payload;
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl">
+    <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 shadow-xl">
       <p className="text-slate-300 font-semibold mb-1">{entry?.label || label}</p>
       {entry?.paid === false ? (
         <p className="text-red-400 font-bold">Unpaid · {entry.days}d outstanding</p>
@@ -541,7 +540,7 @@ const TimelineTooltip = ({ active, payload }) => {
   if (!active || !payload?.length) return null;
   const entry = payload[0]?.payload;
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-xl">
+    <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 shadow-xl">
       <p className="text-slate-300 font-semibold">{entry?.label}</p>
       <p className={entry?.type === "invoice" ? "text-red-400" : "text-green-400"}>
         {entry?.type === "invoice" ? "Invoice" : "Receipt"} · {entry?.dateLabel}
@@ -554,7 +553,7 @@ const TimelineTooltip = ({ active, payload }) => {
 };
 
 function PaymentHistoryCharts({ lagData, timelineData }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
 
   const hasLagData = lagData && lagData.length > 0;
   const hasTimelineData = timelineData && timelineData.length > 0;
@@ -565,37 +564,41 @@ function PaymentHistoryCharts({ lagData, timelineData }) {
   const receiptTimeline = timelineData.filter(x => x.type === "receipt");
 
   return (
-    <div className="bg-card border border-border rounded-xl mb-3 overflow-hidden">
+    <div className="mb-3">
       <button
-        className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/40 transition-colors"
+        className="w-full flex items-center justify-between px-1 py-2 hover:opacity-80 transition-colors"
         onClick={() => setExpanded(v => !v)}
       >
-        <span className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Payment History</span>
-        {expanded ? <ChevronUp className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payment History</span>
+        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200${expanded ? " rotate-180" : ""}`} />
       </button>
 
       {expanded && (
-        <div className="px-4 pb-4 space-y-4">
+        <div className="border-b border-border pb-2 mb-3" />
+      )}
+      {expanded && (
+        <div className="space-y-4">
           {/* Chart 1: Payment Lag Bar Chart */}
           {hasLagData && (
             <div>
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Days to Pay per Invoice</p>
-              <ResponsiveContainer width="100%" height={160}>
-                <BarChart data={lagData} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+              <div className="w-full overflow-hidden">
+              <ResponsiveContainer width="100%" minWidth={0} height={140}>
+                <BarChart data={lagData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }} maxBarSize={28}>
                   <XAxis
                     dataKey="label"
-                    tick={{ fill: "#94a3b8", fontSize: 10 }}
-                    axisLine={{ stroke: "#334155" }}
+                    tick={{ fontSize: 10, fill: "#64748b" }}
+                    axisLine={false}
                     tickLine={false}
                   />
                   <YAxis
-                    tick={{ fill: "#94a3b8", fontSize: 10 }}
-                    axisLine={{ stroke: "#334155" }}
+                    tick={{ fontSize: 10, fill: "#64748b" }}
+                    axisLine={false}
                     tickLine={false}
                     allowDecimals={false}
                   />
-                  <Tooltip content={<DarkTooltip />} cursor={{ fill: "rgba(99,102,241,0.08)" }} />
-                  <Bar dataKey="days" radius={[3, 3, 0, 0]}>
+                  <Tooltip content={<DarkTooltip />} wrapperStyle={{ outline: "none" }} cursor={{ fill: "rgba(99,102,241,0.08)" }} />
+                  <Bar dataKey="days" radius={[3, 3, 0, 0]} maxBarSize={28}>
                     {lagData.map((entry, index) => (
                       <Cell
                         key={`cell-${index}`}
@@ -609,6 +612,7 @@ function PaymentHistoryCharts({ lagData, timelineData }) {
                   </Bar>
                 </BarChart>
               </ResponsiveContainer>
+              </div>
               <div className="flex gap-4 mt-1 text-xs text-slate-500">
                 <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#4ade80]" />≤14d</span>
                 <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#fb923c]" />15–30d</span>
@@ -621,18 +625,19 @@ function PaymentHistoryCharts({ lagData, timelineData }) {
           {hasTimelineData && (
             <div>
               <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Invoice &amp; Receipt Timeline</p>
-              <ResponsiveContainer width="100%" height={120}>
-                <ComposedChart margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+              <div className="w-full overflow-hidden">
+              <ResponsiveContainer width="100%" minWidth={0} height={100}>
+                <ComposedChart margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
                   <XAxis
                     dataKey="dateLabel"
                     type="category"
                     allowDuplicatedCategory={false}
-                    tick={{ fill: "#94a3b8", fontSize: 10 }}
-                    axisLine={{ stroke: "#334155" }}
+                    tick={{ fontSize: 10, fill: "#64748b" }}
+                    axisLine={false}
                     tickLine={false}
                   />
                   <YAxis hide domain={[0, 2]} />
-                  <Tooltip content={<TimelineTooltip />} cursor={false} />
+                  <Tooltip content={<TimelineTooltip />} wrapperStyle={{ outline: "none" }} cursor={false} />
                   {invoiceTimeline.length > 0 && (
                     <Scatter
                       name="Invoices"
@@ -651,6 +656,7 @@ function PaymentHistoryCharts({ lagData, timelineData }) {
                   )}
                 </ComposedChart>
               </ResponsiveContainer>
+              </div>
               <div className="flex gap-4 mt-1 text-xs text-slate-500">
                 <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#f87171]" />Invoice</span>
                 <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#4ade80]" />Receipt</span>
