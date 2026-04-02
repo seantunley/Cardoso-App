@@ -99,6 +99,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     query_field_mappings: {},
     status: "inactive",
     record_type: "customer",
+    sync_interval_hours: "",
   });
 
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
@@ -157,6 +158,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         })(),
         status: connection.status || "inactive",
         record_type: connection.record_type || "customer",
+        sync_interval_hours: connection.sync_interval_hours != null ? String(connection.sync_interval_hours) : "",
       });
       // Reset query test state when editing an existing connection
       setQueryTestStatus(null);
@@ -176,6 +178,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         query_field_mappings: {},
         status: "inactive",
         record_type: "customer",
+        sync_interval_hours: "",
       });
       setConnectionTestStatus(null);
       setQueryTestStatus(null);
@@ -313,6 +316,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       query_field_mappings: JSON.stringify(formData.query_field_mappings || {}),
       status: formData.status,
       record_type: formData.record_type || "customer",
+      sync_interval_hours: formData.sync_interval_hours ? parseInt(formData.sync_interval_hours, 10) : null,
     };
 
     onSave(dataToSave, connection?.id);
@@ -680,6 +684,28 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
                 <SelectItem value="testing">Testing</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* ── Auto-sync schedule ── */}
+          <div className="space-y-2 pt-4 border-t border-gray-800">
+            <Label className="text-sm font-medium text-gray-300">Auto-sync every</Label>
+            <Select
+              value={formData.sync_interval_hours || "none"}
+              onValueChange={(val) => setFormData({ ...formData, sync_interval_hours: val === "none" ? "" : val })}
+            >
+              <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                <SelectItem value="none">None (manual only)</SelectItem>
+                <SelectItem value="1">Every hour</SelectItem>
+                <SelectItem value="2">Every 2 hours</SelectItem>
+                <SelectItem value="4">Every 4 hours</SelectItem>
+                <SelectItem value="6">Every 6 hours</SelectItem>
+                <SelectItem value="12">Every 12 hours</SelectItem>
+                <SelectItem value="24">Every 24 hours</SelectItem>
               </SelectContent>
             </Select>
           </div>
