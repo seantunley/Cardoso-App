@@ -984,9 +984,9 @@ export default function CustomerLookup({
           </DialogHeader>
 
           {/* ── 1. Verdict Banner ── */}
-          {creditAnalysis ? (() => {
-            const VerdictIcon = verdictIcons[creditAnalysis.verdict] || ShieldCheck;
-            return (
+          {(() => {
+            const VerdictIcon = creditAnalysis ? (verdictIcons[creditAnalysis.verdict] || ShieldCheck) : null;
+            return creditAnalysis ? (
             <div className={cn(
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
@@ -1014,9 +1014,8 @@ export default function CustomerLookup({
                   )}
                 </div>
               </div>
-            </div>);
-          })()
-          ) : (
+            </div>
+            ) : (
             <div className="w-full px-5 py-4 border-b border-border bg-muted/30 shrink-0">
               <div className="flex items-center gap-4 animate-pulse">
                 <div className="h-8 w-12 bg-muted rounded" />
@@ -1026,7 +1025,7 @@ export default function CustomerLookup({
                 </div>
               </div>
             </div>
-          )}
+          )})()}
 
           {/* ── 2. Scrollable Body ── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
