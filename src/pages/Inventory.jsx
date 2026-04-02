@@ -38,6 +38,7 @@ export default function Inventory() {
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [hideZeroQty, setHideZeroQty] = useState(true);
+  const [priceListFilter, setPriceListFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
@@ -73,7 +74,14 @@ export default function Inventory() {
   });
 
   const allRows = data?.records ?? [];
-  const rows = hideZeroQty ? allRows.filter(r => parseFloat(r.qty_on_hand) > 0) : allRows;
+  const priceLists = useMemo(() => {
+    const seen = new Set();
+    for (const r of allRows) { if (r.price_list) seen.add(r.price_list); }
+    return [...seen].sort();
+  }, [allRows]);
+  const rows = allRows
+    .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
+    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -126,6 +134,30 @@ export default function Inventory() {
             />
             Hide zero qty
           </label>
+          {/* Price list filter */}
+          {priceLists.length > 0 && (
+            <>
+              <label className="text-xs text-muted-foreground whitespace-nowrap">Price List:</label>
+              <select
+                value={priceListFilter}
+                onChange={(e) => setPriceListFilter(e.target.value)}
+                className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="all">All</option>
+                {priceLists.map((pl) => (
+                  <option key={pl} value={pl}>{pl}</option>
+                ))}
+              </select>
+              {priceListFilter !== 'all' && (
+                <button
+                  onClick={() => setPriceListFilter('all')}
+                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Clear
+                </button>
+              )}
+            </>
+          )}
           {/* Site filter — hub only */}
           {hubMode && sites.length > 0 && (
             <>
