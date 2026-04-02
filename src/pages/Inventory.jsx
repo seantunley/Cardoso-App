@@ -39,6 +39,7 @@ export default function Inventory() {
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [hideZeroQty, setHideZeroQty] = useState(true);
+  const [highlightBelowCost, setHighlightBelowCost] = useState(false);
   const [priceListFilter, setPriceListFilter] = useState('all');
   const [commodityFilter, setCommodityFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -99,8 +100,8 @@ export default function Inventory() {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
   }, [sitesData]);
 
-  const activeFilterCount = [hideZeroQty, priceListFilter !== "all", commodityFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
-  const clearAll = () => { setSearch(""); setHideZeroQty(false); setPriceListFilter("all"); setCommodityFilter("all"); setSiteFilter("all"); };
+  const activeFilterCount = [hideZeroQty, highlightBelowCost, priceListFilter !== "all", commodityFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
+  const clearAll = () => { setSearch(""); setHideZeroQty(false); setHighlightBelowCost(false); setPriceListFilter("all"); setCommodityFilter("all"); setSiteFilter("all"); };
 
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
@@ -144,6 +145,10 @@ export default function Inventory() {
             <button onClick={() => setHideZeroQty((v) => !v)}
               className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${hideZeroQty ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
               {hideZeroQty && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}Hide zero qty
+            </button>
+            <button onClick={() => setHighlightBelowCost((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${highlightBelowCost ? "border-red-500/40 bg-red-500/10 text-red-400" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+              {highlightBelowCost && <span className="h-1.5 w-1.5 rounded-full bg-red-400" />}Price ≤ cost
             </button>
             {commodities.length > 0 && (
               <div className="relative">
@@ -206,7 +211,7 @@ export default function Inventory() {
 
         {/* Table — virtualised for large datasets */}
         {!isLoading && !isError && rows.length > 0 && (
-          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} />
+          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} highlightBelowCost={highlightBelowCost} />
         )}
       </div>
     </div>
@@ -217,7 +222,7 @@ export default function Inventory() {
 const ROW_HEIGHT = 30;
 const TABLE_HEIGHT = 600;
 
-function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS }) {
+function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost }) {
   const parentRef = useRef(null);
 
   const virtualizer = useVirtualizer({
@@ -231,6 +236,12 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
   const totalHeight = virtualizer.getTotalSize();
   const paddingTop = items.length > 0 ? items[0].start : 0;
   const paddingBottom = items.length > 0 ? totalHeight - items[items.length - 1].end : 0;
+
+  const isBelowCost = (row) => {
+    const price = parseFloat(String(row.price || '').replace(/[^0-9.-]/g, ''));
+    const cost = parseFloat(String(row.last_cost || '').replace(/[^0-9.-]/g, ''));
+    return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -260,13 +271,13 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
               return (
                 <tr
                   key={vRow.key}
-                  className="border-b border-border transition-colors hover:bg-muted/30"
+                  className={`border-b border-border transition-colors ${highlightBelowCost && isBelowCost(row) ? "bg-red-500/10 hover:bg-red-500/15" : "hover:bg-muted/30"}`}
                 >
                   <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap">{row.item_number || "—"}</td>
                   <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
-                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.last_cost)}</td>
-                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatCurrency(row.price)}</td>
+                  <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.last_cost)}</td>
+                  <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.price)}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
                   <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
                   {hubMode && (
