@@ -49,6 +49,8 @@ const BUILT_IN_INVENTORY_FIELDS = [
   { key: "last_cost",       label: "Last Cost",       type: "text", isBuiltIn: true },
   { key: "price_list",      label: "Price List",      type: "text", isBuiltIn: true },
   { key: "price",           label: "Price",           type: "text", isBuiltIn: true },
+  { key: "stocking_uom",    label: "Stocking Unit of Measure", type: "text", isBuiltIn: true },
+  { key: "commodity",       label: "Commodity",       type: "text", isBuiltIn: true },
   { key: "terms",           label: "Terms",           type: "text", isBuiltIn: true },
 ];
 
