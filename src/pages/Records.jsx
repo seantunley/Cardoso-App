@@ -154,7 +154,7 @@ export default function Records() {
           <Button
             variant="outline"
             onClick={exportRecords}
-            className="border-border text-muted-foreground hover:bg-card hover:text-foreground"
+            className="border-border text-muted-foreground hover:bg-card hover:text-foreground self-start sm:self-auto"
           >
             <Download className="w-4 h-4 mr-2" />
             Export
@@ -162,7 +162,7 @@ export default function Records() {
         </div>
 
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-card rounded-2xl border border-border">
+          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-card rounded-xl border border-border">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
@@ -189,7 +189,7 @@ export default function Records() {
           </div>
 
           {selectedRecords.size > 0 && (
-            <div className="flex items-center justify-between p-4 bg-blue-900/20 border border-blue-800/50 rounded-2xl">
+            <div className="flex items-center justify-between p-4 bg-primary/10 border border-primary/30 rounded-2xl">
               <span className="text-sm text-blue-300">
                 {selectedRecords.size} record(s) selected
               </span>
@@ -211,12 +211,19 @@ export default function Records() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
-                className="h-32 bg-card rounded-xl animate-pulse"
-              />
+                className="bg-card rounded-xl animate-pulse p-5 space-y-3"
+              >
+                <div className="flex gap-3">
+                  <div className="h-5 w-24 bg-muted rounded-md" />
+                  <div className="h-5 w-16 bg-muted rounded-md" />
+                </div>
+                <div className="h-4 w-48 bg-muted rounded-md" />
+                <div className="h-4 w-full bg-muted rounded-md" />
+              </div>
             ))}
           </div>
         ) : filteredRecords.length === 0 ? (
-          <div className="text-center py-16 bg-card rounded-2xl border border-border">
+          <div className="text-center py-20 bg-card rounded-xl border border-border">
             <FileText className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground">No records found</h3>
             <p className="text-muted-foreground mt-1">
@@ -239,9 +246,7 @@ export default function Records() {
                   }
                   setSelectedRecords(newSelected);
                 }}
-                className={`cursor-pointer transition-all ${
-                  selectedRecords.has(record.id) ? "ring-2 ring-blue-500 rounded-xl" : ""
-                }`}
+                className="cursor-pointer transition-all"
               >
                 <RecordCard
                   record={record}
