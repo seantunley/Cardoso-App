@@ -2,10 +2,9 @@ import { useState, useMemo, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Package } from "lucide-react";
 
-async function fetchInventory({ isHub, search, siteId, commodity }) {
+async function fetchInventory({ isHub, search, siteId }) {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
-  if (commodity) params.set("commodity", commodity);
   const url = isHub
     ? `/api/hub/inventory?${siteId ? `site_id=${encodeURIComponent(siteId)}&` : ""}${params}`
     : `/api/inventory?${params}`;
@@ -64,13 +63,13 @@ export default function Inventory() {
   });
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["inventory", hubMode, debouncedSearch, siteFilter === "all" ? "" : siteFilter, commodityFilter === "all" ? "" : commodityFilter],
+    queryKey: ["inventory", hubMode, debouncedSearch, siteFilter === "all" ? "" : siteFilter],
     queryFn: () =>
       fetchInventory({
         isHub: hubMode,
         search: debouncedSearch,
         siteId: siteFilter === "all" ? "" : siteFilter,
-        commodity: commodityFilter === "all" ? "" : commodityFilter,
+
       }),
     staleTime: 60_000,
   });
@@ -82,9 +81,18 @@ export default function Inventory() {
     for (const r of allRows) { if (r.price_list) seen.add(r.price_list); }
     return [...seen].sort();
   }, [allRows]);
+  const commodities = useMemo(() => {
+    const seen = new Set();
+    for (const r of allRows) {
+      const v = r.commodity != null ? String(r.commodity).trim() : '';
+      if (v) seen.add(v);
+    }
+    return [...seen].sort();
+  }, [allRows]);
   const rows = allRows
     .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
-    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter);
+    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
+    .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -145,8 +153,9 @@ export default function Inventory() {
             className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           >
             <option value="all">All</option>
-            <option value="1">{COMMODITY_LABELS['1'] || 'Commodity 1'}</option>
-            <option value="2">{COMMODITY_LABELS['2'] || 'Commodity 2'}</option>
+            {commodities.map((v) => (
+              <option key={v} value={v}>{COMMODITY_LABELS[v] || v}</option>
+            ))}
           </select>
           {commodityFilter !== 'all' && (
             <button
