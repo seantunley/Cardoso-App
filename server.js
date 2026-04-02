@@ -665,7 +665,7 @@ function initPreparedStatements() {
 
   stmts.getHubSetting  = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
   stmts.setHubSetting  = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  stmts.hubSitesForBackup = db.prepare('SELECT id, name, api_url, reporting_token FROM hub_site WHERE is_active = 1');
+  stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
 }
 
 initPreparedStatements();
