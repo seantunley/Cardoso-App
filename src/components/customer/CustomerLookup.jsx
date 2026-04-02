@@ -254,8 +254,19 @@ function getHistoryReasonSnippet(log) {
 function parseDateField(val) {
   if (!val) return null;
   const s = String(val).trim();
+  // YYYYMMDD
   if (/^\d{8}$/.test(s)) {
     return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
+  }
+  // DD/MM/YYYY or DD-MM-YYYY (common SA/ERP format)
+  const dmy = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
+  if (dmy) {
+    return new Date(`${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`);
+  }
+  // MM/DD/YYYY
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    return new Date(`${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`);
   }
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
