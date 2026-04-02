@@ -3550,6 +3550,7 @@ if (process.env.HUB_MODE === 'true') {
     try {
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
+      db.prepare('DELETE FROM hub_inventory').run();
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
       syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
