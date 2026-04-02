@@ -229,7 +229,7 @@ function parseDateField(val) {
   return isNaN(d.getTime()) ? null : d;
 }
 
-function analyseInvoiceCredit(records) {
+function analyseInvoiceCredit(records, flagHistory = []) {
   // records = array of all accounts (main + sub-accounts like BF, CA, OC)
   // Merge slots across all accounts, take combined outstanding balance
   const record = records[0] || {};
@@ -308,6 +308,14 @@ function analyseInvoiceCredit(records) {
 
   const factors = [];
   let deductions = 0;
+
+  // Count manual flag events from activity log
+  const redFlags = flagHistory.filter(e =>
+    e.action === "flag_changed" && (e.new_value === "red" || e.details?.includes("red"))
+  ).length;
+  const orangeFlags = flagHistory.filter(e =>
+    e.action === "flag_changed" && (e.new_value === "orange" || e.details?.includes("orange"))
+  ).length;
 
   // ── Match invoices → receipts (chronological pairing) ───────────────────
   // Sort invoices oldest→newest so we pair them in order
@@ -390,6 +398,19 @@ function analyseInvoiceCredit(records) {
       factors.push({ type: "bad", text: `Outstanding balance (R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})}) exceeds 2× the average invoice — high exposure.` });
       deductions += 15;
     }
+  }
+
+  // ── RULE 4: Staff flag history ──────────────────────────────────────────
+  if (redFlags >= 2) {
+    deductions += 20;
+    factors.push({ label: "Repeatedly flagged red by staff", impact: "high" });
+  } else if (redFlags === 1) {
+    deductions += 10;
+    factors.push({ label: "Previously flagged red", impact: "medium" });
+  }
+  if (orangeFlags >= 2) {
+    deductions += 10;
+    factors.push({ label: "Repeatedly flagged orange by staff", impact: "medium" });
   }
 
   // ── Verdict ─────────────────────────────────────────────────────────────
@@ -663,7 +684,8 @@ export default function CustomerLookup({
   const creditAnalysis = useMemo(() => {
     if (!customer) return null;
     const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
-    return analyseInvoiceCredit(allAccountRecords);
+    // TODO: pass real activity log once fetched in this component
+    return analyseInvoiceCredit(allAccountRecords, []);
   }, [customer, subAccounts]);
 
   const canModifyFlag = () => {

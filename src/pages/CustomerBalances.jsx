@@ -319,6 +319,12 @@ export default function CustomerBalances() {
           )}
 
           {/* Table */}
+          {rows.length >= LIMIT && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
+              <span>⚠️</span>
+              <span>Showing top {LIMIT} customers only. There may be more records not shown.</span>
+            </div>
+          )}
           {!isLoading && !isError && filtered.length > 0 && (
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <table className="w-full text-sm">
