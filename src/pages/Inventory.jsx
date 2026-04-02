@@ -39,6 +39,7 @@ export default function Inventory() {
   const [search, setSearch] = useState("");
   const [hideZeroQty, setHideZeroQty] = useState(true);
   const [priceListFilter, setPriceListFilter] = useState('all');
+  const [commodityFilter, setCommodityFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
@@ -73,6 +74,8 @@ export default function Inventory() {
     staleTime: 60_000,
   });
 
+  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes' };
+
   const allRows = data?.records ?? [];
   const priceLists = useMemo(() => {
     const seen = new Set();
@@ -81,7 +84,8 @@ export default function Inventory() {
   }, [allRows]);
   const rows = allRows
     .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
-    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter);
+    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
+    .filter(r => commodityFilter === 'all' || String(r.commodity) === commodityFilter);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -134,6 +138,25 @@ export default function Inventory() {
             />
             Hide zero qty
           </label>
+          {/* Commodity filter */}
+          <label className="text-xs text-muted-foreground whitespace-nowrap">Commodity:</label>
+          <select
+            value={commodityFilter}
+            onChange={(e) => setCommodityFilter(e.target.value)}
+            className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            <option value="all">All</option>
+            <option value="1">Sweets</option>
+            <option value="2">Cigarettes</option>
+          </select>
+          {commodityFilter !== 'all' && (
+            <button
+              onClick={() => setCommodityFilter('all')}
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Clear
+            </button>
+          )}
           {/* Price list filter */}
           {priceLists.length > 0 && (
             <>
