@@ -168,7 +168,7 @@ export default function Layout({ children, currentPageName }) {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <aside className={cn(
-        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-300",
+        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-200 ease-out",
         isCollapsed ? "w-16" : "w-56"
       )}>
         <div className="border-b border-border px-3 pt-6 pb-3">
@@ -183,15 +183,13 @@ export default function Layout({ children, currentPageName }) {
                 <defs><linearGradient id="bc32" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs>
               </svg>
             </div>
-            {!isCollapsed && (
-              <div className="min-w-0">
-                <h1 className="font-semibold text-base text-foreground leading-tight">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground">Business System</p>
+            <div className={cn("min-w-0 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "w-full opacity-100")}>
+                <h1 className="font-semibold text-base text-foreground leading-tight whitespace-nowrap">Cardoso Cigarettes</h1>
+                <p className="text-xs text-muted-foreground whitespace-nowrap">Business System</p>
               </div>
-            )}
           </div>
-          {currentUser && !isCollapsed && (
-            <div className="mt-6 rounded-lg bg-muted px-2.5 py-1.5">
+          {currentUser && (
+            <div className={cn("mt-6 rounded-lg bg-muted px-2.5 py-1.5 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0 mt-0 py-0 px-0" : "max-h-20 opacity-100")}>
               <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
               <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
             </div>
@@ -216,7 +214,7 @@ export default function Layout({ children, currentPageName }) {
                 <item.icon
                   className="h-5 w-5 shrink-0"
                 />
-                {!isCollapsed && item.name}
+                <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{item.name}</span>
               </Link>
             );
           })}
@@ -227,7 +225,7 @@ export default function Layout({ children, currentPageName }) {
               className={cn("w-full h-8", !isCollapsed && "justify-start")}
               onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
               <Settings className="h-3.5 w-3.5 shrink-0" />
-              {!isCollapsed && <span className="ml-1.5 text-xs">Settings</span>}
+              <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
             </Button>
           )}
 
@@ -235,25 +233,24 @@ export default function Layout({ children, currentPageName }) {
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
             <KeyRound className="h-3.5 w-3.5 shrink-0" />
-            {!isCollapsed && <span className="ml-1.5 text-xs">Change Password</span>}
+            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
           </Button>
 
           <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
             <LogOut className="h-3.5 w-3.5 shrink-0" />
-            {!isCollapsed && <span className="ml-1.5 text-xs">Logout</span>}
+            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
           </Button>
 
           <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}>
-            {isCollapsed
-              ? <ChevronRight className="h-3.5 w-3.5" />
-              : <><ChevronLeft className="h-3.5 w-3.5" /><span className="ml-1.5 text-xs">Collapse</span></>}
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+            <span className={cn("ml-1.5 text-xs overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
           </Button>
 
-          {!isCollapsed && (
+          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-20 opacity-100")}>
             <div
               className={cn(
                 "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
@@ -281,7 +278,7 @@ export default function Layout({ children, currentPageName }) {
                   : <><p className="font-medium">Update available</p><p className="font-semibold">v{versionStatus.latestVersion}{isAdmin ? " — click" : ""}</p></>
               )}
             </div>
-          )}
+            </div>
         </div>
       </aside>
       <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
