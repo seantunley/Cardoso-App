@@ -1000,18 +1000,18 @@ export default function CustomerLookup({
                     <p className="text-sm mt-1 opacity-80 leading-snug">{creditAnalysis.summary}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0 ml-3">
+                <div className="flex items-center gap-2.5 shrink-0 ml-3">
+                  {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
+                    <span className="text-base font-bold px-4 py-1.5 rounded-full bg-white/20 text-white ring-2 ring-white/40">
+                      ⏱ {creditAnalysis.avgLag}d avg
+                    </span>
+                  )}
                   <span className={cn(
-                    "text-sm font-bold px-3 py-1.5 rounded-full",
+                    "text-sm font-semibold px-3 py-1.5 rounded-full opacity-80",
                     verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
                   )}>
                     {creditAnalysis.score}/100
                   </span>
-                  {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                    <span className="text-sm font-semibold px-3 py-1.5 rounded-full bg-black/20 text-current opacity-90">
-                      Avg {creditAnalysis.avgLag}d to pay
-                    </span>
-                  )}
                 </div>
               </div>
             </div>
