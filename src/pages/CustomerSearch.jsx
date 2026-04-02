@@ -4,18 +4,14 @@ import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
-import StatCard from "../components/dashboard/StatCard";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
-import ActivityLogModal from "../components/customer/ActivityLogModal";
 import { Button } from "@/components/ui/button";
-import { History } from "lucide-react";
 
 export default function CustomerSearch() {
   const queryClient = useQueryClient();
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [selectedFlagColor, setSelectedFlagColor] = useState(null);
-  const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [customerNumberToLookup, setCustomerNumberToLookup] = useState("");
 
   const { data: currentUser } = useQuery({
@@ -98,14 +94,14 @@ export default function CustomerSearch() {
   // FlaggedCustomersModal fetches its own records server-side
 
   return (
-     <div className="min-h-screen bg-[var(--bg-primary)]">
-       <div className="max-w-4xl mx-auto p-3 lg:p-5 space-y-3">
+     <div className="min-h-screen bg-background">
+       <div className="max-w-4xl mx-auto p-6 space-y-3">
          {/* Header */}
          <div>
-           <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
+           <h1 className="text-2xl font-bold text-foreground tracking-tight">
              Customer Management
            </h1>
-           <p className="text-sm text-[var(--text-secondary)] mt-1">
+           <p className="text-sm text-muted-foreground mt-1">
              Search and review customer accounts, balances, and outstanding activity
            </p>
          </div>
@@ -184,12 +180,6 @@ export default function CustomerSearch() {
               onCustomerClick={handleCustomerClickFromModal}
             />
 
-            {/* Activity Log Modal */}
-            <ActivityLogModal
-              open={activityLogOpen}
-              onClose={() => setActivityLogOpen(false)}
-            />
-
 
 
         {/* Customer Lookup + Last Sync side by side */}
@@ -243,7 +233,7 @@ export default function CustomerSearch() {
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (
-          <Card className="border-amber-700 bg-amber-900/20">
+          <Card className="border-amber-500/40 bg-amber-500/10">
             <CardContent className="p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5" />
@@ -260,7 +250,7 @@ export default function CustomerSearch() {
         )}
 
         {activeConnections.length > 0 && (
-          <Card className="border-blue-700 bg-blue-900/20">
+          <Card className="border-blue-500/40 bg-blue-500/10">
             <CardContent className="p-3">
               <div className="flex items-start gap-2">
                 <Database className="w-4 h-4 text-blue-400 mt-0.5" />

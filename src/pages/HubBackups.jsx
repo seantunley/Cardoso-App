@@ -39,13 +39,13 @@ function fmtDate(iso) {
 }
 
 const STATUS_META = {
-  ok:          { label: "OK",        icon: CheckCircle2,  color: "#10b981", bg: "rgba(16,185,129,0.1)",  border: "rgba(16,185,129,0.3)"  },
-  warning:     { label: "Overdue",   icon: AlertTriangle, color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.3)"  },
-  stale:       { label: "Stale",     icon: AlertTriangle, color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)"   },
-  never:       { label: "No Backup", icon: XCircle,       color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)"   },
-  error:       { label: "Error",     icon: XCircle,       color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)"   },
-  unreachable: { label: "Offline",   icon: CloudOff,      color: "#6b7280", bg: "rgba(107,114,128,0.1)", border: "rgba(107,114,128,0.3)" },
-  unknown:     { label: "Unknown",   icon: Clock,         color: "#6b7280", bg: "rgba(107,114,128,0.1)", border: "rgba(107,114,128,0.3)" },
+  ok:          { label: "OK",        icon: CheckCircle2,  cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+  warning:     { label: "Overdue",   icon: AlertTriangle, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
+  stale:       { label: "Stale",     icon: AlertTriangle, cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+  never:       { label: "No Backup", icon: XCircle,       cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+  error:       { label: "Error",     icon: XCircle,       cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+  unreachable: { label: "Offline",   icon: CloudOff,      cls: "bg-slate-500/10 border border-slate-500/30 text-slate-400" },
+  unknown:     { label: "Unknown",   icon: Clock,         cls: "bg-slate-500/10 border border-slate-500/30 text-slate-400" },
 };
 
 // ── fetch ──────────────────────────────────────────────────────────────────
@@ -69,19 +69,13 @@ function SiteCard({ site, onDownload, downloading }) {
 
   return (
     <div
-      className="rounded-xl p-5 flex flex-col gap-4"
-      style={{
-        background: "rgba(15,23,42,0.6)",
-        border: `1px solid ${meta.border}`,
-        boxShadow: "0 4px 16px rgba(0,0,0,0.3)",
-      }}
+      className={`bg-card rounded-xl p-5 flex flex-col gap-4 ${meta.cls}`}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
           <div
-            className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)" }}
+            className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/15 border border-blue-500/30"
           >
             <Database className="w-4 h-4 text-blue-400" />
           </div>
@@ -92,8 +86,7 @@ function SiteCard({ site, onDownload, downloading }) {
         </div>
         {/* Status badge */}
         <span
-          className="flex-shrink-0 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full"
-          style={{ background: meta.bg, border: `1px solid ${meta.border}`, color: meta.color }}
+          className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${meta.cls}`}
         >
           <Icon className="w-3.5 h-3.5" />
           {meta.label}
@@ -119,8 +112,7 @@ function SiteCard({ site, onDownload, downloading }) {
           variant="outline"
           disabled={!site.url || downloading === site.site_id}
           onClick={() => onDownload(site)}
-          className="text-xs h-7 px-3"
-          style={{ borderColor: "rgba(59,130,246,0.3)", color: "#93c5fd" }}
+          className="text-xs h-7 px-3 border-border text-primary"
         >
           {downloading === site.site_id
             ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />Downloading…</>
@@ -135,7 +127,7 @@ function Stat({ label, value, sub }) {
   return (
     <div>
       <div className="text-[11px] text-slate-500 uppercase tracking-wide mb-0.5">{label}</div>
-      <div className="text-sm font-semibold text-white">{value ?? "—"}</div>
+      <div className="text-sm font-semibold text-foreground">{value ?? "—"}</div>
       {sub && <div className="text-[11px] text-slate-500">{sub}</div>}
     </div>
   );
@@ -154,15 +146,14 @@ function SummaryBar({ sites }) {
   return (
     <div className="flex flex-wrap gap-3 mb-6">
       {[
-        { label: "Healthy",  count: ok,      color: "#10b981", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.3)" },
-        { label: "Overdue",  count: warning,  color: "#f59e0b", bg: "rgba(245,158,11,0.1)",  border: "rgba(245,158,11,0.3)" },
-        { label: "Problems", count: problem, color: "#ef4444", bg: "rgba(239,68,68,0.1)",   border: "rgba(239,68,68,0.3)" },
-        { label: "Total Sites", count: sites.length, color: "#93c5fd", bg: "rgba(59,130,246,0.1)", border: "rgba(59,130,246,0.3)" },
+        { label: "Healthy",  count: ok,      cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+        { label: "Overdue",  count: warning, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
+        { label: "Problems", count: problem, cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+        { label: "Total Sites", count: sites.length, cls: "bg-blue-500/10 border border-blue-500/30 text-blue-300" },
       ].map(p => (
         <div
           key={p.label}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium"
-          style={{ background: p.bg, border: `1px solid ${p.border}`, color: p.color }}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium ${p.cls}`}
         >
           <span className="text-xl font-bold leading-none">{p.count}</span>
           <span className="text-xs opacity-80">{p.label}</span>
@@ -241,22 +232,20 @@ export default function HubBackups() {
 
   return (
     <div
-      className="min-h-screen p-6"
-      style={{ background: "radial-gradient(ellipse at 65% 0%, #1e3a5f 0%, #0f172a 55%)" }}
+      className="min-h-screen p-6 bg-background"
     >
       <div className="max-w-5xl mx-auto">
         {/* Page header */}
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center"
-              style={{ background: "rgba(59,130,246,0.15)", border: "1px solid rgba(59,130,246,0.3)" }}
+              className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15 border border-blue-500/30"
             >
               <HardDrive className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-white">Site Backups</h1>
-              <p className="text-xs text-slate-400">Live backup health across all registered sites</p>
+              <h1 className="text-xl font-bold text-foreground">Site Backups</h1>
+              <p className="text-xs text-muted-foreground">Live backup health across all registered sites</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -266,10 +255,7 @@ export default function HubBackups() {
               onClick={handleToggleSync}
               disabled={togglingSync}
               className="text-xs"
-              style={{
-                borderColor: syncEnabled ? "rgba(16,185,129,0.4)" : "rgba(239,68,68,0.4)",
-                color: syncEnabled ? "#6ee7b7" : "#fca5a5",
-              }}
+              className={syncEnabled ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}
             >
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
@@ -280,7 +266,7 @@ export default function HubBackups() {
               onClick={() => refetch()}
               disabled={isFetching}
               className="text-xs"
-              style={{ borderColor: "rgba(255,255,255,0.1)", color: "#94a3b8" }}
+              className="border-border text-muted-foreground"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
               Refresh
@@ -298,7 +284,7 @@ export default function HubBackups() {
 
         {/* Error */}
         {isError && (
-          <div className="rounded-xl p-4 text-red-300 text-sm" style={{ background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)" }}>
+          <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
             Failed to load backup status. Make sure you are logged in as an admin.
           </div>
         )}

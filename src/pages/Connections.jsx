@@ -100,6 +100,7 @@ export default function Connections() {
   const [syncingId, setSyncingId] = useState(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
@@ -225,20 +226,23 @@ export default function Connections() {
   };
 
   const handleDelete = (connection) => {
-    if (confirm("Are you sure you want to delete this connection?")) {
-      deleteMutation.mutate(connection.id);
-    }
+    setDeleteConfirmId(connection.id);
+  };
+
+  const confirmDelete = (id) => {
+    deleteMutation.mutate(id);
+    setDeleteConfirmId(null);
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
-      <div className="max-w-7xl mx-auto p-3 lg:p-5 space-y-5">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-7xl mx-auto p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">
               Database Connections
             </h1>
-            <p className="text-[var(--text-secondary)] mt-1">
+            <p className="text-muted-foreground mt-1">
               Manage your SQL database connections
             </p>
           </div>
@@ -248,7 +252,7 @@ export default function Connections() {
               onClick={handleSyncAll}
               disabled={isSyncingAll}
               variant="outline"
-              className="border-[var(--border-color)] bg-[var(--bg-secondary)] text-[var(--text-secondary)] hover:bg-[var(--bg-tertiary)] hover:text-[var(--text-primary)]"
+              className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll ? "animate-spin" : ""}`} />
               {isSyncingAll ? "Syncing..." : "Sync Now"}
@@ -260,7 +264,7 @@ export default function Connections() {
                   setEditingConnection(null);
                   setModalOpen(true);
                 }}
-                className="bg-white hover:bg-gray-100 text-gray-900 shadow-lg shadow-white/10"
+                variant="default"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Connection
@@ -284,17 +288,17 @@ export default function Connections() {
             {[1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="h-64 bg-[var(--bg-secondary)] rounded-2xl animate-pulse"
+                className="h-64 bg-card rounded-2xl animate-pulse"
               />
             ))}
           </div>
         ) : connections.length === 0 ? (
-          <div className="text-center py-16 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-color)]">
-            <Database className="w-12 h-12 text-[var(--text-tertiary)] mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-[var(--text-primary)]">
+          <div className="text-center py-16 bg-card rounded-2xl border border-border">
+            <Database className="w-12 h-12 text-muted-foreground/60 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-foreground">
               No connections yet
             </h3>
-            <p className="text-[var(--text-secondary)] mt-1 mb-6">
+            <p className="text-muted-foreground mt-1 mb-6">
               {isAdmin
                 ? "Add your first SQL database connection to start syncing data"
                 : "No database connections have been configured yet. Contact an admin."}
@@ -302,7 +306,7 @@ export default function Connections() {
             {isAdmin && (
               <Button
                 onClick={() => setModalOpen(true)}
-                className="bg-white hover:bg-gray-100 text-gray-900"
+                variant="default"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Add Connection
@@ -312,7 +316,7 @@ export default function Connections() {
         ) : (
           <div className="space-y-4">
             {selectedConnectionId && connections.find((c) => c.id === selectedConnectionId) && (
-              <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+              <Card className="border-border bg-card">
                 <CardContent className="p-4">
                   <ConnectionStatus
                     connection={connections.find((c) => c.id === selectedConnectionId)}
@@ -325,20 +329,38 @@ export default function Connections() {
               {connections.map((conn) => (
                 <div
                   key={conn.id}
-                  onClick={() => setSelectedConnectionId(conn.id)}
-                  className={`cursor-pointer transition-opacity ${
-                    selectedConnectionId === conn.id
-                      ? "opacity-100"
-                      : "opacity-75 hover:opacity-100"
-                  }`}
+                  className="relative"
                 >
-                  <ConnectionCard
-                    connection={conn}
-                    onSync={handleSync}
-                    onEdit={isAdmin ? handleEdit : null}
-                    onDelete={isAdmin ? handleDelete : null}
-                    isSyncing={syncingId === conn.id}
-                  />
+                  <div
+                    onClick={() => setSelectedConnectionId(conn.id)}
+                    className={`cursor-pointer transition-opacity ${
+                      selectedConnectionId === conn.id
+                        ? "opacity-100"
+                        : "opacity-75 hover:opacity-100"
+                    }`}
+                  >
+                    <ConnectionCard
+                      connection={conn}
+                      onSync={handleSync}
+                      onEdit={isAdmin ? handleEdit : null}
+                      onDelete={isAdmin ? handleDelete : null}
+                      isSyncing={syncingId === conn.id}
+                    />
+                  </div>
+                  {deleteConfirmId === conn.id && (
+                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 rounded-2xl border border-red-500/40 bg-card/95 backdrop-blur-sm p-4">
+                      <p className="text-sm font-medium text-foreground text-center">Delete this connection?</p>
+                      <p className="text-xs text-muted-foreground text-center">This action cannot be undone.</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <Button variant="destructive" size="sm" onClick={() => confirmDelete(conn.id)} disabled={deleteMutation.isPending}>
+                          Confirm Delete
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

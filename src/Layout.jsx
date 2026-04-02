@@ -91,6 +91,7 @@ export default function Layout({ children, currentPageName }) {
     updateAvailable: false,
   });
   const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -120,19 +121,19 @@ export default function Layout({ children, currentPageName }) {
 
   const triggerUpdate = async () => {
     if (!isAdmin || updateInstalling) return;
-    if (!confirm("Install update now? The app will restart automatically.")) return;
+    setShowUpdateConfirm(true);
+  };
+
+  const confirmUpdate = async () => {
+    setShowUpdateConfirm(false);
     setUpdateInstalling(true);
     try {
       const res = await fetch('/api/app-update-trigger', { method: 'POST', credentials: 'include' });
       const data = await res.json();
-      if (res.ok) {
-        alert("Update started. The app will restart in a few moments.");
-      } else {
-        alert("Update failed: " + (data.error || "Unknown error"));
+      if (!res.ok) {
         setUpdateInstalling(false);
       }
     } catch (e) {
-      alert("Update failed: " + e.message);
       setUpdateInstalling(false);
     }
   };
@@ -257,9 +258,9 @@ export default function Layout({ children, currentPageName }) {
               className={cn(
                 "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
                 versionStatus.updateAvailable && isAdmin
-                  ? "border-yellow-300 bg-yellow-100 text-yellow-900 cursor-pointer hover:bg-yellow-200"
+                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300 cursor-pointer hover:bg-yellow-500/25"
                   : versionStatus.updateAvailable
-                  ? "border-yellow-300 bg-yellow-100 text-yellow-900"
+                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300"
                   : "border-transparent text-muted-foreground/50"
               )}
               title={
@@ -271,12 +272,28 @@ export default function Layout({ children, currentPageName }) {
                     : `New: v${versionStatus.latestVersion}`
                   : `v${versionStatus.currentVersion}`
               }
-              onClick={versionStatus.updateAvailable && isAdmin ? triggerUpdate : undefined}
+              onClick={versionStatus.updateAvailable && isAdmin && !showUpdateConfirm ? triggerUpdate : undefined}
             >
               <p>v{versionStatus.currentVersion}</p>
               {versionStatus.updateAvailable && (
                 updateInstalling
                   ? <p className="font-medium animate-pulse">Installing…</p>
+                  : showUpdateConfirm
+                  ? (
+                    <div className="mt-1 space-y-1">
+                      <p className="font-medium text-yellow-300">Install now?</p>
+                      <div className="flex gap-1 justify-center">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
+                          className="px-2 py-0.5 rounded text-[10px] bg-yellow-500/30 hover:bg-yellow-500/50 text-yellow-200 font-semibold"
+                        >Install</button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
+                          className="px-2 py-0.5 rounded text-[10px] bg-muted hover:bg-muted/80 text-muted-foreground"
+                        >Cancel</button>
+                      </div>
+                    </div>
+                  )
                   : <><p className="font-medium">Update available</p><p className="font-semibold">v{versionStatus.latestVersion}{isAdmin ? " — click" : ""}</p></>
               )}
             </div>
@@ -289,7 +306,7 @@ export default function Layout({ children, currentPageName }) {
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
         {canSeeSettings && (
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5" style={{ color: "#f59e0b" }} /></Button>
+          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
         )}
       </header>
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">

@@ -1,15 +1,16 @@
 import { useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { Flag, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const flagColors = {
-  red: { bg: "bg-red-100", text: "text-red-700", border: "border-red-200", label: "Red Flag" },
-  green: { bg: "bg-green-100", text: "text-green-700", border: "border-green-200", label: "Green Flag" },
-  orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", label: "Orange Flag" },
+  red: { bg: "bg-red-500/15", text: "text-red-400", border: "border-red-500/30", label: "Red Flag" },
+  green: { bg: "bg-green-500/15", text: "text-green-400", border: "border-green-500/30", label: "Green Flag" },
+  orange: { bg: "bg-orange-500/15", text: "text-orange-400", border: "border-orange-500/30", label: "Orange Flag" },
+  none: { bg: "bg-slate-500/15", text: "text-slate-400", border: "border-slate-500/30", label: "No Flag" },
 };
 
 export default function FlaggedCustomersModal({ flagColor, open, onClose, onCustomerClick, siteName, customers: externalCustomers }) {
@@ -37,38 +38,34 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
     return String(numA).localeCompare(String(numB));
   });
 
-
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e) => { if (e.key === 'Enter') onClose(); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open]);
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[80vh] bg-gray-900 border-gray-700">
+      <DialogContent
+        className="max-w-2xl max-h-[80vh] bg-card border-border"
+        onKeyDown={(e) => { if (e.key === 'Enter') onClose(); }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-3">
-            <div className={cn("p-2 rounded-lg bg-gray-800")}>
+            <div className={cn("p-2 rounded-lg bg-muted")}>
               <Flag className={cn("w-5 h-5", config.text)} />
             </div>
             <div>
               {siteName && (
-                <div className="text-xl font-semibold text-white mb-0.5">{siteName}</div>
+                <div className="text-xl font-semibold text-foreground mb-0.5">{siteName}</div>
               )}
-              <div className="text-lg font-semibold text-white">
+              <div className="text-lg font-semibold text-foreground">
                 {config.label} Customers
-              </div>
-              <div className="text-sm text-gray-400 font-normal">
-                {isFetchingDisplay ? 'Loading...' : `${sortedCustomers.length} customer${sortedCustomers.length !== 1 ? 's' : ''}`}
               </div>
             </div>
           </DialogTitle>
+          <DialogDescription>
+            {isFetchingDisplay ? 'Loading...' : `${sortedCustomers.length} customer${sortedCustomers.length !== 1 ? 's' : ''}`}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 overflow-y-auto max-h-[60vh] pr-2">
           {sortedCustomers.length === 0 ? (
-            <div className="text-center py-8 text-gray-400">
+            <div className="text-center py-8 text-muted-foreground">
               No customers with {flagColor} flags
             </div>
           ) : (
@@ -84,22 +81,22 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
                     onCustomerClick(customer);
                     onClose();
                   }}
-                  className="p-4 bg-gray-800 rounded-lg border border-gray-700 hover:border-gray-600 hover:shadow-sm transition-all cursor-pointer"
+                  className="p-4 bg-muted rounded-lg border border-border hover:border-border/70 hover:shadow-sm transition-all cursor-pointer"
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-3 flex-1">
-                      <div className="p-2 bg-gray-900 rounded-lg">
-                        <User className="w-4 h-4 text-gray-400" />
+                      <div className="p-2 bg-card rounded-lg">
+                        <User className="w-4 h-4 text-muted-foreground" />
                       </div>
                       <div className="flex-1 min-w-0">
-                        <div className="font-semibold text-white">
+                        <div className="font-semibold text-foreground">
                           {custName || "Unknown Customer"}
                         </div>
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-muted-foreground">
                           Customer #{custNum}
                         </div>
                         {flagReason && (
-                          <div className="text-xs text-gray-300 mt-1 italic">
+                          <div className="text-xs text-muted-foreground mt-1 italic">
                             "{flagReason}"
                           </div>
                         )}

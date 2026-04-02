@@ -33,27 +33,27 @@ import { cn } from "@/lib/utils";
 
 const flagColors = {
   none: {
-    bg: "bg-slate-100",
-    text: "text-slate-500",
-    border: "border-slate-200",
+    bg: "bg-slate-500/15",
+    text: "text-slate-400",
+    border: "border-slate-500/30",
     label: "No Flag",
   },
   red: {
-    bg: "bg-red-100",
-    text: "text-red-700",
-    border: "border-red-200",
+    bg: "bg-red-500/15",
+    text: "text-red-400",
+    border: "border-red-500/30",
     label: "Red",
   },
   green: {
-    bg: "bg-green-100",
-    text: "text-green-700",
-    border: "border-green-200",
+    bg: "bg-green-500/15",
+    text: "text-green-400",
+    border: "border-green-500/30",
     label: "Green",
   },
   orange: {
-    bg: "bg-orange-100",
-    text: "text-orange-700",
-    border: "border-orange-200",
+    bg: "bg-orange-500/15",
+    text: "text-orange-400",
+    border: "border-orange-500/30",
     label: "Orange",
   },
 };
@@ -467,9 +467,9 @@ function analyseInvoiceCredit(records, flagHistory = []) {
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
 
 const verdictBannerStyles = {
-  approve: "bg-emerald-950/80 border-emerald-700/60 text-emerald-300",
-  caution: "bg-amber-950/80 border-amber-700/60 text-amber-300",
-  hold: "bg-red-950/80 border-red-700/60 text-red-300",
+  approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
+  caution: "bg-amber-500/20 border-amber-500/40 text-amber-200",
+  hold: "bg-red-500/20 border-red-500/40 text-red-200",
 };
 
 const verdictIcons = {
@@ -492,10 +492,10 @@ const flagDotColor = {
 };
 
 const flagPillStyles = {
-  none: { base: "border-slate-600 text-slate-300", active: "bg-slate-700 border-slate-400 text-white ring-2 ring-slate-400" },
-  green: { base: "border-green-800 text-green-400", active: "bg-green-900 border-green-500 text-green-200 ring-2 ring-green-500" },
-  orange: { base: "border-orange-800 text-orange-400", active: "bg-orange-900 border-orange-500 text-orange-200 ring-2 ring-orange-500" },
-  red: { base: "border-red-800 text-red-400", active: "bg-red-900 border-red-500 text-red-200 ring-2 ring-red-500" },
+  none: { base: "border-border text-muted-foreground", active: "bg-slate-700 border-slate-400 text-white ring-2 ring-slate-400" },
+  green: { base: "border-border text-muted-foreground", active: "bg-green-900 border-green-500 text-green-200 ring-2 ring-green-500" },
+  orange: { base: "border-border text-muted-foreground", active: "bg-orange-900 border-orange-500 text-orange-200 ring-2 ring-orange-500" },
+  red: { base: "border-border text-muted-foreground", active: "bg-red-900 border-red-500 text-red-200 ring-2 ring-red-500" },
 };
 
 export default function CustomerLookup({
@@ -863,7 +863,7 @@ export default function CustomerLookup({
           {title}
         </p>
         <div className="overflow-x-auto">
-          <table className="w-full">
+          <table className="w-full min-w-full">
             <thead>
               <tr className="border-b border-border">
                 <th className="text-left text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2 pr-4">Number</th>
@@ -910,7 +910,7 @@ export default function CustomerLookup({
   return (
     <div className="space-y-4">
       {/* ── Search bar ── */}
-      <div className="relative rounded-xl border border-slate-700/50 bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 p-5 shadow-xl">
+      <div className="relative rounded-xl border border-border bg-card p-5 shadow-xl">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
         <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Lookup</p>
         <div className="flex gap-2.5">
@@ -925,7 +925,7 @@ export default function CustomerLookup({
               className="h-11 border border-slate-600/60 bg-slate-950/70 pl-10 text-white placeholder:text-slate-500 focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
             />
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+              <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
                 {suggestions.map((s, idx) => (
                   <button
                     key={s.record.id ?? idx}
@@ -977,7 +977,7 @@ export default function CustomerLookup({
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
-            (!customer?.flag_color || customer?.flag_color === "none") && "border-gray-700"
+            (!customer?.flag_color || customer?.flag_color === "none") && "border-border"
           )}
         >
           <DialogHeader className="sr-only">
@@ -1121,7 +1121,7 @@ export default function CustomerLookup({
           <div className="shrink-0 bg-card border-t border-border px-4 py-3">
             <div className="flex items-center gap-2 flex-wrap">
               {!canModifyFlag() && customer?.flag_color !== "none" && (
-                <Badge variant="outline" className="border-gray-600 text-sm text-gray-400 mr-2">
+                <Badge variant="outline" className="border-border text-sm text-muted-foreground mr-2">
                   <Shield className="mr-1 h-3 w-3" />
                   Protected
                 </Badge>
@@ -1198,7 +1198,7 @@ export default function CustomerLookup({
       {/* ── Flag Removal Reason Modal ── */}
       <Dialog open={showRemovalModal} onOpenChange={() => {}}>
         <DialogContent
-          className="max-w-md bg-gray-900 border-rose-700 [&>button]:hidden"
+          className="max-w-md bg-card border-rose-700 [&>button]:hidden"
           onInteractOutside={(e) => e.preventDefault()}
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
@@ -1207,7 +1207,7 @@ export default function CustomerLookup({
               <Trash2 className="h-4 w-4 text-rose-400" />
               Remove Flag — Reason Required
             </DialogTitle>
-            <DialogDescription className="text-gray-400">
+            <DialogDescription className="text-muted-foreground">
               You are removing a{" "}
               <span className={customer?.flag_color === "red" ? "font-semibold text-red-400" : "font-semibold text-orange-400"}>
                 {customer?.flag_color}
@@ -1225,7 +1225,7 @@ export default function CustomerLookup({
                 value={removalReason}
                 onChange={(e) => setRemovalReason(e.target.value)}
                 placeholder="Enter the reason for removing this flag…"
-                className="h-24 resize-none border-gray-700 bg-gray-800 text-sm text-gray-100 placeholder:text-gray-500 focus:border-rose-600"
+                className="h-24 resize-none border-border bg-muted text-sm text-foreground placeholder:text-muted-foreground focus:border-rose-600"
                 autoFocus
               />
             </div>
@@ -1233,7 +1233,7 @@ export default function CustomerLookup({
             <div className="flex justify-end gap-2 pt-1">
               <Button
                 variant="outline"
-                className="border-gray-700 text-gray-300 hover:bg-gray-800 hover:text-white"
+                className="border-border text-muted-foreground hover:bg-muted hover:text-foreground"
                 onClick={() => {
                   setShowRemovalModal(false);
                   setRemovalReason("");
