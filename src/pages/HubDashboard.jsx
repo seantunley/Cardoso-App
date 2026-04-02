@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   RefreshCw, AlertCircle, Clock, Search,
   Building2, Wifi, WifiOff, Loader2, User, Flag, Shield,
-  Trash2, History, CheckCircle, Calendar,
+  Trash2, History, CheckCircle, Calendar, Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -479,12 +479,18 @@ export default function HubDashboard() {
       <HubCustomerSearch sites={sites} />
 
       {/* Per-site cards */}
-      {sites.length > 0 && (
+      {sites.length > 0 ? (
         <div>
           <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sites</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} />)}
           </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
+          <Network className="w-12 h-12 text-muted-foreground mb-4" />
+          <h3 className="text-lg font-medium text-foreground">No sites configured yet</h3>
+          <p className="text-sm text-muted-foreground mt-1">Add site connections to start aggregating data.</p>
         </div>
       )}
 

@@ -140,21 +140,21 @@ export default function Records() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
+    <div className="min-h-screen bg-background">
       <div className="max-w-6xl mx-auto p-6 lg:p-8 space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-[var(--text-primary)] tracking-tight">
+            <h1 className="text-3xl font-bold text-foreground tracking-tight">
               Data Records
             </h1>
-            <p className="text-[var(--text-secondary)] mt-1">
+            <p className="text-muted-foreground mt-1">
               {filteredRecords.length} of {records.length} records
             </p>
           </div>
           <Button
             variant="outline"
             onClick={exportRecords}
-            className="border-[var(--border-color)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] hover:text-[var(--text-primary)]"
+            className="border-border text-muted-foreground hover:bg-card hover:text-foreground"
           >
             <Download className="w-4 h-4 mr-2" />
             Export
@@ -162,23 +162,23 @@ export default function Records() {
         </div>
 
         <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-[var(--bg-secondary)] rounded-2xl border border-[var(--border-color)]">
+          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-card rounded-2xl border border-border">
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-tertiary)]" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search records..."
-                className="pl-10 bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                className="pl-10 bg-muted border-border text-foreground placeholder:text-muted-foreground"
               />
             </div>
 
             <Select value={flagFilter} onValueChange={setFlagFilter}>
-              <SelectTrigger className="w-full sm:w-[180px] bg-[var(--bg-tertiary)] border-[var(--border-color)] text-[var(--text-primary)]">
-                <Filter className="w-4 h-4 mr-2 text-[var(--text-tertiary)]" />
+              <SelectTrigger className="w-full sm:w-[180px] bg-muted border-border text-foreground">
+                <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
                 <SelectValue placeholder="Filter by flag" />
               </SelectTrigger>
-              <SelectContent className="bg-[var(--bg-secondary)] border-[var(--border-color)]">
+              <SelectContent className="bg-card border-border">
                 <SelectItem value="all">All Flags</SelectItem>
                 <SelectItem value="none">No Flag</SelectItem>
                 <SelectItem value="red">Red Flag</SelectItem>
@@ -211,15 +211,15 @@ export default function Records() {
             {[1, 2, 3, 4, 5].map((i) => (
               <div
                 key={i}
-                className="h-32 bg-[var(--bg-secondary)] rounded-xl animate-pulse"
+                className="h-32 bg-card rounded-xl animate-pulse"
               />
             ))}
           </div>
         ) : filteredRecords.length === 0 ? (
-          <div className="text-center py-16 bg-gray-900 rounded-2xl border border-gray-700">
-            <FileText className="w-12 h-12 text-gray-600 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-white">No records found</h3>
-            <p className="text-gray-400 mt-1">
+          <div className="text-center py-16 bg-card rounded-2xl border border-border">
+            <FileText className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-foreground">No records found</h3>
+            <p className="text-muted-foreground mt-1">
               {records.length === 0
                 ? "Sync data from your connections to see records here"
                 : "Try adjusting your search or filter"}

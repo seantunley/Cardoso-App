@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Scale } from "lucide-react";
 
 const LIMIT = 200;
 
@@ -304,7 +305,14 @@ export default function CustomerBalances() {
               {error?.message || "Failed to load data"}
             </div>
           )}
-          {!isLoading && !isError && filtered.length === 0 && (
+          {!isLoading && !isError && rows.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
+              <Scale className="w-12 h-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-medium text-foreground">No balance data yet</h3>
+              <p className="text-sm text-muted-foreground mt-1">Sync your connections to see customer balances here.</p>
+            </div>
+          )}
+          {!isLoading && !isError && rows.length > 0 && filtered.length === 0 && (
             <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
               {siteFilter !== "all" ? `No outstanding balances for "${siteFilter}".` : "No outstanding balances found."}
             </div>
