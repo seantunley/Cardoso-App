@@ -580,6 +580,8 @@ ensureColumn('datarecord', 'terms', 'TEXT');
 ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
 ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
+ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
+ensureColumn('inventoryrecord', 'commodity', 'TEXT');
 ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
 
 // Migrate field_mappings from legacy flat format to per-table format
@@ -3055,9 +3057,6 @@ if (process.env.HUB_MODE === 'true') {
 
   // Ensure hub_records has all columns (for existing DBs created before schema expansions)
   // Ensure inventoryrecord has newer columns
-  for (const [col, type] of [['stocking_uom','TEXT'],['commodity','TEXT']]) {
-    ensureColumn('inventoryrecord', col, type);
-  }
   if (HUB_MODE) {
     for (const [col, type] of [['stocking_uom','TEXT'],['commodity','TEXT']]) {
       ensureColumn('hub_inventory', col, type);
