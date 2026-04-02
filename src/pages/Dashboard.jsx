@@ -47,7 +47,7 @@ export default function Dashboard() {
       <div className="min-h-screen bg-background">
         <div className="max-w-7xl mx-auto p-6 lg:p-8 space-y-8">
           <div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
             <p className="text-muted-foreground mt-1">Overview of your data sync system</p>
           </div>
           <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-border bg-card">
@@ -64,7 +64,7 @@ export default function Dashboard() {
     <div className="min-h-screen bg-background">
       <div className="max-w-7xl mx-auto p-6 lg:p-8 space-y-8">
         <div>
-          <h1 className="text-3xl font-bold text-foreground tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Overview of your data sync system</p>
         </div>
 

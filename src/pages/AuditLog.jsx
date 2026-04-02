@@ -81,7 +81,7 @@ export default function AuditLog() {
 
   if (!isAdmin) {
     return (
-      <div className="min-h-screen bg-gray-950">
+      <div className="min-h-screen bg-background">
         <div className="mx-auto max-w-4xl p-6 lg:p-8">
           <Card className="border-rose-700 bg-rose-900/20">
             <CardContent className="p-8 text-center">
@@ -96,26 +96,26 @@ export default function AuditLog() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-950">
+    <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
 
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-foreground">Audit Logs</h1>
-          <p className="mt-2 text-gray-400">Track actions and access within the app</p>
+          <p className="mt-2 text-muted-foreground">Track actions and access within the app</p>
         </div>
 
         <Tabs defaultValue="audit" className="space-y-4">
-          <TabsList className="bg-gray-800 border border-gray-700">
+          <TabsList className="bg-muted border border-border">
             <TabsTrigger
               value="audit"
-              className="data-[state=active]:bg-gray-700 data-[state=active]:text-white text-gray-400 flex items-center gap-2"
+              className="data-[state=active]:bg-background data-[state=active]:text-foreground text-muted-foreground flex items-center gap-2"
             >
               <ClipboardList className="h-4 w-4" />
               Audit Log
             </TabsTrigger>
             <TabsTrigger
               value="login"
-              className="data-[state=active]:bg-gray-700 data-[state=active]:text-white text-gray-400 flex items-center gap-2"
+              className="data-[state=active]:bg-background data-[state=active]:text-foreground text-muted-foreground flex items-center gap-2"
             >
               <LogIn className="h-4 w-4" />
               Login Log
@@ -127,7 +127,7 @@ export default function AuditLog() {
             {logsLoading ? (
               <div className="space-y-4">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-16 animate-pulse rounded-lg bg-gray-800" />
+                  <div key={i} className="h-16 animate-pulse rounded-lg bg-muted" />
                 ))}
               </div>
             ) : logsError ? (
@@ -146,7 +146,7 @@ export default function AuditLog() {
             {loginLogsLoading ? (
               <div className="space-y-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-12 animate-pulse rounded-lg bg-gray-800" />
+                  <div key={i} className="h-12 animate-pulse rounded-lg bg-muted" />
                 ))}
               </div>
             ) : loginLogsError ? (
@@ -156,15 +156,15 @@ export default function AuditLog() {
                 </CardContent>
               </Card>
             ) : loginLogs.length === 0 ? (
-              <Card className="border-gray-700 bg-gray-900">
+              <Card className="border-border bg-card">
                 <CardContent className="p-6 text-center">
-                  <p className="text-sm text-gray-500">No login records yet.</p>
+                  <p className="text-sm text-muted-foreground">No login records yet.</p>
                 </CardContent>
               </Card>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-gray-700">
+              <div className="overflow-hidden rounded-lg border border-border">
                 <table className="min-w-full text-sm">
-                  <thead className="bg-gray-800">
+                  <thead className="bg-muted">
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Username
@@ -180,13 +180,13 @@ export default function AuditLog() {
                       </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-gray-800 bg-gray-900">
+                  <tbody className="divide-y divide-border bg-card">
                     {loginLogs.map((entry) => (
-                      <tr key={entry.id} className="transition-colors hover:bg-gray-800/50">
-                        <td className="px-4 py-3 font-medium text-white">{entry.user_email}</td>
-                        <td className="px-4 py-3 text-gray-400">{entry.user_name || "—"}</td>
-                        <td className="px-4 py-3 font-mono text-xs text-gray-400">{entry.ip_address || "—"}</td>
-                        <td className="px-4 py-3 text-gray-400">{formatDateTime(entry.logged_in_at)}</td>
+                      <tr key={entry.id} className="transition-colors hover:bg-muted/50">
+                        <td className="px-4 py-3 font-medium text-foreground">{entry.user_email}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{entry.user_name || "—"}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{entry.ip_address || "—"}</td>
+                        <td className="px-4 py-3 text-muted-foreground">{formatDateTime(entry.logged_in_at)}</td>
                       </tr>
                     ))}
                   </tbody>

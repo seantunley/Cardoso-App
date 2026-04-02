@@ -244,7 +244,7 @@ export default function HubBackups() {
               <HardDrive className="w-5 h-5 text-blue-400" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">Site Backups</h1>
+              <h1 className="text-2xl font-bold text-foreground">Site Backups</h1>
               <p className="text-xs text-muted-foreground">Live backup health across all registered sites</p>
             </div>
           </div>

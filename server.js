@@ -162,6 +162,48 @@ async function getVersionStatus() {
   }
 }
 
+// ==================== FIELD REGISTRY ====================
+// Defines all MSSQL→SQLite field mappings. buildFieldPatch iterates this.
+const FIELD_REGISTRY = [
+  { key: 'customer_number',    sources: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER'],                                                                       defaultMode: 'sync' },
+  { key: 'customer_name',      sources: ['customer_name', 'CustomerName', 'CUSTOMER_NAME', 'name', 'Name'],                                                             defaultMode: 'sync' },
+  { key: 'age_analysis',       sources: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],                                                                                defaultMode: 'sync' },
+  { key: 'outstanding_balance',sources: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE', 'AMTDUE', 'AMTDUE1', 'AMTDUE1HC', 'AMTOUTSTANDING', 'OUTSTANDING', 'OutstandingAmt', 'outstanding_amt', 'balance_due', 'BalanceDue', 'BALANCEDUE', 'TotalDue', 'TOTALDUE', 'total_due', 'AmountDue', 'AMOUNTDUE', 'amount_due'], defaultMode: 'sync' },
+  { key: 'age_current',        sources: ['age_current', 'AgeCurrent', 'AGE_CURRENT', 'Current', 'CURRENT'],                                                             defaultMode: 'sync' },
+  { key: 'age_7_days',         sources: ['age_7_days', 'Age7Days', 'AGE_7_DAYS', 'Age7', 'AMTDUE07'],                                                                  defaultMode: 'sync' },
+  { key: 'age_14_days',        sources: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],                                                               defaultMode: 'sync' },
+  { key: 'age_21_days',        sources: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],                                                               defaultMode: 'sync' },
+  { key: 'terms',              sources: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],                                                  defaultMode: 'sync' },
+  { key: 'note',               sources: ['note', 'Note', 'notes', 'Notes'],                                                                                             defaultMode: 'local-only' },
+];
+
+// Invoice/receipt slot definitions — used by buildFieldPatch to produce JSON arrays
+const INVOICE_SLOTS = [1, 2, 3, 4, 5].map(i => ({
+  index: i,
+  number_sources: i === 1
+    ? [`last_unpaid_invoice_1`, 'LastUnpaidInvoice1', 'LAST_UNPAID_INVOICE_1']
+    : [`last_unpaid_invoice_${i}`, `LastUnpaidInvoice${i}`, `LAST_UNPAID_INVOICE_${i}`],
+  amount_sources: i === 1
+    ? ['last_unpaid_invoice_1_amount', 'LastUnpaidInvoice1Amount', 'LAST_UNPAID_INVOICE_1_AMOUNT']
+    : [`last_unpaid_invoice_${i}_amount`, `LastUnpaidInvoice${i}Amount`, `LAST_UNPAID_INVOICE_${i}_AMOUNT`],
+  date_sources: i === 1
+    ? ['last_unpaid_invoice_1_date', 'LastUnpaidInvoice1Date', 'LAST_UNPAID_INVOICE_1_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate']
+    : [`last_unpaid_invoice_${i}_date`, `LastUnpaidInvoice${i}Date`, `LAST_UNPAID_INVOICE_${i}_DATE`],
+}));
+
+const RECEIPT_SLOTS = [1, 2, 3, 4, 5].map(i => ({
+  index: i,
+  number_sources: i === 1
+    ? ['last_receipt_1', 'LastReceipt1', 'LAST_RECEIPT_1', 'last_receipt_number', 'LastReceiptNumber', 'ReceiptNo', 'RECNO']
+    : [`last_receipt_${i}`, `LastReceipt${i}`, `LAST_RECEIPT_${i}`],
+  amount_sources: i === 1
+    ? ['last_receipt_1_amount', 'LastReceipt1Amount', 'LAST_RECEIPT_1_AMOUNT', 'last_receipt_amount', 'LastReceiptAmount', 'ReceiptAmount', 'RECAMT']
+    : [`last_receipt_${i}_amount`, `LastReceipt${i}Amount`, `LAST_RECEIPT_${i}_AMOUNT`],
+  date_sources: i === 1
+    ? ['last_receipt_1_date', 'LastReceipt1Date', 'LAST_RECEIPT_1_DATE', 'last_receipt_date', 'LastReceiptDate', 'ReceiptDate', 'RECDATE']
+    : [`last_receipt_${i}_date`, `LastReceipt${i}Date`, `LAST_RECEIPT_${i}_DATE`],
+}));
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -239,6 +281,15 @@ db.pragma('cache_size = -65536');
 db.pragma('mmap_size = 268435456');
 db.pragma('temp_store = MEMORY');
 db.exec('PRAGMA optimize');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
 console.log(`✅ SQLite database ready → ${dbPath}`);
 
@@ -525,129 +576,253 @@ function ensureColumn(tableName, columnName, definition) {
   }
 }
 
-const migrationTx = db.transaction(() => {
-  ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
-  ensureColumn('databaseconnection', 'last_error', 'TEXT');
-  ensureColumn('datarecord', 'age_current', 'TEXT');
-  ensureColumn('datarecord', 'age_7_days', 'TEXT');
-  ensureColumn('datarecord', 'age_14_days', 'TEXT');
-  ensureColumn('datarecord', 'age_21_days', 'TEXT');
-  ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
-  // Invoice fields 1-5 (number, amount, date) — ensure all exist for existing DBs
-  ensureColumn('datarecord', 'last_unpaid_invoice_1', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_1_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_1_date', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_2', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_2_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_2_date', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_3', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_3_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_3_date', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_4', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_4_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_4_date', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_5', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_5_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_unpaid_invoice_5_date', 'TEXT');
-  // Receipt fields 1-5 (number, amount, date) — ensure all exist for existing DBs
-  ensureColumn('datarecord', 'last_receipt_1', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_1_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_1_date', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_2', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_2_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_2_date', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_3', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_3_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_3_date', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_4', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_4_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_4_date', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_5', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_5_amount', 'TEXT');
-  ensureColumn('datarecord', 'last_receipt_5_date', 'TEXT');
-  ensureColumn('datarecord', 'flag_source', "TEXT DEFAULT NULL");
-
-  // One-time data migration: copy old singular field names into new _1 slots if new slots are empty
+const MIGRATIONS = [
   {
-    const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
-    const migrations = [
-      // old column name -> new column name
-      ['last_unpaid_invoice_1_date', null],  // already existed, no old name for the number/amount
-      ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
-      ['last_receipt_number', 'last_receipt_1'],
-      ['last_receipt_amount', 'last_receipt_1_amount'],
-      ['last_receipt_date', 'last_receipt_1_date'],
-    ];
-    for (const [oldCol, newCol] of migrations) {
-      if (!newCol) continue;
-      if (colNames.includes(oldCol) && colNames.includes(newCol)) {
-        try {
-          db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
-        } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
+    version: 1,
+    name: 'initial_schema_columns',
+    up() {
+      ensureColumn('datarecord', 'local_fields', `TEXT DEFAULT '{}'`);
+      ensureColumn('databaseconnection', 'last_error', 'TEXT');
+      ensureColumn('datarecord', 'age_current', 'TEXT');
+      ensureColumn('datarecord', 'age_7_days', 'TEXT');
+      ensureColumn('datarecord', 'age_14_days', 'TEXT');
+      ensureColumn('datarecord', 'age_21_days', 'TEXT');
+      ensureColumn('datarecord', 'outstanding_balance', 'TEXT');
+    },
+  },
+  {
+    version: 2,
+    name: 'invoice_receipt_numbered_columns',
+    up() {
+      for (let i = 1; i <= 5; i++) {
+        ensureColumn('datarecord', `last_unpaid_invoice_${i}`, 'TEXT');
+        ensureColumn('datarecord', `last_unpaid_invoice_${i}_amount`, 'TEXT');
+        ensureColumn('datarecord', `last_unpaid_invoice_${i}_date`, 'TEXT');
+        ensureColumn('datarecord', `last_receipt_${i}`, 'TEXT');
+        ensureColumn('datarecord', `last_receipt_${i}_amount`, 'TEXT');
+        ensureColumn('datarecord', `last_receipt_${i}_date`, 'TEXT');
       }
+      // One-time data migration: copy old singular field names into new _1 slots
+      const colNames = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
+      const renames = [
+        ['last_unpaid_invoice_date', 'last_unpaid_invoice_1_date'],
+        ['last_receipt_number', 'last_receipt_1'],
+        ['last_receipt_amount', 'last_receipt_1_amount'],
+        ['last_receipt_date', 'last_receipt_1_date'],
+      ];
+      for (const [oldCol, newCol] of renames) {
+        if (colNames.includes(oldCol) && colNames.includes(newCol)) {
+          try {
+            db.exec(`UPDATE datarecord SET ${newCol} = ${oldCol} WHERE (${newCol} IS NULL OR ${newCol} = '') AND (${oldCol} IS NOT NULL AND ${oldCol} != '')`);
+          } catch(e) { console.warn('Migration skip:', oldCol, '->', newCol, e.message); }
+        }
+      }
+    },
+  },
+  {
+    version: 3,
+    name: 'flag_source_and_terms',
+    up() {
+      ensureColumn('datarecord', 'flag_source', `TEXT DEFAULT NULL`);
+      ensureColumn('datarecord', 'terms', 'TEXT');
+    },
+  },
+  {
+    version: 4,
+    name: 'query_mode_and_inventory_columns',
+    up() {
+      ensureColumn('databaseconnection', 'sync_query', 'TEXT');
+      ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
+      ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
+      ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
+      ensureColumn('inventoryrecord', 'commodity', 'TEXT');
+      ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
+      ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
+      ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
+    },
+  },
+  {
+    version: 5,
+    name: 'field_mappings_per_table_format',
+    up() {
+      const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
+      for (const conn of connections) {
+        try {
+          const raw = JSON.parse(conn.field_mappings || '{}');
+          const isFlat = Object.keys(raw).length > 0 &&
+            Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
+          if (!isFlat) continue;
+          const tableConfigs = JSON.parse(conn.table_configs || '[]');
+          if (!tableConfigs.length) continue;
+          const migrated = {};
+          for (const t of tableConfigs) {
+            migrated[t.table_name] = raw;
+          }
+          db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
+            .run(JSON.stringify(migrated), conn.id);
+          console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
+        } catch (e) {
+          console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
+        }
+      }
+    },
+  },
+  {
+    version: 6,
+    name: 'user_permissions',
+    up() {
+      ensureColumn('user', 'password_hash', 'TEXT');
+      ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
+      ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
+      ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
+      ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
+      db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
+      ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
+      ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
+      ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
+    },
+  },
+  {
+    version: 7,
+    name: 'invoice_receipt_json_columns',
+    up() {
+      // Add JSON array columns to datarecord
+      ensureColumn('datarecord', 'unpaid_invoices', 'TEXT');
+      ensureColumn('datarecord', 'receipts', 'TEXT');
+
+      // Migrate existing numbered columns into JSON arrays
+      const rows = db.prepare(`
+        SELECT id,
+          last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date,
+          last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date,
+          last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date,
+          last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date,
+          last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
+          last_receipt_1, last_receipt_1_amount, last_receipt_1_date,
+          last_receipt_2, last_receipt_2_amount, last_receipt_2_date,
+          last_receipt_3, last_receipt_3_amount, last_receipt_3_date,
+          last_receipt_4, last_receipt_4_amount, last_receipt_4_date,
+          last_receipt_5, last_receipt_5_amount, last_receipt_5_date
+        FROM datarecord WHERE unpaid_invoices IS NULL OR receipts IS NULL
+      `).all();
+      const updateStmt = db.prepare(`UPDATE datarecord SET unpaid_invoices = ?, receipts = ? WHERE id = ?`);
+      const migrateRows = db.transaction(() => {
+        for (const row of rows) {
+          const invoices = [];
+          const recs = [];
+          for (let i = 1; i <= 5; i++) {
+            const num = row[`last_unpaid_invoice_${i}`];
+            const amt = row[`last_unpaid_invoice_${i}_amount`];
+            const dt  = row[`last_unpaid_invoice_${i}_date`];
+            if (num || amt || dt) invoices.push({ date: dt || '', number: num || '', amount: amt || '' });
+            const rnum = row[`last_receipt_${i}`];
+            const ramt = row[`last_receipt_${i}_amount`];
+            const rdt  = row[`last_receipt_${i}_date`];
+            if (rnum || ramt || rdt) recs.push({ date: rdt || '', number: rnum || '', amount: ramt || '' });
+          }
+          updateStmt.run(JSON.stringify(invoices), JSON.stringify(recs), row.id);
+        }
+      });
+      migrateRows();
+      if (rows.length > 0) console.log(`[migration 7] Migrated ${rows.length} datarecord rows to JSON invoice/receipt columns`);
+
+      // Hub records migration (only if table exists — new DBs get correct schema from CREATE TABLE)
+      if (process.env.HUB_MODE === 'true') {
+        const hubExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
+        if (hubExists) {
+          ensureColumn('hub_records', 'unpaid_invoices', 'TEXT');
+          ensureColumn('hub_records', 'receipts', 'TEXT');
+          const hubRows = db.prepare(`
+            SELECT site_id, record_id,
+              last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date,
+              last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date,
+              last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date,
+              last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date,
+              last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
+              last_receipt_1, last_receipt_1_amount, last_receipt_1_date,
+              last_receipt_2, last_receipt_2_amount, last_receipt_2_date,
+              last_receipt_3, last_receipt_3_amount, last_receipt_3_date,
+              last_receipt_4, last_receipt_4_amount, last_receipt_4_date,
+              last_receipt_5, last_receipt_5_amount, last_receipt_5_date
+            FROM hub_records WHERE unpaid_invoices IS NULL OR receipts IS NULL
+          `).all();
+          const updateHub = db.prepare(`UPDATE hub_records SET unpaid_invoices = ?, receipts = ? WHERE site_id = ? AND record_id = ?`);
+          const migrateHub = db.transaction(() => {
+            for (const row of hubRows) {
+              const invoices = [];
+              const recs = [];
+              for (let i = 1; i <= 5; i++) {
+                const num = row[`last_unpaid_invoice_${i}`];
+                const amt = row[`last_unpaid_invoice_${i}_amount`];
+                const dt  = row[`last_unpaid_invoice_${i}_date`];
+                if (num || amt || dt) invoices.push({ date: dt || '', number: num || '', amount: amt || '' });
+                const rnum = row[`last_receipt_${i}`];
+                const ramt = row[`last_receipt_${i}_amount`];
+                const rdt  = row[`last_receipt_${i}_date`];
+                if (rnum || ramt || rdt) recs.push({ date: rdt || '', number: rnum || '', amount: ramt || '' });
+              }
+              updateHub.run(JSON.stringify(invoices), JSON.stringify(recs), row.site_id, row.record_id);
+            }
+          });
+          migrateHub();
+          if (hubRows.length > 0) console.log(`[migration 7] Migrated ${hubRows.length} hub_records rows to JSON invoice/receipt columns`);
+        }
+      }
+    },
+  },
+  {
+    version: 8,
+    name: 'hub_schema_columns',
+    up() {
+      if (process.env.HUB_MODE !== 'true') return;
+      const hubInventoryExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
+      if (hubInventoryExists) {
+        ensureColumn('hub_inventory', 'stocking_uom', 'TEXT');
+        ensureColumn('hub_inventory', 'commodity', 'TEXT');
+      }
+      const hubRecordsExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
+      if (hubRecordsExists) {
+        ensureColumn('hub_records', 'unpaid_invoices', 'TEXT');
+        ensureColumn('hub_records', 'receipts', 'TEXT');
+        ensureColumn('hub_records', 'outstanding_balance', 'TEXT');
+        ensureColumn('hub_records', 'auto_flagged', 'INTEGER DEFAULT 0');
+        ensureColumn('hub_records', 'flag_color', 'TEXT');
+        ensureColumn('hub_records', 'flag_reason', 'TEXT');
+        ensureColumn('hub_records', 'terms', 'TEXT');
+        ensureColumn('hub_records', 'updated_date', 'TEXT');
+        ensureColumn('hub_records', 'synced_at', 'TEXT');
+      }
+    },
+  },
+];
+
+function runMigrations(db) {
+  for (const migration of MIGRATIONS) {
+    const already = db.prepare('SELECT id FROM schema_migrations WHERE version = ?').get(migration.version);
+    if (already) continue;
+    const run = db.transaction(() => {
+      migration.up();
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(migration.version, migration.name);
+    });
+    try {
+      run();
+      console.log(`[migration] Applied v${migration.version}: ${migration.name}`);
+    } catch (err) {
+      console.error(`[migration] Failed v${migration.version} (${migration.name}):`, err.message);
+      throw err;
     }
   }
-  ensureColumn('datarecord', 'terms', 'TEXT');
-  // Query-mode columns
-  ensureColumn('databaseconnection', 'sync_query', 'TEXT');
-  ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
-  ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
-  ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
-  ensureColumn('inventoryrecord', 'commodity', 'TEXT');
-  ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
-  ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
-  ensureColumn('databaseconnection', 'sync_interval_hours', 'INTEGER');
+}
 
-  // Migrate field_mappings from legacy flat format to per-table format
-  // Legacy: { localKey: { sourceField, ... } }
-  // New:    { tableName: { localKey: { sourceField, ... } } }
-  (function migrateFieldMappingsToPerTable() {
-    const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
-    for (const conn of connections) {
-      try {
-        const raw = JSON.parse(conn.field_mappings || '{}');
-        const isFlat = Object.keys(raw).length > 0 &&
-          Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
-        if (!isFlat) continue; // already per-table or empty
-
-        const tableConfigs = JSON.parse(conn.table_configs || '[]');
-        if (!tableConfigs.length) continue;
-
-        const migrated = {};
-        for (const t of tableConfigs) {
-          migrated[t.table_name] = raw;
-        }
-
-        db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
-          .run(JSON.stringify(migrated), conn.id);
-
-        console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
-      } catch (e) {
-        console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
-      }
-    }
-  })();
-
-  ensureColumn('user', 'password_hash', 'TEXT');
-  ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
-  ensureColumn('user', 'can_access_customer_search', 'INTEGER DEFAULT 1');
-  ensureColumn('user', 'can_access_records', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'can_access_reports', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'can_access_connections', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'can_access_settings', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'can_manage_users', 'INTEGER DEFAULT 0');
-  ensureColumn('user', 'can_manage_rules', 'INTEGER DEFAULT 0');
-  // Back-fill: existing admin users should have can_manage_rules = 1
-  db.prepare(`UPDATE "user" SET can_manage_rules = 1 WHERE role = 'admin' AND can_manage_rules = 0`).run();
-  ensureColumn('user', 'can_edit_records', 'INTEGER DEFAULT 1');
-  ensureColumn('user', 'can_flag_records', 'INTEGER DEFAULT 1');
-  ensureColumn('user', 'hub_redirect', 'INTEGER DEFAULT 0');
-});
 try {
-  migrationTx();
+  runMigrations(db);
 } catch (err) {
-  console.error("[startup] migration failed:", err);
+  console.error('[startup] migration failed:', err);
   process.exit(1);
 }
 
@@ -729,7 +904,31 @@ function stringifyJsonSafely(value, fallback = '{}') {
 function expandDataRecord(row) {
   if (!row || typeof row !== 'object') return row;
   const localFields = parseJsonSafely(row.local_fields, {});
-  return { ...row, ...localFields };
+  const expanded = { ...row, ...localFields };
+
+  // Expand unpaid_invoices JSON array back to flat numbered fields for API compat
+  const invoices = parseJsonSafely(row.unpaid_invoices, []);
+  if (Array.isArray(invoices)) {
+    invoices.forEach((inv, i) => {
+      const n = i + 1;
+      expanded[`last_unpaid_invoice_${n}`]        = inv.number ?? '';
+      expanded[`last_unpaid_invoice_${n}_amount`] = inv.amount ?? '';
+      expanded[`last_unpaid_invoice_${n}_date`]   = inv.date   ?? '';
+    });
+  }
+
+  // Expand receipts JSON array back to flat numbered fields for API compat
+  const recs = parseJsonSafely(row.receipts, []);
+  if (Array.isArray(recs)) {
+    recs.forEach((rec, i) => {
+      const n = i + 1;
+      expanded[`last_receipt_${n}`]        = rec.number ?? '';
+      expanded[`last_receipt_${n}_amount`] = rec.amount ?? '';
+      expanded[`last_receipt_${n}_date`]   = rec.date   ?? '';
+    });
+  }
+
+  return expanded;
 }
 
 function normalizeFieldKey(input) {
@@ -885,184 +1084,37 @@ function shouldApplyMappedValue(mode, existingValue, incomingValue) {
 function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
   const patch = {};
 
-  const mappingConfig = {
-    customer_number: {
-      fallbacks: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER', indexField, 'id'],
-      defaultMode: 'sync',
-    },
-    customer_name: {
-      fallbacks: ['customer_name', 'CustomerName', 'CUSTOMER_NAME', 'name', 'Name'],
-      defaultMode: 'sync',
-    },
-    age_analysis: {
-      fallbacks: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],
-      defaultMode: 'sync',
-    },
-    outstanding_balance: {
-      fallbacks: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE',
-        'AMTDUE', 'AMTDUE1', 'AMTDUE1HC', 'AMTOUTSTANDING', 'OUTSTANDING', 'OutstandingAmt',
-        'outstanding_amt', 'balance_due', 'BalanceDue', 'BALANCEDUE', 'TotalDue', 'TOTALDUE',
-        'total_due', 'AmountDue', 'AMOUNTDUE', 'amount_due'],
-      defaultMode: 'sync',
-    },
-    age_current: {
-      fallbacks: ['age_current', 'AgeCurrent', 'AGE_CURRENT', 'Current', 'CURRENT'],
-      defaultMode: 'sync',
-    },
-    age_7_days: {
-      fallbacks: ['age_7_days', 'Age7Days', 'AGE_7_DAYS', 'Age7', 'AMTDUE07'],
-      defaultMode: 'sync',
-    },
-    age_14_days: {
-      fallbacks: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],
-      defaultMode: 'sync',
-    },
-    age_21_days: {
-      fallbacks: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_1: {
-      fallbacks: ['last_unpaid_invoice_1', 'LastUnpaidInvoice1', 'LAST_UNPAID_INVOICE_1'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_1_amount: {
-      fallbacks: ['last_unpaid_invoice_1_amount', 'LastUnpaidInvoice1Amount', 'LAST_UNPAID_INVOICE_1_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_1_date: {
-      fallbacks: ['last_unpaid_invoice_1_date', 'LastUnpaidInvoice1Date', 'LAST_UNPAID_INVOICE_1_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_2: {
-      fallbacks: ['last_unpaid_invoice_2', 'LastUnpaidInvoice2', 'LAST_UNPAID_INVOICE_2'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_2_amount: {
-      fallbacks: ['last_unpaid_invoice_2_amount', 'LastUnpaidInvoice2Amount', 'LAST_UNPAID_INVOICE_2_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_2_date: {
-      fallbacks: ['last_unpaid_invoice_2_date', 'LastUnpaidInvoice2Date', 'LAST_UNPAID_INVOICE_2_DATE'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_3: {
-      fallbacks: ['last_unpaid_invoice_3', 'LastUnpaidInvoice3', 'LAST_UNPAID_INVOICE_3'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_3_amount: {
-      fallbacks: ['last_unpaid_invoice_3_amount', 'LastUnpaidInvoice3Amount', 'LAST_UNPAID_INVOICE_3_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_3_date: {
-      fallbacks: ['last_unpaid_invoice_3_date', 'LastUnpaidInvoice3Date', 'LAST_UNPAID_INVOICE_3_DATE'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_4: {
-      fallbacks: ['last_unpaid_invoice_4', 'LastUnpaidInvoice4', 'LAST_UNPAID_INVOICE_4'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_4_amount: {
-      fallbacks: ['last_unpaid_invoice_4_amount', 'LastUnpaidInvoice4Amount', 'LAST_UNPAID_INVOICE_4_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_4_date: {
-      fallbacks: ['last_unpaid_invoice_4_date', 'LastUnpaidInvoice4Date', 'LAST_UNPAID_INVOICE_4_DATE'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_5: {
-      fallbacks: ['last_unpaid_invoice_5', 'LastUnpaidInvoice5', 'LAST_UNPAID_INVOICE_5'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_5_amount: {
-      fallbacks: ['last_unpaid_invoice_5_amount', 'LastUnpaidInvoice5Amount', 'LAST_UNPAID_INVOICE_5_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_5_date: {
-      fallbacks: ['last_unpaid_invoice_5_date', 'LastUnpaidInvoice5Date', 'LAST_UNPAID_INVOICE_5_DATE'],
-      defaultMode: 'sync',
-    },
-    last_receipt_1: {
-      fallbacks: ['last_receipt_1', 'LastReceipt1', 'LAST_RECEIPT_1', 'last_receipt_number', 'LastReceiptNumber', 'ReceiptNo', 'RECNO'],
-      defaultMode: 'sync',
-    },
-    last_receipt_1_amount: {
-      fallbacks: ['last_receipt_1_amount', 'LastReceipt1Amount', 'LAST_RECEIPT_1_AMOUNT', 'last_receipt_amount', 'LastReceiptAmount', 'ReceiptAmount', 'RECAMT'],
-      defaultMode: 'sync',
-    },
-    last_receipt_1_date: {
-      fallbacks: ['last_receipt_1_date', 'LastReceipt1Date', 'LAST_RECEIPT_1_DATE', 'last_receipt_date', 'LastReceiptDate', 'ReceiptDate', 'RECDATE'],
-      defaultMode: 'sync',
-    },
-    last_receipt_2: {
-      fallbacks: ['last_receipt_2', 'LastReceipt2', 'LAST_RECEIPT_2'],
-      defaultMode: 'sync',
-    },
-    last_receipt_2_amount: {
-      fallbacks: ['last_receipt_2_amount', 'LastReceipt2Amount', 'LAST_RECEIPT_2_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_receipt_2_date: {
-      fallbacks: ['last_receipt_2_date', 'LastReceipt2Date', 'LAST_RECEIPT_2_DATE'],
-      defaultMode: 'sync',
-    },
-    last_receipt_3: {
-      fallbacks: ['last_receipt_3', 'LastReceipt3', 'LAST_RECEIPT_3'],
-      defaultMode: 'sync',
-    },
-    last_receipt_3_amount: {
-      fallbacks: ['last_receipt_3_amount', 'LastReceipt3Amount', 'LAST_RECEIPT_3_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_receipt_3_date: {
-      fallbacks: ['last_receipt_3_date', 'LastReceipt3Date', 'LAST_RECEIPT_3_DATE'],
-      defaultMode: 'sync',
-    },
-    last_receipt_4: {
-      fallbacks: ['last_receipt_4', 'LastReceipt4', 'LAST_RECEIPT_4'],
-      defaultMode: 'sync',
-    },
-    last_receipt_4_amount: {
-      fallbacks: ['last_receipt_4_amount', 'LastReceipt4Amount', 'LAST_RECEIPT_4_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_receipt_4_date: {
-      fallbacks: ['last_receipt_4_date', 'LastReceipt4Date', 'LAST_RECEIPT_4_DATE'],
-      defaultMode: 'sync',
-    },
-    last_receipt_5: {
-      fallbacks: ['last_receipt_5', 'LastReceipt5', 'LAST_RECEIPT_5'],
-      defaultMode: 'sync',
-    },
-    last_receipt_5_amount: {
-      fallbacks: ['last_receipt_5_amount', 'LastReceipt5Amount', 'LAST_RECEIPT_5_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_receipt_5_date: {
-      fallbacks: ['last_receipt_5_date', 'LastReceipt5Date', 'LAST_RECEIPT_5_DATE'],
-      defaultMode: 'sync',
-    },
-    terms: {
-      fallbacks: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],
-      defaultMode: 'sync',
-    },
-    note: {
-      fallbacks: ['note', 'Note', 'notes', 'Notes'],
-      defaultMode: 'local-only',
-    },
-  };
-
-  for (const [localKey, config] of Object.entries(mappingConfig)) {
-    const mapping = getMappingForKey(fieldMappings, localKey);
-    const mode = mapping?.mode || config.defaultMode;
-    const incomingValue = getMappedOrFallbackValue(row, fieldMappings, localKey, config.fallbacks);
-    const existingValue = existingRecord?.[localKey];
+  for (const field of FIELD_REGISTRY) {
+    const sources = field.key === 'customer_number'
+      ? [...field.sources, indexField, 'id'].filter(Boolean)
+      : field.sources;
+    const mapping = getMappingForKey(fieldMappings, field.key);
+    const mode = mapping?.mode || field.defaultMode;
+    const incomingValue = getMappedOrFallbackValue(row, fieldMappings, field.key, sources);
+    const existingValue = existingRecord?.[field.key];
 
     if (shouldApplyMappedValue(mode, existingValue, incomingValue)) {
-      patch[localKey] = String(incomingValue ?? '');
+      patch[field.key] = String(incomingValue ?? '');
     } else if (!existingRecord && incomingValue !== undefined && incomingValue !== null && incomingValue !== '') {
-      patch[localKey] = String(incomingValue);
+      patch[field.key] = String(incomingValue);
     }
   }
+
+  // Build unpaid_invoices JSON array from INVOICE_SLOTS
+  const invoiceSlots = INVOICE_SLOTS.map(slot => ({
+    number: String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}`, slot.number_sources) ?? ''),
+    amount: String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}_amount`, slot.amount_sources) ?? ''),
+    date:   String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}_date`,   slot.date_sources)   ?? ''),
+  })).filter(s => s.date || s.number || s.amount);
+  patch.unpaid_invoices = JSON.stringify(invoiceSlots);
+
+  // Build receipts JSON array from RECEIPT_SLOTS
+  const receiptSlots = RECEIPT_SLOTS.map(slot => ({
+    number: String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}`,        slot.number_sources) ?? ''),
+    amount: String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}_amount`, slot.amount_sources) ?? ''),
+    date:   String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}_date`,   slot.date_sources)   ?? ''),
+  })).filter(s => s.date || s.number || s.amount);
+  patch.receipts = JSON.stringify(receiptSlots);
 
   return patch;
 }
@@ -1421,36 +1473,8 @@ async function runConnectionImport(connectionId) {
         source_table = ?,
         data = ?,
         local_fields = ?,
-        last_unpaid_invoice_1 = ?,
-        last_unpaid_invoice_1_amount = ?,
-        last_unpaid_invoice_1_date = ?,
-        last_unpaid_invoice_2 = ?,
-        last_unpaid_invoice_2_amount = ?,
-        last_unpaid_invoice_2_date = ?,
-        last_unpaid_invoice_3 = ?,
-        last_unpaid_invoice_3_amount = ?,
-        last_unpaid_invoice_3_date = ?,
-        last_unpaid_invoice_4 = ?,
-        last_unpaid_invoice_4_amount = ?,
-        last_unpaid_invoice_4_date = ?,
-        last_unpaid_invoice_5 = ?,
-        last_unpaid_invoice_5_amount = ?,
-        last_unpaid_invoice_5_date = ?,
-        last_receipt_1 = ?,
-        last_receipt_1_amount = ?,
-        last_receipt_1_date = ?,
-        last_receipt_2 = ?,
-        last_receipt_2_amount = ?,
-        last_receipt_2_date = ?,
-        last_receipt_3 = ?,
-        last_receipt_3_amount = ?,
-        last_receipt_3_date = ?,
-        last_receipt_4 = ?,
-        last_receipt_4_amount = ?,
-        last_receipt_4_date = ?,
-        last_receipt_5 = ?,
-        last_receipt_5_amount = ?,
-        last_receipt_5_date = ?,
+        unpaid_invoices = ?,
+        receipts = ?,
         terms = ?,
         flag_color = ?,
         flag_reason = ?,
@@ -1476,40 +1500,12 @@ async function runConnectionImport(connectionId) {
         source_table,
         data,
         local_fields,
-        last_unpaid_invoice_1,
-        last_unpaid_invoice_1_amount,
-        last_unpaid_invoice_1_date,
-        last_unpaid_invoice_2,
-        last_unpaid_invoice_2_amount,
-        last_unpaid_invoice_2_date,
-        last_unpaid_invoice_3,
-        last_unpaid_invoice_3_amount,
-        last_unpaid_invoice_3_date,
-        last_unpaid_invoice_4,
-        last_unpaid_invoice_4_amount,
-        last_unpaid_invoice_4_date,
-        last_unpaid_invoice_5,
-        last_unpaid_invoice_5_amount,
-        last_unpaid_invoice_5_date,
-        last_receipt_1,
-        last_receipt_1_amount,
-        last_receipt_1_date,
-        last_receipt_2,
-        last_receipt_2_amount,
-        last_receipt_2_date,
-        last_receipt_3,
-        last_receipt_3_amount,
-        last_receipt_3_date,
-        last_receipt_4,
-        last_receipt_4_amount,
-        last_receipt_4_date,
-        last_receipt_5,
-        last_receipt_5_amount,
-        last_receipt_5_date,
+        unpaid_invoices,
+        receipts,
         terms,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -1571,17 +1567,7 @@ async function runConnectionImport(connectionId) {
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                note, local_fields, flag_color, flag_reason, flag_created_by, data,
-               outstanding_balance, terms,
-               last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date,
-               last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date,
-               last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date,
-               last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date,
-               last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-               last_receipt_1, last_receipt_1_amount, last_receipt_1_date,
-               last_receipt_2, last_receipt_2_amount, last_receipt_2_date,
-               last_receipt_3, last_receipt_3_amount, last_receipt_3_date,
-               last_receipt_4, last_receipt_4_amount, last_receipt_4_date,
-               last_receipt_5, last_receipt_5_amount, last_receipt_5_date
+               outstanding_balance, terms, unpaid_invoices, receipts
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -1643,36 +1629,8 @@ async function runConnectionImport(connectionId) {
               baseRecordData.source_table,
               baseRecordData.data,
               String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
-              String(baseRecordData.last_unpaid_invoice_1 ?? existing.last_unpaid_invoice_1 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_amount ?? existing.last_unpaid_invoice_1_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_date ?? existing.last_unpaid_invoice_1_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2 ?? existing.last_unpaid_invoice_2 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_amount ?? existing.last_unpaid_invoice_2_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_date ?? existing.last_unpaid_invoice_2_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3 ?? existing.last_unpaid_invoice_3 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_amount ?? existing.last_unpaid_invoice_3_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_date ?? existing.last_unpaid_invoice_3_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4 ?? existing.last_unpaid_invoice_4 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4_amount ?? existing.last_unpaid_invoice_4_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4_date ?? existing.last_unpaid_invoice_4_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5 ?? existing.last_unpaid_invoice_5 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5_amount ?? existing.last_unpaid_invoice_5_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5_date ?? existing.last_unpaid_invoice_5_date ?? ''),
-              String(baseRecordData.last_receipt_1 ?? existing.last_receipt_1 ?? ''),
-              String(baseRecordData.last_receipt_1_amount ?? existing.last_receipt_1_amount ?? ''),
-              String(baseRecordData.last_receipt_1_date ?? existing.last_receipt_1_date ?? ''),
-              String(baseRecordData.last_receipt_2 ?? existing.last_receipt_2 ?? ''),
-              String(baseRecordData.last_receipt_2_amount ?? existing.last_receipt_2_amount ?? ''),
-              String(baseRecordData.last_receipt_2_date ?? existing.last_receipt_2_date ?? ''),
-              String(baseRecordData.last_receipt_3 ?? existing.last_receipt_3 ?? ''),
-              String(baseRecordData.last_receipt_3_amount ?? existing.last_receipt_3_amount ?? ''),
-              String(baseRecordData.last_receipt_3_date ?? existing.last_receipt_3_date ?? ''),
-              String(baseRecordData.last_receipt_4 ?? existing.last_receipt_4 ?? ''),
-              String(baseRecordData.last_receipt_4_amount ?? existing.last_receipt_4_amount ?? ''),
-              String(baseRecordData.last_receipt_4_date ?? existing.last_receipt_4_date ?? ''),
-              String(baseRecordData.last_receipt_5 ?? existing.last_receipt_5 ?? ''),
-              String(baseRecordData.last_receipt_5_amount ?? existing.last_receipt_5_amount ?? ''),
-              String(baseRecordData.last_receipt_5_date ?? existing.last_receipt_5_date ?? ''),
+              baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
+              baseRecordData.receipts ?? existing.receipts ?? '[]',
               String(baseRecordData.terms ?? existing.terms ?? ''),
               existing.flag_color,
               existing.flag_reason,
@@ -1686,7 +1644,7 @@ async function runConnectionImport(connectionId) {
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
              if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
-               const mergedRecord = { ...existing, ...baseRecordData };
+               const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
                const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
                if (autoFlag) {
                  // Flag it (or update the auto-flag if the rule result changed)
@@ -1711,36 +1669,8 @@ async function runConnectionImport(connectionId) {
               baseRecordData.source_table,
               baseRecordData.data,
               String(baseRecordData.local_fields ?? '{}'),
-              String(baseRecordData.last_unpaid_invoice_1 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_4_date ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_5_date ?? ''),
-              String(baseRecordData.last_receipt_1 ?? ''),
-              String(baseRecordData.last_receipt_1_amount ?? ''),
-              String(baseRecordData.last_receipt_1_date ?? ''),
-              String(baseRecordData.last_receipt_2 ?? ''),
-              String(baseRecordData.last_receipt_2_amount ?? ''),
-              String(baseRecordData.last_receipt_2_date ?? ''),
-              String(baseRecordData.last_receipt_3 ?? ''),
-              String(baseRecordData.last_receipt_3_amount ?? ''),
-              String(baseRecordData.last_receipt_3_date ?? ''),
-              String(baseRecordData.last_receipt_4 ?? ''),
-              String(baseRecordData.last_receipt_4_amount ?? ''),
-              String(baseRecordData.last_receipt_4_date ?? ''),
-              String(baseRecordData.last_receipt_5 ?? ''),
-              String(baseRecordData.last_receipt_5_amount ?? ''),
-              String(baseRecordData.last_receipt_5_date ?? ''),
+              baseRecordData.unpaid_invoices ?? '[]',
+              baseRecordData.receipts ?? '[]',
               String(baseRecordData.terms ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
@@ -2189,12 +2119,8 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           r.customer_number,
           r.customer_name,
           r.outstanding_balance,
-          r.last_unpaid_invoice_1,
-          r.last_unpaid_invoice_1_amount,
-          r.last_unpaid_invoice_1_date,
-          r.last_receipt_1,
-          r.last_receipt_1_amount,
-          r.last_receipt_1_date,
+          r.unpaid_invoices,
+          r.receipts,
           r.flag_color,
           r.flag_reason,
           r.auto_flagged,
@@ -2205,7 +2131,7 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
         ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
         LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(limit, offset);
+      rows = stmt.all(limit, offset).map(expandDataRecord);
     } else {
       total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
       const stmt = db.prepare(`
@@ -2213,12 +2139,8 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           customer_number,
           customer_name,
           outstanding_balance,
-          last_unpaid_invoice_1,
-          last_unpaid_invoice_1_amount,
-          last_unpaid_invoice_1_date,
-          last_receipt_1,
-          last_receipt_1_amount,
-          last_receipt_1_date,
+          unpaid_invoices,
+          receipts,
           flag_color,
           flag_reason,
           auto_flagged,
@@ -2228,7 +2150,7 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
         ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
         LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(SITE_NAME, limit, offset);
+      rows = stmt.all(SITE_NAME, limit, offset).map(expandDataRecord);
     }
     const totalPages = Math.ceil(total / limit);
     res.json({ records: rows, total, page, totalPages });
@@ -2944,16 +2866,14 @@ app.get('/api/reporting/records', requireReportingToken, (req, res) => {
   if (since) {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date, last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date, last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date, last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date, last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-              last_receipt_1, last_receipt_1_amount, last_receipt_1_date, last_receipt_2, last_receipt_2_amount, last_receipt_2_date, last_receipt_3, last_receipt_3_amount, last_receipt_3_date, last_receipt_4, last_receipt_4_amount, last_receipt_4_date, last_receipt_5, last_receipt_5_amount, last_receipt_5_date,
+              outstanding_balance, unpaid_invoices, receipts,
               updated_date, synced_at, source_table, source_id
        FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(since, limit, offset);
   } else {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date, last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date, last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date, last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date, last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-              last_receipt_1, last_receipt_1_amount, last_receipt_1_date, last_receipt_2, last_receipt_2_amount, last_receipt_2_date, last_receipt_3, last_receipt_3_amount, last_receipt_3_date, last_receipt_4, last_receipt_4_amount, last_receipt_4_date, last_receipt_5, last_receipt_5_amount, last_receipt_5_date,
+              outstanding_balance, unpaid_invoices, receipts,
               updated_date, synced_at, source_table, source_id
        FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);
@@ -3030,38 +2950,12 @@ if (process.env.HUB_MODE === 'true') {
       flag_color TEXT,
       flag_reason TEXT,
       outstanding_balance TEXT,
-      last_unpaid_invoice_1 TEXT,
-      last_unpaid_invoice_1_amount TEXT,
-      last_unpaid_invoice_1_date TEXT,
-      last_unpaid_invoice_2 TEXT,
-      last_unpaid_invoice_2_amount TEXT,
-      last_unpaid_invoice_2_date TEXT,
-      last_unpaid_invoice_3 TEXT,
-      last_unpaid_invoice_3_amount TEXT,
-      last_unpaid_invoice_3_date TEXT,
-      last_unpaid_invoice_4 TEXT,
-      last_unpaid_invoice_4_amount TEXT,
-      last_unpaid_invoice_4_date TEXT,
-      last_unpaid_invoice_5 TEXT,
-      last_unpaid_invoice_5_amount TEXT,
-      last_unpaid_invoice_5_date TEXT,
-      last_receipt_1 TEXT,
-      last_receipt_1_amount TEXT,
-      last_receipt_1_date TEXT,
-      last_receipt_2 TEXT,
-      last_receipt_2_amount TEXT,
-      last_receipt_2_date TEXT,
-      last_receipt_3 TEXT,
-      last_receipt_3_amount TEXT,
-      last_receipt_3_date TEXT,
-      last_receipt_4 TEXT,
-      last_receipt_4_amount TEXT,
-      last_receipt_4_date TEXT,
-      last_receipt_5 TEXT,
-      last_receipt_5_amount TEXT,
-      last_receipt_5_date TEXT,
+      unpaid_invoices TEXT,
+      receipts TEXT,
       updated_date TEXT,
       synced_at TEXT,
+      auto_flagged INTEGER DEFAULT 0,
+      terms TEXT,
       PRIMARY KEY (site_id, record_id)
     );
     CREATE TABLE IF NOT EXISTS hub_sync_log (
@@ -3096,33 +2990,6 @@ if (process.env.HUB_MODE === 'true') {
 
   // Seed default hub settings
   db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
-
-  // Ensure hub_records has all columns (for existing DBs created before schema expansions)
-  // Ensure inventoryrecord has newer columns
-  if (process.env.HUB_MODE === 'true') {
-    for (const [col, type] of [['stocking_uom','TEXT'],['commodity','TEXT']]) {
-      ensureColumn('hub_inventory', col, type);
-    }
-  }
-
-  const hubRecordsCols = [
-    ['last_unpaid_invoice_1', 'TEXT'], ['last_unpaid_invoice_1_amount', 'TEXT'], ['last_unpaid_invoice_1_date', 'TEXT'],
-    ['last_unpaid_invoice_2', 'TEXT'], ['last_unpaid_invoice_2_amount', 'TEXT'], ['last_unpaid_invoice_2_date', 'TEXT'],
-    ['last_unpaid_invoice_3', 'TEXT'], ['last_unpaid_invoice_3_amount', 'TEXT'], ['last_unpaid_invoice_3_date', 'TEXT'],
-    ['last_unpaid_invoice_4', 'TEXT'], ['last_unpaid_invoice_4_amount', 'TEXT'], ['last_unpaid_invoice_4_date', 'TEXT'],
-    ['last_unpaid_invoice_5', 'TEXT'], ['last_unpaid_invoice_5_amount', 'TEXT'], ['last_unpaid_invoice_5_date', 'TEXT'],
-    ['last_receipt_1', 'TEXT'], ['last_receipt_1_amount', 'TEXT'], ['last_receipt_1_date', 'TEXT'],
-    ['last_receipt_2', 'TEXT'], ['last_receipt_2_amount', 'TEXT'], ['last_receipt_2_date', 'TEXT'],
-    ['last_receipt_3', 'TEXT'], ['last_receipt_3_amount', 'TEXT'], ['last_receipt_3_date', 'TEXT'],
-    ['last_receipt_4', 'TEXT'], ['last_receipt_4_amount', 'TEXT'], ['last_receipt_4_date', 'TEXT'],
-    ['last_receipt_5', 'TEXT'], ['last_receipt_5_amount', 'TEXT'], ['last_receipt_5_date', 'TEXT'],
-    ['outstanding_balance', 'TEXT'],
-    ['auto_flagged', 'INTEGER DEFAULT 0'], ['flag_color', 'TEXT'], ['flag_reason', 'TEXT'],
-    ['terms', 'TEXT'], ['updated_date', 'TEXT'], ['synced_at', 'TEXT'],
-  ];
-  for (const [col, def] of hubRecordsCols) {
-    ensureColumn('hub_records', col, def);
-  }
 
   // GET /api/hub/backup-settings
   app.get('/api/hub/backup-settings', (req, res) => {
@@ -3194,13 +3061,11 @@ if (process.env.HUB_MODE === 'true') {
       const upsertRec = db.prepare(`
         INSERT INTO hub_records (
           site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
-          outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount, last_unpaid_invoice_1_date, last_unpaid_invoice_2, last_unpaid_invoice_2_amount, last_unpaid_invoice_2_date, last_unpaid_invoice_3, last_unpaid_invoice_3_amount, last_unpaid_invoice_3_date, last_unpaid_invoice_4, last_unpaid_invoice_4_amount, last_unpaid_invoice_4_date, last_unpaid_invoice_5, last_unpaid_invoice_5_amount, last_unpaid_invoice_5_date,
-          last_receipt_1, last_receipt_1_amount, last_receipt_1_date, last_receipt_2, last_receipt_2_amount, last_receipt_2_date, last_receipt_3, last_receipt_3_amount, last_receipt_3_date, last_receipt_4, last_receipt_4_amount, last_receipt_4_date, last_receipt_5, last_receipt_5_amount, last_receipt_5_date,
+          outstanding_balance, unpaid_invoices, receipts,
           updated_date, synced_at
         ) VALUES (
           @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
-          @outstanding_balance, @last_unpaid_invoice_1, @last_unpaid_invoice_1_amount, @last_unpaid_invoice_1_date, @last_unpaid_invoice_2, @last_unpaid_invoice_2_amount, @last_unpaid_invoice_2_date, @last_unpaid_invoice_3, @last_unpaid_invoice_3_amount, @last_unpaid_invoice_3_date, @last_unpaid_invoice_4, @last_unpaid_invoice_4_amount, @last_unpaid_invoice_4_date, @last_unpaid_invoice_5, @last_unpaid_invoice_5_amount, @last_unpaid_invoice_5_date,
-          @last_receipt_1, @last_receipt_1_amount, @last_receipt_1_date, @last_receipt_2, @last_receipt_2_amount, @last_receipt_2_date, @last_receipt_3, @last_receipt_3_amount, @last_receipt_3_date, @last_receipt_4, @last_receipt_4_amount, @last_receipt_4_date, @last_receipt_5, @last_receipt_5_amount, @last_receipt_5_date,
+          @outstanding_balance, @unpaid_invoices, @receipts,
           @updated_date, @synced_at
         )
         ON CONFLICT(site_id, record_id) DO UPDATE SET
@@ -3209,36 +3074,8 @@ if (process.env.HUB_MODE === 'true') {
           flag_color=excluded.flag_color,
           flag_reason=excluded.flag_reason,
           outstanding_balance=excluded.outstanding_balance,
-          last_unpaid_invoice_1=excluded.last_unpaid_invoice_1,
-          last_unpaid_invoice_1_amount=excluded.last_unpaid_invoice_1_amount,
-          last_unpaid_invoice_1_date=excluded.last_unpaid_invoice_1_date,
-          last_unpaid_invoice_2=excluded.last_unpaid_invoice_2,
-          last_unpaid_invoice_2_amount=excluded.last_unpaid_invoice_2_amount,
-          last_unpaid_invoice_2_date=excluded.last_unpaid_invoice_2_date,
-          last_unpaid_invoice_3=excluded.last_unpaid_invoice_3,
-          last_unpaid_invoice_3_amount=excluded.last_unpaid_invoice_3_amount,
-          last_unpaid_invoice_3_date=excluded.last_unpaid_invoice_3_date,
-          last_unpaid_invoice_4=excluded.last_unpaid_invoice_4,
-          last_unpaid_invoice_4_amount=excluded.last_unpaid_invoice_4_amount,
-          last_unpaid_invoice_4_date=excluded.last_unpaid_invoice_4_date,
-          last_unpaid_invoice_5=excluded.last_unpaid_invoice_5,
-          last_unpaid_invoice_5_amount=excluded.last_unpaid_invoice_5_amount,
-          last_unpaid_invoice_5_date=excluded.last_unpaid_invoice_5_date,
-          last_receipt_1=excluded.last_receipt_1,
-          last_receipt_1_amount=excluded.last_receipt_1_amount,
-          last_receipt_1_date=excluded.last_receipt_1_date,
-          last_receipt_2=excluded.last_receipt_2,
-          last_receipt_2_amount=excluded.last_receipt_2_amount,
-          last_receipt_2_date=excluded.last_receipt_2_date,
-          last_receipt_3=excluded.last_receipt_3,
-          last_receipt_3_amount=excluded.last_receipt_3_amount,
-          last_receipt_3_date=excluded.last_receipt_3_date,
-          last_receipt_4=excluded.last_receipt_4,
-          last_receipt_4_amount=excluded.last_receipt_4_amount,
-          last_receipt_4_date=excluded.last_receipt_4_date,
-          last_receipt_5=excluded.last_receipt_5,
-          last_receipt_5_amount=excluded.last_receipt_5_amount,
-          last_receipt_5_date=excluded.last_receipt_5_date,
+          unpaid_invoices=excluded.unpaid_invoices,
+          receipts=excluded.receipts,
           updated_date=excluded.updated_date,
           synced_at=excluded.synced_at
       `);
@@ -3253,36 +3090,8 @@ if (process.env.HUB_MODE === 'true') {
             flag_color: r.flag_color || 'none',
             flag_reason: r.flag_reason || null,
             outstanding_balance: r.outstanding_balance || null,
-            last_unpaid_invoice_1: r.last_unpaid_invoice_1 || null,
-            last_unpaid_invoice_1_amount: r.last_unpaid_invoice_1_amount || null,
-            last_unpaid_invoice_1_date: r.last_unpaid_invoice_1_date || null,
-            last_unpaid_invoice_2: r.last_unpaid_invoice_2 || null,
-            last_unpaid_invoice_2_amount: r.last_unpaid_invoice_2_amount || null,
-            last_unpaid_invoice_2_date: r.last_unpaid_invoice_2_date || null,
-            last_unpaid_invoice_3: r.last_unpaid_invoice_3 || null,
-            last_unpaid_invoice_3_amount: r.last_unpaid_invoice_3_amount || null,
-            last_unpaid_invoice_3_date: r.last_unpaid_invoice_3_date || null,
-            last_unpaid_invoice_4: r.last_unpaid_invoice_4 || null,
-            last_unpaid_invoice_4_amount: r.last_unpaid_invoice_4_amount || null,
-            last_unpaid_invoice_4_date: r.last_unpaid_invoice_4_date || null,
-            last_unpaid_invoice_5: r.last_unpaid_invoice_5 || null,
-            last_unpaid_invoice_5_amount: r.last_unpaid_invoice_5_amount || null,
-            last_unpaid_invoice_5_date: r.last_unpaid_invoice_5_date || null,
-            last_receipt_1: r.last_receipt_1 || null,
-            last_receipt_1_amount: r.last_receipt_1_amount || null,
-            last_receipt_1_date: r.last_receipt_1_date || null,
-            last_receipt_2: r.last_receipt_2 || null,
-            last_receipt_2_amount: r.last_receipt_2_amount || null,
-            last_receipt_2_date: r.last_receipt_2_date || null,
-            last_receipt_3: r.last_receipt_3 || null,
-            last_receipt_3_amount: r.last_receipt_3_amount || null,
-            last_receipt_3_date: r.last_receipt_3_date || null,
-            last_receipt_4: r.last_receipt_4 || null,
-            last_receipt_4_amount: r.last_receipt_4_amount || null,
-            last_receipt_4_date: r.last_receipt_4_date || null,
-            last_receipt_5: r.last_receipt_5 || null,
-            last_receipt_5_amount: r.last_receipt_5_amount || null,
-            last_receipt_5_date: r.last_receipt_5_date || null,
+            unpaid_invoices: r.unpaid_invoices || '[]',
+            receipts: r.receipts || '[]',
             updated_date: r.updated_date,
             synced_at: now,
           });

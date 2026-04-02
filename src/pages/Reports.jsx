@@ -510,7 +510,7 @@ export default function Reports() {
                   <thead>
                     <tr className="border-b border-border">
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("customerNumber")}
                       >
                         <div className="flex items-center">
@@ -519,7 +519,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("customerName")}
                       >
                         <div className="flex items-center">
@@ -528,7 +528,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("ageAnalysis")}
                       >
                         <div className="flex items-center">
@@ -537,7 +537,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-right text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                        className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("ageValue")}
                       >
                         <div className="flex items-center justify-end">
@@ -546,7 +546,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-center text-xs font-semibold text-foreground transition-colors hover:bg-muted"
+                        className="cursor-pointer px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("flagColor")}
                       >
                         <div className="flex items-center justify-center">
