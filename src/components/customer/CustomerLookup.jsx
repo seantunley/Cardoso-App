@@ -858,7 +858,7 @@ export default function CustomerLookup({
     if (activeSlots.length === 0) return null;
     return (
       <div className="bg-card border border-border rounded-xl p-4 mb-3">
-        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-2">
           <Icon className={cn("h-4 w-4", iconColor)} />
           {title}
         </p>
@@ -881,9 +881,9 @@ export default function CustomerLookup({
                     if (!ref && !amt && !date) return null;
                     return (
                       <tr key={`${label}-${i}`} className="border-b border-border/50 last:border-0">
-                        <td className={cn("text-base py-1.5 pr-4 font-mono", iconColor)}>{ref || "—"}</td>
-                        <td className={cn("text-base py-1.5 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
-                        <td className={cn("text-base py-1.5 text-right", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
+                        <td className={cn("text-sm py-1 pr-4 font-mono max-w-[120px] truncate", iconColor)}>{ref || "—"}</td>
+                        <td className={cn("text-sm py-1 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
+                        <td className={cn("text-sm py-1 text-right", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
                       </tr>
                     );
                   })
@@ -973,7 +973,7 @@ export default function CustomerLookup({
             }
           }}
           className={cn(
-            "max-w-[1100px] w-full border-4 bg-gray-900 p-0 flex flex-col max-h-[88vh]",
+            "max-w-[960px] w-full border-4 bg-background p-0 flex flex-col max-h-[90dvh]",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
@@ -1000,14 +1000,14 @@ export default function CustomerLookup({
                     <p className="text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-4 shrink-0 mr-14">
+                <div className="flex items-center gap-4 shrink-0 pr-14">
                   {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                    <span className="text-base font-bold px-4 py-1.5 rounded-full bg-white/20 text-white ring-2 ring-white/40">
+                    <span className={cn("text-base font-bold px-4 py-1.5 rounded-full", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
                       ⏱ {creditAnalysis.avgLag}d avg
                     </span>
                   )}
                   <span className={cn(
-                    "text-sm font-semibold px-3 py-1.5 rounded-full opacity-80",
+                    "text-sm font-semibold px-3 py-1.5 rounded-full",
                     verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
                   )}>
                     {creditAnalysis.score}/100
@@ -1051,10 +1051,10 @@ export default function CustomerLookup({
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  <p className={cn("text-3xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                  <p className={cn("text-3xl font-bold tabular-nums", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
                     {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
                   </p>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Outstanding</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Outstanding</p>
                   <div className="flex gap-1.5 flex-wrap justify-end">
                     {customer?.terms && (
                       <Badge variant="outline" className="text-xs">
@@ -1094,10 +1094,10 @@ export default function CustomerLookup({
             </div>{/* end pinned header */}
 
             {/* Scrollable: invoices + receipts */}
-            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
+            <div className="flex-1 overflow-y-auto px-5 pt-1 pb-3">
 
             {/* Invoices + Receipts side by side */}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 items-start">
               <div>{renderGroupedTable({
                 title: "Invoices",
                 icon: Flag,
@@ -1136,7 +1136,7 @@ export default function CustomerLookup({
                     onClick={() => setPendingFlagColor(color)}
                     disabled={!canModifyFlag() || isUpdatingFlag}
                     className={cn(
-                      "rounded-full px-4 py-1.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                      "rounded-full px-4 py-1.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] justify-center",
                       isActive ? styles.active : styles.base,
                       isCurrent && !isActive && "ring-1 ring-white/30"
                     )}
@@ -1156,7 +1156,7 @@ export default function CustomerLookup({
                   value={flagReason}
                   onChange={(e) => setFlagReason(e.target.value)}
                   placeholder="Reason for flag change..."
-                  className="h-16 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
+                  className="h-16 resize-none border-border bg-background text-sm placeholder:text-muted-foreground"
                   disabled={isUpdatingFlag}
                 />
                 <Button
@@ -1175,12 +1175,12 @@ export default function CustomerLookup({
 
             {/* Last 3 flag history entries */}
             {recordHistory.length > 0 && (
-              <div className={cn("space-y-1", pendingFlagColor ? "mt-3" : "mt-2")}>
+              <div className={cn("space-y-1 border-t border-border/40 pt-2", pendingFlagColor ? "mt-3" : "mt-2")}>
                 {recordHistory.slice(0, 3).map((log) => {
                   const toColor = getHistoryFlagColor(log);
                   const snippet = getHistoryReasonSnippet(log);
                   return (
-                    <div key={log.id} className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <div key={log.id} className="flex items-center gap-2 text-muted-foreground">
                       <span className="text-xs shrink-0">{formatHistoryDate(log.created_date)}</span>
                       <span className="text-xs shrink-0">{log.user_name || log.user_email || "?"}</span>
                       {toColor && <span className={cn("h-2 w-2 rounded-full shrink-0", flagDotColor[toColor] || "bg-slate-400")} />}
