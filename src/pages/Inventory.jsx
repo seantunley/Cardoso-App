@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
-import { Package, Search, RefreshCw, X } from "lucide-react";
+import { Package, Search, RefreshCw, X, Download } from "lucide-react";
 
 async function fetchInventory({ isHub, search, siteId }) {
   const params = new URLSearchParams();
@@ -103,6 +103,37 @@ export default function Inventory() {
   const activeFilterCount = [hideZeroQty, highlightBelowCost, priceListFilter !== "all", commodityFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
   const clearAll = () => { setSearch(""); setHideZeroQty(false); setHighlightBelowCost(false); setPriceListFilter("all"); setCommodityFilter("all"); setSiteFilter("all"); };
 
+  const exportCSV = () => {
+    const escape = (v) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ["Item Number", "Description", "Qty on Hand", "Last Cost", "Price", "Price List", "UOM", "Commodity"];
+    if (hubMode) headers.push("Site");
+    const csvRows = [headers.join(",")];
+    for (const row of rows) {
+      const vals = [
+        row.item_number || "",
+        row.item_description || "",
+        row.qty_on_hand ?? "",
+        row.last_cost ?? "",
+        row.price ?? "",
+        row.price_list ?? "",
+        row.stocking_uom || "",
+        COMMODITY_LABELS[row.commodity] || row.commodity || "",
+      ];
+      if (hubMode) vals.push(row.site_name || "");
+      csvRows.push(vals.map(escape).join(","));
+    }
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `inventory-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
       <div className="max-w-7xl mx-auto">
@@ -121,14 +152,24 @@ export default function Inventory() {
               </p>
             </div>
           </div>
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCSV}
+              disabled={rows.length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
 
