@@ -420,14 +420,17 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
 `);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_auditlog_created_date ON auditlog(created_date)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_login_log_logged_in_at ON login_log(logged_in_at)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_syncrun_connection_id ON syncrun(connection_id)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
+
+if (process.env.HUB_MODE === 'true') {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id)`);
+}
 
 // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
 function ensureFlexibleCustomFieldConfigTable() {
