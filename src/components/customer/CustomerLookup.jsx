@@ -1000,7 +1000,7 @@ export default function CustomerLookup({
                     <p className="text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-4 shrink-0 mr-2">
+                <div className="flex items-center gap-4 shrink-0 mr-14">
                   {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
                     <span className="text-base font-bold px-4 py-1.5 rounded-full bg-white/20 text-white ring-2 ring-white/40">
                       ⏱ {creditAnalysis.avgLag}d avg
