@@ -42,6 +42,16 @@ async function runLocalImport(connectionId) {
   return result;
 }
 
+const BUILT_IN_INVENTORY_FIELDS = [
+  { key: "item_number",     label: "Item Number",     type: "text", isBuiltIn: true },
+  { key: "item_description",label: "Item Description",type: "text", isBuiltIn: true },
+  { key: "qty_on_hand",     label: "Qty on Hand",     type: "text", isBuiltIn: true },
+  { key: "last_cost",       label: "Last Cost",       type: "text", isBuiltIn: true },
+  { key: "price_list",      label: "Price List",      type: "text", isBuiltIn: true },
+  { key: "price",           label: "Price",           type: "text", isBuiltIn: true },
+  { key: "terms",           label: "Terms",           type: "text", isBuiltIn: true },
+];
+
 const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
@@ -98,16 +108,19 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
   const [customLocalFields, setCustomLocalFields] = useState([]);
   const [showPassword, setShowPassword] = useState(false);
 
-  const allLocalFields = [
-    ...BUILT_IN_LOCAL_FIELDS,
-    ...customLocalFields.map((f) => ({
-      key: f.field_key,
-      label: f.label,
-      type: f.field_type,
-      options: f.options,
-      isBuiltIn: false,
-    })),
-  ];
+  const isInventoryConnection = (formData.record_type || "customer") === "inventory";
+  const allLocalFields = isInventoryConnection
+    ? BUILT_IN_INVENTORY_FIELDS
+    : [
+        ...BUILT_IN_LOCAL_FIELDS,
+        ...customLocalFields.map((f) => ({
+          key: f.field_key,
+          label: f.label,
+          type: f.field_type,
+          options: f.options,
+          isBuiltIn: false,
+        })),
+      ];
 
   const loadCustomLocalFields = async () => {
     try {
@@ -578,7 +591,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <Label className="text-gray-300">Field Mappings</Label>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Map SQL columns to local fields. Columns aliased to a local field name (e.g.{" "}
-                  <code className="text-gray-400">outstanding_balance</code>) are auto-mapped on sync —
+                  <code className="text-gray-400">{isInventoryConnection ? "item_number" : "outstanding_balance"}</code>) are auto-mapped on sync —
                   no manual mapping needed for those.
                 </p>
               </div>
