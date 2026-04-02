@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
-import { Package } from "lucide-react";
+import { Package, Search, RefreshCw, X, Download } from "lucide-react";
 
-async function fetchInventory({ isHub, search, siteId, limit }) {
-  const params = new URLSearchParams({ limit: String(limit) });
+async function fetchInventory({ isHub, search, siteId }) {
+  const params = new URLSearchParams();
   if (search) params.set("search", search);
   const url = isHub
     ? `/api/hub/inventory?${siteId ? `site_id=${encodeURIComponent(siteId)}&` : ""}${params}`
@@ -22,10 +23,25 @@ async function fetchHubSites() {
   return res.json();
 }
 
+const formatNum = (val, decimals = 2) => {
+  if (val === null || val === undefined || val === '') return '—';
+  const n = parseFloat(String(val).replace(/,/g, ''));
+  if (isNaN(n)) return val;
+  return n.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+const formatCurrency = (val) => {
+  const f = formatNum(val);
+  return f === '—' ? '—' : `R ${f}`;
+};
+
 export default function Inventory() {
   const [hubMode, setHubMode] = useState(false);
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [hideZeroQty, setHideZeroQty] = useState(true);
+  const [highlightBelowCost, setHighlightBelowCost] = useState(false);
+  const [priceListFilter, setPriceListFilter] = useState('all');
+  const [commodityFilter, setCommodityFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
@@ -48,87 +64,181 @@ export default function Inventory() {
     staleTime: 60_000,
   });
 
-  const { data, isLoading, isError, error, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["inventory", hubMode, debouncedSearch, siteFilter === "all" ? "" : siteFilter],
     queryFn: () =>
       fetchInventory({
         isHub: hubMode,
         search: debouncedSearch,
         siteId: siteFilter === "all" ? "" : siteFilter,
-        limit: 500,
+
       }),
     staleTime: 60_000,
   });
 
-  const rows = data?.records ?? [];
+  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
+  const allRows = data?.records ?? [];
+  const priceLists = useMemo(() => {
+    const seen = new Set();
+    for (const r of allRows) { if (r.price_list) seen.add(r.price_list); }
+    return [...seen].sort();
+  }, [allRows]);
+  const commodities = useMemo(() => {
+    const seen = new Set();
+    for (const r of allRows) {
+      const v = r.commodity != null ? String(r.commodity).trim() : '';
+      if (v) seen.add(v);
+    }
+    return [...seen].sort();
+  }, [allRows]);
+  const rows = allRows
+    .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
+    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
+    .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
   }, [sitesData]);
 
+  const activeFilterCount = [hideZeroQty, highlightBelowCost, priceListFilter !== "all", commodityFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
+  const clearAll = () => { setSearch(""); setHideZeroQty(false); setHighlightBelowCost(false); setPriceListFilter("all"); setCommodityFilter("all"); setSiteFilter("all"); };
+
+  const exportCSV = () => {
+    const escape = (v) => {
+      const s = String(v ?? "");
+      return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const headers = ["Item Number", "Description", "Qty on Hand", "Last Cost", "Price", "Price List", "UOM", "Commodity"];
+    if (hubMode) headers.push("Site");
+    const csvRows = [headers.join(",")];
+    for (const row of rows) {
+      const vals = [
+        row.item_number || "",
+        row.item_description || "",
+        row.qty_on_hand ?? "",
+        row.last_cost ?? "",
+        row.price ?? "",
+        row.price_list ?? "",
+        row.stocking_uom || "",
+        COMMODITY_LABELS[row.commodity] || row.commodity || "",
+      ];
+      if (hubMode) vals.push(row.site_name || "");
+      csvRows.push(vals.map(escape).join(","));
+    }
+    const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `inventory-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center justify-between mb-5">
           <div className="flex items-center gap-3">
-            <Package className="h-6 w-6 text-muted-foreground" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
+              <Package className="h-5 w-5 text-muted-foreground" />
+            </div>
             <div>
               <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
               <p className="text-sm text-muted-foreground mt-0.5">
-                {rows.length} item{rows.length !== 1 ? "s" : ""}
-                {debouncedSearch ? ` matching "${debouncedSearch}"` : ""}
+                {(() => {
+                  const subtitleParts = [];
+                  subtitleParts.push(`${rows.length}${allRows.length !== rows.length ? " of " + allRows.length : ""} item${rows.length !== 1 ? "s" : ""}`);
+                  if (debouncedSearch) subtitleParts.push(`"${debouncedSearch}"`);
+                  if (commodityFilter !== "all") subtitleParts.push(COMMODITY_LABELS[commodityFilter] || commodityFilter);
+                  if (priceListFilter !== "all") subtitleParts.push(priceListFilter);
+                  if (hubMode && siteFilter !== "all") {
+                    const siteName = sites.find(s => String(s.id) === String(siteFilter))?.name || siteFilter;
+                    subtitleParts.push(siteName);
+                  }
+                  if (highlightBelowCost) subtitleParts.push("Price \u2264 cost");
+                  return subtitleParts.join(" \u00b7 ");
+                })()}
               </p>
             </div>
           </div>
-          <button
-            onClick={() => refetch()}
-            className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M23 4v6h-6M1 20v-6h6"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={exportCSV}
+              disabled={rows.length === 0}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+          </div>
         </div>
 
-        {/* Filters row */}
-        <div className="mb-4 flex flex-wrap items-center gap-3">
-          {/* Search */}
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search item number or description…"
-            className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-[220px]"
-          />
-          {/* Site filter — hub only */}
-          {hubMode && sites.length > 0 && (
-            <>
-              <label className="text-xs text-muted-foreground whitespace-nowrap">Site:</label>
-              <select
-                value={siteFilter}
-                onChange={(e) => setSiteFilter(e.target.value)}
-                className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="all">All sites</option>
-                {sites.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              {siteFilter !== "all" && (
-                <button
-                  onClick={() => setSiteFilter("all")}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  Clear
-                </button>
-              )}
-            </>
-          )}
-        </div>
 
+        {/* Filter bar */}
+        <div className="mb-4 rounded-xl border border-border bg-card px-3 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[220px] flex-1">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search item number or description…"
+                className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+              {search && (<button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>)}
+            </div>
+            <div className="h-5 w-px bg-border" />
+            <button onClick={() => setHideZeroQty((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${hideZeroQty ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+              {hideZeroQty && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}Hide zero qty
+            </button>
+            <button onClick={() => setHighlightBelowCost((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${highlightBelowCost ? "border-red-500/40 bg-red-500/10 text-red-400" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+              {highlightBelowCost && <span className="h-1.5 w-1.5 rounded-full bg-red-400" />}Price ≤ cost
+            </button>
+            {commodities.length > 0 && (
+              <div className="relative">
+                <select value={commodityFilter} onChange={(e) => setCommodityFilter(e.target.value)}
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${commodityFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+                  <option value="all" className="bg-card text-foreground">All commodities</option>
+                  {commodities.map((v) => <option key={v} value={v} className="bg-card text-foreground">{COMMODITY_LABELS[v] || v}</option>)}
+                </select>
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
+              </div>
+            )}
+            {priceLists.length > 0 && (
+              <div className="relative">
+                <select value={priceListFilter} onChange={(e) => setPriceListFilter(e.target.value)}
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${priceListFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+                  <option value="all" className="bg-card text-foreground">All price lists</option>
+                  {priceLists.map((pl) => <option key={pl} value={pl} className="bg-card text-foreground">{pl}</option>)}
+                </select>
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
+              </div>
+            )}
+            {hubMode && sites.length > 0 && (
+              <div className="relative">
+                <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${siteFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+                  <option value="all">All sites</option>
+                  {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
+              </div>
+            )}
+            {(activeFilterCount > 0 || search) && (
+              <button onClick={clearAll} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                <X className="h-3 w-3" />Clear
+                {activeFilterCount > 0 && <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold text-primary">{activeFilterCount}</span>}
+              </button>
+            )}
+          </div>
+        </div>
         {/* State: loading */}
         {isLoading && (
           <div className="flex items-center justify-center py-20">
@@ -143,55 +253,102 @@ export default function Inventory() {
           </div>
         )}
 
-        {/* State: empty */}
-        {!isLoading && !isError && rows.length === 0 && (
+        {/* State: empty (no data at all) */}
+        {!isLoading && !isError && allRows.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
+            <Package className="w-12 h-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium text-foreground">No inventory data yet</h3>
+            <p className="text-sm text-muted-foreground mt-1">Sync your connections to see inventory.</p>
+          </div>
+        )}
+
+        {/* State: empty (filtered) */}
+        {!isLoading && !isError && allRows.length > 0 && rows.length === 0 && (
           <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
             {debouncedSearch ? `No inventory items matching "${debouncedSearch}".` : "No inventory records found."}
           </div>
         )}
 
-        {/* Table */}
+        {/* Table — virtualised for large datasets */}
         {!isLoading && !isError && rows.length > 0 && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Item Number</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Description</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Qty on Hand</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Last Cost</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price List</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Terms</th>
-                    {hubMode && (
-                      <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((row, idx) => (
-                    <tr
-                      key={`${row.site_id ?? row.source_table}-${row.item_number}-${idx}`}
-                      className="border-b border-border last:border-0 transition-colors hover:bg-muted/30"
-                    >
-                      <td className="px-2 py-1 text-xs font-mono text-foreground">{row.item_number || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.qty_on_hand || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.last_cost || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.price_list || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{row.price || "—"}</td>
-                      <td className="px-2 py-1 text-xs text-muted-foreground">{row.terms || "—"}</td>
-                      {hubMode && (
-                        <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_id || "—"}</td>
-                      )}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} highlightBelowCost={highlightBelowCost} />
         )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Virtualised table ────────────────────────────────────────────────────────
+const ROW_HEIGHT = 30;
+const TABLE_HEIGHT = 600;
+
+function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost }) {
+  const parentRef = useRef(null);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_HEIGHT,
+    overscan: 20,
+  });
+
+  const items = virtualizer.getVirtualItems();
+  const totalHeight = virtualizer.getTotalSize();
+  const paddingTop = items.length > 0 ? items[0].start : 0;
+  const paddingBottom = items.length > 0 ? totalHeight - items[items.length - 1].end : 0;
+
+  const isBelowCost = (row) => {
+    const price = parseFloat(String(row.price || '').replace(/[^0-9.-]/g, ''));
+    const cost = parseFloat(String(row.last_cost || '').replace(/[^0-9.-]/g, ''));
+    return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div
+        ref={parentRef}
+        style={{ height: TABLE_HEIGHT, overflowY: "auto", overflowX: "auto" }}
+      >
+        <table className="w-full text-sm">
+          <thead className="sticky top-0 z-20">
+            <tr className="border-b border-border bg-card">
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Item Number</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Description</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Qty on Hand</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Cost</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price List</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th>
+              {hubMode && (
+                <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
+              )}
+            </tr>
+          </thead>
+          <tbody>
+            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {items.map((vRow) => {
+              const row = rows[vRow.index];
+              return (
+                <tr
+                  key={vRow.key}
+                  className={`border-b border-border transition-colors ${highlightBelowCost && isBelowCost(row) ? "bg-red-500/10 hover:bg-red-500/15" : "hover:bg-muted/30"}`}
+                >
+                  <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap">{row.item_number || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
+                  <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.last_cost)}</td>
+                  <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.price)}</td>
+                  <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
+                  {hubMode && (
+                    <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || row.site_id || "—"}</td>
+                  )}
+                </tr>
+              );
+            })}
+            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   );

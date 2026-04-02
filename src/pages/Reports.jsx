@@ -238,20 +238,20 @@ export default function Reports() {
   const chartData = calculateAgeBuckets();
 
   const flagColors = {
-    none: { bg: "bg-slate-100", text: "text-slate-700", label: "No Flag" },
-    red: { bg: "bg-red-100", text: "text-red-700", label: "Red" },
-    green: { bg: "bg-green-100", text: "text-green-700", label: "Green" },
-    orange: { bg: "bg-orange-100", text: "text-orange-700", label: "Orange" },
+    none: { bg: "bg-muted", text: "text-muted-foreground", label: "No Flag" },
+    red: { bg: "bg-red-500/15", text: "text-red-400", label: "Red" },
+    green: { bg: "bg-green-500/15", text: "text-green-400", label: "Green" },
+    orange: { bg: "bg-orange-500/15", text: "text-orange-400", label: "Orange" },
   };
 
   return (
-    <div className="min-h-screen bg-[var(--bg-primary)]">
-      <div className="mx-auto max-w-7xl space-y-4 p-4 lg:p-6">
+    <div className="min-h-screen bg-background">
+      <div className="mx-auto max-w-7xl space-y-4 p-6">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             Age Analysis Reports
           </h1>
-          <p className="mt-1 text-sm text-[var(--text-secondary)]">
+          <p className="mt-1 text-sm text-muted-foreground">
             View and analyze customer age analysis data
           </p>
         </div>
@@ -267,18 +267,18 @@ export default function Reports() {
         )}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          <Card className="border-border bg-card">
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <FileBarChart className="h-3.5 w-3.5" />
                 Total Customers
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-[var(--text-primary)]">
+              <div className="text-2xl font-bold text-foreground">
                 {sortedRecords.length}
               </div>
-              <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-[10px] text-muted-foreground/60">
                 {records.length !== sortedRecords.length
                   ? `of ${records.length} total`
                   : "in database"}
@@ -286,48 +286,48 @@ export default function Reports() {
             </CardContent>
           </Card>
 
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          <Card className="border-border bg-card">
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <TrendingUp className="h-3.5 w-3.5" />
                 Total Age Value
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-[var(--text-primary)]">
+              <div className="text-2xl font-bold text-foreground">
                 R{totalAgeValue.toLocaleString('en-US')}
               </div>
-              <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-[10px] text-muted-foreground/60">
                 Sum of all age analysis values
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+          <Card className="border-border bg-card">
             <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <TrendingUp className="h-3.5 w-3.5" />
                 Average Age Value
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-[var(--text-primary)]">
+              <div className="text-2xl font-bold text-foreground">
                 R{avgAgeValue.toLocaleString('en-US')}
               </div>
-              <p className="mt-0.5 text-[10px] text-[var(--text-tertiary)]">
+              <p className="mt-0.5 text-[10px] text-muted-foreground/60">
                 Average per customer
               </p>
             </CardContent>
           </Card>
         </div>
 
-        <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <Card className="border-border bg-card">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base text-[var(--text-primary)]">
+            <CardTitle className="flex items-center gap-2 text-base text-foreground">
               <BarChart3 className="h-4 w-4" />
               Age Analysis Distribution
             </CardTitle>
-            <p className="mt-0.5 text-xs text-[var(--text-secondary)]">
+            <p className="mt-0.5 text-xs text-muted-foreground">
               Total age value across different aging periods
             </p>
           </CardHeader>
@@ -368,10 +368,10 @@ export default function Reports() {
           </CardContent>
         </Card>
 
-        <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <Card className="border-border bg-card">
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
-              <CardTitle className="flex items-center gap-2 text-base text-[var(--text-primary)]">
+              <CardTitle className="flex items-center gap-2 text-base text-foreground">
                 <Filter className="h-4 w-4" />
                 Filters
               </CardTitle>
@@ -380,7 +380,7 @@ export default function Reports() {
                   variant="ghost"
                   size="sm"
                   onClick={clearFilters}
-                  className="h-7 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                  className="h-7 text-xs text-muted-foreground hover:text-foreground"
                 >
                   <X className="mr-1 h-3 w-3" />
                   Clear All
@@ -391,7 +391,7 @@ export default function Reports() {
 
           <CardContent className="space-y-3">
             <div>
-              <label className="mb-1.5 block text-xs font-medium text-[var(--text-secondary)]">
+              <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
                 Filter by Flags
               </label>
               <div className="flex flex-wrap gap-1.5">
@@ -441,64 +441,64 @@ export default function Reports() {
             </div>
 
             <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--text-tertiary)]" />
+              <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground/60" />
               <Input
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search customers..."
-                className="h-8 border-[var(--border-color)] bg-[var(--bg-tertiary)] pl-9 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]"
+                className="h-8 border-border bg-muted pl-9 text-sm text-foreground placeholder:text-muted-foreground/60"
               />
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
                   From Date
                 </label>
                 <Input
                   type="date"
                   value={dateFrom}
                   onChange={(e) => setDateFrom(e.target.value)}
-                  className="h-8 border-[var(--border-color)] bg-[var(--bg-tertiary)] text-sm text-[var(--text-primary)]"
+                  className="h-8 border-border bg-muted text-sm text-foreground"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium text-[var(--text-secondary)]">
+                <label className="mb-1 block text-xs font-medium text-muted-foreground">
                   To Date
                 </label>
                 <Input
                   type="date"
                   value={dateTo}
                   onChange={(e) => setDateTo(e.target.value)}
-                  className="h-8 border-[var(--border-color)] bg-[var(--bg-tertiary)] text-sm text-[var(--text-primary)]"
+                  className="h-8 border-border bg-muted text-sm text-foreground"
                 />
               </div>
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
+        <Card className="border-border bg-card">
           <CardHeader className="pb-2">
-            <CardTitle className="text-base text-[var(--text-primary)]">
+            <CardTitle className="text-base text-foreground">
               Customer Records
             </CardTitle>
           </CardHeader>
 
           <CardContent>
             {isLoading ? (
-              <div className="py-8 text-center text-sm text-[var(--text-secondary)]">
+              <div className="py-8 text-center text-sm text-muted-foreground">
                 Loading records...
               </div>
             ) : sortedRecords.length === 0 ? (
               <div className="py-8 text-center">
-                <FileBarChart className="mx-auto mb-3 h-10 w-10 text-[var(--text-tertiary)]" />
-                <p className="text-sm text-[var(--text-secondary)]">No records found</p>
+                <FileBarChart className="mx-auto mb-3 h-10 w-10 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">No records found</p>
                 {hasActiveFilters && (
                   <Button
                     variant="outline"
                     size="sm"
                     onClick={clearFilters}
-                    className="mt-3 h-7 border-[var(--border-color)] text-xs text-[var(--text-primary)]"
+                    className="mt-3 h-7 border-border text-xs text-foreground"
                   >
                     Clear Filters
                   </Button>
@@ -508,9 +508,9 @@ export default function Reports() {
               <div className="overflow-x-auto">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-[var(--border-color)]">
+                    <tr className="border-b border-border">
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("customerNumber")}
                       >
                         <div className="flex items-center">
@@ -519,7 +519,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("customerName")}
                       >
                         <div className="flex items-center">
@@ -528,7 +528,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-left text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="cursor-pointer px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("ageAnalysis")}
                       >
                         <div className="flex items-center">
@@ -537,7 +537,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-right text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="cursor-pointer px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("ageValue")}
                       >
                         <div className="flex items-center justify-end">
@@ -546,7 +546,7 @@ export default function Reports() {
                         </div>
                       </th>
                       <th
-                        className="cursor-pointer px-3 py-2 text-center text-xs font-semibold text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="cursor-pointer px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide transition-colors hover:bg-muted"
                         onClick={() => handleSort("flagColor")}
                       >
                         <div className="flex items-center justify-center">
@@ -561,18 +561,18 @@ export default function Reports() {
                     {sortedRecords.map((record) => (
                       <tr
                         key={record.id}
-                        className="border-b border-[var(--border-color)] transition-colors hover:bg-[var(--bg-tertiary)]"
+                        className="border-b border-border transition-colors hover:bg-muted"
                       >
-                        <td className="px-3 py-2 font-mono text-xs text-[var(--text-primary)]">
+                        <td className="px-3 py-2 font-mono text-xs text-foreground">
                           {record.customerNumber}
                         </td>
-                        <td className="px-3 py-2 text-xs text-[var(--text-primary)]">
+                        <td className="px-3 py-2 text-xs text-foreground">
                           {record.customerName}
                         </td>
-                        <td className="max-w-xs truncate px-3 py-2 text-xs text-[var(--text-secondary)]">
+                        <td className="max-w-xs truncate px-3 py-2 text-xs text-muted-foreground">
                           {record.ageAnalysis || "N/A"}
                         </td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold text-[var(--text-primary)]">
+                        <td className="px-3 py-2 text-right text-xs font-semibold text-foreground">
                           {record.ageValue > 0 ? record.ageValue.toLocaleString('en-US') : "-"}
                         </td>
                         <td className="px-3 py-2 text-center">
@@ -595,7 +595,7 @@ export default function Reports() {
                               {flagColors[record.flagColor].label}
                             </Badge>
                           ) : (
-                            <span className="text-[10px] text-[var(--text-tertiary)]">-</span>
+                            <span className="text-[10px] text-muted-foreground/60">-</span>
                           )}
                         </td>
                       </tr>

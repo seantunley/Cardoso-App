@@ -55,7 +55,7 @@ export default function HubSyncLog() {
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 {["Site", "Status", "Records", "Started", "Note"].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>
+                  <th key={h} className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>

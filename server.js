@@ -162,6 +162,48 @@ async function getVersionStatus() {
   }
 }
 
+// ==================== FIELD REGISTRY ====================
+// Defines all MSSQL→SQLite field mappings. buildFieldPatch iterates this.
+const FIELD_REGISTRY = [
+  { key: 'customer_number',    sources: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER'],                                                                       defaultMode: 'sync' },
+  { key: 'customer_name',      sources: ['customer_name', 'CustomerName', 'CUSTOMER_NAME', 'name', 'Name'],                                                             defaultMode: 'sync' },
+  { key: 'age_analysis',       sources: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],                                                                                defaultMode: 'sync' },
+  { key: 'outstanding_balance',sources: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE', 'AMTDUE', 'AMTDUE1', 'AMTDUE1HC', 'AMTOUTSTANDING', 'OUTSTANDING', 'OutstandingAmt', 'outstanding_amt', 'balance_due', 'BalanceDue', 'BALANCEDUE', 'TotalDue', 'TOTALDUE', 'total_due', 'AmountDue', 'AMOUNTDUE', 'amount_due'], defaultMode: 'sync' },
+  { key: 'age_current',        sources: ['age_current', 'AgeCurrent', 'AGE_CURRENT', 'Current', 'CURRENT'],                                                             defaultMode: 'sync' },
+  { key: 'age_7_days',         sources: ['age_7_days', 'Age7Days', 'AGE_7_DAYS', 'Age7', 'AMTDUE07'],                                                                  defaultMode: 'sync' },
+  { key: 'age_14_days',        sources: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],                                                               defaultMode: 'sync' },
+  { key: 'age_21_days',        sources: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],                                                               defaultMode: 'sync' },
+  { key: 'terms',              sources: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],                                                  defaultMode: 'sync' },
+  { key: 'note',               sources: ['note', 'Note', 'notes', 'Notes'],                                                                                             defaultMode: 'local-only' },
+];
+
+// Invoice/receipt slot definitions — used by buildFieldPatch to produce JSON arrays
+const INVOICE_SLOTS = [1, 2, 3, 4, 5].map(i => ({
+  index: i,
+  number_sources: i === 1
+    ? [`last_unpaid_invoice_1`, 'LastUnpaidInvoice1', 'LAST_UNPAID_INVOICE_1']
+    : [`last_unpaid_invoice_${i}`, `LastUnpaidInvoice${i}`, `LAST_UNPAID_INVOICE_${i}`],
+  amount_sources: i === 1
+    ? ['last_unpaid_invoice_1_amount', 'LastUnpaidInvoice1Amount', 'LAST_UNPAID_INVOICE_1_AMOUNT']
+    : [`last_unpaid_invoice_${i}_amount`, `LastUnpaidInvoice${i}Amount`, `LAST_UNPAID_INVOICE_${i}_AMOUNT`],
+  date_sources: i === 1
+    ? ['last_unpaid_invoice_1_date', 'LastUnpaidInvoice1Date', 'LAST_UNPAID_INVOICE_1_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate']
+    : [`last_unpaid_invoice_${i}_date`, `LastUnpaidInvoice${i}Date`, `LAST_UNPAID_INVOICE_${i}_DATE`],
+}));
+
+const RECEIPT_SLOTS = [1, 2, 3, 4, 5].map(i => ({
+  index: i,
+  number_sources: i === 1
+    ? ['last_receipt_1', 'LastReceipt1', 'LAST_RECEIPT_1', 'last_receipt_number', 'LastReceiptNumber', 'ReceiptNo', 'RECNO']
+    : [`last_receipt_${i}`, `LastReceipt${i}`, `LAST_RECEIPT_${i}`],
+  amount_sources: i === 1
+    ? ['last_receipt_1_amount', 'LastReceipt1Amount', 'LAST_RECEIPT_1_AMOUNT', 'last_receipt_amount', 'LastReceiptAmount', 'ReceiptAmount', 'RECAMT']
+    : [`last_receipt_${i}_amount`, `LastReceipt${i}Amount`, `LAST_RECEIPT_${i}_AMOUNT`],
+  date_sources: i === 1
+    ? ['last_receipt_1_date', 'LastReceipt1Date', 'LAST_RECEIPT_1_DATE', 'last_receipt_date', 'LastReceiptDate', 'ReceiptDate', 'RECDATE']
+    : [`last_receipt_${i}_date`, `LastReceipt${i}Date`, `LAST_RECEIPT_${i}_DATE`],
+}));
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
@@ -235,6 +277,19 @@ db.pragma('journal_mode = WAL');
 db.pragma('busy_timeout = 5000');
 db.pragma('synchronous = NORMAL');
 db.pragma('foreign_keys = ON');
+db.pragma('cache_size = -65536');
+db.pragma('mmap_size = 268435456');
+db.pragma('temp_store = MEMORY');
+db.exec('PRAGMA optimize');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS schema_migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    version INTEGER NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`);
 
 console.log(`✅ SQLite database ready → ${dbPath}`);
 
@@ -385,6 +440,18 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_databaseconnection_status
   ON databaseconnection (status);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_customer_number
+  ON datarecord (customer_number);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_flag_color
+  ON datarecord (flag_color);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance
+  ON datarecord (outstanding_balance);
+
+  CREATE INDEX IF NOT EXISTS idx_datarecord_updated_date
+  ON datarecord (updated_date);
 `);
 
 db.exec(`
@@ -404,6 +471,17 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
 `);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_auditlog_created_date ON auditlog(created_date)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_login_log_logged_in_at ON login_log(logged_in_at)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_syncrun_connection_id ON syncrun(connection_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
+
+if (process.env.HUB_MODE === 'true') {
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color)`);
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id)`);
+}
 
 // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
 function ensureFlexibleCustomFieldConfigTable() {
@@ -523,29 +601,65 @@ ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
   const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
   for (const conn of connections) {
     try {
-      const raw = JSON.parse(conn.field_mappings || '{}');
-      const isFlat = Object.keys(raw).length > 0 &&
-        Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
-      if (!isFlat) continue; // already per-table or empty
-
-      const tableConfigs = JSON.parse(conn.table_configs || '[]');
-      if (!tableConfigs.length) continue;
-
-      const migrated = {};
-      for (const t of tableConfigs) {
-        migrated[t.table_name] = raw;
-      }
-
-      db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
-        .run(JSON.stringify(migrated), conn.id);
-
-      console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
-    } catch (e) {
-      console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
+      run();
+      console.log(`[migration] Applied v${migration.version}: ${migration.name}`);
+    } catch (err) {
+      console.error(`[migration] Failed v${migration.version} (${migration.name}):`, err.message);
+      throw err;
     }
   }
-})();
+}
 
+try {
+  runMigrations(db);
+} catch (err) {
+  console.error('[startup] migration failed:', err);
+  process.exit(1);
+}
+
+// ==================== SCHEMA CACHE ====================
+// Pre-load and cache table schemas at startup so PRAGMA table_info is never
+// called on hot request paths (PUT/POST run it on every write otherwise).
+const _schemaCache = new Map();
+function getTableColumns(table) {
+  if (_schemaCache.has(table)) return _schemaCache.get(table);
+  const cols = new Set(db.prepare(`PRAGMA table_info("${table}")`).all().map(c => c.name));
+  _schemaCache.set(table, cols);
+  return cols;
+}
+function invalidateSchemaCache(table) { _schemaCache.delete(table); }
+// Warm the cache for all allowed tables at startup
+for (const t of allowedTables) {
+  try { getTableColumns(t); } catch {}
+}
+
+// ==================== PRE-COMPILED STATEMENTS ====================
+let stmts = {};
+function initPreparedStatements() {
+  stmts.getUserById        = db.prepare('SELECT * FROM "user" WHERE id = ?');
+  stmts.getUserByEmail     = db.prepare('SELECT * FROM "user" WHERE email = ?');
+  stmts.updateUserPassword = db.prepare('UPDATE "user" SET password_hash = ? WHERE id = ?');
+
+  stmts.kpiTotalRecords  = db.prepare('SELECT COUNT(*) as count FROM datarecord');
+  stmts.kpiFlagCounts    = db.prepare('SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color');
+  stmts.kpiLastSync      = db.prepare('SELECT MAX(synced_at) as last_sync FROM datarecord');
+  stmts.kpiLastRun       = db.prepare('SELECT MAX(last_sync) as last_run FROM databaseconnection');
+  stmts.kpiActiveConns   = db.prepare("SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'");
+
+  stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC');
+  stmts.autoRecordsForFlags  = db.prepare('SELECT * FROM datarecord');
+  stmts.updateAutoFlag       = db.prepare('UPDATE datarecord SET flag_color = ?, flag_source = ? WHERE id = ?');
+  stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_source = NULL WHERE id = ? AND flag_source = ?");
+  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_source = NULL WHERE flag_source = 'auto'");
+
+  if (process.env.HUB_MODE === 'true') {
+    stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
+    stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
+  }
+}
+
+initPreparedStatements();
 ensureColumn('user', 'password_hash', 'TEXT');
 ensureColumn('user', 'must_change_password', 'INTEGER DEFAULT 0');
 ensureColumn('user', 'is_active', 'INTEGER DEFAULT 1');
@@ -596,7 +710,31 @@ function stringifyJsonSafely(value, fallback = '{}') {
 function expandDataRecord(row) {
   if (!row || typeof row !== 'object') return row;
   const localFields = parseJsonSafely(row.local_fields, {});
-  return { ...row, ...localFields };
+  const expanded = { ...row, ...localFields };
+
+  // Expand unpaid_invoices JSON array back to flat numbered fields for API compat
+  const invoices = parseJsonSafely(row.unpaid_invoices, []);
+  if (Array.isArray(invoices)) {
+    invoices.forEach((inv, i) => {
+      const n = i + 1;
+      expanded[`last_unpaid_invoice_${n}`]        = inv.number ?? '';
+      expanded[`last_unpaid_invoice_${n}_amount`] = inv.amount ?? '';
+      expanded[`last_unpaid_invoice_${n}_date`]   = inv.date   ?? '';
+    });
+  }
+
+  // Expand receipts JSON array back to flat numbered fields for API compat
+  const recs = parseJsonSafely(row.receipts, []);
+  if (Array.isArray(recs)) {
+    recs.forEach((rec, i) => {
+      const n = i + 1;
+      expanded[`last_receipt_${n}`]        = rec.number ?? '';
+      expanded[`last_receipt_${n}_amount`] = rec.amount ?? '';
+      expanded[`last_receipt_${n}_date`]   = rec.date   ?? '';
+    });
+  }
+
+  return expanded;
 }
 
 function normalizeFieldKey(input) {
@@ -752,112 +890,37 @@ function shouldApplyMappedValue(mode, existingValue, incomingValue) {
 function buildFieldPatch(existingRecord, row, fieldMappings, indexField) {
   const patch = {};
 
-  const mappingConfig = {
-    customer_number: {
-      fallbacks: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER', indexField, 'id'],
-      defaultMode: 'sync',
-    },
-    customer_name: {
-      fallbacks: ['customer_name', 'CustomerName', 'CUSTOMER_NAME', 'name', 'Name'],
-      defaultMode: 'sync',
-    },
-    age_analysis: {
-      fallbacks: ['age_analysis', 'AgeAnalysis', 'AGE_ANALYSIS'],
-      defaultMode: 'sync',
-    },
-    outstanding_balance: {
-      fallbacks: ['outstanding_balance', 'OutstandingBalance', 'OUTSTANDING_BALANCE', 'Balance', 'BALANCE',
-        'AMTDUE', 'AMTDUE1', 'AMTDUE1HC', 'AMTOUTSTANDING', 'OUTSTANDING', 'OutstandingAmt',
-        'outstanding_amt', 'balance_due', 'BalanceDue', 'BALANCEDUE', 'TotalDue', 'TOTALDUE',
-        'total_due', 'AmountDue', 'AMOUNTDUE', 'amount_due'],
-      defaultMode: 'sync',
-    },
-    age_current: {
-      fallbacks: ['age_current', 'AgeCurrent', 'AGE_CURRENT', 'Current', 'CURRENT'],
-      defaultMode: 'sync',
-    },
-    age_7_days: {
-      fallbacks: ['age_7_days', 'Age7Days', 'AGE_7_DAYS', 'Age7', 'AMTDUE07'],
-      defaultMode: 'sync',
-    },
-    age_14_days: {
-      fallbacks: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],
-      defaultMode: 'sync',
-    },
-    age_21_days: {
-      fallbacks: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_1: {
-      fallbacks: ['last_unpaid_invoice_1', 'LastUnpaidInvoice1', 'LAST_UNPAID_INVOICE_1'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_1_amount: {
-      fallbacks: ['last_unpaid_invoice_1_amount', 'LastUnpaidInvoice1Amount', 'LAST_UNPAID_INVOICE_1_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_2: {
-      fallbacks: ['last_unpaid_invoice_2', 'LastUnpaidInvoice2', 'LAST_UNPAID_INVOICE_2'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_2_amount: {
-      fallbacks: ['last_unpaid_invoice_2_amount', 'LastUnpaidInvoice2Amount', 'LAST_UNPAID_INVOICE_2_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_3: {
-      fallbacks: ['last_unpaid_invoice_3', 'LastUnpaidInvoice3', 'LAST_UNPAID_INVOICE_3'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_3_amount: {
-      fallbacks: ['last_unpaid_invoice_3_amount', 'LastUnpaidInvoice3Amount', 'LAST_UNPAID_INVOICE_3_AMOUNT'],
-      defaultMode: 'sync',
-    },
-    last_unpaid_invoice_date: {
-      fallbacks: ['last_unpaid_invoice_date', 'LastUnpaidInvoiceDate', 'LAST_UNPAID_INVOICE_DATE', 'InvoiceDate', 'INVDATE', 'LastInvoiceDate'],
-      defaultMode: 'sync',
-    },
-    last_receipt_number: {
-      fallbacks: ['last_receipt_number', 'LastReceiptNumber', 'LAST_RECEIPT_NUMBER', 'ReceiptNo', 'RECNO', 'LastReceiptNo'],
-      defaultMode: 'sync',
-    },
-    last_receipt_amount: {
-      fallbacks: ['last_receipt_amount', 'LastReceiptAmount', 'LAST_RECEIPT_AMOUNT', 'ReceiptAmount', 'RECAMT', 'LastReceiptAmt'],
-      defaultMode: 'sync',
-    },
-    last_receipt_date: {
-      fallbacks: ['last_receipt_date', 'LastReceiptDate', 'LastReceiptIssuedDate', 'LAST_RECEIPT_DATE', 'ReceiptDate', 'RECDATE'],
-      defaultMode: 'sync',
-    },
-    note: {
-      fallbacks: ['note', 'Note', 'notes', 'Notes'],
-      defaultMode: 'local-only',
-    },
-    custom_field_1: {
-      fallbacks: [],
-      defaultMode: 'sync-if-empty',
-    },
-    custom_field_2: {
-      fallbacks: [],
-      defaultMode: 'sync-if-empty',
-    },
-    custom_field_3: {
-      fallbacks: [],
-      defaultMode: 'sync-if-empty',
-    },
-  };
-
-  for (const [localKey, config] of Object.entries(mappingConfig)) {
-    const mapping = getMappingForKey(fieldMappings, localKey);
-    const mode = mapping?.mode || config.defaultMode;
-    const incomingValue = getMappedOrFallbackValue(row, fieldMappings, localKey, config.fallbacks);
-    const existingValue = existingRecord?.[localKey];
+  for (const field of FIELD_REGISTRY) {
+    const sources = field.key === 'customer_number'
+      ? [...field.sources, indexField, 'id'].filter(Boolean)
+      : field.sources;
+    const mapping = getMappingForKey(fieldMappings, field.key);
+    const mode = mapping?.mode || field.defaultMode;
+    const incomingValue = getMappedOrFallbackValue(row, fieldMappings, field.key, sources);
+    const existingValue = existingRecord?.[field.key];
 
     if (shouldApplyMappedValue(mode, existingValue, incomingValue)) {
-      patch[localKey] = String(incomingValue ?? '');
+      patch[field.key] = String(incomingValue ?? '');
     } else if (!existingRecord && incomingValue !== undefined && incomingValue !== null && incomingValue !== '') {
-      patch[localKey] = String(incomingValue);
+      patch[field.key] = String(incomingValue);
     }
   }
+
+  // Build unpaid_invoices JSON array from INVOICE_SLOTS
+  const invoiceSlots = INVOICE_SLOTS.map(slot => ({
+    number: String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}`, slot.number_sources) ?? ''),
+    amount: String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}_amount`, slot.amount_sources) ?? ''),
+    date:   String(getMappedOrFallbackValue(row, fieldMappings, `last_unpaid_invoice_${slot.index}_date`,   slot.date_sources)   ?? ''),
+  })).filter(s => s.date || s.number || s.amount);
+  patch.unpaid_invoices = JSON.stringify(invoiceSlots);
+
+  // Build receipts JSON array from RECEIPT_SLOTS
+  const receiptSlots = RECEIPT_SLOTS.map(slot => ({
+    number: String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}`,        slot.number_sources) ?? ''),
+    amount: String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}_amount`, slot.amount_sources) ?? ''),
+    date:   String(getMappedOrFallbackValue(row, fieldMappings, `last_receipt_${slot.index}_date`,   slot.date_sources)   ?? ''),
+  })).filter(s => s.date || s.number || s.amount);
+  patch.receipts = JSON.stringify(receiptSlots);
 
   return patch;
 }
@@ -953,7 +1016,7 @@ function sanitizeConnection(conn) {
 }
 
 function getUserById(id) {
-  return db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(id);
+  return stmts.getUserById.get(id);
 }
 
 function recoverAbandonedSyncs() {
@@ -1215,20 +1278,10 @@ async function runConnectionImport(connectionId) {
         source_id = ?,
         source_table = ?,
         data = ?,
-        custom_field_1 = ?,
-        custom_field_2 = ?,
-        custom_field_3 = ?,
         local_fields = ?,
-        last_unpaid_invoice_1 = ?,
-        last_unpaid_invoice_1_amount = ?,
-        last_unpaid_invoice_2 = ?,
-        last_unpaid_invoice_2_amount = ?,
-        last_unpaid_invoice_3 = ?,
-        last_unpaid_invoice_3_amount = ?,
-        last_unpaid_invoice_date = ?,
-        last_receipt_number = ?,
-        last_receipt_amount = ?,
-        last_receipt_date = ?,
+        unpaid_invoices = ?,
+        receipts = ?,
+        terms = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -1252,65 +1305,61 @@ async function runConnectionImport(connectionId) {
         source_id,
         source_table,
         data,
-        custom_field_1,
-        custom_field_2,
-        custom_field_3,
         local_fields,
-        last_unpaid_invoice_1,
-        last_unpaid_invoice_1_amount,
-        last_unpaid_invoice_2,
-        last_unpaid_invoice_2_amount,
-        last_unpaid_invoice_3,
-        last_unpaid_invoice_3_amount,
-        last_unpaid_invoice_date,
-        last_receipt_number,
-        last_receipt_amount,
-        last_receipt_date,
+        unpaid_invoices,
+        receipts,
+        terms,
         note,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
-      item_number:      { fallbacks: ['item_number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
-      item_description: { fallbacks: ['item_description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc'] },
-      qty_on_hand:      { fallbacks: ['qty_on_hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand'] },
-      last_cost:        { fallbacks: ['last_cost', 'LastCost', 'LAST_COST', 'Cost', 'COST'] },
-      price_list:       { fallbacks: ['price_list', 'PriceList', 'PRICE_LIST', 'Pricelist'] },
-      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice'] },
-      terms:            { fallbacks: ['terms', 'Terms', 'TERMS', 'PaymentTerms'] },
+      item_number:      { fallbacks: ['item_number', 'Item Number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
+      item_description: { fallbacks: ['item_description', 'Item Description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc', 'ItemName'] },
+      qty_on_hand:      { fallbacks: ['qty_on_hand', 'Qty on Hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand', 'QTYONHAND', 'TotalLiveQtyOnHand'] },
+      last_cost:        { fallbacks: ['last_cost', 'Last Cost', 'LastCost', 'LAST_COST', 'Cost', 'COST', 'RECENTCOST', 'LowestRecentCost'] },
+      price_list:       { fallbacks: ['price_list', 'Price List', 'PriceList', 'PRICE_LIST', 'Pricelist', 'PRICELIST'] },
+      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice', 'UNITPRICE', 'HighestUnitPrice'] },
+      stocking_uom:     { fallbacks: ['stocking_uom', 'StockingUnitOfMeasure', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
+      commodity:        { fallbacks: ['commodity', 'CommodityNumber', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
+      inventory_value:  { fallbacks: ['inventory_value', 'InventoryValue', 'TotalInventoryValueAtCost', 'TotalValue', 'inventory_value_at_cost'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_table, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
         last_cost=excluded.last_cost,
         price_list=excluded.price_list,
         price=excluded.price,
-        terms=excluded.terms,
+        stocking_uom=excluded.stocking_uom,
+        commodity=excluded.commodity,
+        inventory_value=excluded.inventory_value,
         updated_date=excluded.updated_date
     `);
 
-    const runInventoryRows = (rows, sourceName) => {
+    const runInventoryRows = (rows, sourceName, mappings = {}) => {
       const syncTimestamp = new Date().toISOString();
       const writeInventory = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const itemNumber = String(
-            getMappedOrFallbackValue(row, {}, 'item_number', inventoryMappingConfig.item_number.fallbacks) || ''
+            getMappedOrFallbackValue(row, mappings, 'item_number', inventoryMappingConfig.item_number.fallbacks) || ''
           );
           if (!itemNumber) continue;
           upsertInventoryRecord.run(
             sourceName,
             itemNumber,
-            String(getMappedOrFallbackValue(row, {}, 'item_description', inventoryMappingConfig.item_description.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'qty_on_hand', inventoryMappingConfig.qty_on_hand.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'price', inventoryMappingConfig.price.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'terms', inventoryMappingConfig.terms.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'item_description', inventoryMappingConfig.item_description.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'qty_on_hand', inventoryMappingConfig.qty_on_hand.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'price', inventoryMappingConfig.price.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'stocking_uom', inventoryMappingConfig.stocking_uom.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'commodity', inventoryMappingConfig.commodity.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'inventory_value', inventoryMappingConfig.inventory_value.fallbacks) || ''),
             syncTimestamp
           );
         }
@@ -1323,13 +1372,8 @@ async function runConnectionImport(connectionId) {
       const existingRows = db.prepare(`
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
-               note, custom_field_1, custom_field_2, custom_field_3,
-               local_fields, flag_color, flag_reason, flag_created_by, data,
-               last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
-               last_unpaid_invoice_2, last_unpaid_invoice_2_amount,
-               last_unpaid_invoice_3, last_unpaid_invoice_3_amount,
-               last_unpaid_invoice_date, outstanding_balance,
-               last_receipt_number, last_receipt_amount, last_receipt_date
+               note, local_fields, flag_color, flag_reason, flag_created_by, data,
+               outstanding_balance, terms, unpaid_invoices, receipts
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -1341,6 +1385,7 @@ async function runConnectionImport(connectionId) {
       const syncTimestamp = new Date().toISOString();
 
       // Load active auto-flag rules once for the entire sync batch
+      const activeAutoFlagRules = stmts.activeAutoFlagRules.all();
       const activeAutoFlagRules = db.prepare(
         `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
       ).all();
@@ -1392,20 +1437,10 @@ async function runConnectionImport(connectionId) {
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,
-              String(baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? ''),
-              String(baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? ''),
-              String(baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? ''),
               String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
-              String(baseRecordData.last_unpaid_invoice_1 ?? existing.last_unpaid_invoice_1 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_amount ?? existing.last_unpaid_invoice_1_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2 ?? existing.last_unpaid_invoice_2 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_amount ?? existing.last_unpaid_invoice_2_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3 ?? existing.last_unpaid_invoice_3 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_amount ?? existing.last_unpaid_invoice_3_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_date ?? existing.last_unpaid_invoice_date ?? ''),
-              String(baseRecordData.last_receipt_number ?? existing.last_receipt_number ?? ''),
-              String(baseRecordData.last_receipt_amount ?? existing.last_receipt_amount ?? ''),
-              String(baseRecordData.last_receipt_date ?? existing.last_receipt_date ?? ''),
+              baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
+              baseRecordData.receipts ?? existing.receipts ?? '[]',
+              String(baseRecordData.terms ?? existing.terms ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -1418,6 +1453,7 @@ async function runConnectionImport(connectionId) {
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
              if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
+               const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
                const mergedRecord = { ...existing, ...baseRecordData };
                const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
                if (autoFlag) {
@@ -1442,20 +1478,10 @@ async function runConnectionImport(connectionId) {
               baseRecordData.source_id,
               baseRecordData.source_table,
               baseRecordData.data,
-              String(baseRecordData.custom_field_1 ?? ''),
-              String(baseRecordData.custom_field_2 ?? ''),
-              String(baseRecordData.custom_field_3 ?? ''),
               String(baseRecordData.local_fields ?? '{}'),
-              String(baseRecordData.last_unpaid_invoice_1 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_1_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_2_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3 ?? ''),
-              String(baseRecordData.last_unpaid_invoice_3_amount ?? ''),
-              String(baseRecordData.last_unpaid_invoice_date ?? ''),
-              String(baseRecordData.last_receipt_number ?? ''),
-              String(baseRecordData.last_receipt_amount ?? ''),
-              String(baseRecordData.last_receipt_date ?? ''),
+              baseRecordData.unpaid_invoices ?? '[]',
+              baseRecordData.receipts ?? '[]',
+              String(baseRecordData.terms ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.synced_at
             );
@@ -1497,7 +1523,17 @@ async function runConnectionImport(connectionId) {
       const sourceName = `query::${connConfig.id}`;
 
       if (connConfig.record_type === 'inventory') {
-        runInventoryRows(rows, sourceName);
+        runInventoryRows(rows, sourceName, queryFieldMappings);
+        // Prune items no longer returned by the query (upsert-then-prune keeps data live)
+        const freshItemNumbers = rows.map(r =>
+          String(getMappedOrFallbackValue(r, queryFieldMappings, 'item_number', inventoryMappingConfig.item_number.fallbacks) || '')
+        ).filter(Boolean);
+        if (freshItemNumbers.length > 0) {
+          const placeholders = freshItemNumbers.map(() => '?').join(',');
+          db.prepare(
+            `DELETE FROM inventoryrecord WHERE source_table = ? AND item_number NOT IN (${placeholders})`
+          ).run(sourceName, ...freshItemNumbers);
+        }
       } else {
         runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
       }
@@ -1542,7 +1578,7 @@ async function runConnectionImport(connectionId) {
 
         const configRecordType = config.record_type || connConfig.record_type || 'customer';
         if (configRecordType === 'inventory') {
-          runInventoryRows(rows, table_name);
+          runInventoryRows(rows, table_name, fieldMappings);
         } else {
           runWriteRows(rows, table_name, fieldMappings, index_field);
         }
@@ -1617,7 +1653,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   }
 
   try {
-    const user = db.prepare(`SELECT * FROM "user" WHERE lower(email) = lower(?)`).get(email);
+    const user = stmts.getUserByEmail.get(email);
 
     if (!user || !user.password_hash) {
       return res.status(401).json({ error: 'Invalid username or password' });
@@ -1689,7 +1725,7 @@ app.post('/api/auth/set-initial-password', async (req, res) => {
 
   try {
     const hash = await bcrypt.hash(password, 12);
-    db.prepare(`UPDATE "user" SET password_hash = ?, must_change_password = 0 WHERE id = ?`).run(hash, userId);
+    stmts.updateUserPassword.run(hash, userId);
 
     // Upgrade session to full login
     const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);
@@ -1761,6 +1797,7 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
     // Fetch a reasonably large sample to find matches and non-matches
     const rows = db.prepare(
       `SELECT customer_number, customer_name, outstanding_balance,
+              last_unpaid_invoice_1_date, last_receipt_1_date, updated_date, created_date,
               last_unpaid_invoice_date, last_receipt_date, updated_date, created_date,
               age_analysis, flag_color
        FROM datarecord ORDER BY RANDOM() LIMIT 200`
@@ -1830,6 +1867,8 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
         customer_number: row.customer_number,
         customer_name: row.customer_name,
         outstanding_balance: row.outstanding_balance,
+        last_unpaid_invoice_1_date: row.last_unpaid_invoice_1_date,
+        last_receipt_1_date: row.last_receipt_1_date,
         last_unpaid_invoice_date: row.last_unpaid_invoice_date,
         last_receipt_date: row.last_receipt_date,
         updated_date: row.updated_date,
@@ -1854,20 +1893,47 @@ app.post('/api/test-rule', requireAuth, (req, res) => {
 // Returns top customers by outstanding balance, sorted descending.
 // In hub mode, queries the hub_records table (cross-site).
 // In site mode, queries the local datarecord table.
+app.get('/api/kpis', requireAuth, (req, res) => {
+  try {
+    const total = stmts.kpiTotalRecords.get();
+    const byFlag = stmts.kpiFlagCounts.all();
+    const lastSync = stmts.kpiLastSync.get();
+    const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
+    for (const row of byFlag) {
+      if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
+    }
+    res.json({
+      total_records: total.count,
+      records_by_flag: flagCounts,
+      last_sync_at: lastSync?.completed_at || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/top-balances', requireAuth, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit, 10) || 30, 200);
+  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+  const offset = (page - 1) * limit;
   const isHub = process.env.HUB_MODE === 'true';
 
+  const balanceWhere = `outstanding_balance IS NOT NULL
+          AND outstanding_balance != ''
+          AND outstanding_balance != '0'
+          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
+
   try {
-    let rows;
+    let rows, total;
     if (isHub) {
-      // hub_records has site_id, customer_number, customer_name, outstanding_balance
-      // join hub_sites for a friendly site name
+      total = db.prepare(`SELECT COUNT(*) AS count FROM hub_records r WHERE r.${balanceWhere}`).get().count;
       const stmt = db.prepare(`
         SELECT
           r.customer_number,
           r.customer_name,
           r.outstanding_balance,
+          r.unpaid_invoices,
+          r.receipts,
           r.last_unpaid_invoice_1,
           r.last_unpaid_invoice_1_amount,
           r.last_unpaid_invoice_date,
@@ -1880,15 +1946,13 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           COALESCE(s.name, r.site_id) AS site_name
         FROM hub_records r
         LEFT JOIN hub_sites s ON s.id = r.site_id
-        WHERE r.outstanding_balance IS NOT NULL
-          AND r.outstanding_balance != ''
-          AND r.outstanding_balance != '0'
-          AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        WHERE r.${balanceWhere}
         ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(limit);
+      rows = stmt.all(limit, offset).map(expandDataRecord);
     } else {
+      total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
       const stmt = db.prepare(`
         SELECT
           customer_number,
@@ -1905,37 +1969,41 @@ app.get('/api/top-balances', requireAuth, (req, res) => {
           auto_flagged,
           source_table AS site_name
         FROM datarecord
-        WHERE outstanding_balance IS NOT NULL
-          AND outstanding_balance != ''
-          AND outstanding_balance != '0'
-          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0
+        WHERE ${balanceWhere}
         ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ?
+        LIMIT ? OFFSET ?
       `);
-      rows = stmt.all(limit);
+      rows = stmt.all(SITE_NAME, limit, offset).map(expandDataRecord);
     }
-    res.json(rows);
+    const totalPages = Math.ceil(total / limit);
+    res.json({ records: rows, total, page, totalPages });
   } catch (err) {
     console.error('top-balances error', err);
     res.status(500).json({ error: 'Failed to fetch top balances' });
   }
 });
 
-// GET /api/inventory?search=&limit=500
+// GET /api/inventory?search=&commodity=&limit=
 app.get('/api/inventory', requireAuth, (req, res) => {
-  const search = req.query.search || '';
-  const limit = Math.min(parseInt(req.query.limit, 10) || 500, 10000);
+  const search = (req.query.search || '').trim();
+  const commodity = (req.query.commodity || '').trim();
+  const limit = Math.min(parseInt(req.query.limit, 10) || 100000, 100000);
   try {
-    let rows;
+    const conditions = [];
+    const params = [];
     if (search) {
-      rows = db.prepare(
-        `SELECT * FROM inventoryrecord WHERE item_number LIKE ? OR item_description LIKE ? ORDER BY item_number ASC LIMIT ?`
-      ).all(`%${search}%`, `%${search}%`, limit);
-    } else {
-      rows = db.prepare(
-        `SELECT * FROM inventoryrecord ORDER BY item_number ASC LIMIT ?`
-      ).all(limit);
+      conditions.push('(item_number LIKE ? OR item_description LIKE ?)');
+      params.push(`%${search}%`, `%${search}%`);
     }
+    if (commodity) {
+      conditions.push('CAST(commodity AS TEXT) = ?');
+      params.push(commodity);
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit);
+    const rows = db.prepare(
+      `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
+    ).all(...params);
     res.json({ count: rows.length, records: rows });
   } catch (err) {
     console.error('inventory error', err);
@@ -2591,16 +2659,10 @@ app.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
 
 // GET /api/reporting/kpis
 app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const byFlag = db.prepare(
-    "SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color"
-  ).all();
-  const lastSync = db.prepare(
-    "SELECT completed_at, status FROM syncrun WHERE status = 'completed' ORDER BY completed_at DESC LIMIT 1"
-  ).get();
-  const activeConns = db.prepare(
-    "SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'"
-  ).get();
+  const total = stmts.kpiTotalRecords.get();
+  const byFlag = stmts.kpiFlagCounts.all();
+  const lastSync = stmts.kpiLastSync.get();
+  const activeConns = stmts.kpiActiveConns.get();
 
   const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
   for (const row of byFlag) {
@@ -2627,16 +2689,14 @@ app.get('/api/reporting/records', requireReportingToken, (req, res) => {
   if (since) {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
-              last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
+              outstanding_balance, unpaid_invoices, receipts,
               updated_date, synced_at, source_table, source_id
        FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(since, limit, offset);
   } else {
     rows = db.prepare(
       `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
-              last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
+              outstanding_balance, unpaid_invoices, receipts,
               updated_date, synced_at, source_table, source_id
        FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);
@@ -2655,10 +2715,8 @@ app.get('/api/reporting/records', requireReportingToken, (req, res) => {
 
 // GET /api/reporting/health
 app.get('/api/reporting/health', requireReportingToken, (req, res) => {
-  const total = db.prepare('SELECT COUNT(*) as count FROM datarecord').get();
-  const lastRun = db.prepare(
-    'SELECT status, completed_at FROM syncrun ORDER BY started_at DESC LIMIT 1'
-  ).get();
+  const total = stmts.kpiTotalRecords.get();
+  const lastRun = stmts.kpiLastRun.get();
   res.json({
     site_id: SITE_ID,
     site_slug: SITE_SLUG,
@@ -2678,7 +2736,7 @@ app.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
   const offset = parseInt(req.query.offset) || 0;
   const rows = db.prepare(
-    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, updated_date
+    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, updated_date
      FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
   ).all(limit, offset);
   res.json({
@@ -2715,14 +2773,12 @@ if (process.env.HUB_MODE === 'true') {
       flag_color TEXT,
       flag_reason TEXT,
       outstanding_balance TEXT,
-      last_unpaid_invoice_1 TEXT,
-      last_unpaid_invoice_1_amount TEXT,
-      last_unpaid_invoice_date TEXT,
-      last_receipt_number TEXT,
-      last_receipt_amount TEXT,
-      last_receipt_date TEXT,
+      unpaid_invoices TEXT,
+      receipts TEXT,
       updated_date TEXT,
       synced_at TEXT,
+      auto_flagged INTEGER DEFAULT 0,
+      terms TEXT,
       PRIMARY KEY (site_id, record_id)
     );
     CREATE TABLE IF NOT EXISTS hub_sync_log (
@@ -2734,6 +2790,10 @@ if (process.env.HUB_MODE === 'true') {
       status TEXT,
       error TEXT
     );
+    CREATE TABLE IF NOT EXISTS hub_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
     CREATE TABLE IF NOT EXISTS hub_inventory (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       site_id TEXT NOT NULL,
@@ -2743,11 +2803,35 @@ if (process.env.HUB_MODE === 'true') {
       last_cost TEXT,
       price_list TEXT,
       price TEXT,
+      stocking_uom TEXT,
+      commodity TEXT,
       terms TEXT,
       synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
     );
   `);
+
+  // Seed default hub settings
+  db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
+
+  // GET /api/hub/backup-settings
+  app.get('/api/hub/backup-settings', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const row = stmts.getHubSetting.get('backup_sync_enabled');
+    res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
+  });
+
+  app.post('/api/hub/backup-settings', (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+    const { backup_sync_enabled } = req.body;
+    if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
+    stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
+    res.json({ ok: true, backup_sync_enabled });
+  });
 
   // --- Site registry from env ---
   let HUB_SITES = [];
@@ -2800,13 +2884,11 @@ if (process.env.HUB_MODE === 'true') {
       const upsertRec = db.prepare(`
         INSERT INTO hub_records (
           site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
-          outstanding_balance, last_unpaid_invoice_1, last_unpaid_invoice_1_amount,
-          last_unpaid_invoice_date, last_receipt_number, last_receipt_amount, last_receipt_date,
+          outstanding_balance, unpaid_invoices, receipts,
           updated_date, synced_at
         ) VALUES (
           @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
-          @outstanding_balance, @last_unpaid_invoice_1, @last_unpaid_invoice_1_amount,
-          @last_unpaid_invoice_date, @last_receipt_number, @last_receipt_amount, @last_receipt_date,
+          @outstanding_balance, @unpaid_invoices, @receipts,
           @updated_date, @synced_at
         )
         ON CONFLICT(site_id, record_id) DO UPDATE SET
@@ -2815,12 +2897,8 @@ if (process.env.HUB_MODE === 'true') {
           flag_color=excluded.flag_color,
           flag_reason=excluded.flag_reason,
           outstanding_balance=excluded.outstanding_balance,
-          last_unpaid_invoice_1=excluded.last_unpaid_invoice_1,
-          last_unpaid_invoice_1_amount=excluded.last_unpaid_invoice_1_amount,
-          last_unpaid_invoice_date=excluded.last_unpaid_invoice_date,
-          last_receipt_number=excluded.last_receipt_number,
-          last_receipt_amount=excluded.last_receipt_amount,
-          last_receipt_date=excluded.last_receipt_date,
+          unpaid_invoices=excluded.unpaid_invoices,
+          receipts=excluded.receipts,
           updated_date=excluded.updated_date,
           synced_at=excluded.synced_at
       `);
@@ -2835,12 +2913,8 @@ if (process.env.HUB_MODE === 'true') {
             flag_color: r.flag_color || 'none',
             flag_reason: r.flag_reason || null,
             outstanding_balance: r.outstanding_balance || null,
-            last_unpaid_invoice_1: r.last_unpaid_invoice_1 || null,
-            last_unpaid_invoice_1_amount: r.last_unpaid_invoice_1_amount || null,
-            last_unpaid_invoice_date: r.last_unpaid_invoice_date || null,
-            last_receipt_number: r.last_receipt_number || null,
-            last_receipt_amount: r.last_receipt_amount || null,
-            last_receipt_date: r.last_receipt_date || null,
+            unpaid_invoices: r.unpaid_invoices || '[]',
+            receipts: r.receipts || '[]',
             updated_date: r.updated_date,
             synced_at: now,
           });
@@ -2867,15 +2941,17 @@ if (process.env.HUB_MODE === 'true') {
 
       // Inventory — full refresh
       const upsertInv = db.prepare(`
-        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, terms, synced_at)
-        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @terms, @synced_at)
+        INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, synced_at)
+        VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @inventory_value, @synced_at)
         ON CONFLICT(site_id, item_number) DO UPDATE SET
           item_description=excluded.item_description,
           qty_on_hand=excluded.qty_on_hand,
           last_cost=excluded.last_cost,
           price_list=excluded.price_list,
           price=excluded.price,
-          terms=excluded.terms,
+          stocking_uom=excluded.stocking_uom,
+          commodity=excluded.commodity,
+          inventory_value=excluded.inventory_value,
           synced_at=excluded.synced_at
       `);
       const insertInventory = db.transaction((invRecords) => {
@@ -2889,11 +2965,14 @@ if (process.env.HUB_MODE === 'true') {
             last_cost: r.last_cost || null,
             price_list: r.price_list || null,
             price: r.price || null,
-            terms: r.terms || null,
+            stocking_uom: r.stocking_uom || null,
+            commodity: r.commodity || null,
+            inventory_value: r.inventory_value || null,
             synced_at: now,
           });
         }
       });
+      const syncedItemNumbers = [];
       let invOffset = 0;
       let invHasMore = true;
       while (invHasMore) {
@@ -2906,9 +2985,17 @@ if (process.env.HUB_MODE === 'true') {
         const invData = await invRes.json();
         if (invData.records && invData.records.length > 0) {
           insertInventory(invData.records);
+          invData.records.forEach(r => { if (r.item_number) syncedItemNumbers.push(r.item_number); });
           invOffset += invData.records.length;
         }
         invHasMore = invData.has_more === true;
+      }
+      // Prune hub_inventory rows no longer in the site's query (upsert-then-prune)
+      if (syncedItemNumbers.length > 0) {
+        const placeholders = syncedItemNumbers.map(() => '?').join(',');
+        db.prepare(
+          `DELETE FROM hub_inventory WHERE site_id = ? AND item_number NOT IN (${placeholders})`
+        ).run(site.id, ...syncedItemNumbers);
       }
 
       // Update hub_sites
@@ -2949,13 +3036,97 @@ if (process.env.HUB_MODE === 'true') {
 
   // --- Hub API routes ---
 
+
+
+  // GET /api/hub/proxy-backup?site_id=xxx
+  // Proxies a backup download from a site through the Hub server to avoid CORS.
+  // Admin-only.
+  app.get('/api/hub/proxy-backup', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+    const { site_id } = req.query;
+    if (!site_id) return res.status(400).json({ error: 'site_id required' });
+
+    const site = db.prepare('SELECT id, name, url FROM hub_sites WHERE id = ?').get(site_id);
+    if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
+
+    const token = process.env.REPORTING_TOKEN || '';
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+      const upstream = await fetch(`${site.url}/api/backup/download`, {
+        headers: { 'x-reporting-token': token },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!upstream.ok) return res.status(upstream.status).json({ error: `Site returned ${upstream.status}` });
+
+      const filename = `cardoso-${site.id}-${new Date().toISOString().slice(0,10)}.db`;
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      upstream.body.pipe(res);
+    } catch (err) {
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/backup-status
+  // Polls /api/backup/status on each registered site and returns aggregated results.
+  // Admin-only (session required).
+  app.get('/api/hub/backup-status', async (req, res) => {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
+    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
+    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+
+    const sites = db.prepare('SELECT id, name, url FROM hub_sites').all();
+    const token = process.env.REPORTING_TOKEN || '';
+
+    const results = await Promise.all(sites.map(async (site) => {
+      const base = { site_id: site.id, site_name: site.name, url: site.url };
+      if (!site.url) return { ...base, error: 'No API URL configured', status: 'unknown' };
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        const r = await fetch(`${site.url}/api/backup/status`, {
+          headers: { 'x-reporting-token': token },
+          signal: controller.signal,
+        });
+        clearTimeout(timeout);
+        if (!r.ok) return { ...base, error: `HTTP ${r.status}`, status: 'error' };
+        const data = await r.json();
+        // Determine health
+        let status = 'ok';
+        if (!data.last_backup) {
+          status = 'never';
+        } else {
+          const hoursAgo = (Date.now() - new Date(data.last_backup.mtime).getTime()) / 3600000;
+          if (hoursAgo > 48) status = 'stale';
+          else if (hoursAgo > 25) status = 'warning';
+        }
+        return { ...base, ...data, status };
+      } catch (err) {
+        return { ...base, error: err.name === 'AbortError' ? 'Timeout' : err.message, status: 'unreachable' };
+      }
+    }));
+
+    res.json({ sites: results });
+  });
+
   // GET /api/hub/sites
+  // Accessible via session (dashboard) OR x-reporting-token (scripts/hub-pull-backups.ps1)
   app.get('/api/hub/sites', (req, res) => {
-    const sites = db.prepare('SELECT * FROM hub_sites').all();
-    res.json(sites.map(s => ({
-      ...s,
-      last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
-    })));
+    const tokenHeader = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    const authedByToken = expectedToken && tokenHeader === expectedToken;
+    if (!authedByToken && !req.session?.userId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    const rawSites = db.prepare('SELECT * FROM hub_sites').all();
+    const mapped = rawSites.map(s => ({ ...s, last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null }));
+    // Returns JSON array — compatible with both the UI and hub-pull-backups.ps1
+    res.json(mapped);
   });
 
   // GET /api/hub/records
@@ -3005,13 +3176,13 @@ if (process.env.HUB_MODE === 'true') {
 
   // GET /api/hub/inventory
   app.get('/api/hub/inventory', requireAuth, (req, res) => {
-    const { site_id, search } = req.query;
-    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
-    let query = 'SELECT * FROM hub_inventory WHERE 1=1';
+    const { site_id, search, commodity } = req.query;
+    let query = 'SELECT hi.*, COALESCE(s.name, hi.site_id) AS site_name FROM hub_inventory hi LEFT JOIN hub_sites s ON s.id = hi.site_id WHERE 1=1';
     const params = [];
-    if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
-    if (search) { query += ' AND (item_number LIKE ? OR item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    query += ` ORDER BY item_number ASC LIMIT ${limit}`;
+    if (site_id) { query += ' AND hi.site_id=?'; params.push(site_id); }
+    if (search) { query += ' AND (hi.item_number LIKE ? OR hi.item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (commodity) { query += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
+    query += ' ORDER BY hi.item_number ASC';
     try {
       const rows = db.prepare(query).all(...params);
       res.json({ count: rows.length, records: rows });
@@ -3027,6 +3198,33 @@ if (process.env.HUB_MODE === 'true') {
       'SELECT * FROM hub_sync_log ORDER BY started_at DESC LIMIT ?'
     ).all(limit);
     res.json(rows);
+  });
+
+  // POST /api/hub/force-resync — clears sync history and hub_records, triggers full re-pull
+  app.post('/api/hub/force-resync', requireAuth, requireAdmin, (req, res) => {
+    try {
+      db.prepare('DELETE FROM hub_sync_log').run();
+      db.prepare('DELETE FROM hub_records').run();
+      db.prepare('DELETE FROM hub_inventory').run();
+      res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
+      syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/force-resync/:siteId — per-site force resync
+  app.post('/api/hub/force-resync/:siteId', requireAuth, requireAdmin, (req, res) => {
+    const { siteId } = req.params;
+    try {
+      db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
+      db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
+      db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      syncAllSites().catch(err => console.error("force-resync error:", err));
+      res.status(202).json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // POST /api/hub/sync
@@ -3181,27 +3379,25 @@ if (process.env.HUB_MODE === 'true') {
     res.json({ created, updated, errors });
   });
 
-  // Migrate hub_records schema for existing databases
-  const hubFinancialCols = [
-    'outstanding_balance', 'last_unpaid_invoice_1', 'last_unpaid_invoice_1_amount',
-    'last_unpaid_invoice_date', 'last_receipt_number', 'last_receipt_amount', 'last_receipt_date',
-  ];
-  const existingCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
-  for (const col of hubFinancialCols) {
-    if (!existingCols.includes(col)) {
-      db.prepare(`ALTER TABLE hub_records ADD COLUMN ${col} TEXT`).run();
-      console.log(`[HUB] Migrated hub_records: added column ${col}`);
-    }
-  }
-
   console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
 }
 
+
+// ==================== NON-HUB FALLBACKS ====================
+// Return empty/minimal responses for hub endpoints called by UI on non-hub installs
+if (process.env.HUB_MODE !== 'true') {
+  app.get('/api/hub/sites', (req, res) => res.json([]));
+  app.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
+  app.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
+  app.get('/api/hub/inventory', (req, res) => res.json([]));
+  app.get('/api/hub/sync-log', (req, res) => res.json([]));
+}
 
 // ==================== DYNAMIC CRUD ROUTES ====================
 
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
+    const rules = stmts.activeAutoFlagRules.all();
     const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
@@ -3209,6 +3405,11 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
     });
     if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
 
+    const records = stmts.autoRecordsForFlags.all();
+    let flagged = 0, cleared = 0;
+
+    const updateFlag = stmts.updateAutoFlag;
+    const clearFlag = stmts.clearAutoFlag;
     const records = db.prepare(`SELECT * FROM datarecord`).all();
     let flagged = 0, cleared = 0;
 
@@ -3241,8 +3442,61 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 
 app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
   try {
+    const result = stmts.clearAllAutoFlags.run();
     const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
     res.json({ cleared: result.changes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ─── Auto-Flag Rules Export / Import ─────────────────────────────────────────
+
+app.get('/api/autoflagrule/export', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const rules = db.prepare(`SELECT rule_name, priority, conditions, flag_color, is_active FROM autoflagrule ORDER BY priority DESC`).all();
+    const exportData = rules.map(r => ({
+      name: r.rule_name,
+      priority: r.priority,
+      color: r.flag_color,
+      is_active: r.is_active,
+      conditions: (() => { try { return JSON.parse(r.conditions); } catch { return r.conditions; } })()
+    }));
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', 'attachment; filename="cardoso-rules-export.json"');
+    res.json(exportData);
+  } catch (err) {
+    console.error('[export error]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/autoflagrule/import', requireAuth, requireAdmin, (req, res) => {
+  try {
+    const rules = req.body;
+    if (!Array.isArray(rules)) return res.status(400).json({ error: 'Expected array of rules' });
+
+    let created = 0, updated = 0, skipped = 0;
+    const upsert = db.transaction(() => {
+      for (const rule of rules) {
+        if (!rule.name || !rule.conditions) { skipped++; continue; }
+        const ruleColor = rule.color ?? rule.flag_color ?? 'red';
+        const condStr = typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions);
+        const existing = db.prepare(`SELECT id FROM autoflagrule WHERE rule_name = ?`).get(rule.name);
+        if (existing) {
+          db.prepare(`UPDATE autoflagrule SET priority = ?, conditions = ?, flag_color = ?, is_active = ? WHERE id = ?`)
+            .run(rule.priority ?? 1, condStr, ruleColor, rule.is_active ?? 1, existing.id);
+          updated++;
+        } else {
+          db.prepare(`INSERT INTO autoflagrule (rule_name, priority, conditions, flag_color, is_active) VALUES (?, ?, ?, ?, ?)`)
+            .run(rule.name, rule.priority ?? 1, condStr, ruleColor, rule.is_active ?? 1);
+          created++;
+        }
+      }
+    });
+    upsert();
+    res.json({ created, updated, skipped });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -3271,6 +3525,7 @@ app.get('/api/:table', requireAuth, (req, res) => {
     if (sortParam) {
       const desc = sortParam.startsWith('-');
       const col = desc ? sortParam.slice(1) : sortParam;
+      const validCols = getTableColumns(table);
       const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
       const validCols = new Set(tableInfo.map(c => c.name));
       if (validCols.has(col)) {
@@ -3362,8 +3617,7 @@ app.post('/api/:table', requireAuth, (req, res) => {
     }
 
     // Validate column names against actual schema to prevent injection
-    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const validColumns = getTableColumns(table);
     const invalidCols = columns.filter((k) => !validColumns.has(k));
     if (invalidCols.length > 0) {
       return res.status(400).json({ error: `Invalid fields: ${invalidCols.join(', ')}` });
@@ -3457,8 +3711,7 @@ app.put('/api/:table/:id', requireAuth, (req, res) => {
     }
 
     // Validate column names against actual schema to prevent injection
-    const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-    const validColumns = new Set(tableInfo.map((col) => col.name));
+    const validColumns = getTableColumns(table);
     const invalidKeys = keys.filter((k) => !validColumns.has(k));
     if (invalidKeys.length > 0) {
       return res.status(400).json({ error: `Invalid fields: ${invalidKeys.join(', ')}` });
@@ -3601,6 +3854,47 @@ async function runScheduledSyncCycle() {
 const weekdayHalfHourTask = cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle);
 const weekdayFivePmTask = cron.schedule('0 17 * * 1-5', runScheduledSyncCycle);
 
+// Hub backup pull cron (03:00 daily, hub mode only)
+let hubBackupCronTask = null;
+async function runHubBackupPull() {
+  if (process.env.HUB_MODE !== 'true') return;
+  const row = stmts.getHubSetting.get('backup_sync_enabled');
+  const enabled = row ? row.value === 'true' : true;
+  if (!enabled) {
+    console.log('[HUB BACKUP] Skipping scheduled pull — backup sync disabled.');
+    return;
+  }
+  const sites = stmts.hubSitesForBackup.all();
+  const token = process.env.REPORTING_TOKEN || '';
+  console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
+  const { mkdirSync, writeFileSync } = await import('fs');
+  const pathMod = await import('path');
+  await Promise.allSettled(sites.map(async (site) => {
+    try {
+      const controller = new AbortController();
+      const hardTimeout = setTimeout(() => controller.abort(), 30000);
+      const upstream = await fetch(`${site.url}/api/backup/download`, {
+        headers: { 'x-reporting-token': token },
+        signal: controller.signal,
+      });
+      clearTimeout(hardTimeout);
+      if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      const dir = pathMod.join(process.cwd(), 'database', 'hub-backups', site.id);
+      mkdirSync(dir, { recursive: true });
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const file = pathMod.join(dir, `cardoso-${site.id}-${ts}.db`);
+      writeFileSync(file, buf);
+      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${file}`);
+    } catch (err) {
+      console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
+    }
+  }));
+}
+if (process.env.HUB_MODE === 'true') {
+  hubBackupCronTask = cron.schedule('0 3 * * *', runHubBackupPull);
+}
+
 
 // ==================== SHUTDOWN ====================
 function gracefulShutdown(signal) {
@@ -3610,6 +3904,7 @@ function gracefulShutdown(signal) {
   try {
     weekdayHalfHourTask.stop();
     weekdayFivePmTask.stop();
+    try { hubBackupCronTask?.stop(); } catch {}
   } catch {}
 
   if (server) {
@@ -3729,6 +4024,90 @@ if (IS_PRODUCTION) {
   });
 }
 
+
+
+// ==================== BACKUP STATUS ====================
+
+// GET /api/backup/status
+// Returns metadata about the most recent local backup file.
+// Used by the Hub to monitor backup health across sites.
+app.get('/api/backup/status', (req, res) => {
+  const token = req.headers['x-reporting-token'];
+  const expectedToken = process.env.REPORTING_TOKEN;
+  if (!expectedToken || token !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  const fs = require('fs');
+  const backupDir = path.resolve(path.dirname(dbPath), 'backups');
+
+  let lastBackup = null;
+  if (fs.existsSync(backupDir)) {
+    const files = fs.readdirSync(backupDir)
+      .filter(f => f.endsWith('.db'))
+      .map(f => {
+        const full = path.join(backupDir, f);
+        const stat = fs.statSync(full);
+        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
+      })
+      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
+
+    if (files.length > 0) {
+      lastBackup = files[0];
+      lastBackup.total_backups = files.length;
+    }
+  }
+
+  const dbStat = fs.existsSync(dbPath) ? fs.statSync(path.resolve(dbPath)) : null;
+
+  res.json({
+    site_id: process.env.SITE_ID || 'unknown',
+    site_name: process.env.SITE_NAME || 'Unknown',
+    db_size: dbStat ? dbStat.size : null,
+    db_modified: dbStat ? dbStat.mtime.toISOString() : null,
+    last_backup: lastBackup,
+    backup_dir: backupDir,
+  });
+});
+
+// ==================== BACKUP ====================
+// GET /api/backup/download
+// Streams the live SQLite database to the caller as a binary file.
+// Protected by x-reporting-token header — same token used for hub reporting.
+// The database is checkpointed (WAL → main file) before streaming so the
+// downloaded file is consistent and can be opened directly with any SQLite tool.
+app.get('/api/backup/download', (req, res) => {
+  const token = req.headers['x-reporting-token'];
+  const expectedToken = process.env.REPORTING_TOKEN;
+
+  if (!expectedToken || token !== expectedToken) {
+    return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
+  }
+
+  try {
+    // Flush WAL to main DB file so the file on disk is complete
+    db.pragma('wal_checkpoint(TRUNCATE)');
+
+    const resolvedDbPath = path.resolve(dbPath);
+    const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0,10)}.db`;
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
+    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
+
+    const stream = require('fs').createReadStream(resolvedDbPath);
+    stream.on('error', (err) => {
+      console.error('[backup] Stream error:', err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Failed to stream database' });
+    });
+    stream.pipe(res);
+  } catch (err) {
+    console.error('[backup] Error preparing backup:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== STARTUP ====================
 recoverAbandonedSyncs();
 
@@ -3742,3 +4121,23 @@ ensureSeedUsers()
     console.error('Failed to seed users:', error);
     process.exit(1);
   });
+
+// Auto-sync scheduler: checks every 5 minutes
+setInterval(async () => {
+  try {
+    const conns = db.prepare(
+      "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
+    ).all();
+    const now = Date.now();
+    for (const conn of conns) {
+      const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
+      const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
+      if (now - lastSync >= intervalMs) {
+        console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
+        runConnectionImport(conn.id).catch(err => console.error(`[auto-sync] error for ${conn.id}:`, err));
+      }
+    }
+  } catch (err) {
+    console.error("[auto-sync] scheduler error:", err);
+  }
+}, 5 * 60 * 1000);

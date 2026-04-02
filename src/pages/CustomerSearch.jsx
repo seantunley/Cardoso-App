@@ -4,18 +4,14 @@ import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
-import StatCard from "../components/dashboard/StatCard";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
-import ActivityLogModal from "../components/customer/ActivityLogModal";
 import { Button } from "@/components/ui/button";
-import { History } from "lucide-react";
 
 export default function CustomerSearch() {
   const queryClient = useQueryClient();
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [selectedFlagColor, setSelectedFlagColor] = useState(null);
-  const [activityLogOpen, setActivityLogOpen] = useState(false);
   const [customerNumberToLookup, setCustomerNumberToLookup] = useState("");
 
   const { data: currentUser } = useQuery({
@@ -43,27 +39,46 @@ export default function CustomerSearch() {
     }
   }, [connections, selectedConnectionId]);
 
-  const { data: records = [] } = useQuery({
+  const { data: kpis = null } = useQuery({
+    queryKey: ["kpis"],
+    queryFn: async () => {
+      try { return await api.kpis(); } catch { return null; }
+    },
+    staleTime: 30_000,
+  });
+
+  // Fallback: if /api/kpis not available (older server), count from full record list
+  const { data: allRecords = [] } = useQuery({
     queryKey: ["records"],
-    queryFn: () => api.entities.DataRecord.list("-created_date", 1000),
+    queryFn: () => api.entities.DataRecord.list(),
+    enabled: kpis === null,
+    staleTime: 30_000,
   });
 
   useEffect(() => {
+    let debounceTimer = null;
     const unsubscribe = api.entities.DataRecord.subscribe((event) => {
       if (["create", "update"].includes(event.type)) {
-        queryClient.invalidateQueries({ queryKey: ["records"] });
+        // Batch rapid events (e.g., during a sync) into a single invalidation
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          queryClient.invalidateQueries({ queryKey: ["kpis"] });
+        }, 1000);
       }
     });
-    return unsubscribe;
+    return () => {
+      clearTimeout(debounceTimer);
+      unsubscribe();
+    };
   }, [queryClient]);
 
   const activeConnections = connections.filter(c => c.status === "active");
   const selectedConnection = connections.find(c => c.id === selectedConnectionId);
   
-  // Calculate flag stats
-  const redFlagged = records.filter((r) => r.flag_color === "red");
-  const greenFlagged = records.filter((r) => r.flag_color === "green");
-  const orangeFlagged = records.filter((r) => r.flag_color === "orange");
+  // Flag counts from KPI endpoint, with fallback to full record list for older servers
+  const redCount = kpis?.records_by_flag?.red ?? allRecords.filter(r => r.flag_color === 'red').length;
+  const greenCount = kpis?.records_by_flag?.green ?? allRecords.filter(r => r.flag_color === 'green').length;
+  const orangeCount = kpis?.records_by_flag?.orange ?? allRecords.filter(r => r.flag_color === 'orange').length;
 
   const handleFlagClick = (flagColor) => {
     setSelectedFlagColor(flagColor);
@@ -76,22 +91,17 @@ export default function CustomerSearch() {
     setFlagModalOpen(false);
   };
 
-  const getFlaggedCustomers = () => {
-    if (selectedFlagColor === "red") return redFlagged;
-    if (selectedFlagColor === "green") return greenFlagged;
-    if (selectedFlagColor === "orange") return orangeFlagged;
-    return [];
-  };
+  // FlaggedCustomersModal fetches its own records server-side
 
   return (
-     <div className="min-h-screen bg-[var(--bg-primary)]">
-       <div className="max-w-4xl mx-auto p-3 lg:p-5 space-y-3">
+     <div className="min-h-screen bg-background">
+       <div className="max-w-4xl mx-auto p-6 space-y-3">
          {/* Header */}
          <div>
-           <h1 className="text-xl font-bold text-[var(--text-primary)] tracking-tight">
+           <h1 className="text-2xl font-bold text-foreground tracking-tight">
              Customer Management
            </h1>
-           <p className="text-sm text-[var(--text-secondary)] mt-1">
+           <p className="text-sm text-muted-foreground mt-1">
              Search and review customer accounts, balances, and outstanding activity
            </p>
          </div>
@@ -107,7 +117,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-rose-400/70 uppercase tracking-widest mb-2">Critical</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{redFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{redCount}</p>
                     <p className="text-xs text-rose-300/60 mt-1.5">Red Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/20">
@@ -115,7 +125,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-rose-500/20">
-                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
 
@@ -128,7 +138,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-2">Attention</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{orangeFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{orangeCount}</p>
                     <p className="text-xs text-amber-300/60 mt-1.5">Orange Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/20">
@@ -136,7 +146,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-amber-500/20">
-                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
 
@@ -149,7 +159,7 @@ export default function CustomerSearch() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-2">Approved</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{greenFlagged.length}</p>
+                    <p className="text-2xl font-extrabold text-white leading-none">{greenCount}</p>
                     <p className="text-xs text-emerald-300/60 mt-1.5">Green Flagged</p>
                   </div>
                   <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/20">
@@ -157,7 +167,7 @@ export default function CustomerSearch() {
                   </div>
                 </div>
                 <div className="mt-3 h-0.5 rounded-full bg-emerald-500/20">
-                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenFlagged.length > 0 ? "100%" : "0%" }} />
+                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenCount > 0 ? "100%" : "0%" }} />
                 </div>
               </div>
             </div>
@@ -165,52 +175,12 @@ export default function CustomerSearch() {
             {/* Flagged Customers Modal */}
             <FlaggedCustomersModal
               flagColor={selectedFlagColor}
-              customers={getFlaggedCustomers()}
               open={flagModalOpen}
               onClose={() => setFlagModalOpen(false)}
               onCustomerClick={handleCustomerClickFromModal}
             />
 
-            {/* Activity Log Modal */}
-            <ActivityLogModal
-              open={activityLogOpen}
-              onClose={() => setActivityLogOpen(false)}
-            />
 
-        {/* Connection Selector */}
-        {connections.length > 1 && (
-          <Card className="border-[var(--border-color)] bg-[var(--bg-secondary)]">
-            <CardContent className="p-4">
-              <div className="space-y-2">
-                <h3 className="text-sm font-semibold text-[var(--text-primary)]">Select Database Connection</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {connections.map((conn) => (
-                    <button
-                      key={conn.id}
-                      onClick={() => setSelectedConnectionId(conn.id)}
-                      className={`p-2.5 rounded-lg border-2 transition-all text-left ${
-                        selectedConnectionId === conn.id
-                          ? "border-[var(--text-primary)] bg-[var(--text-primary)]/10 ring-1 ring-[var(--text-primary)]/20"
-                          : "border-[var(--border-color)] hover:border-[var(--border-color)]/70 hover:bg-[var(--bg-tertiary)]/50"
-                      }`}
-                    >
-                      <p className="font-medium text-[var(--text-primary)] text-xs">{conn.name}</p>
-                      <p className="text-[10px] text-[var(--text-secondary)] mt-0.5">{conn.database_name}</p>
-                      <div className="flex items-center gap-1.5 mt-1.5">
-                        <div className={`w-1.5 h-1.5 rounded-full ${
-                          conn.status === "active" ? "bg-green-500" : 
-                          conn.status === "error" ? "bg-red-500" : 
-                          "bg-gray-500"
-                        }`} />
-                        <span className="text-[10px] text-gray-400 capitalize">{conn.status}</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Customer Lookup + Last Sync side by side */}
         <div className="flex gap-3 items-stretch">
@@ -263,7 +233,7 @@ export default function CustomerSearch() {
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (
-          <Card className="border-amber-700 bg-amber-900/20">
+          <Card className="border-amber-500/40 bg-amber-500/10">
             <CardContent className="p-3">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5" />
@@ -280,7 +250,7 @@ export default function CustomerSearch() {
         )}
 
         {activeConnections.length > 0 && (
-          <Card className="border-blue-700 bg-blue-900/20">
+          <Card className="border-blue-500/40 bg-blue-500/10">
             <CardContent className="p-3">
               <div className="flex items-start gap-2">
                 <Database className="w-4 h-4 text-blue-400 mt-0.5" />

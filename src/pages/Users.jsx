@@ -119,16 +119,16 @@ export default function Users({ embedded = false }) {
                 <tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3 font-medium text-foreground">
                     {user.full_name || "Unnamed"}
-                    {currentUser?.id === user.id && <Badge variant="outline" className="ml-2 text-xs border-blue-700 text-blue-400">You</Badge>}
+                    {currentUser?.id === user.id && <Badge variant="outline" className="ml-2 text-xs border-blue-500/40 text-blue-400">You</Badge>}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
                   <td className="px-4 py-3">
-                    <Badge variant="outline" className={user.role === "admin" ? "border-purple-700 text-purple-400" : "border-border text-muted-foreground"}>
+                    <Badge variant="outline" className={user.role === "admin" ? "border-purple-500/40 text-purple-400" : "border-border text-muted-foreground"}>
                       {user.role === "admin" ? "Admin" : "User"}
                     </Badge>
                   </td>
                   <td className="px-4 py-3">
-                    <Badge variant="outline" className={user.is_active ? "border-green-700 text-green-400" : "border-red-700 text-red-400"}>
+                    <Badge variant="outline" className={user.is_active ? "border-green-500/40 text-green-400" : "border-red-500/40 text-red-400"}>
                       {user.is_active ? "Active" : "Disabled"}
                     </Badge>
                   </td>
@@ -168,9 +168,9 @@ export default function Users({ embedded = false }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto p-3 lg:p-5 space-y-3">
+      <div className="max-w-5xl mx-auto p-6 space-y-3">
         <div>
-          <h1 className="text-xl font-bold text-foreground tracking-tight">Users</h1>
+          <h1 className="text-2xl font-bold text-foreground tracking-tight">Users</h1>
           <p className="text-sm text-muted-foreground mt-1">Manage user accounts and permissions</p>
         </div>
         {content}

@@ -42,22 +42,48 @@ async function runLocalImport(connectionId) {
   return result;
 }
 
+const BUILT_IN_INVENTORY_FIELDS = [
+  { key: "item_number",     label: "Item Number",     type: "text", isBuiltIn: true },
+  { key: "item_description",label: "Item Description",type: "text", isBuiltIn: true },
+  { key: "qty_on_hand",     label: "Qty on Hand",     type: "text", isBuiltIn: true },
+  { key: "last_cost",       label: "Last Cost",       type: "text", isBuiltIn: true },
+  { key: "price_list",      label: "Price List",      type: "text", isBuiltIn: true },
+  { key: "price",           label: "Price",           type: "text", isBuiltIn: true },
+  { key: "stocking_uom",    label: "Stocking Unit of Measure", type: "text", isBuiltIn: true },
+  { key: "commodity",       label: "Commodity",       type: "text", isBuiltIn: true },
+  { key: "terms",           label: "Terms",           type: "text", isBuiltIn: true },
+];
+
 const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Last Invoice — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Last Invoice — Amount", type: "text", isBuiltIn: true },
-  { key: "last_unpaid_invoice_date", label: "Last Invoice — Date", type: "text", isBuiltIn: true },
-  { key: "last_receipt_number", label: "Last Receipt — Number", type: "text", isBuiltIn: true },
-  { key: "last_receipt_amount", label: "Last Receipt — Amount", type: "text", isBuiltIn: true },
-  { key: "last_receipt_date", label: "Last Receipt — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_1_date", label: "Invoice 1 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_2_date", label: "Invoice 2 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_3_date", label: "Invoice 3 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_4_date", label: "Invoice 4 — Date", type: "text", isBuiltIn: true },
+  { key: "last_unpaid_invoice_5_date", label: "Invoice 5 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1", label: "Receipt 1 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1_amount", label: "Receipt 1 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_1_date", label: "Receipt 1 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2", label: "Receipt 2 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2_amount", label: "Receipt 2 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_2_date", label: "Receipt 2 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3", label: "Receipt 3 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3_amount", label: "Receipt 3 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_3_date", label: "Receipt 3 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4", label: "Receipt 4 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4_amount", label: "Receipt 4 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_4_date", label: "Receipt 4 — Date", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5", label: "Receipt 5 — Number", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5_amount", label: "Receipt 5 — Amount", type: "text", isBuiltIn: true },
+  { key: "last_receipt_5_date", label: "Receipt 5 — Date", type: "text", isBuiltIn: true },
   { key: "note", label: "Note", type: "text", isBuiltIn: true },
   { key: "flag_color", label: "Flag Color", type: "text", isBuiltIn: true },
   { key: "flag_reason", label: "Flag Reason", type: "text", isBuiltIn: true },
-  { key: "custom_field_1", label: "Legacy Custom Field 1", type: "text", isBuiltIn: true },
-  { key: "custom_field_2", label: "Legacy Custom Field 2", type: "text", isBuiltIn: true },
-  { key: "custom_field_3", label: "Legacy Custom Field 3", type: "text", isBuiltIn: true },
+
 ];
 
 export default function ConnectionModal({ connection, open, onClose, onSave, isSaving }) {
@@ -73,27 +99,32 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     query_field_mappings: {},
     status: "inactive",
     record_type: "customer",
+    sync_interval_hours: "",
   });
 
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
   const [testingConnection, setTestingConnection] = useState(false);
   const [queryTestStatus, setQueryTestStatus] = useState(null); // null | 'testing' | 'ok' | 'error'
+  const [queryErrorMsg, setQueryErrorMsg] = useState('');
   const [queryColumns, setQueryColumns] = useState([]);
   const [queryPreview, setQueryPreview] = useState([]);
   const [isImporting, setIsImporting] = useState(false);
   const [customLocalFields, setCustomLocalFields] = useState([]);
   const [showPassword, setShowPassword] = useState(false);
 
-  const allLocalFields = [
-    ...BUILT_IN_LOCAL_FIELDS,
-    ...customLocalFields.map((f) => ({
-      key: f.field_key,
-      label: f.label,
-      type: f.field_type,
-      options: f.options,
-      isBuiltIn: false,
-    })),
-  ];
+  const isInventoryConnection = (formData.record_type || "customer") === "inventory";
+  const allLocalFields = isInventoryConnection
+    ? BUILT_IN_INVENTORY_FIELDS
+    : [
+        ...BUILT_IN_LOCAL_FIELDS,
+        ...customLocalFields.map((f) => ({
+          key: f.field_key,
+          label: f.label,
+          type: f.field_type,
+          options: f.options,
+          isBuiltIn: false,
+        })),
+      ];
 
   const loadCustomLocalFields = async () => {
     try {
@@ -127,6 +158,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         })(),
         status: connection.status || "inactive",
         record_type: connection.record_type || "customer",
+        sync_interval_hours: connection.sync_interval_hours != null ? String(connection.sync_interval_hours) : "",
       });
       // Reset query test state when editing an existing connection
       setQueryTestStatus(null);
@@ -146,6 +178,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         query_field_mappings: {},
         status: "inactive",
         record_type: "customer",
+        sync_interval_hours: "",
       });
       setConnectionTestStatus(null);
       setQueryTestStatus(null);
@@ -214,6 +247,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     }
 
     setQueryTestStatus("testing");
+    setQueryErrorMsg('');
     setQueryColumns([]);
     setQueryPreview([]);
 
@@ -254,6 +288,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       toast.success(`Query OK — ${data.columns?.length || 0} columns, ${data.preview?.length || 0} preview rows`);
     } catch (error) {
       setQueryTestStatus("error");
+      setQueryErrorMsg(error.message || 'Unknown error');
       toast.error(`Query failed: ${error.message}`);
     }
   };
@@ -281,6 +316,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       query_field_mappings: JSON.stringify(formData.query_field_mappings || {}),
       status: formData.status,
       record_type: formData.record_type || "customer",
+      sync_interval_hours: formData.sync_interval_hours ? parseInt(formData.sync_interval_hours, 10) : null,
     };
 
     onSave(dataToSave, connection?.id);
@@ -445,7 +481,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 setQueryColumns([]);
                 setQueryPreview([]);
               }}
-              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_date,\n  RECNO1 AS last_receipt_number,\n  RECAMT1 AS last_receipt_amount,\n  RECDATE1 AS last_receipt_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
+              placeholder={`SELECT\n  CUSTNO,\n  CUSTNAME,\n  AMTDUE AS outstanding_balance,\n  INVNO1 AS last_unpaid_invoice_1,\n  INVAMT1 AS last_unpaid_invoice_1_amount,\n  INVDATE1 AS last_unpaid_invoice_1_date,\n  RECNO1 AS last_receipt_1,\n  RECAMT1 AS last_receipt_1_amount,\n  RECDATE1 AS last_receipt_1_date\nFROM ARCUST\nWHERE ACTIVE = 1`}
               rows={8}
               className="bg-gray-800 border-gray-700 text-gray-100 placeholder:text-gray-600 font-mono text-sm resize-y"
             />
@@ -473,6 +509,9 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <><Play className="w-4 h-4 mr-2" />Test Query (preview 5 rows)</>
               )}
             </Button>
+          {queryTestStatus === "error" && queryErrorMsg && (
+            <p className="text-xs text-red-400 mt-2 break-words">{queryErrorMsg}</p>
+          )}
           </div>
 
           {/* ── Index field ── */}
@@ -564,7 +603,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <Label className="text-gray-300">Field Mappings</Label>
                 <p className="text-xs text-gray-500 mt-0.5">
                   Map SQL columns to local fields. Columns aliased to a local field name (e.g.{" "}
-                  <code className="text-gray-400">outstanding_balance</code>) are auto-mapped on sync —
+                  <code className="text-gray-400">{isInventoryConnection ? "item_number" : "outstanding_balance"}</code>) are auto-mapped on sync —
                   no manual mapping needed for those.
                 </p>
               </div>
@@ -585,22 +624,28 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 size="sm"
                 className="w-full border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white"
                 onClick={() => {
-                  // Auto-map any column whose name exactly matches a local field key
+                  // Normalize a string to a field key: lowercase, spaces→underscores, strip non-alphanum/_
+                  const normalize = (s) => s.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
                   const autoMappings = { ...formData.query_field_mappings };
+                  let count = 0;
                   for (const col of queryColumns) {
-                    const localField = allLocalFields.find((f) => f.key === col);
-                    if (localField && !autoMappings[col]) {
-                      autoMappings[col] = {
+                    // Try exact match first, then normalized match
+                    const localField =
+                      allLocalFields.find((f) => f.key === col) ||
+                      allLocalFields.find((f) => normalize(f.key) === normalize(col) || normalize(f.label) === normalize(col));
+                    if (localField && !autoMappings[localField.key]) {
+                      autoMappings[localField.key] = {
                         sourceField: col,
                         label: localField.label,
                         type: localField.type,
                         isCustom: !localField.isBuiltIn,
                         mode: "sync",
                       };
+                      count++;
                     }
                   }
                   setFormData({ ...formData, query_field_mappings: autoMappings });
-                  toast.success("Auto-mapped matching column names");
+                  toast.success(`Auto-mapped ${count} column${count !== 1 ? 's' : ''}`);
                 }}
               >
                 Auto-map matching column names
@@ -639,6 +684,28 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 <SelectItem value="active">Active</SelectItem>
                 <SelectItem value="inactive">Inactive</SelectItem>
                 <SelectItem value="testing">Testing</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* ── Auto-sync schedule ── */}
+          <div className="space-y-2 pt-4 border-t border-gray-800">
+            <Label className="text-sm font-medium text-gray-300">Auto-sync every</Label>
+            <Select
+              value={formData.sync_interval_hours || "none"}
+              onValueChange={(val) => setFormData({ ...formData, sync_interval_hours: val === "none" ? "" : val })}
+            >
+              <SelectTrigger className="bg-gray-800 border-gray-700 text-white">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-gray-800 border-gray-700 text-white">
+                <SelectItem value="none">None (manual only)</SelectItem>
+                <SelectItem value="1">Every hour</SelectItem>
+                <SelectItem value="2">Every 2 hours</SelectItem>
+                <SelectItem value="4">Every 4 hours</SelectItem>
+                <SelectItem value="6">Every 6 hours</SelectItem>
+                <SelectItem value="12">Every 12 hours</SelectItem>
+                <SelectItem value="24">Every 24 hours</SelectItem>
               </SelectContent>
             </Select>
           </div>

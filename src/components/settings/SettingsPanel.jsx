@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
   RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
+  Download, Upload,
 } from "lucide-react";
 
 // Sub-components
@@ -70,6 +71,7 @@ function ConnectionsTab({ currentUser }) {
   const [syncingId, setSyncingId] = useState(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState(null);
   const [isSyncingAll, setIsSyncingAll] = useState(false);
+  const [deleteConfirmId, setDeleteConfirmId] = useState(null);
 
   const isAdmin = currentUser?.role === "admin";
 
@@ -126,7 +128,7 @@ function ConnectionsTab({ currentUser }) {
   };
 
   const handleEdit = (conn) => { setEditingConnection(conn); setModalOpen(true); };
-  const handleDelete = (conn) => { if (confirm("Delete this connection?")) deleteMutation.mutate(conn.id); };
+  const handleDelete = (conn) => { setDeleteConfirmId(conn.id); };
 
   return (
     <div className="space-y-5">
@@ -138,7 +140,7 @@ function ConnectionsTab({ currentUser }) {
         </Button>
         {isAdmin && (
           <Button onClick={() => { setEditingConnection(null); setModalOpen(true); }} size="sm"
-            className="bg-white hover:bg-gray-100 text-gray-900">
+            variant="default">
             <Plus className="w-4 h-4 mr-2" />New Connection
           </Button>
         )}
@@ -156,7 +158,7 @@ function ConnectionsTab({ currentUser }) {
             {isAdmin ? "No connections yet. Add one to start syncing." : "No connections configured. Contact an admin."}
           </p>
           {isAdmin && (
-            <Button onClick={() => setModalOpen(true)} size="sm" className="mt-4 bg-white hover:bg-gray-100 text-gray-900">
+            <Button onClick={() => setModalOpen(true)} size="sm" variant="default" className="mt-4">
               <Plus className="w-4 h-4 mr-2" />Add Connection
             </Button>
           )}
@@ -177,6 +179,19 @@ function ConnectionsTab({ currentUser }) {
                 <ConnectionCard connection={conn} onSync={handleSync}
                   onEdit={isAdmin ? handleEdit : null} onDelete={isAdmin ? handleDelete : null}
                   isSyncing={syncingId === conn.id} />
+                {deleteConfirmId === conn.id && (
+                  <div className="mt-2 flex items-center gap-2 rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-sm">
+                    <span className="flex-1 text-rose-400">Delete this connection?</span>
+                    <button onClick={(e) => { e.stopPropagation(); deleteMutation.mutate(conn.id); setDeleteConfirmId(null); }}
+                      className="rounded px-2 py-1 text-xs font-medium bg-rose-600 hover:bg-rose-700 text-white transition-colors">
+                      Confirm Delete
+                    </button>
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(null); }}
+                      className="rounded px-2 py-1 text-xs font-medium border border-border text-muted-foreground hover:text-foreground transition-colors">
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -192,159 +207,108 @@ function ConnectionsTab({ currentUser }) {
 
 // ─── Fields Tab ─────────────────────────────────────────────────────────────
 
-const BUILT_IN_FIELDS = [
-  { key: "customer_number", label: "Customer Number", type: "text" },
-  { key: "customer_name",   label: "Customer Name",   type: "text" },
-  { key: "age_analysis",    label: "Age Analysis",     type: "text" },
-  { key: "source_id",       label: "Source ID",        type: "text" },
-  { key: "source_table",    label: "Source Table",     type: "text" },
-  { key: "data",            label: "Data",             type: "object" },
-  { key: "flag_color",      label: "Flag Color",       type: "text" },
+const CUSTOMER_FIELDS = [
+  { key: "customer_number",     label: "Customer Number",     fallbacks: "customer_number, CustomerNumber",             mode: "sync" },
+  { key: "customer_name",       label: "Customer Name",       fallbacks: "customer_name, CustomerName, name",           mode: "sync" },
+  { key: "age_analysis",        label: "Age Analysis",        fallbacks: "age_analysis, AgeAnalysis",                   mode: "sync" },
+  { key: "outstanding_balance", label: "Outstanding Balance", fallbacks: "outstanding_balance, OutstandingBalance, AMTDUE, BalanceDue", mode: "sync" },
+  { key: "age_current",         label: "Age Current",         fallbacks: "age_current, AgeCurrent, Current",            mode: "sync" },
+  { key: "age_7_days",          label: "Age 7 Days",          fallbacks: "age_7_days, Age7Days, AMTDUE07",              mode: "sync" },
+  { key: "age_14_days",         label: "Age 14 Days",         fallbacks: "age_14_days, Age14Days, AMTDUE14",            mode: "sync" },
+  { key: "age_21_days",         label: "Age 21 Days",         fallbacks: "age_21_days, Age21Days, AMTDUE21",            mode: "sync" },
+  { key: "last_unpaid_invoice_1",       label: "Invoice 1 Number",        fallbacks: "last_unpaid_invoice_1, LastUnpaidInvoice1",                       mode: "sync" },
+  { key: "last_unpaid_invoice_1_amount", label: "Invoice 1 Amount",        fallbacks: "last_unpaid_invoice_1_amount, LastUnpaidInvoice1Amount",            mode: "sync" },
+  { key: "last_unpaid_invoice_1_date",   label: "Invoice 1 Date",          fallbacks: "last_unpaid_invoice_1_date, LastUnpaidInvoice1Date",                mode: "sync" },
+  { key: "last_unpaid_invoice_2",       label: "Invoice 2 Number",        fallbacks: "last_unpaid_invoice_2, LastUnpaidInvoice2",                       mode: "sync" },
+  { key: "last_unpaid_invoice_2_amount", label: "Invoice 2 Amount",        fallbacks: "last_unpaid_invoice_2_amount, LastUnpaidInvoice2Amount",            mode: "sync" },
+  { key: "last_unpaid_invoice_2_date",   label: "Invoice 2 Date",          fallbacks: "last_unpaid_invoice_2_date, LastUnpaidInvoice2Date",                mode: "sync" },
+  { key: "last_unpaid_invoice_3",       label: "Invoice 3 Number",        fallbacks: "last_unpaid_invoice_3, LastUnpaidInvoice3",                       mode: "sync" },
+  { key: "last_unpaid_invoice_3_amount", label: "Invoice 3 Amount",        fallbacks: "last_unpaid_invoice_3_amount, LastUnpaidInvoice3Amount",            mode: "sync" },
+  { key: "last_unpaid_invoice_3_date",   label: "Invoice 3 Date",          fallbacks: "last_unpaid_invoice_3_date, LastUnpaidInvoice3Date",                mode: "sync" },
+  { key: "last_unpaid_invoice_4",       label: "Invoice 4 Number",        fallbacks: "last_unpaid_invoice_4, LastUnpaidInvoice4",                       mode: "sync" },
+  { key: "last_unpaid_invoice_4_amount", label: "Invoice 4 Amount",        fallbacks: "last_unpaid_invoice_4_amount, LastUnpaidInvoice4Amount",            mode: "sync" },
+  { key: "last_unpaid_invoice_4_date",   label: "Invoice 4 Date",          fallbacks: "last_unpaid_invoice_4_date, LastUnpaidInvoice4Date",                mode: "sync" },
+  { key: "last_unpaid_invoice_5",       label: "Invoice 5 Number",        fallbacks: "last_unpaid_invoice_5, LastUnpaidInvoice5",                       mode: "sync" },
+  { key: "last_unpaid_invoice_5_amount", label: "Invoice 5 Amount",        fallbacks: "last_unpaid_invoice_5_amount, LastUnpaidInvoice5Amount",            mode: "sync" },
+  { key: "last_unpaid_invoice_5_date",   label: "Invoice 5 Date",          fallbacks: "last_unpaid_invoice_5_date, LastUnpaidInvoice5Date",                mode: "sync" },
+  { key: "last_receipt_1",               label: "Receipt 1 Number",        fallbacks: "last_receipt_1, LastReceipt1",                                    mode: "sync" },
+  { key: "last_receipt_1_amount",        label: "Receipt 1 Amount",        fallbacks: "last_receipt_1_amount, LastReceipt1Amount",                       mode: "sync" },
+  { key: "last_receipt_1_date",          label: "Receipt 1 Date",          fallbacks: "last_receipt_1_date, LastReceipt1Date",                           mode: "sync" },
+  { key: "last_receipt_2",               label: "Receipt 2 Number",        fallbacks: "last_receipt_2, LastReceipt2",                                    mode: "sync" },
+  { key: "last_receipt_2_amount",        label: "Receipt 2 Amount",        fallbacks: "last_receipt_2_amount, LastReceipt2Amount",                       mode: "sync" },
+  { key: "last_receipt_2_date",          label: "Receipt 2 Date",          fallbacks: "last_receipt_2_date, LastReceipt2Date",                           mode: "sync" },
+  { key: "last_receipt_3",               label: "Receipt 3 Number",        fallbacks: "last_receipt_3, LastReceipt3",                                    mode: "sync" },
+  { key: "last_receipt_3_amount",        label: "Receipt 3 Amount",        fallbacks: "last_receipt_3_amount, LastReceipt3Amount",                       mode: "sync" },
+  { key: "last_receipt_3_date",          label: "Receipt 3 Date",          fallbacks: "last_receipt_3_date, LastReceipt3Date",                           mode: "sync" },
+  { key: "last_receipt_4",               label: "Receipt 4 Number",        fallbacks: "last_receipt_4, LastReceipt4",                                    mode: "sync" },
+  { key: "last_receipt_4_amount",        label: "Receipt 4 Amount",        fallbacks: "last_receipt_4_amount, LastReceipt4Amount",                       mode: "sync" },
+  { key: "last_receipt_4_date",          label: "Receipt 4 Date",          fallbacks: "last_receipt_4_date, LastReceipt4Date",                           mode: "sync" },
+  { key: "last_receipt_5",               label: "Receipt 5 Number",        fallbacks: "last_receipt_5, LastReceipt5",                                    mode: "sync" },
+  { key: "last_receipt_5_amount",        label: "Receipt 5 Amount",        fallbacks: "last_receipt_5_amount, LastReceipt5Amount",                       mode: "sync" },
+  { key: "last_receipt_5_date",          label: "Receipt 5 Date",          fallbacks: "last_receipt_5_date, LastReceipt5Date",                           mode: "sync" },
+  { key: "terms",               label: "Payment Terms",       fallbacks: "terms, Terms, PaymentTerms",                  mode: "sync" },
+  { key: "note",                label: "Note",                fallbacks: "note, Note, notes",                           mode: "local-only" },
 ];
 
+const INVENTORY_FIELDS = [
+  { key: "item_number",      label: "Item Number",      fallbacks: "item_number, ItemNumber, ItemNo, ITEMNO",            mode: "sync" },
+  { key: "item_description", label: "Item Description", fallbacks: "item_description, ItemDescription, Description, DESC", mode: "sync" },
+  { key: "qty_on_hand",      label: "Qty on Hand",      fallbacks: "qty_on_hand, QtyOnHand, Quantity, QTY, OnHand",      mode: "sync" },
+  { key: "last_cost",        label: "Last Cost",        fallbacks: "last_cost, LastCost, Cost, COST",                    mode: "sync" },
+  { key: "price_list",       label: "Price List",       fallbacks: "price_list, PriceList, PRICE_LIST",                  mode: "sync" },
+  { key: "price",            label: "Price",            fallbacks: "price, Price, SellPrice, UnitPrice",                 mode: "sync" },
+];
+
+const MODE_BADGE = {
+  "sync":          { label: "Sync",          cls: "bg-blue-900/50 text-blue-300 border-blue-700" },
+  "sync-if-empty": { label: "Sync if empty", cls: "bg-yellow-900/50 text-yellow-300 border-yellow-700" },
+  "local-only":    { label: "Local only",    cls: "bg-gray-700 text-gray-300 border-gray-600" },
+};
+
+function FieldsTable({ fields }) {
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/40">
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-48">Field Key</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-44">Label</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">SQL Fallback Names</th>
+            <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-32">Mode</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fields.map(f => {
+            const badge = MODE_BADGE[f.mode] || MODE_BADGE["sync"];
+            return (
+              <tr key={f.key} className="border-b border-border last:border-0 hover:bg-muted/20">
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key}</td>
+                <td className="px-4 py-2.5 text-foreground text-sm">{f.label}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground/70 leading-relaxed">{f.fallbacks}</td>
+                <td className="px-4 py-2.5">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
+                    {badge.label}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function FieldsTab() {
-  const queryClient = useQueryClient();
-  const [editingField, setEditingField] = useState(null);
-  const [editValues, setEditValues] = useState({});
-  const [addingField, setAddingField] = useState(false);
-  const [newField, setNewField] = useState({ key: "", label: "", field_type: "text" });
-
-  const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
-  const canManage = hasPermission(currentUser, "can_access_settings") || currentUser?.role === "admin";
-
-  const { data: customFields = [], isLoading } = useQuery({
-    queryKey: ["customFields"],
-    queryFn: () => api.entities.CustomField.list(),
-  });
-
-  const createMutation = useMutation({
-    mutationFn: (data) => api.entities.CustomField.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field added"); setAddingField(false); setNewField({ key: "", label: "", field_type: "text" }); },
-  });
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, data }) => api.entities.CustomField.update(id, data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field updated"); setEditingField(null); },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => api.entities.CustomField.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["customFields"] }); toast.success("Field deleted"); },
-  });
-
-  const startEdit = (field) => {
-    setEditingField(field.id);
-    setEditValues({ label: field.label, field_type: field.field_type });
-  };
-
   return (
     <div className="space-y-6">
-      {/* Built-in */}
       <div>
-        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Built-in Fields</h3>
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <table className="w-full text-sm">
-            <thead><tr className="border-b border-border bg-muted/40">
-              {["Field Key","Label","Type",""].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {BUILT_IN_FIELDS.map(f => (
-                <tr key={f.key} className="border-b border-border last:border-0">
-                  <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key}</td>
-                  <td className="px-4 py-2.5 text-foreground">{f.label}</td>
-                  <td className="px-4 py-2.5"><Badge variant="secondary">{f.type}</Badge></td>
-                  <td className="px-4 py-2.5"><Lock className="h-3.5 w-3.5 text-muted-foreground/50" /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Customer Fields</h3>
+        <FieldsTable fields={CUSTOMER_FIELDS} />
       </div>
-
-      {/* Custom */}
       <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider">Custom Fields</h3>
-          {canManage && (
-            <Button size="sm" variant="outline" onClick={() => setAddingField(true)} className="gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> Add Field
-            </Button>
-          )}
-        </div>
-
-        {addingField && (
-          <div className="mb-3 rounded-xl border border-border bg-card p-4 space-y-3">
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Key (snake_case)</label>
-                <Input value={newField.key} onChange={e => setNewField(v => ({ ...v, key: e.target.value }))} placeholder="e.g. credit_limit" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Label</label>
-                <Input value={newField.label} onChange={e => setNewField(v => ({ ...v, label: e.target.value }))} placeholder="e.g. Credit Limit" />
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Type</label>
-                <Select value={newField.field_type} onValueChange={v => setNewField(f => ({ ...f, field_type: v }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {["text","number","date","boolean","select"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" onClick={() => createMutation.mutate(newField)} disabled={!newField.key || !newField.label || createMutation.isPending}>Save</Button>
-              <Button size="sm" variant="ghost" onClick={() => setAddingField(false)}>Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {isLoading ? (
-          <div className="h-20 animate-pulse bg-muted rounded-xl" />
-        ) : customFields.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border rounded-xl">No custom fields yet</div>
-        ) : (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <table className="w-full text-sm">
-              <thead><tr className="border-b border-border bg-muted/40">
-                {["Key","Label","Type",""].map(h => <th key={h} className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {customFields.map(f => (
-                  <tr key={f.id} className="border-b border-border last:border-0">
-                    <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key || f.field_key}</td>
-                    <td className="px-4 py-2.5">
-                      {editingField === f.id
-                        ? <Input className="h-7 text-sm" value={editValues.label} onChange={e => setEditValues(v => ({ ...v, label: e.target.value }))} />
-                        : <span className="text-foreground">{f.label}</span>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {editingField === f.id
-                        ? <Select value={editValues.field_type} onValueChange={v => setEditValues(ev => ({ ...ev, field_type: v }))}><SelectTrigger className="h-7 text-sm"><SelectValue /></SelectTrigger><SelectContent>{["text","number","date","boolean","select"].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent></Select>
-                        : <Badge variant="secondary">{f.field_type}</Badge>}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {canManage && (
-                        editingField === f.id ? (
-                          <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => updateMutation.mutate({ id: f.id, data: editValues })}><Check className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setEditingField(null)}><X className="h-3.5 w-3.5" /></Button>
-                          </div>
-                        ) : (
-                          <div className="flex gap-1">
-                            <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => startEdit(f)}><Edit2 className="h-3.5 w-3.5" /></Button>
-                            <Button size="icon" variant="ghost" className="h-7 w-7 text-red-400 hover:text-red-500" onClick={() => confirm("Delete this field?") && deleteMutation.mutate(f.id)}><Trash2 className="h-3.5 w-3.5" /></Button>
-                          </div>
-                        )
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-3">Inventory Fields</h3>
+        <FieldsTable fields={INVENTORY_FIELDS} />
       </div>
     </div>
   );
@@ -515,6 +479,45 @@ function AutoFlagTab() {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
+  const handleExport = async () => {
+    try {
+      const res = await fetch('/api/autoflagrule/export', { credentials: 'include' });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); toast.error('Export failed: ' + (e.error || res.status)); return; }
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cardoso-rules-export.json';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+      toast.success('Rules exported');
+    } catch (e) { toast.error('Export error: ' + e.message); }
+  };
+
+  const handleImport = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const rules = JSON.parse(ev.target.result);
+        const res = await fetch('/api/autoflagrule/import', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(rules),
+        });
+        if (!res.ok) { toast.error('Import failed'); return; }
+        const { created, updated, skipped } = await res.json();
+        queryClient.invalidateQueries({ queryKey: ['autoFlagRules'] });
+        toast.success(`Imported: ${created} created, ${updated} updated${skipped ? `, ${skipped} skipped` : ''}`);
+      } catch (err) { toast.error(`Import error: ${err.message}`); }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   const { data: autoFlagRules = [], isLoading } = useQuery({
     queryKey: ["autoFlagRules"],
     queryFn: () => api.entities.AutoFlagRule.list("-priority"),
@@ -574,6 +577,19 @@ function AutoFlagTab() {
             <Plus className="h-3.5 w-3.5" /> Add Rule
           </Button>
         )}
+        {canManageRules && (
+          <Button size="sm" variant="outline" onClick={handleExport} className="gap-1.5">
+            <Download className="h-3.5 w-3.5" /> Export
+          </Button>
+        )}
+        {canManageRules && (
+          <label>
+            <input type="file" accept=".json" className="hidden" onChange={handleImport} />
+            <Button size="sm" variant="outline" className="gap-1.5 cursor-pointer" asChild>
+              <span><Upload className="h-3.5 w-3.5" /> Import</span>
+            </Button>
+          </label>
+        )}
       </div>
       {showNewRule && canManageRules && <AutoFlagRuleForm onSave={handleSave} onDelete={() => setShowNewRule(false)} isSaving={createMutation.isPending} isAdmin={canManageRules} />}
       {isLoading ? <div className="h-20 animate-pulse bg-muted rounded-xl" /> : (
@@ -602,7 +618,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     canManageUsers && { id: "users", label: "Users" },
     { id: "theme", label: "Theme" },
     !hubMode && { id: "autoflag", label: "Auto-Flag Rules" },
-    !hubMode && { id: "fields", label: "Fields" },
+    { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
     hubMode && { id: "synclog", label: "Sync Log" },
