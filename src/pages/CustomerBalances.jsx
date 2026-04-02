@@ -115,7 +115,7 @@ export default function CustomerBalances() {
   const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
   const [hubMode, setHubMode] = useState(false);
-  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(true);
+  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
 
   useEffect(() => {
     const id = "cb-print-style";
