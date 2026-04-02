@@ -655,17 +655,19 @@ function initPreparedStatements() {
   stmts.kpiFlagCounts    = db.prepare('SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color');
   stmts.kpiLastSync      = db.prepare('SELECT MAX(synced_at) as last_sync FROM datarecord');
   stmts.kpiLastRun       = db.prepare('SELECT MAX(last_sync) as last_run FROM databaseconnection');
-  stmts.kpiActiveConns   = db.prepare('SELECT COUNT(*) as count FROM databaseconnection WHERE is_active = 1');
+  stmts.kpiActiveConns   = db.prepare("SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'");
 
-  stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM auto_flag_rule WHERE is_active = 1 ORDER BY priority DESC');
+  stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC');
   stmts.autoRecordsForFlags  = db.prepare('SELECT id, customer_number, customer_name, flag_color, flag_source, outstanding_balance, last_invoice_1_amount, last_invoice_1_date, last_invoice_1_number, last_invoice_2_amount, last_invoice_2_date, last_invoice_2_number, last_invoice_3_amount, last_invoice_3_date, last_invoice_3_number, last_invoice_4_amount, last_invoice_4_date, last_invoice_4_number, last_invoice_5_amount, last_invoice_5_date, last_invoice_5_number, last_receipt_1_amount, last_receipt_1_date, last_receipt_1_number, last_receipt_2_amount, last_receipt_2_date, last_receipt_2_number, last_receipt_3_amount, last_receipt_3_date, last_receipt_3_number, last_receipt_4_amount, last_receipt_4_date, last_receipt_4_number, last_receipt_5_amount, last_receipt_5_date, last_receipt_5_number FROM datarecord');
   stmts.updateAutoFlag       = db.prepare('UPDATE datarecord SET flag_color = ?, flag_source = ? WHERE id = ?');
   stmts.clearAutoFlag        = db.prepare('UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE id = ? AND flag_source = ?');
   stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_source = NULL WHERE flag_source = 'auto'");
 
-  stmts.getHubSetting  = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
-  stmts.setHubSetting  = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-  stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
+  if (process.env.HUB_MODE === 'true') {
+    stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
+    stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
+    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
+  }
 }
 
 initPreparedStatements();
