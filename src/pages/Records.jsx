@@ -10,11 +10,33 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, Filter, FileText, Download, Zap, ShieldOff } from "lucide-react";
+import { Search, FileText, Download, Zap, ShieldOff, X } from "lucide-react";
 import { toast } from "sonner";
 import RecordCard from "../components/records/RecordCard";
 import RecordEditModal from "../components/records/RecordEditModal";
 import { hasPermission } from "@/lib/permissions";
+import { cn } from "@/lib/utils";
+
+// Skeleton card matching RecordCard shape
+function SkeletonCard() {
+  return (
+    <div className="bg-card rounded-xl border border-l-4 border-border overflow-hidden animate-pulse">
+      <div className="p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <div className="h-4 w-28 bg-muted rounded" />
+            <div className="h-3 w-16 bg-muted/60 rounded" />
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="h-3 w-20 bg-muted/40 rounded hidden sm:block" />
+            <div className="h-7 w-7 bg-muted/40 rounded" />
+            <div className="h-7 w-7 bg-muted/40 rounded" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Records() {
   const queryClient = useQueryClient();
@@ -55,7 +77,6 @@ export default function Records() {
   });
 
   const applyAutoFlagMutation = useMutation({
-    // Use the server-side batch endpoint — single SQLite transaction instead of N individual PUTs
     mutationFn: async () => {
       const res = await fetch("/api/apply-auto-flags", {
         method: "POST",
@@ -71,7 +92,6 @@ export default function Records() {
       toast.success(`Applied auto-flagging: ${count} record(s) updated`);
     },
   });
-
 
   const handleFlagChange = (id, color) => {
     updateMutation.mutate({ id, data: { flag_color: color } });
@@ -139,101 +159,89 @@ export default function Records() {
     );
   }
 
+  const hasSelection = selectedRecords.size > 0;
+
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-6xl mx-auto p-6 lg:p-8 space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      {/* Extra bottom padding when selection bar is visible */}
+      <div className={cn("max-w-6xl mx-auto p-6 lg:p-8 space-y-5", hasSelection && "pb-24")}>
+
+        {/* Page header */}
+        <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-foreground tracking-tight">
+            <h1 className="text-2xl font-bold text-foreground tracking-tight">
               Data Records
             </h1>
-            <p className="text-muted-foreground mt-1">
-              {filteredRecords.length} of {records.length} records
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {isLoading ? "Loading…" : `${filteredRecords.length} of ${records.length} records`}
             </p>
           </div>
+        </div>
+
+        {/* Filter bar — compact single row */}
+        <div className="bg-card border border-border rounded-xl p-3 flex items-center gap-2 flex-wrap sm:flex-nowrap">
+          {/* Search */}
+          <div className="relative flex-1 min-w-[160px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search records…"
+              className="pl-8 h-8 text-sm bg-muted border-border text-foreground placeholder:text-muted-foreground"
+            />
+          </div>
+
+          {/* Divider */}
+          <div className="hidden sm:block h-6 w-px bg-border shrink-0" />
+
+          {/* Flag filter */}
+          <Select value={flagFilter} onValueChange={setFlagFilter}>
+            <SelectTrigger className="w-full sm:w-[148px] h-8 text-sm bg-muted border-border text-foreground shrink-0">
+              <SelectValue placeholder="All flags" />
+            </SelectTrigger>
+            <SelectContent className="bg-card border-border">
+              <SelectItem value="all">All Flags</SelectItem>
+              <SelectItem value="none">No Flag</SelectItem>
+              <SelectItem value="red">Red</SelectItem>
+              <SelectItem value="green">Green</SelectItem>
+              <SelectItem value="orange">Orange</SelectItem>
+            </SelectContent>
+          </Select>
+
+          {/* Divider */}
+          <div className="hidden sm:block h-6 w-px bg-border shrink-0" />
+
+          {/* Export */}
           <Button
             variant="outline"
+            size="sm"
             onClick={exportRecords}
-            className="border-border text-muted-foreground hover:bg-card hover:text-foreground self-start sm:self-auto"
+            className="h-8 text-xs border-border text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"
           >
-            <Download className="w-4 h-4 mr-2" />
+            <Download className="w-3.5 h-3.5 mr-1.5" />
             Export
           </Button>
         </div>
 
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row gap-4 p-4 bg-card rounded-xl border border-border">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search records..."
-                className="pl-10 bg-muted border-border text-foreground placeholder:text-muted-foreground"
-              />
-            </div>
-
-            <Select value={flagFilter} onValueChange={setFlagFilter}>
-              <SelectTrigger className="w-full sm:w-[180px] bg-muted border-border text-foreground">
-                <Filter className="w-4 h-4 mr-2 text-muted-foreground" />
-                <SelectValue placeholder="Filter by flag" />
-              </SelectTrigger>
-              <SelectContent className="bg-card border-border">
-                <SelectItem value="all">All Flags</SelectItem>
-                <SelectItem value="none">No Flag</SelectItem>
-                <SelectItem value="red">Red Flag</SelectItem>
-                <SelectItem value="green">Green Flag</SelectItem>
-                <SelectItem value="orange">Orange Flag</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {selectedRecords.size > 0 && (
-            <div className="flex items-center justify-between p-4 bg-primary/10 border border-primary/30 rounded-2xl">
-              <span className="text-sm text-blue-300">
-                {selectedRecords.size} record(s) selected
-              </span>
-              <Button
-                onClick={() => applyAutoFlagMutation.mutate(Array.from(selectedRecords))}
-                disabled={applyAutoFlagMutation.isPending}
-                size="sm"
-                className="bg-blue-600 hover:bg-blue-700 text-white"
-              >
-                <Zap className="w-4 h-4 mr-2" />
-                {applyAutoFlagMutation.isPending ? "Applying..." : "Apply Auto-Flag"}
-              </Button>
-            </div>
-          )}
-        </div>
-
+        {/* Record list */}
         {isLoading ? (
-          <div className="space-y-4">
+          <div className="space-y-2.5">
             {[1, 2, 3, 4, 5].map((i) => (
-              <div
-                key={i}
-                className="bg-card rounded-xl animate-pulse p-5 space-y-3"
-              >
-                <div className="flex gap-3">
-                  <div className="h-5 w-24 bg-muted rounded-md" />
-                  <div className="h-5 w-16 bg-muted rounded-md" />
-                </div>
-                <div className="h-4 w-48 bg-muted rounded-md" />
-                <div className="h-4 w-full bg-muted rounded-md" />
-              </div>
+              <SkeletonCard key={i} />
             ))}
           </div>
         ) : filteredRecords.length === 0 ? (
           <div className="text-center py-20 bg-card rounded-xl border border-border">
-            <FileText className="w-12 h-12 text-muted-foreground/50 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-foreground">No records found</h3>
-            <p className="text-muted-foreground mt-1">
+            <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+            <h3 className="text-sm font-semibold text-foreground">No records found</h3>
+            <p className="text-xs text-muted-foreground mt-1">
               {records.length === 0
                 ? "Sync data from your connections to see records here"
                 : "Try adjusting your search or filter"}
             </p>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-2.5">
             {filteredRecords.map((record) => (
               <div
                 key={record.id}
@@ -246,7 +254,7 @@ export default function Records() {
                   }
                   setSelectedRecords(newSelected);
                 }}
-                className="cursor-pointer transition-all"
+                className="cursor-pointer"
               >
                 <RecordCard
                   record={record}
@@ -259,16 +267,59 @@ export default function Records() {
             ))}
           </div>
         )}
-
-        <RecordEditModal
-          record={editingRecord}
-          customFields={customFields}
-          open={!!editingRecord}
-          onClose={() => setEditingRecord(null)}
-          onSave={handleSaveEdit}
-          isSaving={updateMutation.isPending}
-        />
       </div>
+
+      {/* Selection bar — fixed bottom, slides in when records are selected */}
+      <div
+        className={cn(
+          "fixed bottom-0 left-0 right-0 z-50 transition-all duration-200",
+          hasSelection ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
+        )}
+      >
+        <div className="bg-card border-t border-border shadow-2xl">
+          <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-semibold text-foreground">
+                {selectedRecords.size}
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {selectedRecords.size === 1 ? "record selected" : "records selected"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedRecords(new Set())}
+                className="h-8 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-3.5 h-3.5 mr-1.5" />
+                Clear
+              </Button>
+
+              <Button
+                size="sm"
+                onClick={() => applyAutoFlagMutation.mutate(Array.from(selectedRecords))}
+                disabled={applyAutoFlagMutation.isPending}
+                className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Zap className="w-3.5 h-3.5 mr-1.5" />
+                {applyAutoFlagMutation.isPending ? "Applying…" : "Apply Auto-Flag"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <RecordEditModal
+        record={editingRecord}
+        customFields={customFields}
+        open={!!editingRecord}
+        onClose={() => setEditingRecord(null)}
+        onSave={handleSaveEdit}
+        isSaving={updateMutation.isPending}
+      />
     </div>
   );
 }
