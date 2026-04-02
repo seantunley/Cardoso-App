@@ -1510,22 +1510,22 @@ async function runConnectionImport(connectionId) {
         updated_date=excluded.updated_date
     `);
 
-    const runInventoryRows = (rows, sourceName) => {
+    const runInventoryRows = (rows, sourceName, mappings = {}) => {
       const syncTimestamp = new Date().toISOString();
       const writeInventory = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const itemNumber = String(
-            getMappedOrFallbackValue(row, {}, 'item_number', inventoryMappingConfig.item_number.fallbacks) || ''
+            getMappedOrFallbackValue(row, mappings, 'item_number', inventoryMappingConfig.item_number.fallbacks) || ''
           );
           if (!itemNumber) continue;
           upsertInventoryRecord.run(
             sourceName,
             itemNumber,
-            String(getMappedOrFallbackValue(row, {}, 'item_description', inventoryMappingConfig.item_description.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'qty_on_hand', inventoryMappingConfig.qty_on_hand.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, {}, 'price', inventoryMappingConfig.price.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'item_description', inventoryMappingConfig.item_description.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'qty_on_hand', inventoryMappingConfig.qty_on_hand.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'last_cost', inventoryMappingConfig.last_cost.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'price_list', inventoryMappingConfig.price_list.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'price', inventoryMappingConfig.price.fallbacks) || ''),
             syncTimestamp
           );
         }
@@ -1751,7 +1751,7 @@ async function runConnectionImport(connectionId) {
       const sourceName = `query::${connConfig.id}`;
 
       if (connConfig.record_type === 'inventory') {
-        runInventoryRows(rows, sourceName);
+        runInventoryRows(rows, sourceName, queryFieldMappings);
       } else {
         runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
       }
@@ -1796,7 +1796,7 @@ async function runConnectionImport(connectionId) {
 
         const configRecordType = config.record_type || connConfig.record_type || 'customer';
         if (configRecordType === 'inventory') {
-          runInventoryRows(rows, table_name);
+          runInventoryRows(rows, table_name, fieldMappings);
         } else {
           runWriteRows(rows, table_name, fieldMappings, index_field);
         }
