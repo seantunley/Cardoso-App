@@ -3063,7 +3063,7 @@ if (process.env.HUB_MODE === 'true') {
 
   // Ensure hub_records has all columns (for existing DBs created before schema expansions)
   // Ensure inventoryrecord has newer columns
-  if (HUB_MODE) {
+  if (process.env.HUB_MODE === 'true') {
     for (const [col, type] of [['stocking_uom','TEXT'],['commodity','TEXT']]) {
       ensureColumn('hub_inventory', col, type);
     }
