@@ -171,8 +171,8 @@ export default function Layout({ children, currentPageName }) {
         "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-200 ease-out",
         isCollapsed ? "w-14" : "w-56"
       )}>
-        <div className={cn("border-b border-border pt-6 pb-3", isCollapsed ? "px-0 flex justify-center" : "px-3")}>
-          <div className={cn("flex items-center mb-0", isCollapsed ? "justify-center" : "gap-3")}>
+        <div className={"border-b border-border px-3 pt-6 pb-3"}>
+          <div className={cn("flex items-center mb-0 w-full", isCollapsed ? "justify-center" : "gap-3")}>
             <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
               <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
                 <rect width="32" height="32" rx="7" fill="#1e293b"/>
