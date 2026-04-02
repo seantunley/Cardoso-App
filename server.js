@@ -1518,6 +1518,13 @@ async function runConnectionImport(connectionId) {
 
     const runInventoryRows = (rows, sourceName, mappings = {}) => {
       const syncTimestamp = new Date().toISOString();
+      if (rows.length > 0) {
+        console.log('[INV DEBUG] First row keys:', Object.keys(rows[0]));
+        console.log('[INV DEBUG] stocking_uom mapping:', JSON.stringify(getMappingForKey(mappings, 'stocking_uom')));
+        console.log('[INV DEBUG] commodity mapping:', JSON.stringify(getMappingForKey(mappings, 'commodity')));
+        const r0 = rows[0]; const su = getMappingForKey(mappings, 'stocking_uom');
+        console.log('[INV DEBUG] stocking_uom value:', su ? r0[su.sourceField] : 'no mapping');
+      }
       const writeInventory = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const itemNumber = String(
