@@ -335,6 +335,7 @@ function analyseInvoiceCredit(records, flagHistory = []) {
 
   const factors = [];
   let deductions = 0;
+  let avgLag = null;
 
   // Count manual flag events from activity log
   const redFlags = flagHistory.filter(e =>
@@ -394,7 +395,7 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   // A customer who pays in full but slowly is caution, not hold.
   if (paidPairs.length > 0) {
     const laggedPairs = paidPairs.filter(p => p.lagDays !== null);
-    const avgLag = laggedPairs.length > 0
+    avgLag = laggedPairs.length > 0
       ? Math.round(laggedPairs.reduce((s, p) => s + p.lagDays, 0) / laggedPairs.length)
       : null;
 
@@ -461,7 +462,7 @@ function analyseInvoiceCredit(records, flagHistory = []) {
     summary = `Customer is paying reliably and within terms.${inactiveNote}`;
   }
 
-  return { verdict, title, summary, factors, score };
+  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null };
 }
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
 
@@ -994,17 +995,22 @@ export default function CustomerLookup({
                 {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5">
-                    <span className="text-lg font-bold tracking-tight leading-tight">{creditAnalysis.title}</span>
-                    <span className={cn(
-                      "text-xs font-semibold px-2 py-0.5 rounded-full shrink-0",
-                      verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
-                    )}>
-                      {creditAnalysis.score}/100
-                    </span>
-                  </div>
+                  <span className="text-lg font-bold tracking-tight leading-tight">{creditAnalysis.title}</span>
                   {creditAnalysis.summary && (
                     <p className="text-sm mt-1 opacity-80 leading-snug">{creditAnalysis.summary}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 shrink-0 ml-3">
+                  <span className={cn(
+                    "text-sm font-bold px-3 py-1.5 rounded-full",
+                    verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
+                  )}>
+                    {creditAnalysis.score}/100
+                  </span>
+                  {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
+                    <span className="text-sm font-semibold px-3 py-1.5 rounded-full bg-black/20 text-current opacity-90">
+                      Avg {creditAnalysis.avgLag}d to pay
+                    </span>
                   )}
                 </div>
               </div>
@@ -1102,28 +1108,7 @@ export default function CustomerLookup({
               slots: receiptSlots,
             })}
 
-            {/* Credit analysis detail card */}
-            {creditAnalysis && creditAnalysis.factors.length > 0 && (
-              <div className="bg-card border border-border rounded-xl p-4 mb-3">
-                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
-                  <Shield className="h-4 w-4" />
-                  Assessment Details
-                </p>
-                <p className="text-sm text-muted-foreground mb-3 leading-snug">{creditAnalysis.summary}</p>
-                <ul className="space-y-1.5">
-                  {creditAnalysis.factors.map((f, i) => {
-                    const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
-                    const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
-                    return (
-                      <li key={i} className="flex gap-2 text-sm leading-snug">
-                        <span className={cn("shrink-0", factorColor[f.type])}>{factorIcon[f.type]}</span>
-                        <span className={factorColor[f.type]}>{f.text || f.label}</span>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            )}
+
           </div>
 
           {/* ── 3. Sticky Flag Bar ── */}
