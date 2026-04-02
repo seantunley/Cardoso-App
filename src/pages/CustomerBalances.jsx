@@ -169,6 +169,12 @@ export default function CustomerBalances() {
     year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
 
+  /* ── filter subtitle ── */
+  const subtitleParts = [];
+  subtitleParts.push(`${totalRecords} customer${totalRecords !== 1 ? "s" : ""}`);
+  if (siteFilter && siteFilter !== "all") subtitleParts.push(siteFilter);
+  if (hideInvoiceMatchesBalance) subtitleParts.push("Invoice ≠ Balance");
+
   return (
     <>
       {/* ── Print-only block (hidden on screen) ── */}
@@ -233,7 +239,7 @@ export default function CustomerBalances() {
           <div className="flex items-center justify-between mb-6">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Customer Balances</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">{totalRecords} customer{totalRecords !== 1 ? "s" : ""} by outstanding balance</p>
+              <p className="text-sm text-muted-foreground mt-0.5">{subtitleParts.join(" · ")}</p>
             </div>
             <div className="flex items-center gap-2">
               {filtered.length > 0 && (
