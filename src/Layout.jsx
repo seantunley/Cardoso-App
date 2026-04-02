@@ -226,7 +226,7 @@ export default function Layout({ children, currentPageName }) {
             <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
               className={cn("w-full h-8", !isCollapsed && "justify-start")}
               onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}>
-              <Settings className="h-3.5 w-3.5 shrink-0" style={{ color: "#f59e0b" }} />
+              <Settings className="h-3.5 w-3.5 shrink-0" />
               {!isCollapsed && <span className="ml-1.5 text-xs">Settings</span>}
             </Button>
           )}
@@ -234,14 +234,14 @@ export default function Layout({ children, currentPageName }) {
           <Button variant="ghost" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}>
-            <KeyRound className="h-3.5 w-3.5 shrink-0" style={{ color: "#14b8a6" }} />
+            <KeyRound className="h-3.5 w-3.5 shrink-0" />
             {!isCollapsed && <span className="ml-1.5 text-xs">Change Password</span>}
           </Button>
 
           <Button variant="outline" size={isCollapsed ? "icon" : "sm"}
             className={cn("w-full h-8", !isCollapsed && "justify-start")}
             onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}>
-            <LogOut className="h-3.5 w-3.5 shrink-0" style={{ color: "#f43f5e" }} />
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
             {!isCollapsed && <span className="ml-1.5 text-xs">Logout</span>}
           </Button>
 
