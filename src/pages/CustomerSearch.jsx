@@ -45,7 +45,17 @@ export default function CustomerSearch() {
 
   const { data: kpis = null } = useQuery({
     queryKey: ["kpis"],
-    queryFn: () => api.kpis(),
+    queryFn: async () => {
+      try { return await api.kpis(); } catch { return null; }
+    },
+    staleTime: 30_000,
+  });
+
+  // Fallback: if /api/kpis not available (older server), count from full record list
+  const { data: allRecords = [] } = useQuery({
+    queryKey: ["records"],
+    queryFn: () => api.entities.DataRecord.list(),
+    enabled: kpis === null,
     staleTime: 30_000,
   });
 
@@ -69,10 +79,10 @@ export default function CustomerSearch() {
   const activeConnections = connections.filter(c => c.status === "active");
   const selectedConnection = connections.find(c => c.id === selectedConnectionId);
   
-  // Flag counts from KPI endpoint (no full record load)
-  const redCount = kpis?.records_by_flag?.red ?? 0;
-  const greenCount = kpis?.records_by_flag?.green ?? 0;
-  const orangeCount = kpis?.records_by_flag?.orange ?? 0;
+  // Flag counts from KPI endpoint, with fallback to full record list for older servers
+  const redCount = kpis?.records_by_flag?.red ?? allRecords.filter(r => r.flag_color === 'red').length;
+  const greenCount = kpis?.records_by_flag?.green ?? allRecords.filter(r => r.flag_color === 'green').length;
+  const orangeCount = kpis?.records_by_flag?.orange ?? allRecords.filter(r => r.flag_color === 'orange').length;
 
   const handleFlagClick = (flagColor) => {
     setSelectedFlagColor(flagColor);
