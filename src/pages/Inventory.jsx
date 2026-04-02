@@ -142,15 +142,15 @@ export default function Inventory() {
             </div>
             <div className="h-5 w-px bg-border" />
             <button onClick={() => setHideZeroQty((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${hideZeroQty ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}>
+              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${hideZeroQty ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
               {hideZeroQty && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}Hide zero qty
             </button>
             {commodities.length > 0 && (
               <div className="relative">
                 <select value={commodityFilter} onChange={(e) => setCommodityFilter(e.target.value)}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${commodityFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}>
-                  <option value="all">All commodities</option>
-                  {commodities.map((v) => <option key={v} value={v}>{COMMODITY_LABELS[v] || v}</option>)}
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${commodityFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+                  <option value="all" className="bg-card text-foreground">All commodities</option>
+                  {commodities.map((v) => <option key={v} value={v} className="bg-card text-foreground">{COMMODITY_LABELS[v] || v}</option>)}
                 </select>
                 <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
               </div>
@@ -158,9 +158,9 @@ export default function Inventory() {
             {priceLists.length > 0 && (
               <div className="relative">
                 <select value={priceListFilter} onChange={(e) => setPriceListFilter(e.target.value)}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${priceListFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}>
-                  <option value="all">All price lists</option>
-                  {priceLists.map((pl) => <option key={pl} value={pl}>{pl}</option>)}
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${priceListFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
+                  <option value="all" className="bg-card text-foreground">All price lists</option>
+                  {priceLists.map((pl) => <option key={pl} value={pl} className="bg-card text-foreground">{pl}</option>)}
                 </select>
                 <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
               </div>
@@ -168,7 +168,7 @@ export default function Inventory() {
             {hubMode && sites.length > 0 && (
               <div className="relative">
                 <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${siteFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-background text-muted-foreground hover:text-foreground"}`}>
+                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${siteFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
                   <option value="all">All sites</option>
                   {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
