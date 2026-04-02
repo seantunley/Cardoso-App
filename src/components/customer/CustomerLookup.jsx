@@ -1027,9 +1027,10 @@ export default function CustomerLookup({
             </div>
           )}
 
-          {/* ── 2. Scrollable Body ── */}
-          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
-            {/* Customer header card */}
+          {/* ── 2. Pinned header + scrollable invoices/receipts ── */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Pinned: customer header card */}
+            <div className="shrink-0 px-5 pt-4 pb-0">
             <div className="bg-card border border-border rounded-xl p-4 mb-3">
               <div className="flex items-start gap-3">
                 <User className="h-6 w-6 text-muted-foreground shrink-0 mt-1" />
@@ -1090,6 +1091,11 @@ export default function CustomerLookup({
               </div>
             )}
 
+            </div>{/* end pinned header */}
+
+            {/* Scrollable: invoices + receipts */}
+            <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
+
             {/* Invoices table */}
             {renderGroupedTable({
               title: "Invoices",
@@ -1108,8 +1114,8 @@ export default function CustomerLookup({
               slots: receiptSlots,
             })}
 
-
-          </div>
+            </div>{/* end scrollable invoices/receipts */}
+          </div>{/* end pinned+scroll wrapper */}
 
           {/* ── 3. Sticky Flag Bar ── */}
           <div className="shrink-0 bg-card border-t border-border px-4 py-3">
