@@ -1490,12 +1490,12 @@ async function runConnectionImport(connectionId) {
     `);
 
     const inventoryMappingConfig = {
-      item_number:      { fallbacks: ['item_number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
-      item_description: { fallbacks: ['item_description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc'] },
-      qty_on_hand:      { fallbacks: ['qty_on_hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand'] },
-      last_cost:        { fallbacks: ['last_cost', 'LastCost', 'LAST_COST', 'Cost', 'COST'] },
-      price_list:       { fallbacks: ['price_list', 'PriceList', 'PRICE_LIST', 'Pricelist'] },
-      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice'] },
+      item_number:      { fallbacks: ['item_number', 'Item Number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
+      item_description: { fallbacks: ['item_description', 'Item Description', 'ItemDescription', 'ITEM_DESCRIPTION', 'Description', 'DESC', 'ItemDesc'] },
+      qty_on_hand:      { fallbacks: ['qty_on_hand', 'Qty on Hand', 'QtyOnHand', 'QTY_ON_HAND', 'Quantity', 'QTY', 'OnHand', 'QTYONHAND'] },
+      last_cost:        { fallbacks: ['last_cost', 'Last Cost', 'LastCost', 'LAST_COST', 'Cost', 'COST', 'RECENTCOST'] },
+      price_list:       { fallbacks: ['price_list', 'Price List', 'PriceList', 'PRICE_LIST', 'Pricelist', 'PRICELIST'] },
+      price:            { fallbacks: ['price', 'Price', 'PRICE', 'SellPrice', 'UnitPrice', 'UNITPRICE'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
