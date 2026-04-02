@@ -80,7 +80,7 @@ function SiteCard({ site, onDownload, downloading }) {
             <Database className="w-4 h-4 text-blue-400" />
           </div>
           <div className="min-w-0">
-            <div className="font-semibold text-white text-sm truncate">{site.site_name || site.site_id}</div>
+            <div className="font-semibold text-foreground text-sm truncate">{site.site_name || site.site_id}</div>
             <div className="text-xs text-slate-500 truncate">{site.url || "No URL"}</div>
           </div>
         </div>

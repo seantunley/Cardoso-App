@@ -100,7 +100,7 @@ export default function AuditLog() {
       <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
 
         <div>
-          <h1 className="text-3xl font-bold tracking-tight text-white">Audit Logs</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Audit Logs</h1>
           <p className="mt-2 text-gray-400">Track actions and access within the app</p>
         </div>
 
@@ -166,16 +166,16 @@ export default function AuditLog() {
                 <table className="min-w-full text-sm">
                   <thead className="bg-gray-800">
                     <tr>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Username
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Full Name
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         IP Address
                       </th>
-                      <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-400">
+                      <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">
                         Logged In At
                       </th>
                     </tr>

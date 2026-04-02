@@ -19,10 +19,10 @@ import { toast } from "sonner";
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 const FLAG_COLORS = {
-  red:    { bg: "bg-red-100",    text: "text-red-700",    border: "border-red-200",    label: "Red"    },
-  orange: { bg: "bg-orange-100", text: "text-orange-700", border: "border-orange-200", label: "Orange" },
-  green:  { bg: "bg-green-100",  text: "text-green-700",  border: "border-green-200",  label: "Green"  },
-  none:   { bg: "bg-slate-100",  text: "text-slate-500",  border: "border-slate-200",  label: "No Flag"},
+  red:    { bg: "bg-red-500/15",    text: "text-red-400",    border: "border-red-500/30",    label: "Red"    },
+  orange: { bg: "bg-orange-500/15", text: "text-orange-400", border: "border-orange-500/30", label: "Orange" },
+  green:  { bg: "bg-green-500/15",  text: "text-green-400",  border: "border-green-500/30",  label: "Green"  },
+  none:   { bg: "bg-muted",         text: "text-muted-foreground", border: "border-border",   label: "No Flag"},
 };
 
 function parseAmount(val) {
@@ -67,6 +67,7 @@ function SiteCard({ site, onFlagClick, onResync }) {
         <div className="flex items-center gap-2">
           <button
             onClick={(e) => { e.stopPropagation(); onResync(site); }}
+            aria-label="Force resync this site"
             className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             title={`Resync ${site.site_name || site.site_slug}`}
           >
@@ -84,42 +85,42 @@ function SiteCard({ site, onFlagClick, onResync }) {
         <div className="grid grid-cols-4 gap-2">
 
           {/* Total */}
-          <div className="group relative overflow-hidden rounded-xl border border-indigo-500/20 bg-gradient-to-br from-indigo-950/60 via-slate-900/80 to-slate-900/60 p-3">
-            <p className="text-[9px] font-semibold text-indigo-400/70 uppercase tracking-widest mb-1">Total</p>
-            <p className="text-xl font-extrabold text-white leading-none">{total ?? "—"}</p>
-            <p className="text-[9px] text-indigo-300/60 mt-1">Records</p>
-            <div className="mt-2 h-0.5 rounded-full bg-indigo-500/20">
-              <div className="h-full rounded-full bg-indigo-500/60 w-full" />
+          <div className="group relative overflow-hidden rounded-xl border border-border bg-muted p-3">
+            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">Total</p>
+            <p className="text-xl font-extrabold text-foreground leading-none">{total ?? "—"}</p>
+            <p className="text-[9px] text-muted-foreground/60 mt-1">Records</p>
+            <div className="mt-2 h-0.5 rounded-full bg-border">
+              <div className="h-full rounded-full bg-muted-foreground/40 w-full" />
             </div>
           </div>
           {/* Red */}
-          <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+          <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
-            <p className="text-xl font-extrabold text-white leading-none">{flags.red ?? 0}</p>
+            <p className="text-xl font-extrabold text-foreground leading-none">{flags.red ?? 0}</p>
             <p className="text-[9px] text-rose-300/60 mt-1">Red Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
-              <div className="h-full rounded-full bg-rose-500/60" style={{ width: (flags.red ?? 0) > 0 ? "100%" : "0%" }} />
+              <div className="h-full rounded-full bg-rose-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.red ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
           </div>
           {/* Orange */}
-          <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+          <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
-            <p className="text-xl font-extrabold text-white leading-none">{flags.orange ?? 0}</p>
+            <p className="text-xl font-extrabold text-foreground leading-none">{flags.orange ?? 0}</p>
             <p className="text-[9px] text-amber-300/60 mt-1">Orange Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
-              <div className="h-full rounded-full bg-amber-500/60" style={{ width: (flags.orange ?? 0) > 0 ? "100%" : "0%" }} />
+              <div className="h-full rounded-full bg-amber-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.orange ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
           </div>
           {/* Green */}
-          <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-3 cursor-pointer">
+          <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
-            <p className="text-xl font-extrabold text-white leading-none">{flags.green ?? 0}</p>
+            <p className="text-xl font-extrabold text-foreground leading-none">{flags.green ?? 0}</p>
             <p className="text-[9px] text-emerald-300/60 mt-1">Green Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
-              <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (flags.green ?? 0) > 0 ? "100%" : "0%" }} />
+              <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.green ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
           </div>
         </div>
@@ -151,19 +152,19 @@ function HubCustomerModal({ record, open, onClose }) {
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
         className={cn(
-          "max-w-2xl border-4 bg-gray-900 max-h-[90vh] flex flex-col",
+          "max-w-2xl border-4 bg-card max-h-[90vh] flex flex-col",
           record.flag_color === "red"    && "border-red-500",
           record.flag_color === "green"  && "border-green-500",
           record.flag_color === "orange" && "border-orange-500",
-          (!record.flag_color || record.flag_color === "none") && "border-gray-700"
+          (!record.flag_color || record.flag_color === "none") && "border-border"
         )}
       >
         <DialogHeader className="pb-0">
           <DialogTitle className="flex items-center gap-2">
-            <User className="h-4 w-4 text-gray-400 shrink-0" />
+            <User className="h-4 w-4 text-muted-foreground shrink-0" />
             <div className="leading-tight">
-              <div className="text-base text-white leading-none">{record.customer_name || "—"}</div>
-              <div className="text-xs text-gray-400 mt-0.5">
+              <div className="text-base text-foreground leading-none">{record.customer_name || "—"}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">
                 Customer #{record.customer_number} · {record._siteName}
               </div>
             </div>
@@ -177,58 +178,58 @@ function HubCustomerModal({ record, open, onClose }) {
         <div className="space-y-4 pt-2 overflow-y-auto flex-1 pr-1">
           {/* Flag reason */}
           {record.flag_reason && (
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-              <p className="text-xs font-medium text-gray-400 mb-1">Flag Reason</p>
-              <p className="text-sm text-gray-200">{record.flag_reason}</p>
+            <div className="rounded-xl border border-border bg-muted p-3">
+              <p className="text-xs font-medium text-muted-foreground mb-1">Flag Reason</p>
+              <p className="text-sm text-foreground">{record.flag_reason}</p>
             </div>
           )}
 
           {/* Outstanding Balance */}
-          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+          <div className="rounded-xl border border-border bg-muted p-3">
             <div className="flex items-center gap-2 mb-2">
-              <Calendar className="h-4 w-4 text-gray-400" />
-              <h4 className="text-sm font-semibold text-gray-300">Outstanding Balance</h4>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+              <h4 className="text-sm font-semibold text-foreground">Outstanding Balance</h4>
             </div>
-            <div className="grid grid-cols-2 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+            <div className="grid grid-cols-2 gap-1 text-[10px] text-muted-foreground uppercase tracking-wide px-1 mb-1">
               <span>Account</span><span className="text-right">Balance</span>
             </div>
-            <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-700 px-2 py-1.5">
-              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
-              <span className="text-xs text-right text-white">{formatAmount(record.outstanding_balance)}</span>
+            <div className="grid grid-cols-2 gap-1 rounded-lg bg-background px-2 py-1.5">
+              <span className="text-xs font-medium text-foreground truncate">{record.customer_number}</span>
+              <span className="text-xs text-right text-foreground">{formatAmount(record.outstanding_balance)}</span>
             </div>
           </div>
 
           {/* Last Invoice */}
-          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+          <div className="rounded-xl border border-border bg-muted p-3">
             <div className="flex items-center gap-2 mb-2">
               <Flag className="h-4 w-4 text-orange-400" />
-              <h4 className="text-sm font-semibold text-gray-300">Last Invoice</h4>
+              <h4 className="text-sm font-semibold text-foreground">Last Invoice</h4>
             </div>
-            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-muted-foreground uppercase tracking-wide px-1 mb-1">
               <span>Account</span><span>No.</span><span>Amount</span><span>Date</span>
             </div>
-            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-gray-700 px-2 py-1.5">
-              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-background px-2 py-1.5">
+              <span className="text-xs font-medium text-foreground truncate">{record.customer_number}</span>
               <span className="text-xs text-orange-400 truncate">{record.last_unpaid_invoice_1 || "—"}</span>
-              <span className="text-xs text-white truncate">{formatAmount(record.last_unpaid_invoice_1_amount)}</span>
-              <span className="text-xs text-gray-300 truncate">{record.last_unpaid_invoice_1_date || "—"}</span>
+              <span className="text-xs text-foreground truncate">{formatAmount(record.last_unpaid_invoice_1_amount)}</span>
+              <span className="text-xs text-muted-foreground truncate">{record.last_unpaid_invoice_1_date || "—"}</span>
             </div>
           </div>
 
           {/* Last Receipt */}
-          <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
+          <div className="rounded-xl border border-border bg-muted p-3">
             <div className="flex items-center gap-2 mb-2">
               <CheckCircle className="h-4 w-4 text-emerald-400" />
-              <h4 className="text-sm font-semibold text-gray-300">Last Receipt</h4>
+              <h4 className="text-sm font-semibold text-foreground">Last Receipt</h4>
             </div>
-            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-gray-500 uppercase tracking-wide px-1 mb-1">
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 text-[10px] text-muted-foreground uppercase tracking-wide px-1 mb-1">
               <span>Account</span><span>No.</span><span>Amount</span><span>Date</span>
             </div>
-            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-gray-700 px-2 py-1.5">
-              <span className="text-xs font-medium text-white truncate">{record.customer_number}</span>
+            <div className="grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.4fr)_minmax(0,1fr)] gap-2 rounded-lg bg-background px-2 py-1.5">
+              <span className="text-xs font-medium text-foreground truncate">{record.customer_number}</span>
               <span className="text-xs text-emerald-400 truncate">{record.last_receipt_1 || "—"}</span>
-              <span className="text-xs text-white truncate">{formatAmount(record.last_receipt_1_amount)}</span>
-              <span className="text-xs text-gray-300 truncate">{record.last_receipt_1_date || "—"}</span>
+              <span className="text-xs text-foreground truncate">{formatAmount(record.last_receipt_1_amount)}</span>
+              <span className="text-xs text-muted-foreground truncate">{record.last_receipt_1_date || "—"}</span>
             </div>
           </div>
 
@@ -482,20 +483,22 @@ export default function HubDashboard() {
   const sites = kpis?.sites || [];
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-6 space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Customer Management</h1>
+          <h1 className="text-2xl font-bold text-foreground">Customer Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
         </div>
-        <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
-          <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
-          {syncing ? "Syncing…" : "Sync Now"}
-        </Button>
-        <Button onClick={forceResync} disabled={syncing} variant="ghost" className="gap-2 text-muted-foreground text-xs" title="Clear all synced data and re-pull from all sites">
-          Force Resync
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
+            <RefreshCw className={cn("h-4 w-4", syncing && "animate-spin")} />
+            {syncing ? "Syncing…" : "Sync Now"}
+          </Button>
+          <Button onClick={forceResync} disabled={syncing} variant="ghost" className="gap-2 text-muted-foreground text-xs" title="Clear all synced data and re-pull from all sites">
+            Force Resync
+          </Button>
+        </div>
       </div>
 
       {/* Customer search */}

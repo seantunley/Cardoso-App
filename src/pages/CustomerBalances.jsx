@@ -341,13 +341,13 @@ export default function CustomerBalances() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground w-6">#</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Customer Name</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Customer ID</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Last Invoice</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Last Receipt</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Outstanding Balance</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-6">#</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer Name</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Invoice</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Receipt</th>
+                    <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Outstanding Balance</th>
                   </tr>
                 </thead>
                 <tbody>

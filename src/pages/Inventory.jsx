@@ -144,7 +144,7 @@ export default function Inventory() {
               <Package className="h-5 w-5 text-muted-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-semibold text-foreground">Inventory</h1>
+              <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
               <p className="text-sm text-muted-foreground mt-0.5">
                 {(() => {
                   const subtitleParts = [];
@@ -312,15 +312,15 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-border bg-card">
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Item Number</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Description</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Qty on Hand</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Last Cost</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price</th>
-              <th className="px-2 py-1.5 text-right text-xs font-semibold text-muted-foreground">Price List</th>
-              <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">UOM</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Item Number</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Description</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Qty on Hand</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Cost</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price List</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th>
               {hubMode && (
-                <th className="px-2 py-1.5 text-left text-xs font-semibold text-muted-foreground">Site</th>
+                <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
               )}
             </tr>
           </thead>
