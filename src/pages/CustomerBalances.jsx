@@ -133,7 +133,7 @@ export default function CustomerBalances() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/hub/sites", { credentials: "include" })
+    fetch("/api/app-info", { credentials: "include" })
       .then((r) => r.json()).catch(() => null)
       .then((d) => { if (d?.hub_mode) setHubMode(true); });
   }, []);

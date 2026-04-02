@@ -3751,6 +3751,16 @@ if (process.env.HUB_MODE === 'true') {
 }
 
 
+// ==================== NON-HUB FALLBACKS ====================
+// Return empty/minimal responses for hub endpoints called by UI on non-hub installs
+if (process.env.HUB_MODE !== 'true') {
+  app.get('/api/hub/sites', (req, res) => res.json([]));
+  app.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
+  app.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
+  app.get('/api/hub/inventory', (req, res) => res.json([]));
+  app.get('/api/hub/sync-log', (req, res) => res.json([]));
+}
+
 // ==================== DYNAMIC CRUD ROUTES ====================
 
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
