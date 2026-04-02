@@ -37,6 +37,7 @@ export default function Inventory() {
   const [hubMode, setHubMode] = useState(false);
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [hideZeroQty, setHideZeroQty] = useState(true);
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
   useEffect(() => {
@@ -71,7 +72,8 @@ export default function Inventory() {
     staleTime: 60_000,
   });
 
-  const rows = data?.records ?? [];
+  const allRows = data?.records ?? [];
+  const rows = hideZeroQty ? allRows.filter(r => parseFloat(r.qty_on_hand) > 0) : allRows;
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -114,6 +116,16 @@ export default function Inventory() {
             placeholder="Search item number or description…"
             className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring min-w-[220px]"
           />
+          {/* Zero qty filter */}
+          <label className="flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hideZeroQty}
+              onChange={(e) => setHideZeroQty(e.target.checked)}
+              className="h-4 w-4 rounded border-border accent-primary cursor-pointer"
+            />
+            Hide zero qty
+          </label>
           {/* Site filter — hub only */}
           {hubMode && sites.length > 0 && (
             <>
