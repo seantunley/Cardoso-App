@@ -1096,23 +1096,23 @@ export default function CustomerLookup({
             {/* Scrollable: invoices + receipts */}
             <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
 
-            {/* Invoices table */}
-            {renderGroupedTable({
-              title: "Invoices",
-              icon: Flag,
-              iconColor: "text-orange-400",
-              accounts: allAccounts,
-              slots: invoiceSlots,
-            })}
-
-            {/* Receipts table */}
-            {renderGroupedTable({
-              title: "Receipts",
-              icon: CheckCircle,
-              iconColor: "text-emerald-400",
-              accounts: allAccounts,
-              slots: receiptSlots,
-            })}
+            {/* Invoices + Receipts side by side */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>{renderGroupedTable({
+                title: "Invoices",
+                icon: Flag,
+                iconColor: "text-orange-400",
+                accounts: allAccounts,
+                slots: invoiceSlots,
+              })}</div>
+              <div>{renderGroupedTable({
+                title: "Receipts",
+                icon: CheckCircle,
+                iconColor: "text-emerald-400",
+                accounts: allAccounts,
+                slots: receiptSlots,
+              })}</div>
+            </div>
 
             </div>{/* end scrollable invoices/receipts */}
           </div>{/* end pinned+scroll wrapper */}
