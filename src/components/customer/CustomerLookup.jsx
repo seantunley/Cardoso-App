@@ -217,6 +217,30 @@ function formatHistoryDate(value) {
   }
 }
 
+function getHistoryFlagColor(log) {
+  if (!log || log.action_type !== "update_flag") return null;
+  try {
+    const parsed =
+      typeof log.changes === "string" ? JSON.parse(log.changes) : log.changes;
+    return parsed?.field_changes?.flag_color?.to ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getHistoryReasonSnippet(log) {
+  if (!log || log.action_type !== "update_flag") return null;
+  try {
+    const parsed =
+      typeof log.changes === "string" ? JSON.parse(log.changes) : log.changes;
+    const reason = parsed?.field_changes?.flag_reason?.to;
+    if (!reason) return null;
+    return reason.length > 60 ? reason.slice(0, 57) + "…" : reason;
+  } catch {
+    return null;
+  }
+}
+
 
 // ── Invoice Credit Analysis ────────────────────────────────────────────────
 function parseDateField(val) {
@@ -438,6 +462,26 @@ function analyseInvoiceCredit(records, flagHistory = []) {
 }
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
 
+const verdictBannerStyles = {
+  approve: "bg-emerald-950 border-emerald-700 text-emerald-300",
+  caution: "bg-amber-950 border-amber-700 text-amber-300",
+  hold: "bg-red-950 border-red-700 text-red-300",
+};
+
+const flagDotColor = {
+  none: "bg-slate-400",
+  green: "bg-green-500",
+  orange: "bg-orange-500",
+  red: "bg-red-500",
+};
+
+const flagPillStyles = {
+  none: { base: "border-slate-600 text-slate-300", active: "bg-slate-700 border-slate-400 text-white ring-2 ring-slate-400" },
+  green: { base: "border-green-800 text-green-400", active: "bg-green-900 border-green-500 text-green-200 ring-2 ring-green-500" },
+  orange: { base: "border-orange-800 text-orange-400", active: "bg-orange-900 border-orange-500 text-orange-200 ring-2 ring-orange-500" },
+  red: { base: "border-red-800 text-red-400", active: "bg-red-900 border-red-500 text-red-200 ring-2 ring-red-500" },
+};
+
 export default function CustomerLookup({
   onRecordSelect,
   triggerLookup,
@@ -460,6 +504,7 @@ export default function CustomerLookup({
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [recordHistory, setRecordHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [pendingFlagColor, setPendingFlagColor] = useState(null);
   const searchInputRef = useRef(null);
 
   const closeAndReset = useCallback(() => {
@@ -472,6 +517,7 @@ export default function CustomerLookup({
     setShowSuggestions(false);
     setSelectedSuggestionIndex(-1);
     setRecordHistory([]);
+    setPendingFlagColor(null);
     setTimeout(() => searchInputRef.current?.focus(), 50);
   }, []);
 
@@ -726,6 +772,7 @@ export default function CustomerLookup({
 
       await loadRecordHistory(customer.id);
       setFlagReason("");
+      setPendingFlagColor(null);
       if (onFlagChange) onFlagChange({ id: customer.id, ...updateData });
       toast.success("Flag updated");
     } catch (error) {
@@ -753,12 +800,103 @@ export default function CustomerLookup({
     setRemovalReason("");
   };
 
+  const handleApplyFlag = () => {
+    if (!pendingFlagColor) return;
+    if (pendingFlagColor === "none") {
+      handleRemoveFlagClick();
+    } else {
+      handleFlagChange(pendingFlagColor);
+    }
+  };
+
+  // ── Derived data for modal body ──────────────────────────────────────────
+  const allAccounts = customer
+    ? [
+        { label: String(customer.customer_number || ""), record: customer, isMain: true },
+        ...subAccounts.map((r) => ({
+          label: String(r.customer_number || ""),
+          record: r,
+          isMain: false,
+        })),
+      ]
+    : [];
+
+  const hasSubAccounts = subAccounts.length > 0;
+  const grandTotal = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.outstanding_balance), 0);
+
+  const invoiceSlots = [1,2,3].map(i => ({
+    numField: `last_unpaid_invoice_${i}`,
+    amtField: `last_unpaid_invoice_${i}_amount`,
+    dateField: `last_unpaid_invoice_${i}_date`,
+  }));
+  const receiptSlots = [1,2,3].map(i => ({
+    numField: `last_receipt_${i}`,
+    amtField: `last_receipt_${i}_amount`,
+    dateField: `last_receipt_${i}_date`,
+  }));
+
+  const renderGroupedTable = ({ title, icon: Icon, iconColor, accounts, slots }) => {
+    const activeSlots = slots.filter(({ numField }) =>
+      accounts.some(({ record: r }) => r?.[numField])
+    );
+    if (activeSlots.length === 0) return null;
+    return (
+      <div className="bg-card border border-border rounded-xl p-4 mb-3">
+        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+          <Icon className={cn("h-4 w-4", iconColor)} />
+          {title}
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border">
+                <th className="text-left text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2 pr-4">Number</th>
+                <th className="text-right text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2 pr-4">Amount</th>
+                <th className="text-left text-sm font-semibold text-muted-foreground uppercase tracking-wide pb-2">Date</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accounts.map(({ label, record: r }) => {
+                const rows = activeSlots
+                  .map(({ numField, amtField, dateField }, i) => {
+                    const ref = r?.[numField];
+                    const amt = r?.[amtField];
+                    const date = r?.[dateField];
+                    if (!ref && !amt && !date) return null;
+                    return (
+                      <tr key={`${label}-${i}`} className="border-b border-border/50 last:border-0">
+                        <td className={cn("text-sm py-1.5 pr-4 font-mono", iconColor)}>{ref || "—"}</td>
+                        <td className={cn("text-sm py-1.5 pr-4 text-right", parseAmount(amt) !== 0 ? "text-foreground" : "text-muted-foreground")}>{formatAmount(amt)}</td>
+                        <td className={cn("text-sm py-1.5", date ? "text-foreground" : "text-muted-foreground")}>{date || "—"}</td>
+                      </tr>
+                    );
+                  })
+                  .filter(Boolean);
+                if (rows.length === 0) return null;
+                return [
+                  accounts.length > 1 && (
+                    <tr key={`sep-${label}`}>
+                      <td colSpan={3} className="pt-2 pb-1">
+                        <span className="text-sm font-medium text-muted-foreground">{label}</span>
+                      </td>
+                    </tr>
+                  ),
+                  ...rows,
+                ];
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-4">
+      {/* ── Search bar ── */}
       <div className="relative rounded-xl border border-slate-700/50 bg-gradient-to-br from-slate-900 via-slate-800/90 to-slate-900 p-5 shadow-xl">
-        {/* subtle top accent line */}
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-widest mb-3">Customer Lookup</p>
+        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Lookup</p>
         <div className="flex gap-2.5">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -784,7 +922,7 @@ export default function CustomerLookup({
                     )}
                   >
                     <div className="text-sm font-medium">{s.customerName}</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">#{s.customerNumber}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">#{s.customerNumber}</div>
                   </button>
                 ))}
               </div>
@@ -805,6 +943,7 @@ export default function CustomerLookup({
         </div>
       </div>
 
+      {/* ── Main Customer Modal ── */}
       <Dialog
         open={isModalOpen}
         onOpenChange={(open) => {
@@ -813,374 +952,239 @@ export default function CustomerLookup({
       >
         <DialogContent
           onKeyDown={(e) => {
-            if ((e.key === "Enter" || e.key === "Escape") && e.target.tagName !== "TEXTAREA") {
+            if (e.key === "Escape" && e.target.tagName !== "TEXTAREA") {
               closeAndReset();
             }
           }}
           className={cn(
-            "max-w-[1100px] w-full border-4 bg-gray-900 p-0",
+            "max-w-[1100px] w-full border-4 bg-gray-900 p-0 flex flex-col max-h-[88vh]",
             customer?.flag_color === "red" && "border-red-500",
             customer?.flag_color === "green" && "border-green-500",
             customer?.flag_color === "orange" && "border-orange-500",
             (!customer?.flag_color || customer?.flag_color === "none") && "border-gray-700"
           )}
         >
-          {/* Fixed-size inner shell — controls all sizing from here */}
-          <div style={{ width: "100%", height: "90vh", display: "flex", flexDirection: "column", overflow: "hidden", padding: "16px 16px 12px 16px" }}>
-          <DialogHeader className="pb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <User className="h-4 w-4 text-gray-400 shrink-0" />
-              <div className="leading-tight">
-                <div className="text-base text-white leading-none">{customer?.customer_name}</div>
-                <div className="text-xs text-gray-400 mt-0.5">Customer #{customer?.customer_number}</div>
-              </div>
-
-            </DialogTitle>
+          <DialogHeader className="sr-only">
+            <DialogTitle>{customer?.customer_name || "Customer"}</DialogTitle>
           </DialogHeader>
 
-          {!!customer?.auto_flagged && (
+          {/* ── 1. Verdict Banner ── */}
+          {creditAnalysis ? (
             <div className={cn(
-              "flex items-center justify-center gap-2 px-4 py-2 rounded-lg border text-xs font-medium mt-3",
-              customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
-              customer?.flag_color === "green" && "bg-green-950/70 border-green-700 text-green-300",
-              customer?.flag_color === "orange" && "bg-orange-950/70 border-orange-700 text-orange-300",
-              (!customer?.flag_color || customer?.flag_color === "none") && "bg-slate-800 border-slate-600 text-slate-300",
+              "w-full px-5 py-4 border-b shrink-0",
+              verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
-              <Zap className="w-3.5 h-3.5 shrink-0" />
-              <span>Auto-flagged</span>
-              {customer?.flag_reason && (
-                <>
-                  <span className="opacity-40">·</span>
-                  <span className="opacity-80">{customer.flag_reason.replace(/^Auto-flagged:\s*/i, "")}</span>
-                </>
-              )}
+              <div className="flex items-center gap-4">
+                <span className="text-2xl font-bold">{creditAnalysis.score}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold">{creditAnalysis.title}</div>
+                  {creditAnalysis.factors.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {creditAnalysis.factors.slice(0, 2).map((f, i) => (
+                        <span key={i} className="text-xs px-2 py-0.5 rounded-full bg-black/20 max-w-[340px] truncate">
+                          {f.text || f.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="w-full px-5 py-4 border-b border-border bg-muted/30 shrink-0">
+              <div className="flex items-center gap-4 animate-pulse">
+                <div className="h-8 w-12 bg-muted rounded" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 w-32 bg-muted rounded" />
+                  <div className="h-3 w-48 bg-muted rounded" />
+                </div>
+              </div>
             </div>
           )}
 
-          <div style={{ display: "flex", gap: "16px", flex: 1, minHeight: 0, paddingTop: "8px" }}>
-            {/* ── LEFT COLUMN: balance, invoices, receipts, terms ── */}
-            <div style={{ flex: 1, minWidth: 0, overflowY: "auto", paddingRight: "8px" }} className="space-y-4">
-            {/* ── Outstanding Balance (with sub-accounts if parent) ── */}
-            {(() => {
-              const allAccounts = [
-                { label: String(customer?.customer_number || ""), record: customer, isMain: true },
-                ...subAccounts.map((r) => ({
-                  label: String(r.customer_number || ""),
-                  record: r,
-                  isMain: false,
-                })),
-              ];
-
-              const hasSubAccounts = subAccounts.length > 0;
-              const grandTotal = allAccounts.reduce((s, { record: r }) => s + parseAmount(r?.outstanding_balance), 0);
-
-              return (
-                <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <Calendar className="h-4 w-4 text-gray-400" />
-                    <h4 className="text-sm font-semibold text-gray-300">Outstanding Balance</h4>
-                  </div>
-
-                  <div className="space-y-2">
-                    {/* Header */}
-                    <div className="grid grid-cols-2 gap-1 text-[10px] text-gray-500 uppercase tracking-wide px-1">
-                      <span>Account</span>
-                      <span className="text-right">Balance</span>
-                    </div>
-
-                    {allAccounts.map(({ label, record: r, isMain }) => (
-                      <div
-                        key={label}
-                        className={cn(
-                          "grid grid-cols-2 gap-1 rounded-lg px-2 py-1.5",
-                          isMain ? "bg-gray-700" : "bg-gray-900"
-                        )}
-                      >
-                        <span className={cn("text-xs font-medium truncate", isMain ? "text-white" : "text-gray-400")}>
-                          {label}
-                        </span>
-                        <span className={cn("text-xs text-right", parseAmount(r?.outstanding_balance) !== 0 ? "text-white" : "text-gray-600")}>
-                          {formatAmount(r?.outstanding_balance)}
-                        </span>
-                      </div>
-                    ))}
-
-                    {hasSubAccounts && (
-                      <div className="grid grid-cols-2 gap-1 rounded-lg border border-gray-600 bg-gray-800 px-2 py-1.5 mt-1">
-                        <span className="text-xs font-bold text-yellow-400">TOTAL</span>
-                        <span className={cn("text-xs font-bold text-right", grandTotal !== 0 ? "text-yellow-300" : "text-gray-600")}>
-                          {formatAmount(String(grandTotal))}
-                        </span>
-                      </div>
-                    )}
-                  </div>
+          {/* ── 2. Scrollable Body ── */}
+          <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+            {/* Customer header card */}
+            <div className="bg-card border border-border rounded-xl p-4 mb-3">
+              <div className="flex items-center gap-3">
+                <User className="h-5 w-5 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-semibold text-foreground">{customer?.customer_name}</div>
+                  <div className="text-sm text-muted-foreground">Account #{customer?.customer_number}</div>
                 </div>
-              );
-            })()}
-
-            {/* ── Last Unpaid Invoice (with sub-accounts if parent) ── */}
-            {(() => {
-              const allAccounts = [
-                { label: String(customer?.customer_number || ""), record: customer, isMain: true },
-                ...subAccounts.map((r) => ({
-                  label: String(r.customer_number || ""),
-                  record: r,
-                  isMain: false,
-                })),
-              ];
-
-              // Compact multi-slot table: rows = accounts, cols = invoice/receipt slots (only populated slots shown)
-              const renderMultiSlotTable = ({ title, icon: Icon, iconColor, accounts, slots }) => {
-                const activeSlots = slots.filter(({ numField }) =>
-                  accounts.some(({ record: r }) => r?.[numField])
-                );
-                if (activeSlots.length === 0) return null;
-                return (
-                  <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-                    <div className="mb-2 flex items-center gap-2">
-                      <Icon className={cn("h-4 w-4", iconColor)} />
-                      <h4 className="text-sm font-semibold text-gray-300">{title}</h4>
-                    </div>
-                    <div className="space-y-1.5">
-                      {accounts.map(({ label, record: r, isMain }) => (
-                        <div
-                          key={label}
-                          className={cn(
-                            "rounded-lg px-2 py-1.5",
-                            isMain ? "bg-gray-700" : "bg-gray-900"
-                          )}
-                        >
-                          <span className={cn("block text-xs font-medium mb-1", isMain ? "text-white" : "text-gray-400")}>
-                            {label}
-                          </span>
-                          <div className="space-y-0.5">
-                            <div className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-2 mb-1">
-                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Number</span>
-                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Amount</span>
-                              <span className="text-white font-bold uppercase tracking-wide text-[10px]">Date</span>
-                            </div>
-                            {activeSlots.map(({ numField, amtField, dateField }, i) => {
-                              const ref = r?.[numField];
-                              const amt = r?.[amtField];
-                              const date = r?.[dateField];
-                              if (!ref && !amt && !date) return null;
-                              return (
-                                <div key={i} className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-x-2 text-xs">
-                                  <span className={cn("truncate font-mono", iconColor)}>{ref || "—"}</span>
-                                  <span className={cn("truncate", parseAmount(amt) !== 0 ? "text-white" : "text-gray-600")}>{formatAmount(amt)}</span>
-                                  <span className={cn("truncate", date ? "text-gray-300" : "text-gray-600")}>{date || "—"}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              };
-
-              const invoiceSlots = [1,2,3].map(i => ({
-                numField: `last_unpaid_invoice_${i}`,
-                amtField: `last_unpaid_invoice_${i}_amount`,
-                dateField: `last_unpaid_invoice_${i}_date`,
-              }));
-              const receiptSlots = [1,2,3].map(i => ({
-                numField: `last_receipt_${i}`,
-                amtField: `last_receipt_${i}_amount`,
-                dateField: `last_receipt_${i}_date`,
-              }));
-
-              return (
-                <div className="flex flex-col gap-2">
-                  {renderMultiSlotTable({
-                    title: "Invoices",
-                    icon: Flag,
-                    iconColor: "text-orange-400",
-                    accounts: allAccounts,
-                    slots: invoiceSlots,
-                  })}
-                  {renderMultiSlotTable({
-                    title: "Receipts",
-                    icon: CheckCircle,
-                    iconColor: "text-emerald-400",
-                    accounts: allAccounts,
-                    slots: receiptSlots,
-                  })}
-                </div>
-              );
-            })()}
-
-            {customer?.terms && (
-              <div className="flex items-center gap-2 rounded-lg border border-gray-700 bg-gray-800/50 px-3 py-2">
-                <span className="text-xs text-gray-400 shrink-0">Payment Terms:</span>
-                <span className="text-xs font-medium text-white">{customer.terms}</span>
-              </div>
-            )}
-
-            </div>{/* end left col */}
-            {/* ── RIGHT COLUMN: analysis + flag management ── */}
-            <div style={{ flex: 1, minWidth: 0, overflowY: "auto" }} className="space-y-3">
-            {/* ── Credit Analysis Panel ── */}
-            {creditAnalysis && (() => {
-              const analysis = creditAnalysis;
-              const verdictStyles = {
-                approve: { border: "border-emerald-600", bg: "bg-emerald-900/30", icon: "✅", titleColor: "text-emerald-400", badgeColor: "bg-emerald-700 text-emerald-100" },
-                caution: { border: "border-yellow-600", bg: "bg-yellow-900/20", icon: "⚠️", titleColor: "text-yellow-400", badgeColor: "bg-yellow-700 text-yellow-100" },
-                hold:    { border: "border-red-600",     bg: "bg-red-900/20",     icon: "🔴", titleColor: "text-red-400",     badgeColor: "bg-red-700 text-red-100" },
-              };
-              const s = verdictStyles[analysis.verdict] || verdictStyles["caution"];
-              const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
-              const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
-              return (
-                <div className={`rounded-xl border ${s.border} ${s.bg} p-3`} style={{ flexShrink: 0 }}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className="text-base">{s.icon}</span>
-                    <div className="flex-1">
-                      <div className={`text-sm font-bold ${s.titleColor}`}>{analysis.title}</div>
-                      <div className="text-[10px] text-gray-400">Invoice Recommendation</div>
-                    </div>
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${s.badgeColor}`}>
-                      {analysis.score}/100
-                    </span>
-                  </div>
-                  <p className="text-xs text-gray-300 mb-2 leading-snug">{analysis.summary}</p>
-                  {analysis.factors.length > 0 && (
-                    <ul className="space-y-1">
-                      {analysis.factors.map((f, i) => (
-                        <li key={i} className="flex gap-1.5 text-xs leading-snug">
-                          <span className={`shrink-0 ${factorColor[f.type]}`}>{factorIcon[f.type]}</span>
-                          <span className={factorColor[f.type]}>{f.text}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              );
-            })()}
-            <div className="rounded-xl border border-gray-700 bg-gray-800 p-3">
-              <div className="mb-3 flex items-center justify-between">
-                <h4 className="text-sm font-semibold text-gray-300">
-                  Flag Management
-                </h4>
-                {!canModifyFlag() && customer?.flag_color !== "none" && (
-                  <Badge
-                    variant="outline"
-                    className="border-gray-600 text-xs text-gray-400"
-                  >
-                    <Shield className="mr-1 h-3 w-3" />
-                    Protected
+                {customer?.terms && (
+                  <Badge variant="outline" className="shrink-0 text-sm">
+                    {customer.terms}
+                  </Badge>
+                )}
+                {hasSubAccounts && (
+                  <Badge variant="outline" className="shrink-0 text-sm border-indigo-600 text-indigo-400">
+                    Hub · {subAccounts.length} sub-account{subAccounts.length > 1 ? "s" : ""}
                   </Badge>
                 )}
               </div>
+            </div>
 
-              {/* Row 1: flag buttons (left) + last 2 actions (right) */}
-              <div className="flex gap-3">
-                {/* Left: flag buttons */}
-                <div className="flex w-24 shrink-0 flex-col">
-                  <div className="flex h-full flex-col justify-between">
-                    {Object.entries(flagColors)
-                      .filter(([key]) => key !== "none")
-                      .map(([key, config]) => (
-                        <Button
-                          key={key}
-                          variant="outline"
-                          onClick={() => handleFlagChange(key)}
-                          disabled={!canModifyFlag() || isUpdatingFlag}
-                          className={cn(
-                            "h-7 w-full justify-start border px-2 text-xs transition-all",
-                            customer?.flag_color === key
-                              ? `${config.bg} ${config.text} ${config.border}`
-                              : "border-gray-600 text-gray-300 hover:bg-gray-700"
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              "mr-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
-                              key === "red" && "bg-red-500",
-                              key === "green" && "bg-green-500",
-                              key === "orange" && "bg-orange-500"
-                            )}
-                          />
-                          {customer?.flag_color === key ? "Active" : config.label}
-                        </Button>
-                      ))}
-
-                    {canModifyFlag() && (
-                      <Button
-                        variant="outline"
-                        onClick={handleRemoveFlagClick}
-                        disabled={isUpdatingFlag || !customer?.flag_color || customer.flag_color === "none"}
-                        className="h-7 w-full justify-start border border-gray-600 px-2 text-xs text-gray-400 hover:border-rose-700 hover:bg-rose-900/20 hover:text-rose-400 disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        <Trash2 className="mr-1.5 h-3 w-3 shrink-0" />
-                        Remove
-                      </Button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Right: last 2 actions */}
-                <div className="flex-1 rounded-lg border border-gray-700 bg-gray-900 p-2" style={{ overflow: "auto" }}>
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <History className="h-3.5 w-3.5 text-gray-400" />
-                    <p className="text-xs font-medium text-gray-300">Last 2 actions</p>
-                  </div>
-                  {historyLoading ? (
-                    <p className="text-xs text-gray-500">Loading…</p>
-                  ) : recordHistory.length === 0 ? (
-                    <p className="text-xs text-gray-500">No recent actions</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {recordHistory.slice(0, 2).map((log) => (
-                        <div
-                          key={log.id}
-                          className="rounded border border-gray-800 bg-gray-950 p-1.5"
-                        >
-                          <div className="text-xs font-medium leading-snug text-gray-200">
-                            {formatHistoryAction(log)}
-                          </div>
-                          <div className="mt-0.5 text-[11px] text-gray-400">
-                            {formatHistoryDate(log.created_date)} ·{" "}
-                            {log.user_name || log.user_email || "Unknown"}
-                          </div>
-                        </div>
-                      ))}
+            {/* Outstanding balance card */}
+            <div className="bg-card border border-border rounded-xl p-4 mb-3">
+              <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2">Outstanding Balance</p>
+              <p className={cn("text-2xl font-bold", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
+              </p>
+              {hasSubAccounts && (
+                <div className="mt-3 space-y-1">
+                  {allAccounts.map(({ label, record: r, isMain }) => (
+                    <div key={label} className="flex justify-between text-sm">
+                      <span className={isMain ? "text-foreground font-medium" : "text-muted-foreground"}>{label}</span>
+                      <span className={parseAmount(r?.outstanding_balance) !== 0 ? "text-foreground" : "text-muted-foreground"}>
+                        {formatAmount(r?.outstanding_balance)}
+                      </span>
                     </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Row 2: reason block (full width, below) */}
-              {canModifyFlag() && (
-                <div className="space-y-1 pt-1">
-                  <Label className="text-xs text-gray-400">Reason (optional)</Label>
-                  <Textarea
-                    value={flagReason}
-                    onChange={(e) => setFlagReason(e.target.value)}
-                    placeholder="Add a reason..."
-                    className="h-14 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
-                    disabled={isUpdatingFlag}
-                  />
-                  {customer?.flag_color && customer.flag_color !== "none" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-1 border-gray-600 text-gray-300 hover:bg-gray-700"
-                      disabled={isUpdatingFlag}
-                      onClick={() => handleFlagChange(customer.flag_color)}
-                    >
-                      Save Reason
-                    </Button>
-                  )}
+                  ))}
                 </div>
               )}
-            </div>{/* end flag card */}
-            </div>{/* end right col */}
-            </div>{/* end two-col flex */}
-          </div>{/* end fixed shell */}
+            </div>
+
+            {/* Auto-flag banner */}
+            {!!customer?.auto_flagged && (
+              <div className={cn(
+                "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium mb-3",
+                customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
+                customer?.flag_color === "green" && "bg-green-950/70 border-green-700 text-green-300",
+                customer?.flag_color === "orange" && "bg-orange-950/70 border-orange-700 text-orange-300",
+                (!customer?.flag_color || customer?.flag_color === "none") && "bg-slate-800 border-slate-600 text-slate-300",
+              )}>
+                <Zap className="w-4 h-4 shrink-0" />
+                <span>Auto-flagged</span>
+                {customer?.flag_reason && (
+                  <>
+                    <span className="opacity-40">·</span>
+                    <span className="opacity-80">{customer.flag_reason.replace(/^Auto-flagged:\s*/i, "")}</span>
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Invoices table */}
+            {renderGroupedTable({
+              title: "Invoices",
+              icon: Flag,
+              iconColor: "text-orange-400",
+              accounts: allAccounts,
+              slots: invoiceSlots,
+            })}
+
+            {/* Receipts table */}
+            {renderGroupedTable({
+              title: "Receipts",
+              icon: CheckCircle,
+              iconColor: "text-emerald-400",
+              accounts: allAccounts,
+              slots: receiptSlots,
+            })}
+
+            {/* Credit analysis detail card */}
+            {creditAnalysis && creditAnalysis.factors.length > 0 && (
+              <div className="bg-card border border-border rounded-xl p-4 mb-3">
+                <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-2">
+                  <Shield className="h-4 w-4" />
+                  Credit Analysis
+                </p>
+                <p className="text-sm text-muted-foreground mb-3 leading-snug">{creditAnalysis.summary}</p>
+                <ul className="space-y-1.5">
+                  {creditAnalysis.factors.map((f, i) => {
+                    const factorIcon = { good: "✓", warn: "⚠", bad: "✗", block: "⛔" };
+                    const factorColor = { good: "text-emerald-400", warn: "text-yellow-400", bad: "text-red-400", block: "text-red-400 font-semibold" };
+                    return (
+                      <li key={i} className="flex gap-2 text-sm leading-snug">
+                        <span className={cn("shrink-0", factorColor[f.type])}>{factorIcon[f.type]}</span>
+                        <span className={factorColor[f.type]}>{f.text || f.label}</span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            )}
+          </div>
+
+          {/* ── 3. Sticky Flag Bar ── */}
+          <div className="shrink-0 bg-card border-t border-border px-4 py-3">
+            <div className="flex items-center gap-2 flex-wrap">
+              {!canModifyFlag() && customer?.flag_color !== "none" && (
+                <Badge variant="outline" className="border-gray-600 text-sm text-gray-400 mr-2">
+                  <Shield className="mr-1 h-3 w-3" />
+                  Protected
+                </Badge>
+              )}
+              {["none", "green", "orange", "red"].map((color) => {
+                const isActive = pendingFlagColor === color;
+                const isCurrent = customer?.flag_color === color || (!customer?.flag_color && color === "none");
+                const styles = flagPillStyles[color];
+                return (
+                  <button
+                    key={color}
+                    onClick={() => setPendingFlagColor(color)}
+                    disabled={!canModifyFlag() || isUpdatingFlag}
+                    className={cn(
+                      "rounded-full px-4 py-1.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed",
+                      isActive ? styles.active : styles.base,
+                      isCurrent && !isActive && "ring-1 ring-white/30"
+                    )}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", flagDotColor[color])} />
+                      {flagColors[color].label}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {pendingFlagColor && (
+              <div className="mt-3 space-y-2">
+                <Textarea
+                  value={flagReason}
+                  onChange={(e) => setFlagReason(e.target.value)}
+                  placeholder="Reason for flag change..."
+                  className="h-16 resize-none border-gray-700 bg-gray-900 text-sm text-gray-100 placeholder:text-gray-500"
+                  disabled={isUpdatingFlag}
+                />
+                <Button
+                  onClick={handleApplyFlag}
+                  disabled={isUpdatingFlag}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white"
+                >
+                  {isUpdatingFlag ? (
+                    <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Applying…</>
+                  ) : (
+                    "Apply"
+                  )}
+                </Button>
+              </div>
+            )}
+
+            {/* Last 3 flag history entries */}
+            {recordHistory.length > 0 && (
+              <div className={cn("space-y-1", pendingFlagColor ? "mt-3" : "mt-2")}>
+                {recordHistory.slice(0, 3).map((log) => {
+                  const toColor = getHistoryFlagColor(log);
+                  const snippet = getHistoryReasonSnippet(log);
+                  return (
+                    <div key={log.id} className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <span className="text-xs shrink-0">{formatHistoryDate(log.created_date)}</span>
+                      <span className="text-xs shrink-0">{log.user_name || log.user_email || "?"}</span>
+                      {toColor && <span className={cn("h-2 w-2 rounded-full shrink-0", flagDotColor[toColor] || "bg-slate-400")} />}
+                      {snippet && <span className="text-xs truncate max-w-[200px]">{snippet}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {historyLoading && <p className="text-sm text-muted-foreground mt-2">Loading history…</p>}
+          </div>
         </DialogContent>
       </Dialog>
+
       {/* ── Flag Removal Reason Modal ── */}
       <Dialog open={showRemovalModal} onOpenChange={() => {}}>
         <DialogContent
