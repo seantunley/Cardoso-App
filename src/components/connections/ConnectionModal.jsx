@@ -612,22 +612,28 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                 size="sm"
                 className="w-full border-gray-700 text-gray-400 hover:bg-gray-800 hover:text-white"
                 onClick={() => {
-                  // Auto-map any column whose name exactly matches a local field key
+                  // Normalize a string to a field key: lowercase, spaces→underscores, strip non-alphanum/_
+                  const normalize = (s) => s.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
                   const autoMappings = { ...formData.query_field_mappings };
+                  let count = 0;
                   for (const col of queryColumns) {
-                    const localField = allLocalFields.find((f) => f.key === col);
-                    if (localField && !autoMappings[col]) {
-                      autoMappings[col] = {
+                    // Try exact match first, then normalized match
+                    const localField =
+                      allLocalFields.find((f) => f.key === col) ||
+                      allLocalFields.find((f) => normalize(f.key) === normalize(col) || normalize(f.label) === normalize(col));
+                    if (localField && !autoMappings[localField.key]) {
+                      autoMappings[localField.key] = {
                         sourceField: col,
                         label: localField.label,
                         type: localField.type,
                         isCustom: !localField.isBuiltIn,
                         mode: "sync",
                       };
+                      count++;
                     }
                   }
                   setFormData({ ...formData, query_field_mappings: autoMappings });
-                  toast.success("Auto-mapped matching column names");
+                  toast.success(`Auto-mapped ${count} column${count !== 1 ? 's' : ''}`);
                 }}
               >
                 Auto-map matching column names
