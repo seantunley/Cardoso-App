@@ -108,7 +108,12 @@ async function fetchTopBalances(page, limit) {
     const d = await res.json().catch(() => ({}));
     throw new Error(d.error || "Failed to load balances");
   }
-  return res.json();
+  const data = await res.json();
+  // Handle both old servers (array) and new servers (paginated object)
+  if (Array.isArray(data)) {
+    return { records: data, total: data.length, totalPages: 1 };
+  }
+  return data;
 }
 
 export default function CustomerBalances() {
