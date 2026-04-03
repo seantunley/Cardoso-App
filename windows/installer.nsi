@@ -72,6 +72,11 @@ Function ConfigPageLeave
 FunctionEnd
 
 Section "Install" SecInstall
+  ; --- Stop existing service before overwriting files (upgrade path) ---
+  ; nssm stop returns non-zero if service not found — that's fine, ignore it
+  ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
+  Sleep 2000
+
   SetOutPath "$INSTDIR"
 
   ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
@@ -102,7 +107,8 @@ Section "Install" SecInstall
     FileClose $0
   env_exists:
 
-  ; Install Windows service via NSSM
+  ; Install or reconfigure Windows service via NSSM
+  ; On fresh install: install succeeds. On upgrade: install returns non-zero (already exists) — fine, we just reconfigure below.
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppDirectory "$INSTDIR"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppEnvironmentExtra "NODE_ENV=production"' $0
