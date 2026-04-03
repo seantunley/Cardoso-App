@@ -107,7 +107,7 @@ function flattenRecord(record) {
     last_receipt_5_amount: record.last_receipt_5_amount || record.data?.last_receipt_5_amount,
     last_receipt_5_date: record.last_receipt_5_date || record.data?.last_receipt_5_date,
     outstanding_balance:
-      record.outstanding_balance || record.data?.outstanding_balance,
+      record.outstanding_balance ?? record.data?.outstanding_balance,
     terms: record.terms || record.data?.terms || null,
   };
 }
@@ -970,8 +970,18 @@ export default function CustomerLookup({
   const creditAnalysis = useMemo(() => {
     if (!customer) return null;
     const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
-    // TODO: pass real activity log once fetched in this component
-    return analyseInvoiceCredit(allAccountRecords, []);
+    // Map auditlog entries to the shape analyseInvoiceCredit expects: { action, new_value }
+    const flagHistory = recordHistory
+      .filter(e => e.action_type === 'update_flag')
+      .map(e => {
+        let new_value = null;
+        try {
+          const ch = typeof e.changes === 'string' ? JSON.parse(e.changes) : (e.changes || {});
+          new_value = ch.flag_color || ch.to || null;
+        } catch {}
+        return { action: 'flag_changed', new_value };
+      });
+    return analyseInvoiceCredit(allAccountRecords, flagHistory);
   }, [customer, subAccounts]);
 
   const canModifyFlag = () => {
