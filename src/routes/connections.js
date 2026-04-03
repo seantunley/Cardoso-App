@@ -7,8 +7,9 @@
 import { Router } from 'express';
 import sql from 'mssql';
 import { decryptPassword } from '../services/encryption.js';
+import { runConnectionImport } from '../services/syncEngine.js';
 
-export function createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown }) {
+export function createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) {
   const router = Router();
 
   // ==================== TEST SQL SERVER CONNECTION ====================
@@ -170,7 +171,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, ru
       }
 
       try {
-        const result = await runConnectionImport(req.params.connectionId);
+        const result = await runConnectionImport(req.params.connectionId, { isShuttingDown });
         res.json(result);
       } catch (error) {
         res.status(500).json({ error: error.message || 'Import failed' });
