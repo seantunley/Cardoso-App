@@ -16,6 +16,8 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Shared helpers: src/helpers.js exports sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection
 - fieldRegistry.js imports parseJsonSafely from helpers.js — no circular deps since neither imports from routes/services
 - Auto-flag service: src/services/autoFlag.js exports _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord — pure functions, no deps
+- Auth router: createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }) factory pattern
+- Route files use express.Router() and full paths (e.g., '/api/auth/login'), mounted with app.use(router)
 
 ---
 
@@ -86,4 +88,17 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - **Learnings for future iterations:**
   - Auto-flag functions are pure (no db/stmts dependency) — simplest extraction so far, no factory pattern needed
   - applyAutoFlagRulesToRecord is used in both sync logic (runConnectionImport) and the /api/apply-auto-flags route — both still in server.js, will be extracted in US-007/US-009
+---
+
+## 2026-04-03 - US-006
+- Extracted auth and user routes to src/routes/auth.js using factory pattern: createAuthRouter({ db, stmts, getUserById, ... })
+- Routes extracted: /api/auth/login, /api/auth/logout, /api/auth/set-initial-password, /api/auth/me (GET+PUT), /api/login-logs, /api/users (CRUD + permissions + profile + password)
+- server.js mounts with `app.use(authRouter)` after auth middleware creation
+- Removed ~200 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/auth.js (new)
+- **Learnings for future iterations:**
+  - Factory pattern works well for route modules — pass db, stmts, middleware functions, avoid circular deps
+  - getUserById is still defined in server.js (depends on stmts) and passed to both auth middleware and auth router
+  - The original server.js had a nesting bug: set-initial-password was nested inside logout's callback — preserved the same behavior in the router by using proper separate handlers
+  - Route files use full paths (e.g., '/api/auth/login') not relative — mounted with plain app.use(router)
 ---
