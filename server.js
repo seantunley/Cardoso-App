@@ -1155,7 +1155,6 @@ app.get(
 
 // Login-log and user routes are now in src/routes/auth.js
 
-// (login-log and user routes are now in src/routes/auth.js)
 // ==================== TEST SQL SERVER CONNECTION ====================
 app.post(
   '/api/test-connection',
