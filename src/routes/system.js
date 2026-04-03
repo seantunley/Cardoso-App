@@ -49,9 +49,22 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
 
     try {
       // Get download URL for latest release asset
-      const releaseResp = await fetch('https://api.github.com/repos/seantunley/Cardoso-App/releases/latest', {
-        headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'cardoso-app-auto-update' }
-      });
+      const _controller = new AbortController();
+      const _timeout = setTimeout(() => _controller.abort(), 10000);
+      let releaseResp;
+      try {
+        releaseResp = await fetch('https://api.github.com/repos/seantunley/Cardoso-App/releases/latest', {
+          headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'cardoso-app-auto-update' },
+          signal: _controller.signal,
+        });
+      } finally {
+        clearTimeout(_timeout);
+      }
+      if (releaseResp.status === 429 || releaseResp.status === 403) {
+        console.warn(`[AutoUpdate] GitHub API rate limited (${releaseResp.status}). Skipping this cycle.`);
+        autoUpdateRunning = false;
+        return { ok: false, reason: 'rate_limited' };
+      }
       if (!releaseResp.ok) throw new Error(`GitHub API error: ${releaseResp.status}`);
       const release = await releaseResp.json();
       const asset = release.assets.find(a => a.name.startsWith('CardosoSetup-') && a.name.endsWith('.exe'));
@@ -60,7 +73,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       console.log(`[AutoUpdate] Downloading ${asset.name} (${(asset.size/1024/1024).toFixed(1)} MB)...`);
 
       // Download to temp file
-      const tmpPath = path.join(process.env.TEMP || 'C:\Windows\Temp', 'CardosoSetup-update.exe');
+      const tmpPath = path.join(process.env.TEMP || 'C:\\Windows\\Temp', 'CardosoSetup-update.exe');
       const dlResp = await fetch(asset.browser_download_url);
       if (!dlResp.ok) throw new Error(`Download failed: ${dlResp.status}`);
       await pipeline(dlResp.body, createWriteStream(tmpPath));
