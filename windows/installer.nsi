@@ -1,4 +1,4 @@
-; Cardoso Customer Manager — Windows Installer
+; Cardoso Customer Manager - Windows Installer
 ; Requires: NSIS 3.x, Node.js bundled in build/node/, NSSM in build/nssm/
 ; Build via: makensis windows/installer.nsi
 
@@ -119,7 +119,7 @@ Section "Install" SecInstall
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppDirectory "$INSTDIR"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppEnvironmentExtra "NODE_ENV=production"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} DisplayName "${APP_NAME}"' $0
-  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Description "Cardoso Customer Manager — runs as background service"' $0
+  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Description "Cardoso Customer Manager - runs as background service"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Start SERVICE_AUTO_START' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppStdout "$INSTDIR\logs\service.log"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppStderr "$INSTDIR\logs\service-error.log"' $0
@@ -162,8 +162,7 @@ Section "Uninstall"
   Delete "$INSTDIR\package.json"
   Delete "$INSTDIR\package-lock.json"
   Delete "$INSTDIR\${UNINSTALLER}"
-  RMDir /r "$INSTDIR
-ode_modules"
+  RMDir /r "$INSTDIR\node_modules"
   Delete "$DESKTOP\Cardoso.lnk"
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SERVICE_NAME}"
