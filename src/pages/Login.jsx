@@ -36,9 +36,9 @@ export default function Login() {
   const [appVersion, setAppVersion] = useState("");
 
   useEffect(() => {
-    fetch("/api/status")
+    fetch("/api/app-info")
       .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.app_version) setAppVersion(d.app_version); })
+      .then(d => { if (d?.version) setAppVersion(d.version); })
       .catch(() => {});
   }, []);
 

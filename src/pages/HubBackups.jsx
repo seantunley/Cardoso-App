@@ -205,11 +205,7 @@ export default function HubBackups() {
   const handleDownload = useCallback(async (site) => {
     setDownloading(site.site_id);
     try {
-      const res = await fetch(`${site.url}/api/backup/download`, {
-        headers: { "x-reporting-token": "" }, // token managed server-side when going through hub proxy
-        credentials: "include",
-      });
-      // Use hub proxy instead to avoid CORS
+      // Use hub proxy to avoid CORS — site token is used server-side
       const proxyRes = await fetch(
         `/api/hub/proxy-backup?site_id=${encodeURIComponent(site.site_id)}`,
         { credentials: "include" }
