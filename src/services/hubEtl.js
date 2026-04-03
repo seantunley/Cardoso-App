@@ -16,6 +16,7 @@ function initHubTables() {
       slug TEXT,
       name TEXT,
       url TEXT,
+      token TEXT,
       last_seen TEXT,
       last_kpis TEXT,
       status TEXT DEFAULT 'unknown'
@@ -60,6 +61,7 @@ function initHubTables() {
       price TEXT,
       stocking_uom TEXT,
       commodity TEXT,
+      inventory_value TEXT,
       terms TEXT,
       synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
@@ -80,12 +82,12 @@ try {
 
 function initHubSiteRegistry() {
   const upsertSite = db.prepare(`
-    INSERT INTO hub_sites (id, slug, name, url, status)
-    VALUES (@id, @slug, @name, @url, 'unknown')
-    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url
+    INSERT INTO hub_sites (id, slug, name, url, token, status)
+    VALUES (@id, @slug, @name, @url, @token, 'unknown')
+    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url, token=excluded.token
   `);
   for (const site of HUB_SITES) {
-    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url });
+    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url, token: site.token || null });
   }
 }
 
@@ -277,7 +279,6 @@ async function runHubBackupPull() {
     return;
   }
   const sites = stmts.hubSitesForBackup.all();
-  const token = process.env.REPORTING_TOKEN || '';
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   const { mkdirSync, writeFileSync } = await import('fs');
   const pathMod = await import('path');
@@ -286,7 +287,7 @@ async function runHubBackupPull() {
       const controller = new AbortController();
       const hardTimeout = setTimeout(() => controller.abort(), 30000);
       const upstream = await fetch(`${site.url}/api/backup/download`, {
-        headers: { 'x-reporting-token': token },
+        headers: { 'x-reporting-token': site.token || '' },
         signal: controller.signal,
       });
       clearTimeout(hardTimeout);
