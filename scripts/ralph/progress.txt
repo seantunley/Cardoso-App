@@ -31,6 +31,7 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Backup router: createBackupRouter() — no deps injected, imports db/dbPath singleton directly
 - System router: createSystemRouter({ requireAuth, requireAdmin }) — owns app-info, version-status, auto-update trigger + background hourly check
 - requireReportingToken middleware lives in reporting.js (module-scoped, not exported) — used only by /api/reporting/* routes
+- record_snapshots: append-only audit table (migration v9) — INSERT only, never UPDATE/DELETE. Snapshots inserted per-record in syncEngine.js runWriteRows
 
 ---
 
@@ -193,4 +194,18 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - requireReportingToken is module-scoped in reporting.js, not exported — only /api/reporting/* routes use it
   - APP_VERSION loaded via createRequire in reporting.js (module-level, not factory-scoped)
   - Cleaned up many unused imports from server.js that accumulated from previous extractions
+---
+
+## 2026-04-03 - US-012
+- Added migration v9 in src/db/migrations.js: creates record_snapshots table (id, connection_id, customer_number, snapshot_data, synced_at)
+- Added append-only snapshot inserts in src/services/syncEngine.js after each record upsert in runWriteRows
+- Snapshots capture full record state via SELECT * after upsert — both existing record updates and new record inserts
+- Each snapshot insert is wrapped in try/catch so failures log an error but don't abort the sync
+- No UPDATE or DELETE statements target record_snapshots anywhere in the codebase
+- Refactored new-record auto-flag block slightly: the SELECT for the new record is now reused for both auto-flag and snapshot (avoids duplicate query)
+- Files changed: src/db/migrations.js, src/services/syncEngine.js
+- **Learnings for future iterations:**
+  - Snapshot inserts inside a transaction with try/catch work fine in better-sqlite3 — caught errors don't invalidate the outer transaction
+  - The new record SELECT (for auto-flag) was already present — reusing it for snapshots avoids an extra query per insert
+  - record_snapshots is append-only by design (audit table) — no UPDATE/DELETE anywhere
 ---

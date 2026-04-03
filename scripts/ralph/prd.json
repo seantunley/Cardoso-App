@@ -199,8 +199,8 @@
         "Typecheck passes"
       ],
       "priority": 12,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Migration v9 creates record_snapshots table. Snapshot inserts happen inside runWriteRows transaction in syncEngine.js after each upsert — wrapped in try/catch so failures don't abort sync. Uses SELECT * to capture full record state post-upsert."
     },
     {
       "id": "US-013",
