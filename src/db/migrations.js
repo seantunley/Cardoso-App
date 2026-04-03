@@ -324,6 +324,24 @@ function buildMigrations(db) {
         }
       },
     },
+    {
+      version: 15,
+      name: 'datarecord_complete_schema',
+      up() {
+        // Force-add all columns that should exist on datarecord but may be missing
+        // on installs that created the table before these columns were in CREATE TABLE.
+        // safe to re-run — ALTER TABLE fails silently via try/catch
+        const forceAdd = (table, col, def) => {
+          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); } catch (_) {}
+        };
+        forceAdd('datarecord', 'outstanding_balance', 'TEXT');
+        forceAdd('datarecord', 'unpaid_invoices', 'TEXT');
+        forceAdd('datarecord', 'receipts', 'TEXT');
+        forceAdd('datarecord', 'flag_source', 'TEXT DEFAULT NULL');
+        forceAdd('datarecord', 'terms', 'TEXT');
+      },
+    },
+
   ];
 }
 
