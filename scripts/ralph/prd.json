@@ -147,8 +147,8 @@
         "Typecheck passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Module-level exports pattern: syncEngine.js imports db singleton directly and builds its own stmts. runConnectionImport accepts optional { isShuttingDown } second arg. connections.js imports runConnectionImport directly from syncEngine."
     },
     {
       "id": "US-010",

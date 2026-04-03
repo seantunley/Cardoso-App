@@ -20,7 +20,9 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Route files use express.Router() and full paths (e.g., '/api/auth/login'), mounted with app.use(router)
 - Records router: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }) — owns schema cache, custom-fields, record history, auto-flags, dynamic CRUD
 - Schema cache (allowedTables, isValidTableName, getTableColumns) lives in records router — only used by CRUD routes
-- Connections router: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown }) — owns test-connection, test-query, import
+- Connections router: createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) — owns test-connection, test-query, import (runConnectionImport now imported directly from syncEngine)
+- Sync engine: src/services/syncEngine.js exports runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs — module-level exports, imports db singleton directly
+- runConnectionImport accepts optional 2nd arg { isShuttingDown } — callers pass the getter to enable shutdown-aware sync
 
 ---
 
@@ -134,4 +136,19 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - Connection routes depend on `sql` (mssql) and `decryptPassword` — imported directly in the route module, no need to inject
   - `shuttingDown` is a mutable variable in server.js — passed as a getter function to avoid stale closures
   - runConnectionImport is passed as a dependency since it's still defined in server.js (will move in US-009)
+---
+
+## 2026-04-03 - US-009
+- Extracted sync engine to src/services/syncEngine.js:
+  - runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs
+  - Module-level exports (not factory pattern) — imports db singleton and builds own stmts
+- Updated src/routes/connections.js to import runConnectionImport directly from syncEngine.js (removed from factory deps)
+- server.js now imports sync engine exports; ~448 lines of inline sync logic removed (1902 → 1454 lines)
+- Updated scheduled sync and auto-sync callers to pass { isShuttingDown } option
+- Files changed: server.js, src/services/syncEngine.js (new), src/routes/connections.js
+- **Learnings for future iterations:**
+  - syncEngine.js uses module-level exports instead of factory pattern — suited for singleton services that import db directly
+  - buildStatements(db) is called again inside syncEngine.js (separate from server.js stmts) — works fine since same db singleton, just duplicate prepared statements
+  - runConnectionImport needs isShuttingDown passed per-call since shuttingDown lives in server.js — passed as { isShuttingDown: () => shuttingDown }
+  - connections.js already had its own isShuttingDown pre-check; now also passes it through to runConnectionImport
 ---
