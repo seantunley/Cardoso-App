@@ -10,6 +10,8 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Schema init: src/db/schema.js exports initSchema(db) — PRAGMAs, CREATE TABLEs, indexes, custom field config, migrations
 - Prepared statements: src/db/statements.js exports buildStatements(db)
 - server.js had pre-existing merge corruption from commit 47c41c5 — restored from 4a0e196 (last valid commit)
+- Auth middleware: createAuthMiddleware({ getUserById, sanitizeUser }) factory pattern — dependencies injected from server.js
+- Rate limiter: standalone export from src/middleware/rateLimit.js
 
 ---
 
@@ -41,4 +43,16 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - buildMigrations(db) pattern used instead of bare MIGRATIONS array so migration up() closures capture db
   - dbPath needed to be exported from src/db/index.js because backup routes in server.js reference it
   - Linter auto-removed dotenv import from src/db/index.js — dotenv.config() is already called in server.js before the import
+---
+
+## 2026-04-03 - US-003
+- Extracted auth middleware to src/middleware/auth.js using factory pattern: createAuthMiddleware({ getUserById, sanitizeUser })
+- Extracted login rate limiter to src/middleware/rateLimit.js as standalone export
+- Removed inline auth middleware definitions (~98 lines) and loginLimiter from server.js
+- Removed `import rateLimit from 'express-rate-limit'` from server.js (now only in rateLimit.js)
+- Files changed: server.js, src/middleware/auth.js (new), src/middleware/rateLimit.js (new)
+- **Learnings for future iterations:**
+  - requireAuth depends on getUserById (needs stmts) and sanitizeUser (needs boolFromRow) — factory pattern avoids circular deps
+  - requireAdmin, requirePermission, requireSelfOrAdmin, checkTableAccess are pure — they only read req.currentUser set by requireAuth
+  - boolFromRow, sanitizeUser, getUserById remain in server.js for now — they'll be extracted in later stories (US-004 helpers, US-006 auth routes)
 ---

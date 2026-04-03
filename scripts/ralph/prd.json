@@ -51,8 +51,8 @@
         "Typecheck passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Factory pattern: createAuthMiddleware({ getUserById, sanitizeUser }) returns all middleware functions. Rate limiter extracted as standalone export."
     },
     {
       "id": "US-004",
