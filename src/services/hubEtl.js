@@ -150,7 +150,7 @@ async function syncSite(site) {
         terms=excluded.terms,
         updated_date=excluded.updated_date,
         synced_at=excluded.synced_at
-    \`);
+    `);
     const insertMany = db.transaction((records) => {
       const now = new Date().toISOString();
       for (const r of records) {

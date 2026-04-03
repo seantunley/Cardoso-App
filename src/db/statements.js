@@ -19,8 +19,8 @@ function buildStatements(db) {
   stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC');
   stmts.autoRecordsForFlags  = db.prepare('SELECT * FROM datarecord');
   stmts.updateAutoFlag       = db.prepare("UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = 1, flag_source = 'auto' WHERE id = ?");
-  stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ? AND auto_flagged = 1");
-  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = 'none', flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1");
+  stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ? AND auto_flagged = 1");
+  stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1");
 
   if (process.env.HUB_MODE === 'true') {
     stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');

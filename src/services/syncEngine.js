@@ -113,6 +113,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         flag_reason = ?,
         flag_created_by = ?,
         note = ?,
+        custom_field_1 = ?,
+        custom_field_2 = ?,
+        custom_field_3 = ?,
         synced_at = ?,
         updated_date = ?
       WHERE id = ?
@@ -137,8 +140,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         receipts,
         terms,
         note,
+        custom_field_1,
+        custom_field_2,
+        custom_field_3,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -274,6 +280,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               existing.flag_reason,
               existing.flag_created_by,
               String(baseRecordData.note ?? existing.note ?? ''),
+              baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? null,
+              baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? null,
+              baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? null,
               baseRecordData.synced_at,
               syncTimestamp,
               existing.id
@@ -325,12 +334,15 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.receipts ?? '[]',
               String(baseRecordData.terms ?? ''),
               String(baseRecordData.note ?? ''),
+              baseRecordData.custom_field_1 ?? null,
+              baseRecordData.custom_field_2 ?? null,
+              baseRecordData.custom_field_3 ?? null,
               baseRecordData.synced_at
             );
             // Apply auto-flag rules to new records (user hasn't touched them yet)
             const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
             if (activeAutoFlagRules.length > 0 && newRecord) {
-              const autoFlag = applyAutoFlagRulesToRecord(newRecord, activeAutoFlagRules);
+              const autoFlag = applyAutoFlagRulesToRecord(expandDataRecord(newRecord), activeAutoFlagRules);
               if (autoFlag) {
                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
               }
