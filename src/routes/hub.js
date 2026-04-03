@@ -46,15 +46,14 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const site = db.prepare('SELECT id, name, url FROM hub_sites WHERE id = ?').get(site_id);
+    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
     if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
 
-    const token = process.env.REPORTING_TOKEN || '';
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
       const upstream = await fetch(`${site.url}/api/backup/download`, {
-        headers: { 'x-reporting-token': token },
+        headers: { 'x-reporting-token': site.token || '' },
         signal: controller.signal,
       });
       clearTimeout(timeout);
@@ -77,8 +76,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
     if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
 
-    const sites = db.prepare('SELECT id, name, url FROM hub_sites').all();
-    const token = process.env.REPORTING_TOKEN || '';
+    const sites = db.prepare('SELECT id, name, url, token FROM hub_sites').all();
 
     const results = await Promise.all(sites.map(async (site) => {
       const base = { site_id: site.id, site_name: site.name, url: site.url };
@@ -87,7 +85,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         const r = await fetch(`${site.url}/api/backup/status`, {
-          headers: { 'x-reporting-token': token },
+          headers: { 'x-reporting-token': site.token || '' },
           signal: controller.signal,
         });
         clearTimeout(timeout);

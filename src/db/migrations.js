@@ -252,13 +252,23 @@ function buildMigrations(db) {
     },
     {
       version: 10,
+      name: 'hub_sites_token',
+      up() {
+        // Add token column to hub_sites if table exists (covers all installs — hub and sites with legacy hub_sites table)
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          ensureColumn(db, 'hub_sites', 'token', 'TEXT');
+        }
+      },
+    },
+    {
+      version: 11,
       name: 'hub_inventory_value_column',
       up() {
-        if (process.env.HUB_MODE === 'true') {
-          const cols = db.pragma('table_info(hub_inventory)').map(c => c.name);
-          if (!cols.includes('inventory_value')) {
-            db.exec('ALTER TABLE hub_inventory ADD COLUMN inventory_value TEXT');
-          }
+        // Add inventory_value to hub_inventory — not gated on HUB_MODE so it runs wherever the table exists
+        const hubInventoryExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
+        if (hubInventoryExists) {
+          ensureColumn(db, 'hub_inventory', 'inventory_value', 'TEXT');
         }
       },
     },

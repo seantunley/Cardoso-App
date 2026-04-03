@@ -168,6 +168,9 @@ function initSchema(db) {
       last_cost TEXT,
       price_list TEXT,
       price TEXT,
+      stocking_uom TEXT,
+      commodity TEXT,
+      inventory_value TEXT,
       terms TEXT,
       created_date TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -195,6 +198,7 @@ function initSchema(db) {
         slug TEXT,
         name TEXT,
         url TEXT,
+        token TEXT,
         last_seen TEXT,
         last_kpis TEXT,
         status TEXT DEFAULT 'unknown'
