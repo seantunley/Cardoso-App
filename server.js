@@ -624,7 +624,12 @@ ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
   }
 })();
 
-
+try {
+  runMigrations(db);
+} catch (err) {
+  console.error('[startup] migration failed:', err);
+  process.exit(1);
+}
 
 // ==================== SCHEMA CACHE ====================
 // Pre-load and cache table schemas at startup so PRAGMA table_info is never
