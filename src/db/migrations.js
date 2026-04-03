@@ -251,10 +251,10 @@ function buildMigrations(db) {
       },
     },
     {
-      version: 9,
+      version: 10,
       name: 'hub_sites_token',
       up() {
-        // Add token column to hub_sites if table exists (covers sites with legacy hub_sites from old monolithic server.js)
+        // Add token column to hub_sites if table exists (covers all installs — hub and sites with legacy hub_sites table)
         const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
         if (hubSitesExists) {
           ensureColumn(db, 'hub_sites', 'token', 'TEXT');
