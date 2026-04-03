@@ -215,7 +215,7 @@ function buildMigrations(db) {
       version: 8,
       name: 'hub_schema_columns',
       up() {
-        if (process.env.HUB_MODE !== 'true') return;
+        // No HUB_MODE gate — use table-existence checks so non-hub → hub upgrades also get the columns
         const hubInventoryExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
         if (hubInventoryExists) {
           ensureColumn(db, 'hub_inventory', 'stocking_uom', 'TEXT');

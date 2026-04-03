@@ -71,6 +71,7 @@ export function createReportingRouter({ requireAuth }) {
             r.flag_color,
             r.flag_reason,
             r.auto_flagged,
+            r.terms,
             COALESCE(s.name, r.site_id) AS site_name
           FROM hub_records r
           LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -91,6 +92,7 @@ export function createReportingRouter({ requireAuth }) {
             flag_color,
             flag_reason,
             auto_flagged,
+            terms,
             ? AS site_name
           FROM datarecord
           WHERE ${balanceWhere}
