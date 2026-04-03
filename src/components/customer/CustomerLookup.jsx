@@ -279,13 +279,6 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  // DEBUG: raw date fields
-    inv1: records[0]?.last_unpaid_invoice_1_date,
-    inv1_data: records[0]?.data?.last_unpaid_invoice_1_date,
-    rec1: records[0]?.last_receipt_1_date,
-    rec1_data: records[0]?.data?.last_receipt_1_date,
-  });
-
   // Collect invoice slots from all accounts, sort by date, take most recent 5
   const allInvoices = records.flatMap(r =>
     [1,2,3,4,5].map(i => ({
