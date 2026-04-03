@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
@@ -10,11 +10,10 @@ import { useAuth } from "@/lib/AuthContext";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
-import HubDashboard from "@/pages/HubDashboard";
-
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => <></>;
+const HubDashboard = Pages["HubDashboard"];
 
 const LayoutWrapper = ({ children, currentPageName }) =>
   Layout ? (
@@ -67,6 +66,7 @@ const AuthenticatedApp = () => {
   }
 
   return (
+    <Suspense fallback={<div className="fixed inset-0 flex items-center justify-center bg-background"><div className="h-8 w-8 animate-spin rounded-full border-4 border-border border-t-foreground"></div></div>}>
     <Routes>
       <Route
         path="/login"
@@ -96,6 +96,7 @@ const AuthenticatedApp = () => {
 
       <Route path="*" element={<PageNotFound />} />
     </Routes>
+    </Suspense>
   );
 };
 
