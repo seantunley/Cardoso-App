@@ -68,8 +68,8 @@
         "Typecheck passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "fieldRegistry.js imports parseJsonSafely from helpers.js (no circular deps). helpers.js also exports boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection."
     },
     {
       "id": "US-005",

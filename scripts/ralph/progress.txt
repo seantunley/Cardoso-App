@@ -12,6 +12,9 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - server.js had pre-existing merge corruption from commit 47c41c5 — restored from 4a0e196 (last valid commit)
 - Auth middleware: createAuthMiddleware({ getUserById, sanitizeUser }) factory pattern — dependencies injected from server.js
 - Rate limiter: standalone export from src/middleware/rateLimit.js
+- Field registry: src/fieldRegistry.js exports FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS, buildFieldPatch, buildDynamicLocalFieldsPatch, and mapping helpers
+- Shared helpers: src/helpers.js exports sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection
+- fieldRegistry.js imports parseJsonSafely from helpers.js — no circular deps since neither imports from routes/services
 
 ---
 
@@ -55,4 +58,21 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - requireAuth depends on getUserById (needs stmts) and sanitizeUser (needs boolFromRow) — factory pattern avoids circular deps
   - requireAdmin, requirePermission, requireSelfOrAdmin, checkTableAccess are pure — they only read req.currentUser set by requireAuth
   - boolFromRow, sanitizeUser, getUserById remain in server.js for now — they'll be extracted in later stories (US-004 helpers, US-006 auth routes)
+---
+
+## 2026-04-03 - US-004
+- Extracted field registry constants and helpers to src/fieldRegistry.js:
+  - FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS
+  - getMappingForKey, getRowValue, firstDefined, getMappedOrFallbackValue
+  - shouldApplyMappedValue, buildFieldPatch, buildDynamicLocalFieldsPatch
+- Extracted shared utility helpers to src/helpers.js:
+  - sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord
+  - normalizeFieldKey, validateCustomFieldKey, boolFromRow
+  - defaultPermissionsForRole, sanitizeUser, sanitizeConnection
+- server.js now imports from both new files; ~300 lines of inline definitions removed
+- Files changed: server.js, src/fieldRegistry.js (new), src/helpers.js (new)
+- **Learnings for future iterations:**
+  - fieldRegistry.js needs parseJsonSafely from helpers.js (buildDynamicLocalFieldsPatch uses it) — import is fine since both are leaf utility files
+  - sanitizeUser and boolFromRow moved to helpers.js (previously noted as "remain in server.js" in US-003) — auth middleware factory still gets sanitizeUser injected from server.js which now re-imports it from helpers.js
+  - getUserById stays in server.js because it depends on `stmts` (prepared statements) — will move when auth routes are extracted (US-006)
 ---
