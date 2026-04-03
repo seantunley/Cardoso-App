@@ -664,7 +664,7 @@ function initPreparedStatements() {
   if (process.env.HUB_MODE === 'true') {
     stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
     stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
+    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url, token FROM hub_sites');
   }
 }
 
@@ -3058,10 +3058,10 @@ if (process.env.HUB_MODE === 'true') {
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const site = db.prepare('SELECT id, name, url FROM hub_sites WHERE id = ?').get(site_id);
+    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
     if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
 
-    const token = process.env.REPORTING_TOKEN || '';
+    const token = site.token || '';
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 30000);
@@ -3089,8 +3089,7 @@ if (process.env.HUB_MODE === 'true') {
     const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
     if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
 
-    const sites = db.prepare('SELECT id, name, url FROM hub_sites').all();
-    const token = process.env.REPORTING_TOKEN || '';
+    const sites = db.prepare('SELECT id, name, url, token FROM hub_sites').all();
 
     const results = await Promise.all(sites.map(async (site) => {
       const base = { site_id: site.id, site_name: site.name, url: site.url };
@@ -3099,7 +3098,7 @@ if (process.env.HUB_MODE === 'true') {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         const r = await fetch(`${site.url}/api/backup/status`, {
-          headers: { 'x-reporting-token': token },
+          headers: { 'x-reporting-token': site.token || '' },
           signal: controller.signal,
         });
         clearTimeout(timeout);
@@ -3865,7 +3864,6 @@ async function runHubBackupPull() {
     return;
   }
   const sites = stmts.hubSitesForBackup.all();
-  const token = process.env.REPORTING_TOKEN || '';
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   const { mkdirSync, writeFileSync } = await import('fs');
   const pathMod = await import('path');
@@ -3874,7 +3872,7 @@ async function runHubBackupPull() {
       const controller = new AbortController();
       const hardTimeout = setTimeout(() => controller.abort(), 30000);
       const upstream = await fetch(`${site.url}/api/backup/download`, {
-        headers: { 'x-reporting-token': token },
+        headers: { 'x-reporting-token': site.token || '' },
         signal: controller.signal,
       });
       clearTimeout(hardTimeout);
