@@ -131,8 +131,8 @@
         "Typecheck passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Factory pattern: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown }). Routes: /api/test-connection, /api/test-query, /api/import/:connectionId. shuttingDown passed as closure getter."
     },
     {
       "id": "US-009",

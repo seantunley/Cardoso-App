@@ -18,8 +18,9 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Auto-flag service: src/services/autoFlag.js exports _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord — pure functions, no deps
 - Auth router: createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }) factory pattern
 - Route files use express.Router() and full paths (e.g., '/api/auth/login'), mounted with app.use(router)
-- Records router: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, checkTableAccess }) — owns schema cache, allowedTables, dynamic CRUD
+- Records router: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }) — owns schema cache, custom-fields, record history, auto-flags, dynamic CRUD
 - Schema cache (allowedTables, isValidTableName, getTableColumns) lives in records router — only used by CRUD routes
+- Connections router: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown }) — owns test-connection, test-query, import
 
 ---
 
@@ -117,4 +118,20 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - Records router needs checkTableAccess from auth middleware (passed as dependency), not just requireAuth/requireAdmin
   - applyAutoFlagRulesToRecord import stays in server.js too — used by runConnectionImport in sync engine (not yet extracted)
   - The /:table catch-all routes must be mounted AFTER all specific routes to avoid catching /api/auth/* etc — handled by mounting records router after auth router
+  - Custom-fields CRUD and record-history routes also moved into records.js (initially missed, completed in follow-up)
+  - requirePermission added to records router deps for custom-fields permission checks
+---
+
+## 2026-04-03 - US-008
+- Extracted connection and sync routes to src/routes/connections.js
+- Routes extracted: /api/test-connection, /api/test-query, /api/import/:connectionId
+- Factory pattern: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown })
+- shuttingDown state accessed via closure getter `isShuttingDown: () => shuttingDown`
+- runConnectionImport stays in server.js for now (US-009 will extract to syncEngine service)
+- Removed ~165 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/connections.js (new)
+- **Learnings for future iterations:**
+  - Connection routes depend on `sql` (mssql) and `decryptPassword` — imported directly in the route module, no need to inject
+  - `shuttingDown` is a mutable variable in server.js — passed as a getter function to avoid stale closures
+  - runConnectionImport is passed as a dependency since it's still defined in server.js (will move in US-009)
 ---
