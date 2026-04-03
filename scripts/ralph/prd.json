@@ -164,8 +164,8 @@
         "Typecheck passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Hub ETL (initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES) in src/services/hubEtl.js. Hub routes (createHubRouter, createNonHubFallbackRouter) in src/routes/hub.js. Both use db singleton and buildStatements internally. server.js conditionally mounts hub router and starts sync timers only when HUB_MODE=true."
     },
     {
       "id": "US-011",

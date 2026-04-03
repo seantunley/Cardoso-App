@@ -23,6 +23,10 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Connections router: createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) — owns test-connection, test-query, import (runConnectionImport now imported directly from syncEngine)
 - Sync engine: src/services/syncEngine.js exports runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs — module-level exports, imports db singleton directly
 - runConnectionImport accepts optional 2nd arg { isShuttingDown } — callers pass the getter to enable shutdown-aware sync
+- Hub ETL: src/services/hubEtl.js exports initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES — imports db singleton and buildStatements internally
+- Hub router: createHubRouter({ requireAuth, requireAdmin }) — imports db, stmts, boolFromRow, bcrypt, syncAllSites, HUB_SITES directly (no injection needed)
+- Non-hub fallback: createNonHubFallbackRouter() returns empty-response stubs for hub endpoints on non-hub installs
+- Hub table creation (initHubTables) must be called before hub router or ETL — tables needed for prepared statements
 
 ---
 
@@ -151,4 +155,20 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - buildStatements(db) is called again inside syncEngine.js (separate from server.js stmts) — works fine since same db singleton, just duplicate prepared statements
   - runConnectionImport needs isShuttingDown passed per-call since shuttingDown lives in server.js — passed as { isShuttingDown: () => shuttingDown }
   - connections.js already had its own isShuttingDown pre-check; now also passes it through to runConnectionImport
+---
+
+## 2026-04-03 - US-010
+- Extracted all HUB_MODE routes and ETL logic from server.js
+- Created src/services/hubEtl.js with: initHubTables(), initHubSiteRegistry(), syncSite(), syncAllSites(), runHubBackupPull(), HUB_SITES
+- Created src/routes/hub.js with: createHubRouter({ requireAuth, requireAdmin }), createNonHubFallbackRouter()
+- Hub routes extracted: /api/hub/backup-settings (GET/POST), /api/hub/proxy-backup, /api/hub/backup-status, /api/hub/sites, /api/hub/records, /api/hub/kpis, /api/hub/inventory, /api/hub/sync-log, /api/hub/force-resync (global + per-site), /api/hub/sync, /api/hub/users, /api/hub/push-users, /api/hub/receive-users
+- Non-hub fallback routes (empty responses for hub endpoints) also extracted
+- server.js conditionally creates hub tables, mounts hub router, and starts sync timers only when HUB_MODE=true
+- Removed ~640 lines of inline hub code from server.js
+- Files changed: server.js, src/services/hubEtl.js (new), src/routes/hub.js (new)
+- **Learnings for future iterations:**
+  - Hub router and ETL both use module-level imports (db, stmts, boolFromRow, bcrypt) instead of dependency injection — works well since these are all singletons/pure utils
+  - initHubTables() must be called before buildStatements(db) for hub stmts (getHubSetting, setHubSetting, hubSitesForBackup) to work — tables must exist first
+  - HUB_SITES parsed from env at module load time in hubEtl.js — exported for hub router to access (e.g., in /api/hub/sync response)
+  - Hub backup pull cron schedule stays in server.js (just the cron.schedule call) since it needs to be referenced by gracefulShutdown
 ---
