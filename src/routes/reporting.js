@@ -3,8 +3,6 @@ import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord } from '../helpers.js';
 
-const stmts = buildStatements(db);
-
 const SITE_ID = process.env.SITE_ID || 'local';
 const SITE_SLUG = process.env.SITE_SLUG || 'local';
 const SITE_NAME = process.env.SITE_NAME || 'Local';
@@ -21,6 +19,7 @@ function requireReportingToken(req, res, next) {
 }
 
 export function createReportingRouter({ requireAuth }) {
+  const stmts = buildStatements(db);
   const router = express.Router();
 
   // GET /api/kpis
@@ -110,6 +109,7 @@ export function createReportingRouter({ requireAuth }) {
     const search = (req.query.search || '').trim();
     const commodity = (req.query.commodity || '').trim();
     const limit = Math.min(parseInt(req.query.limit, 10) || 100000, 100000);
+    const isHub = process.env.HUB_MODE === 'true';
     try {
       const conditions = [];
       const params = [];
@@ -123,9 +123,22 @@ export function createReportingRouter({ requireAuth }) {
       }
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
       params.push(limit);
-      const rows = db.prepare(
-        `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
-      ).all(...params);
+      let rows;
+      if (isHub) {
+        const hubWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+        rows = db.prepare(
+          `SELECT i.id, i.site_id, COALESCE(s.name, i.site_id) AS site_name,
+                  i.item_number, i.item_description, i.qty_on_hand, i.last_cost,
+                  i.price_list, i.price, i.stocking_uom, i.commodity, i.terms, i.synced_at
+           FROM hub_inventory i
+           LEFT JOIN hub_sites s ON s.id = i.site_id
+           ${hubWhere} ORDER BY i.item_number ASC LIMIT ?`
+        ).all(...params);
+      } else {
+        rows = db.prepare(
+          `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
+        ).all(...params);
+      }
       res.json({ count: rows.length, records: rows });
     } catch (err) {
       console.error('inventory error', err);
