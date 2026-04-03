@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
+    "dev:local": "cross-env DOTENV_CONFIG_PATH=.env.dev concurrently \"node -r dotenv/config server.js\" \"vite --port 5174\"",
     "server": "node server.js",
     "build": "vite build",
     "start": "cross-env NODE_ENV=production node server.js",
