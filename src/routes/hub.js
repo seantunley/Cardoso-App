@@ -17,18 +17,12 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   const router = Router();
 
   // GET /api/hub/backup-settings
-  router.get('/api/hub/backup-settings', (req, res) => {
-    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
     const row = stmts.getHubSetting.get('backup_sync_enabled');
     res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
   });
 
-  router.post('/api/hub/backup-settings', (req, res) => {
-    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  router.post('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
     const { backup_sync_enabled } = req.body;
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
     stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
@@ -38,10 +32,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   // GET /api/hub/proxy-backup?site_id=xxx
   // Proxies a backup download from a site through the Hub server to avoid CORS.
   // Admin-only.
-  router.get('/api/hub/proxy-backup', async (req, res) => {
-    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  router.get('/api/hub/proxy-backup', requireAuth, requireAdmin, async (req, res) => {
 
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
@@ -71,10 +62,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   // GET /api/hub/backup-status
   // Polls /api/backup/status on each registered site and returns aggregated results.
   // Admin-only (session required).
-  router.get('/api/hub/backup-status', async (req, res) => {
-    if (!req.session?.userId) return res.status(401).json({ error: 'Unauthorized' });
-    const user = db.prepare('SELECT role FROM "user" WHERE id = ?').get(req.session.userId);
-    if (!user || user.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
+  router.get('/api/hub/backup-status', requireAuth, requireAdmin, async (req, res) => {
 
     const sites = db.prepare('SELECT id, name, url, token FROM hub_sites').all();
 
@@ -125,7 +113,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/records
-  router.get('/api/hub/records', (req, res) => {
+  router.get('/api/hub/records', requireAuth, (req, res) => {
     const { site_id, flag_color, search } = req.query;
     const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
     let query = 'SELECT * FROM hub_records WHERE 1=1';
@@ -134,12 +122,17 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
     if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     query += ` ORDER BY updated_date DESC LIMIT ${limit}`;
-    const rows = db.prepare(query).all(...params);
+    const rows = db.prepare(query).all(...params).map(r => {
+      // Parse JSON blob fields so frontend receives arrays, not raw strings
+      try { r.unpaid_invoices = r.unpaid_invoices ? JSON.parse(r.unpaid_invoices) : []; } catch { r.unpaid_invoices = []; }
+      try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
+      return r;
+    });
     res.json({ count: rows.length, records: rows });
   });
 
   // GET /api/hub/kpis
-  router.get('/api/hub/kpis', (req, res) => {
+  router.get('/api/hub/kpis', requireAuth, (req, res) => {
     const sites = db.prepare('SELECT * FROM hub_sites').all();
     const totals = db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
     const totalRecords = db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
@@ -187,7 +180,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/sync-log
-  router.get('/api/hub/sync-log', (req, res) => {
+  router.get('/api/hub/sync-log', requireAuth, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
     const rows = db.prepare(
       'SELECT * FROM hub_sync_log ORDER BY started_at DESC LIMIT ?'
@@ -223,7 +216,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // POST /api/hub/sync
-  router.post('/api/hub/sync', (req, res) => {
+  router.post('/api/hub/sync', requireAuth, requireAdmin, (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
     syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
   });

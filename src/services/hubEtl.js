@@ -131,11 +131,11 @@ async function syncSite(site) {
     const upsertRec = db.prepare(`
       INSERT INTO hub_records (
         site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
-        outstanding_balance, unpaid_invoices, receipts,
+        outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
         updated_date, synced_at
       ) VALUES (
         @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
-        @outstanding_balance, @unpaid_invoices, @receipts,
+        @outstanding_balance, @unpaid_invoices, @receipts, @auto_flagged, @terms,
         @updated_date, @synced_at
       )
       ON CONFLICT(site_id, record_id) DO UPDATE SET
@@ -146,6 +146,8 @@ async function syncSite(site) {
         outstanding_balance=excluded.outstanding_balance,
         unpaid_invoices=excluded.unpaid_invoices,
         receipts=excluded.receipts,
+        auto_flagged=excluded.auto_flagged,
+        terms=excluded.terms,
         updated_date=excluded.updated_date,
         synced_at=excluded.synced_at
     `);
@@ -162,6 +164,8 @@ async function syncSite(site) {
           outstanding_balance: r.outstanding_balance || null,
           unpaid_invoices: r.unpaid_invoices || '[]',
           receipts: r.receipts || '[]',
+          auto_flagged: r.auto_flagged ? 1 : 0,
+          terms: r.terms || null,
           updated_date: r.updated_date,
           synced_at: now,
         });

@@ -275,10 +275,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       // Fetch a reasonably large sample to find matches and non-matches
       const rows = db.prepare(
         `SELECT customer_number, customer_name, outstanding_balance,
-                last_unpaid_invoice_1_date, last_receipt_1_date, updated_date, created_date,
-                age_analysis, flag_color
+                unpaid_invoices, receipts, updated_date, created_date,
+                age_analysis, flag_color, flag_reason, flag_source,
+                auto_flagged, terms, note, synced_at
          FROM datarecord ORDER BY RANDOM() LIMIT 200`
-      ).all();
+      ).all().map(expandDataRecord);
 
       function evalCondition(cond, record) {
         const raw = record[cond.field];
@@ -375,7 +376,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       });
       if (activeRules.length === 0) return res.json({ flagged: 0, cleared: 0 });
 
-      const records = stmts.autoRecordsForFlags.all();
+      const records = stmts.autoRecordsForFlags.all().map(expandDataRecord);
       let flagged = 0, cleared = 0;
 
       const updateFlag = stmts.updateAutoFlag;
@@ -388,7 +389,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
           const autoFlag = applyAutoFlagRulesToRecord(record, activeRules);
           if (autoFlag) {
-            updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, record.id);
+            updateFlag.run(autoFlag.flag_color, autoFlag.flag_reason, record.id);
             flagged++;
           } else if (record.auto_flagged) {
             clearFlag.run(record.id);

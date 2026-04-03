@@ -64,6 +64,10 @@ export async function getVersionStatus() {
     });
     clearTimeout(timeout);
 
+    if (response.status === 429 || response.status === 403) {
+      console.warn(`[VersionCheck] GitHub API rate limited (${response.status}). Keeping existing cache.`);
+      return versionStatusCache.data; // Don't update fetchedAt — preserve valid cache
+    }
     if (!response.ok) {
       throw new Error(`GitHub version check failed with status ${response.status}`);
     }

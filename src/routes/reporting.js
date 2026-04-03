@@ -1,4 +1,7 @@
 import express from 'express';
+import { createRequire } from 'module';
+const _require = createRequire(import.meta.url);
+const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord } from '../helpers.js';
@@ -68,6 +71,7 @@ export function createReportingRouter({ requireAuth }) {
             r.flag_color,
             r.flag_reason,
             r.auto_flagged,
+            r.terms,
             COALESCE(s.name, r.site_id) AS site_name
           FROM hub_records r
           LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -88,6 +92,7 @@ export function createReportingRouter({ requireAuth }) {
             flag_color,
             flag_reason,
             auto_flagged,
+            terms,
             ? AS site_name
           FROM datarecord
           WHERE ${balanceWhere}
@@ -192,14 +197,14 @@ export function createReportingRouter({ requireAuth }) {
     if (since) {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-                outstanding_balance, unpaid_invoices, receipts,
+                outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset);
     } else {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-                outstanding_balance, unpaid_invoices, receipts,
+                outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(limit, offset);
@@ -237,7 +242,7 @@ export function createReportingRouter({ requireAuth }) {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;
     const rows = db.prepare(
-      `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date
+      `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, terms, updated_date
        FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);
     res.json({
@@ -254,7 +259,4 @@ export function createReportingRouter({ requireAuth }) {
   return router;
 }
 
-// APP_VERSION loaded via createRequire
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const { version: APP_VERSION } = require('../../package.json');
+

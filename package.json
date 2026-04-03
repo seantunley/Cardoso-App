@@ -1,14 +1,14 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.3.6",
+  "version": "2026.3.7",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
     "dev:local": "cross-env DOTENV_CONFIG_PATH=.env.dev concurrently \"node -r dotenv/config server.js\" \"vite --port 5174\"",
     "server": "node server.js",
     "build": "vite build",
-    "start": "cross-env NODE_ENV=production node server.js",
+    "start": "cross-env NODE_ENV=production node -r dotenv/config server.js",
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",

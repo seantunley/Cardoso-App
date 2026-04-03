@@ -107,7 +107,7 @@ function flattenRecord(record) {
     last_receipt_5_amount: record.last_receipt_5_amount || record.data?.last_receipt_5_amount,
     last_receipt_5_date: record.last_receipt_5_date || record.data?.last_receipt_5_date,
     outstanding_balance:
-      record.outstanding_balance || record.data?.outstanding_balance,
+      record.outstanding_balance ?? record.data?.outstanding_balance,
     terms: record.terms || record.data?.terms || null,
   };
 }
@@ -280,8 +280,6 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   today.setHours(0, 0, 0, 0);
 
   // DEBUG: raw date fields
-  console.log('[CreditAnalysis] raw record keys (first record):', records[0] ? Object.keys(records[0]).filter(k => k.includes('invoice') || k.includes('receipt')) : []);
-  console.log('[CreditAnalysis] sample date fields:', {
     inv1: records[0]?.last_unpaid_invoice_1_date,
     inv1_data: records[0]?.data?.last_unpaid_invoice_1_date,
     rec1: records[0]?.last_receipt_1_date,
@@ -529,10 +527,6 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   ].filter(x => x.date !== null).sort((a, b) => a.date - b.date);
 
   // DEBUG: log what we have
-  console.log('[CreditAnalysis] invoices:', invoices.length, invoices.map(x => ({ num: x.number, amt: x.amount, date: x.date, rawDate: x._rawDate })));
-  console.log('[CreditAnalysis] receipts:', receipts.length, receipts.map(x => ({ num: x.number, amt: x.amount, date: x.date })));
-  console.log('[CreditAnalysis] lagData:', lagData);
-  console.log('[CreditAnalysis] timelineData:', timelineData);
 
   return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData };
 }
@@ -976,8 +970,18 @@ export default function CustomerLookup({
   const creditAnalysis = useMemo(() => {
     if (!customer) return null;
     const allAccountRecords = [customer, ...subAccounts].filter(Boolean);
-    // TODO: pass real activity log once fetched in this component
-    return analyseInvoiceCredit(allAccountRecords, []);
+    // Map auditlog entries to the shape analyseInvoiceCredit expects: { action, new_value }
+    const flagHistory = recordHistory
+      .filter(e => e.action_type === 'update_flag')
+      .map(e => {
+        let new_value = null;
+        try {
+          const ch = typeof e.changes === 'string' ? JSON.parse(e.changes) : (e.changes || {});
+          new_value = ch.flag_color || ch.to || null;
+        } catch {}
+        return { action: 'flag_changed', new_value };
+      });
+    return analyseInvoiceCredit(allAccountRecords, flagHistory);
   }, [customer, subAccounts]);
 
   const canModifyFlag = () => {
