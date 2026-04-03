@@ -464,6 +464,9 @@ db.exec(`
     last_cost TEXT,
     price_list TEXT,
     price TEXT,
+    stocking_uom TEXT,
+    commodity TEXT,
+    inventory_value TEXT,
     terms TEXT,
     created_date TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -593,6 +596,9 @@ ensureColumn('databaseconnection', 'sync_query', 'TEXT');
 ensureColumn('databaseconnection', 'query_index_field', 'TEXT');
 ensureColumn('databaseconnection', 'query_field_mappings', 'TEXT');
 ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
+ensureColumn('inventoryrecord', 'stocking_uom', 'TEXT');
+ensureColumn('inventoryrecord', 'commodity', 'TEXT');
+ensureColumn('inventoryrecord', 'inventory_value', 'TEXT');
 
 // Migrate field_mappings from legacy flat format to per-table format
 // Legacy: { localKey: { sourceField, ... } }
@@ -2741,7 +2747,7 @@ app.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
   const offset = parseInt(req.query.offset) || 0;
   const rows = db.prepare(
-    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, updated_date
+    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date
      FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
   ).all(limit, offset);
   res.json({
@@ -2766,6 +2772,7 @@ if (process.env.HUB_MODE === 'true') {
       slug TEXT,
       name TEXT,
       url TEXT,
+      token TEXT,
       last_seen TEXT,
       last_kpis TEXT,
       status TEXT DEFAULT 'unknown'
@@ -2819,6 +2826,7 @@ if (process.env.HUB_MODE === 'true') {
 
   // Ensure inventory_value column exists on pre-existing hub_inventory tables
   ensureColumn('hub_inventory', 'inventory_value', 'TEXT');
+  ensureColumn('hub_sites', 'token', 'TEXT');
 
   // Seed default hub settings
   db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
@@ -2852,12 +2860,12 @@ if (process.env.HUB_MODE === 'true') {
 
   // Upsert site registry into db
   const upsertSite = db.prepare(`
-    INSERT INTO hub_sites (id, slug, name, url, status)
-    VALUES (@id, @slug, @name, @url, 'unknown')
-    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url
+    INSERT INTO hub_sites (id, slug, name, url, token, status)
+    VALUES (@id, @slug, @name, @url, @token, 'unknown')
+    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url, token=excluded.token
   `);
   for (const site of HUB_SITES) {
-    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url });
+    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url, token: site.token || null });
   }
 
   // --- ETL function ---
