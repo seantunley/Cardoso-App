@@ -13,6 +13,11 @@ const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 export function createSystemRouter({ requireAuth, requireAdmin }) {
   const router = express.Router();
 
+  // GET /api/health — unauthenticated health check
+  router.get('/api/health', (req, res) => {
+    res.json({ status: 'ok' });
+  });
+
   // GET /api/app-info
   router.get('/api/app-info', (req, res) => {
     res.json({
