@@ -1,27 +1,27 @@
 /**
  * pages.config.js - Page routing configuration
- * 
+ *
  * This file is AUTO-GENERATED. Do not add imports or modify PAGES manually.
  * Pages are auto-registered when you create files in the ./pages/ folder.
- * 
+ *
  * THE ONLY EDITABLE VALUE: mainPage
  * This controls which page is the landing page (shown when users visit the app).
- * 
+ *
  * Example file structure:
- * 
+ *
  *   import HomePage from './pages/HomePage';
  *   import Dashboard from './pages/Dashboard';
- *    *   
+ *    *
  *   export const PAGES = {
  *       "HomePage": HomePage,
  *       "Dashboard": Dashboard,
  *    *   }
- *   
+ *
  *   export const pagesConfig = {
  *       mainPage: "HomePage",
  *       Pages: PAGES,
  *   };
- * 
+ *
  * Example with Layout (wraps all pages):
  *
  *   import Home from './pages/Home';
@@ -43,19 +43,21 @@
  *
  * The mainPage value must match a key in the PAGES object exactly.
  */
-import AuditLog from './pages/AuditLog';
-import CustomerBalances from './pages/CustomerBalances';
-import HubDashboard from './pages/HubDashboard';
-import HubBackups from './pages/HubBackups';
-import HubSyncLog from './pages/HubSyncLog';
-import Connections from './pages/Connections';
-import CustomerSearch from './pages/CustomerSearch';
-import Dashboard from './pages/Dashboard';
-import Records from './pages/Records';
-import Reports from './pages/Reports';
-import Users from './pages/Users';
-import Inventory from './pages/Inventory';
+import React from "react";
 import __Layout from './Layout.jsx';
+
+const AuditLog = React.lazy(() => import('./pages/AuditLog'));
+const CustomerBalances = React.lazy(() => import('./pages/CustomerBalances'));
+const HubDashboard = React.lazy(() => import('./pages/HubDashboard'));
+const HubBackups = React.lazy(() => import('./pages/HubBackups'));
+const HubSyncLog = React.lazy(() => import('./pages/HubSyncLog'));
+const Connections = React.lazy(() => import('./pages/Connections'));
+const CustomerSearch = React.lazy(() => import('./pages/CustomerSearch'));
+const Dashboard = React.lazy(() => import('./pages/Dashboard'));
+const Records = React.lazy(() => import('./pages/Records'));
+const Reports = React.lazy(() => import('./pages/Reports'));
+const Users = React.lazy(() => import('./pages/Users'));
+const Inventory = React.lazy(() => import('./pages/Inventory'));
 
 
 export const PAGES = {

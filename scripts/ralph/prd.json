@@ -1,0 +1,241 @@
+{
+  "project": "Cardoso App",
+  "branchName": "ralph/phase-1-foundation-refactor",
+  "description": "Phase 1 Foundation Refactor — extract server.js concerns into src/ modules, slim entry point to under 80 lines, add record_snapshots audit table",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Extract encryption and version-check helpers",
+      "description": "As a developer, I want AES-256-GCM helpers and version utilities in dedicated service files so they can be imported without pulling in the entire server.",
+      "acceptanceCriteria": [
+        "src/services/encryption.js exports encrypt, decrypt, and all AES-256-GCM helpers currently in server.js",
+        "src/services/versionCheck.js exports normalizeVersion, isVersionNewer, getVersionStatus",
+        "server.js imports these functions from the new files; duplicate definitions removed from server.js",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 1,
+      "passes": true,
+      "notes": ""
+    },
+    {
+      "id": "US-002",
+      "title": "Extract database layer with singleton db instance",
+      "description": "As a developer, I want all SQLite initialisation in src/db/ with a singleton db export so the database layer is isolated from route logic and no module opens its own connection.",
+      "acceptanceCriteria": [
+        "src/db/index.js opens the SQLite database once and exports the db instance as a singleton",
+        "src/db/schema.js exports initSchema(db) that runs PRAGMA setup, creates tables, and calls the migration runner",
+        "src/db/migrations.js exports the MIGRATIONS array",
+        "src/db/statements.js exports buildStatements(db) returning all prepared statement objects",
+        "server.js requires src/db/index.js for the db instance, calls initSchema(db) and buildStatements(db); inline db-init code removed from server.js",
+        "No module opens its own database connection — all use the singleton from src/db/index.js",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 2,
+      "passes": true,
+      "notes": "Singleton pattern chosen: src/db/index.js exports the db instance. Modules require it directly rather than accepting db as a parameter at call time."
+    },
+    {
+      "id": "US-003",
+      "title": "Extract auth middleware and rate limiter",
+      "description": "As a developer, I want middleware in src/middleware/ so route files can import only what they need.",
+      "acceptanceCriteria": [
+        "src/middleware/auth.js exports requireAuth, requireAdmin, requirePermission, requireSelfOrAdmin, checkTableAccess",
+        "src/middleware/rateLimit.js exports the login rate-limiter middleware",
+        "server.js imports and mounts these; inline middleware definitions removed from server.js",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 3,
+      "passes": true,
+      "notes": "Factory pattern: createAuthMiddleware({ getUserById, sanitizeUser }) returns all middleware functions. Rate limiter extracted as standalone export."
+    },
+    {
+      "id": "US-004",
+      "title": "Extract field registry and shared helpers",
+      "description": "As a developer, I want field-registry constants and utility helpers in dedicated top-level src/ files so every route module can import them without circular dependencies.",
+      "acceptanceCriteria": [
+        "src/fieldRegistry.js exports FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS, and buildFieldPatch helpers",
+        "src/helpers.js exports sanitizeForSqlite, parseJsonSafely, expandDataRecord, and all other shared utility functions",
+        "src/fieldRegistry.js and src/helpers.js do not import from any route or service file",
+        "server.js imports from both new files; inline definitions removed from server.js",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 4,
+      "passes": true,
+      "notes": "fieldRegistry.js imports parseJsonSafely from helpers.js (no circular deps). helpers.js also exports boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection."
+    },
+    {
+      "id": "US-005",
+      "title": "Extract auto-flag service",
+      "description": "As a developer, I want auto-flag evaluation logic in its own service file so it can be imported by route handlers and the sync engine independently.",
+      "acceptanceCriteria": [
+        "src/services/autoFlag.js exports _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord",
+        "server.js imports from the new file; inline auto-flag code removed from server.js",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 5,
+      "passes": true,
+      "notes": "Pure functions — no dependencies on db, stmts, or other modules. Exported as named ESM exports."
+    },
+    {
+      "id": "US-006",
+      "title": "Extract auth and user routes",
+      "description": "As a developer, I want auth and user API routes in src/routes/auth.js so the route file is self-contained and mountable as an Express router.",
+      "acceptanceCriteria": [
+        "src/routes/auth.js exports an Express router containing /api/login, /api/logout, /api/me, and all /api/users handlers",
+        "server.js mounts the router with app.use(authRouter); inline route definitions removed from server.js",
+        "All auth and user routes return identical HTTP status codes and response-body shapes as before",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 6,
+      "passes": true,
+      "notes": "Factory pattern: createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }). Routes use /api/auth/* and /api/users/* paths. Login-logs also included."
+    },
+    {
+      "id": "US-007",
+      "title": "Extract data-record routes",
+      "description": "As a developer, I want data-record and custom-field API routes in src/routes/records.js.",
+      "acceptanceCriteria": [
+        "src/routes/records.js exports an Express router containing /api/datarecord, /api/apply-auto-flags, and /api/custom-fields handlers",
+        "server.js mounts the router; inline route definitions removed from server.js",
+        "All data-record routes return identical HTTP status codes and response-body shapes as before",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 7,
+      "passes": true,
+      "notes": "Factory pattern: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }). Includes custom-fields CRUD, record history, test-rule, auto-flag apply/clear/export/import, and dynamic CRUD /:table routes. Schema cache (allowedTables, getTableColumns) moved into records module."
+    },
+    {
+      "id": "US-008",
+      "title": "Extract connection and sync routes",
+      "description": "As a developer, I want connection and sync API routes in src/routes/connections.js.",
+      "acceptanceCriteria": [
+        "src/routes/connections.js exports an Express router containing /api/connections and /api/sync handlers",
+        "server.js mounts the router; inline route definitions removed from server.js",
+        "All connection and sync routes return identical HTTP status codes and response-body shapes as before",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 8,
+      "passes": true,
+      "notes": "Factory pattern: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown }). Routes: /api/test-connection, /api/test-query, /api/import/:connectionId. shuttingDown passed as closure getter."
+    },
+    {
+      "id": "US-009",
+      "title": "Extract sync engine service",
+      "description": "As a developer, I want runConnectionImport and sync-lock helpers in src/services/syncEngine.js so the sync logic is isolated from the HTTP layer.",
+      "acceptanceCriteria": [
+        "src/services/syncEngine.js exports runConnectionImport, acquireSyncLock, releaseSyncLock, and activeSyncs",
+        "src/routes/connections.js imports runConnectionImport from src/services/syncEngine.js",
+        "server.js no longer contains sync-engine logic",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 9,
+      "passes": true,
+      "notes": "Module-level exports pattern: syncEngine.js imports db singleton directly and builds its own stmts. runConnectionImport accepts optional { isShuttingDown } second arg. connections.js imports runConnectionImport directly from syncEngine."
+    },
+    {
+      "id": "US-010",
+      "title": "Extract HUB_MODE routes and ETL",
+      "description": "As a developer, I want all HUB_MODE-specific routes and ETL logic isolated so non-hub deployments are unaffected and the hub surface area is easy to find.",
+      "acceptanceCriteria": [
+        "src/routes/hub.js exports an Express router with all /api/hub/* handlers",
+        "src/services/hubEtl.js exports all hub-mode sync/ETL functions used by hub routes",
+        "server.js conditionally mounts the hub router only when process.env.HUB_MODE === 'true'",
+        "Non-hub deployments are unaffected: hub router not mounted, no hub tables created when HUB_MODE is not 'true'",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 10,
+      "passes": true,
+      "notes": "Hub ETL (initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES) in src/services/hubEtl.js. Hub routes (createHubRouter, createNonHubFallbackRouter) in src/routes/hub.js. Both use db singleton and buildStatements internally. server.js conditionally mounts hub router and starts sync timers only when HUB_MODE=true."
+    },
+    {
+      "id": "US-011",
+      "title": "Extract reporting, backup, and system routes",
+      "description": "As a developer, I want the remaining route groups in dedicated files to complete the route extraction.",
+      "acceptanceCriteria": [
+        "src/routes/reporting.js exports a router with /api/kpis, /api/reports, /api/customer-balances handlers",
+        "src/routes/backup.js exports a router with /api/backup, /api/restore handlers",
+        "src/routes/system.js exports a router with /api/version, /api/health handlers",
+        "server.js mounts all three routers; inline route definitions removed",
+        "All reporting, backup, and system routes return identical HTTP status codes and response-body shapes as before",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 11,
+      "passes": true,
+      "notes": "Reporting router: createReportingRouter({ requireAuth }) — owns /api/kpis, /api/top-balances, /api/inventory, /api/reporting/* and requireReportingToken middleware. Backup router: createBackupRouter() — owns /api/backup/status, /api/backup/download, imports db+dbPath directly. System router: createSystemRouter({ requireAuth, requireAdmin }) — owns /api/app-info, /api/app-version-status, /api/app-update-trigger, and auto-update background check."
+    },
+    {
+      "id": "US-012",
+      "title": "Add record_snapshots table and append-only snapshot inserts",
+      "description": "As a developer, I want an immutable history of every synced record so we can audit what data looked like at any point in time.",
+      "acceptanceCriteria": [
+        "src/db/migrations.js contains a migration that creates table record_snapshots (id INTEGER PRIMARY KEY AUTOINCREMENT, connection_id TEXT, customer_number TEXT, snapshot_data TEXT, synced_at TEXT)",
+        "No UPDATE or DELETE statements target the record_snapshots table anywhere in the codebase",
+        "src/services/syncEngine.js inserts one row into record_snapshots after each successful record upsert in runConnectionImport; snapshot_data is the full JSON of the upserted record; synced_at is an ISO-8601 timestamp",
+        "Snapshot insert failure does not abort the sync (error is logged and sync continues)",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 12,
+      "passes": true,
+      "notes": "Migration v9 creates record_snapshots table. Snapshot inserts happen inside runWriteRows transaction in syncEngine.js after each upsert — wrapped in try/catch so failures don't abort sync. Uses SELECT * to capture full record state post-upsert."
+    },
+    {
+      "id": "US-013",
+      "title": "Slim server.js to thin entry point",
+      "description": "As a developer, I want server.js to contain only imports, middleware mounting, route mounting, and the app.listen call so the file is easy to audit at a glance.",
+      "acceptanceCriteria": [
+        "server.js contains no business logic, no inline route handlers, no SQL, no crypto",
+        "server.js is under 80 lines",
+        "All middleware is imported and applied in order: body-parser, rate limiter, session/cookie, auth",
+        "All routers are mounted in the correct order",
+        "HUB_MODE router is conditionally mounted with if (process.env.HUB_MODE === 'true')",
+        "node --check server.js passes",
+        "npm run build passes",
+        "Typecheck passes"
+      ],
+      "priority": 13,
+      "passes": true,
+      "notes": "Business logic extracted to src/startup.js (validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById) and src/scheduler.js (isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown). server.js is now 79 lines — imports, middleware, router mounting, and startup only."
+    },
+    {
+      "id": "US-014",
+      "title": "Smoke tests",
+      "description": "As a developer, I want a fast automated smoke-test that confirms the refactored app starts correctly and responds to a health check, so regressions are caught immediately.",
+      "acceptanceCriteria": [
+        "node --check passes for every file under src/ and for server.js",
+        "npm run build exits with code 0",
+        "Running the server and calling GET /api/health returns HTTP 200",
+        "scripts/smoke-test.sh (or equivalent npm script) automates the above three checks and exits non-zero on any failure",
+        "The smoke-test script is documented in README.md or inline comments",
+        "Typecheck passes",
+        "Tests pass"
+      ],
+      "priority": 14,
+      "passes": true,
+      "notes": "Added /api/health endpoint to system router. scripts/smoke-test.sh automates: node --check on all backend files, npm run build, and server health check (GET /api/health). Script documented with inline comments."
+    }
+  ]
+}

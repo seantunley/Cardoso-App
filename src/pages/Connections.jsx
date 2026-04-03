@@ -105,6 +105,7 @@ export default function Connections() {
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => api.auth.me(),
+    staleTime: Infinity,
   });
 
   // Only admins can create/edit/delete connections; all connections-users can sync and view
@@ -119,6 +120,7 @@ export default function Connections() {
     queryFn: fetchLocalConnections,
     enabled: !!currentUser,
     refetchInterval: 30000,
+    staleTime: 60_000,
   });
 
   const createMutation = useMutation({

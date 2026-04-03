@@ -1,0 +1,245 @@
+# Ralph Progress Log
+Started: Fri Apr  3 09:46:13 AM SAST 2026
+
+## Codebase Patterns
+- server.js uses ESM (import/export) — all new src/ files must also use import/export (package.json has "type": "module")
+- `createRequire(import.meta.url)` is used for JSON imports (e.g., package.json)
+- db singleton: src/db/index.js exports the db instance. All modules import from there — never open new Database()
+- HUB_MODE routes: wrap in if (process.env.HUB_MODE === 'true') checks
+- Versioned migrations: src/db/migrations.js exports buildMigrations(db) and runMigrations(db)
+- Schema init: src/db/schema.js exports initSchema(db) — PRAGMAs, CREATE TABLEs, indexes, custom field config, migrations
+- Prepared statements: src/db/statements.js exports buildStatements(db)
+- server.js had pre-existing merge corruption from commit 47c41c5 — restored from 4a0e196 (last valid commit)
+- Auth middleware: createAuthMiddleware({ getUserById, sanitizeUser }) factory pattern — dependencies injected from server.js
+- Rate limiter: standalone export from src/middleware/rateLimit.js
+- Field registry: src/fieldRegistry.js exports FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS, buildFieldPatch, buildDynamicLocalFieldsPatch, and mapping helpers
+- Shared helpers: src/helpers.js exports sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection
+- fieldRegistry.js imports parseJsonSafely from helpers.js — no circular deps since neither imports from routes/services
+- Auto-flag service: src/services/autoFlag.js exports _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord — pure functions, no deps
+- Auth router: createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }) factory pattern
+- Route files use express.Router() and full paths (e.g., '/api/auth/login'), mounted with app.use(router)
+- Records router: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }) — owns schema cache, custom-fields, record history, auto-flags, dynamic CRUD
+- Schema cache (allowedTables, isValidTableName, getTableColumns) lives in records router — only used by CRUD routes
+- Connections router: createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) — owns test-connection, test-query, import (runConnectionImport now imported directly from syncEngine)
+- Sync engine: src/services/syncEngine.js exports runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs — module-level exports, imports db singleton directly
+- runConnectionImport accepts optional 2nd arg { isShuttingDown } — callers pass the getter to enable shutdown-aware sync
+- Hub ETL: src/services/hubEtl.js exports initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES — imports db singleton and buildStatements internally
+- Hub router: createHubRouter({ requireAuth, requireAdmin }) — imports db, stmts, boolFromRow, bcrypt, syncAllSites, HUB_SITES directly (no injection needed)
+- Non-hub fallback: createNonHubFallbackRouter() returns empty-response stubs for hub endpoints on non-hub installs
+- Hub table creation (initHubTables) must be called before hub router or ETL — tables needed for prepared statements
+- Reporting router: createReportingRouter({ requireAuth }) — owns KPIs, top-balances, inventory, and /api/reporting/* multi-site endpoints
+- Backup router: createBackupRouter() — no deps injected, imports db/dbPath singleton directly
+- System router: createSystemRouter({ requireAuth, requireAdmin }) — owns app-info, version-status, auto-update trigger + background hourly check
+- requireReportingToken middleware lives in reporting.js (module-scoped, not exported) — used only by /api/reporting/* routes
+- record_snapshots: append-only audit table (migration v9) — INSERT only, never UPDATE/DELETE. Snapshots inserted per-record in syncEngine.js runWriteRows
+- Startup logic: src/startup.js exports validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById — imports db singleton directly
+- Scheduler/lifecycle: src/scheduler.js exports isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown — owns all cron tasks, intervals, and shutdown logic
+- server.js is now a thin entry point (79 lines): imports, middleware config, router mounting, and startup — no business logic, no SQL, no crypto
+- Health endpoint: GET /api/health (unauthenticated) in system router — returns { status: 'ok' }
+- Smoke test: scripts/smoke-test.sh — syntax checks, build, and health check automated
+
+---
+
+## 2026-04-03 - US-001
+- Extracted AES-256-GCM encryption helpers to src/services/encryption.js (encryptPassword, decryptPassword, isEncryptedFormat, getEncryptionKey)
+- Extracted version-check utilities to src/services/versionCheck.js (normalizeVersion, isVersionNewer, getVersionStatus)
+- server.js now imports from both new modules; inline definitions removed
+- Fixed pre-existing merge corruption: restored MIGRATIONS array and runMigrations function from 4a0e196
+- Files changed: server.js, src/services/encryption.js (new), src/services/versionCheck.js (new)
+- **Learnings for future iterations:**
+  - server.js uses ESM, NOT CommonJS — use import/export, not require/module.exports
+  - The dev branch had a corrupted server.js from a bad merge (47c41c5) — this was fixed by restoring from 4a0e196
+  - getEncryptionKey needed to be exported because migrateUnencryptedPasswords IIFE in server.js calls it directly
+  - The `crypto` import was removed from server.js since it's only used by the encryption helpers now
+---
+
+## 2026-04-03 - US-002
+- Extracted database layer into src/db/ with 4 files:
+  - src/db/index.js: singleton db instance (opens SQLite once, exports `db` and `dbPath`)
+  - src/db/schema.js: initSchema(db) — PRAGMAs, CREATE TABLEs, indexes, customfieldconfig table, runs migrations
+  - src/db/migrations.js: ensureColumn, buildMigrations(db), runMigrations(db) with all 8 versioned migrations
+  - src/db/statements.js: buildStatements(db) returning all prepared statement objects
+- server.js now imports `db` and `dbPath` from src/db/index.js, calls initSchema(db) and buildStatements(db)
+- Removed ~530 lines of inline db-init, schema, migration, and statement code from server.js
+- Schema cache (getTableColumns, invalidateSchemaCache) kept in server.js for now — used by route handlers
+- Files changed: server.js, src/db/index.js (new), src/db/schema.js (new), src/db/migrations.js (new), src/db/statements.js (new)
+- **Learnings for future iterations:**
+  - ensureColumn in migrations needs db passed as parameter since it's no longer in server.js scope
+  - buildMigrations(db) pattern used instead of bare MIGRATIONS array so migration up() closures capture db
+  - dbPath needed to be exported from src/db/index.js because backup routes in server.js reference it
+  - Linter auto-removed dotenv import from src/db/index.js — dotenv.config() is already called in server.js before the import
+---
+
+## 2026-04-03 - US-003
+- Extracted auth middleware to src/middleware/auth.js using factory pattern: createAuthMiddleware({ getUserById, sanitizeUser })
+- Extracted login rate limiter to src/middleware/rateLimit.js as standalone export
+- Removed inline auth middleware definitions (~98 lines) and loginLimiter from server.js
+- Removed `import rateLimit from 'express-rate-limit'` from server.js (now only in rateLimit.js)
+- Files changed: server.js, src/middleware/auth.js (new), src/middleware/rateLimit.js (new)
+- **Learnings for future iterations:**
+  - requireAuth depends on getUserById (needs stmts) and sanitizeUser (needs boolFromRow) — factory pattern avoids circular deps
+  - requireAdmin, requirePermission, requireSelfOrAdmin, checkTableAccess are pure — they only read req.currentUser set by requireAuth
+  - boolFromRow, sanitizeUser, getUserById remain in server.js for now — they'll be extracted in later stories (US-004 helpers, US-006 auth routes)
+---
+
+## 2026-04-03 - US-004
+- Extracted field registry constants and helpers to src/fieldRegistry.js:
+  - FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS
+  - getMappingForKey, getRowValue, firstDefined, getMappedOrFallbackValue
+  - shouldApplyMappedValue, buildFieldPatch, buildDynamicLocalFieldsPatch
+- Extracted shared utility helpers to src/helpers.js:
+  - sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord
+  - normalizeFieldKey, validateCustomFieldKey, boolFromRow
+  - defaultPermissionsForRole, sanitizeUser, sanitizeConnection
+- server.js now imports from both new files; ~300 lines of inline definitions removed
+- Files changed: server.js, src/fieldRegistry.js (new), src/helpers.js (new)
+- **Learnings for future iterations:**
+  - fieldRegistry.js needs parseJsonSafely from helpers.js (buildDynamicLocalFieldsPatch uses it) — import is fine since both are leaf utility files
+  - sanitizeUser and boolFromRow moved to helpers.js (previously noted as "remain in server.js" in US-003) — auth middleware factory still gets sanitizeUser injected from server.js which now re-imports it from helpers.js
+  - getUserById stays in server.js because it depends on `stmts` (prepared statements) — will move when auth routes are extracted (US-006)
+---
+
+## 2026-04-03 - US-005
+- Extracted auto-flag rule evaluator to src/services/autoFlag.js:
+  - _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord
+- server.js now imports from src/services/autoFlag.js; ~78 lines of inline auto-flag code removed
+- Files changed: server.js, src/services/autoFlag.js (new)
+- **Learnings for future iterations:**
+  - Auto-flag functions are pure (no db/stmts dependency) — simplest extraction so far, no factory pattern needed
+  - applyAutoFlagRulesToRecord is used in both sync logic (runConnectionImport) and the /api/apply-auto-flags route — both still in server.js, will be extracted in US-007/US-009
+---
+
+## 2026-04-03 - US-006
+- Extracted auth and user routes to src/routes/auth.js using factory pattern: createAuthRouter({ db, stmts, getUserById, ... })
+- Routes extracted: /api/auth/login, /api/auth/logout, /api/auth/set-initial-password, /api/auth/me (GET+PUT), /api/login-logs, /api/users (CRUD + permissions + profile + password)
+- server.js mounts with `app.use(authRouter)` after auth middleware creation
+- Removed ~200 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/auth.js (new)
+- **Learnings for future iterations:**
+  - Factory pattern works well for route modules — pass db, stmts, middleware functions, avoid circular deps
+  - getUserById is still defined in server.js (depends on stmts) and passed to both auth middleware and auth router
+  - The original server.js had a nesting bug: set-initial-password was nested inside logout's callback — preserved the same behavior in the router by using proper separate handlers
+  - Route files use full paths (e.g., '/api/auth/login') not relative — mounted with plain app.use(router)
+---
+
+## 2026-04-03 - US-007
+- Extracted data-record, auto-flag, and dynamic CRUD routes to src/routes/records.js
+- Routes extracted: /api/test-rule, /api/apply-auto-flags, /api/clear-auto-flags, /api/autoflagrule/export, /api/autoflagrule/import, /api/:table (GET/POST), /api/:table/:id (GET/PUT/DELETE)
+- Moved schema cache (allowedTables, isValidTableName, getTableColumns, invalidateSchemaCache) into records module — only used by CRUD routes
+- server.js mounts with `app.use(recordsRouter)` after auth router
+- Removed ~420 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/records.js (new)
+- **Learnings for future iterations:**
+  - Schema cache is scoped to the records router since only CRUD routes use it — no other module needs getTableColumns
+  - Records router needs checkTableAccess from auth middleware (passed as dependency), not just requireAuth/requireAdmin
+  - applyAutoFlagRulesToRecord import stays in server.js too — used by runConnectionImport in sync engine (not yet extracted)
+  - The /:table catch-all routes must be mounted AFTER all specific routes to avoid catching /api/auth/* etc — handled by mounting records router after auth router
+  - Custom-fields CRUD and record-history routes also moved into records.js (initially missed, completed in follow-up)
+  - requirePermission added to records router deps for custom-fields permission checks
+---
+
+## 2026-04-03 - US-008
+- Extracted connection and sync routes to src/routes/connections.js
+- Routes extracted: /api/test-connection, /api/test-query, /api/import/:connectionId
+- Factory pattern: createConnectionsRouter({ db, requireAuth, requirePermission, runConnectionImport, isShuttingDown })
+- shuttingDown state accessed via closure getter `isShuttingDown: () => shuttingDown`
+- runConnectionImport stays in server.js for now (US-009 will extract to syncEngine service)
+- Removed ~165 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/connections.js (new)
+- **Learnings for future iterations:**
+  - Connection routes depend on `sql` (mssql) and `decryptPassword` — imported directly in the route module, no need to inject
+  - `shuttingDown` is a mutable variable in server.js — passed as a getter function to avoid stale closures
+  - runConnectionImport is passed as a dependency since it's still defined in server.js (will move in US-009)
+---
+
+## 2026-04-03 - US-009
+- Extracted sync engine to src/services/syncEngine.js:
+  - runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs
+  - Module-level exports (not factory pattern) — imports db singleton and builds own stmts
+- Updated src/routes/connections.js to import runConnectionImport directly from syncEngine.js (removed from factory deps)
+- server.js now imports sync engine exports; ~448 lines of inline sync logic removed (1902 → 1454 lines)
+- Updated scheduled sync and auto-sync callers to pass { isShuttingDown } option
+- Files changed: server.js, src/services/syncEngine.js (new), src/routes/connections.js
+- **Learnings for future iterations:**
+  - syncEngine.js uses module-level exports instead of factory pattern — suited for singleton services that import db directly
+  - buildStatements(db) is called again inside syncEngine.js (separate from server.js stmts) — works fine since same db singleton, just duplicate prepared statements
+  - runConnectionImport needs isShuttingDown passed per-call since shuttingDown lives in server.js — passed as { isShuttingDown: () => shuttingDown }
+  - connections.js already had its own isShuttingDown pre-check; now also passes it through to runConnectionImport
+---
+
+## 2026-04-03 - US-010
+- Extracted all HUB_MODE routes and ETL logic from server.js
+- Created src/services/hubEtl.js with: initHubTables(), initHubSiteRegistry(), syncSite(), syncAllSites(), runHubBackupPull(), HUB_SITES
+- Created src/routes/hub.js with: createHubRouter({ requireAuth, requireAdmin }), createNonHubFallbackRouter()
+- Hub routes extracted: /api/hub/backup-settings (GET/POST), /api/hub/proxy-backup, /api/hub/backup-status, /api/hub/sites, /api/hub/records, /api/hub/kpis, /api/hub/inventory, /api/hub/sync-log, /api/hub/force-resync (global + per-site), /api/hub/sync, /api/hub/users, /api/hub/push-users, /api/hub/receive-users
+- Non-hub fallback routes (empty responses for hub endpoints) also extracted
+- server.js conditionally creates hub tables, mounts hub router, and starts sync timers only when HUB_MODE=true
+- Removed ~640 lines of inline hub code from server.js
+- Files changed: server.js, src/services/hubEtl.js (new), src/routes/hub.js (new)
+- **Learnings for future iterations:**
+  - Hub router and ETL both use module-level imports (db, stmts, boolFromRow, bcrypt) instead of dependency injection — works well since these are all singletons/pure utils
+  - initHubTables() must be called before buildStatements(db) for hub stmts (getHubSetting, setHubSetting, hubSitesForBackup) to work — tables must exist first
+  - HUB_SITES parsed from env at module load time in hubEtl.js — exported for hub router to access (e.g., in /api/hub/sync response)
+  - Hub backup pull cron schedule stays in server.js (just the cron.schedule call) since it needs to be referenced by gracefulShutdown
+---
+
+## 2026-04-03 - US-011
+- Extracted reporting, backup, and system routes into three new route files
+- Created src/routes/reporting.js with: /api/kpis, /api/top-balances, /api/inventory, /api/reporting/site-info, /api/reporting/kpis, /api/reporting/records, /api/reporting/health, /api/reporting/inventory
+- Created src/routes/backup.js with: /api/backup/status, /api/backup/download
+- Created src/routes/system.js with: /api/app-info, /api/app-version-status, /api/app-update-trigger + triggerWindowsUpdate function + hourly auto-update check
+- Cleaned up unused imports from server.js (decryptPassword, sql, fs, dbPath, activeSyncs, expandDataRecord, getVersionStatus, APP_VERSION, __dirname)
+- server.js mounts: reportingRouter, systemRouter, backupRouter
+- Removed ~430 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/reporting.js (new), src/routes/backup.js (new), src/routes/system.js (new)
+- **Learnings for future iterations:**
+  - reporting.js uses module-level imports (db, stmts, expandDataRecord) — no factory deps except requireAuth
+  - backup.js imports db+dbPath directly — no middleware deps needed (uses its own x-reporting-token check inline)
+  - system.js imports getVersionStatus, child_process, stream/promises — self-contained auto-update logic
+  - requireReportingToken is module-scoped in reporting.js, not exported — only /api/reporting/* routes use it
+  - APP_VERSION loaded via createRequire in reporting.js (module-level, not factory-scoped)
+  - Cleaned up many unused imports from server.js that accumulated from previous extractions
+---
+
+## 2026-04-03 - US-012
+- Added migration v9 in src/db/migrations.js: creates record_snapshots table (id, connection_id, customer_number, snapshot_data, synced_at)
+- Added append-only snapshot inserts in src/services/syncEngine.js after each record upsert in runWriteRows
+- Snapshots capture full record state via SELECT * after upsert — both existing record updates and new record inserts
+- Each snapshot insert is wrapped in try/catch so failures log an error but don't abort the sync
+- No UPDATE or DELETE statements target record_snapshots anywhere in the codebase
+- Refactored new-record auto-flag block slightly: the SELECT for the new record is now reused for both auto-flag and snapshot (avoids duplicate query)
+- Files changed: src/db/migrations.js, src/services/syncEngine.js
+- **Learnings for future iterations:**
+  - Snapshot inserts inside a transaction with try/catch work fine in better-sqlite3 — caught errors don't invalidate the outer transaction
+  - The new record SELECT (for auto-flag) was already present — reusing it for snapshots avoids an extra query per insert
+  - record_snapshots is append-only by design (audit table) — no UPDATE/DELETE anywhere
+---
+
+## 2026-04-03 - US-013
+- Slimmed server.js from 382 lines to 79 lines — now a thin entry point
+- Created src/startup.js with: validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById
+- Created src/scheduler.js with: isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown
+- server.js now contains only: imports, env config, middleware mounting, router mounting, hub conditional, SPA fallback, and startup
+- No business logic, no SQL, no crypto remain in server.js
+- Files changed: server.js, src/startup.js (new), src/scheduler.js (new)
+- **Learnings for future iterations:**
+  - startup.js uses module-level imports (db singleton, encryption, helpers) — same pattern as syncEngine and hubEtl
+  - scheduler.js owns all cron tasks and intervals in arrays — gracefulShutdown iterates and stops them all
+  - setServer(s) pattern used because server is created asynchronously after ensureSeedUsers — scheduler needs the ref for graceful close
+  - createGetUserById(stmts) factory avoids putting the stmts dependency in startup.js — server.js creates stmts and injects
+  - Session config uses createRequire for connect-sqlite3 (CommonJS package in ESM context) — this stays in server.js as it's middleware config
+---
+
+## 2026-04-03 - US-014
+- Added GET /api/health endpoint to src/routes/system.js — unauthenticated, returns { status: 'ok' }
+- Created scripts/smoke-test.sh automating three checks:
+  1. node --check on server.js and all 22 backend src/ files
+  2. npm run build (Vite build)
+  3. Server startup + GET /api/health returns HTTP 200
+- Script is self-documented with inline comments, uses set -euo pipefail, cleans up server process on exit
+- Files changed: src/routes/system.js, scripts/smoke-test.sh (new)
+- **Learnings for future iterations:**
+  - /api/health did not exist prior — had to be added to system router (unauthenticated so monitoring tools can hit it)
+  - better-sqlite3 native bindings may not be built in all environments — smoke test health check will fail if native module is missing (npm rebuild needed)
+  - Frontend files (src/lib/, src/api/, src/pages.config.js) are Vite/React — excluded from node --check since they use JSX/browser APIs
+---

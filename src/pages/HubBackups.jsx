@@ -254,8 +254,7 @@ export default function HubBackups() {
               size="sm"
               onClick={handleToggleSync}
               disabled={togglingSync}
-              className="text-xs"
-              className={syncEnabled ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}
+              className={`text-xs ${syncEnabled ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}`}
             >
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
@@ -265,8 +264,7 @@ export default function HubBackups() {
               size="sm"
               onClick={() => refetch()}
               disabled={isFetching}
-              className="text-xs"
-              className="border-border text-muted-foreground"
+              className="text-xs border-border text-muted-foreground"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
               Refresh
