@@ -39,6 +39,7 @@ function initSchema(db) {
       age_7_days TEXT,
       age_14_days TEXT,
       age_21_days TEXT,
+      outstanding_balance TEXT,
       source_id TEXT,
       source_table TEXT,
       data TEXT,
@@ -52,12 +53,16 @@ function initSchema(db) {
       last_unpaid_invoice_2_amount TEXT,
       last_unpaid_invoice_3 TEXT,
       last_unpaid_invoice_3_amount TEXT,
+      unpaid_invoices TEXT,
+      receipts TEXT,
       flag_color TEXT CHECK(flag_color IN ('none', 'red', 'green', 'orange')) DEFAULT 'none',
       flag_reason TEXT,
       flag_created_by TEXT,
+      flag_source TEXT DEFAULT NULL,
       note TEXT,
       synced_at TEXT,
       last_checked TEXT,
+      terms TEXT,
       auto_flagged INTEGER DEFAULT 0
     );
 
