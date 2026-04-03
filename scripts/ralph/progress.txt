@@ -1,0 +1,25 @@
+# Ralph Progress Log
+Started: Fri Apr  3 09:46:13 AM SAST 2026
+
+## Codebase Patterns
+- server.js uses ESM (import/export) — all new src/ files must also use import/export (package.json has "type": "module")
+- `createRequire(import.meta.url)` is used for JSON imports (e.g., package.json)
+- db singleton: the db instance is created in server.js — future extraction will move it to src/db/index.js
+- HUB_MODE routes: wrap in if (process.env.HUB_MODE === 'true') checks
+- Versioned migrations: MIGRATIONS array with version/name/up() objects, run via runMigrations(db)
+- server.js had pre-existing merge corruption from commit 47c41c5 — restored from 4a0e196 (last valid commit)
+
+---
+
+## 2026-04-03 - US-001
+- Extracted AES-256-GCM encryption helpers to src/services/encryption.js (encryptPassword, decryptPassword, isEncryptedFormat, getEncryptionKey)
+- Extracted version-check utilities to src/services/versionCheck.js (normalizeVersion, isVersionNewer, getVersionStatus)
+- server.js now imports from both new modules; inline definitions removed
+- Fixed pre-existing merge corruption: restored MIGRATIONS array and runMigrations function from 4a0e196
+- Files changed: server.js, src/services/encryption.js (new), src/services/versionCheck.js (new)
+- **Learnings for future iterations:**
+  - server.js uses ESM, NOT CommonJS — use import/export, not require/module.exports
+  - The dev branch had a corrupted server.js from a bad merge (47c41c5) — this was fixed by restoring from 4a0e196
+  - getEncryptionKey needed to be exported because migrateUnencryptedPasswords IIFE in server.js calls it directly
+  - The `crypto` import was removed from server.js since it's only used by the encryption helpers now
+---
