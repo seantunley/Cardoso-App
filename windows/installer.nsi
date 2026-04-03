@@ -72,9 +72,17 @@ Function ConfigPageLeave
 FunctionEnd
 
 Section "Install" SecInstall
+  ; Ensure silent-mode installs get sane defaults (custom pages are skipped with /S)
+  ${If} "$PortValue" == ""
+    StrCpy $PortValue "3001"
+  ${EndIf}
+  ${If} "$SiteNameValue" == ""
+    StrCpy $SiteNameValue "Cardoso Site"
+  ${EndIf}
+
   ; Stop existing service before copying files (prevents file-lock failures on upgrade)
   ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
-  Sleep 2000
+  Sleep 6000
 
   SetOutPath "$INSTDIR"
 
@@ -154,6 +162,8 @@ Section "Uninstall"
   Delete "$INSTDIR\package.json"
   Delete "$INSTDIR\package-lock.json"
   Delete "$INSTDIR\${UNINSTALLER}"
+  RMDir /r "$INSTDIR
+ode_modules"
   Delete "$DESKTOP\Cardoso.lnk"
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SERVICE_NAME}"
