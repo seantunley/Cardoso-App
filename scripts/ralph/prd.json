@@ -234,8 +234,8 @@
         "Tests pass"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Added /api/health endpoint to system router. scripts/smoke-test.sh automates: node --check on all backend files, npm run build, and server health check (GET /api/health). Script documented with inline comments."
     }
   ]
 }

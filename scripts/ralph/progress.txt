@@ -35,6 +35,8 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Startup logic: src/startup.js exports validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById — imports db singleton directly
 - Scheduler/lifecycle: src/scheduler.js exports isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown — owns all cron tasks, intervals, and shutdown logic
 - server.js is now a thin entry point (79 lines): imports, middleware config, router mounting, and startup — no business logic, no SQL, no crypto
+- Health endpoint: GET /api/health (unauthenticated) in system router — returns { status: 'ok' }
+- Smoke test: scripts/smoke-test.sh — syntax checks, build, and health check automated
 
 ---
 
@@ -226,4 +228,18 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - setServer(s) pattern used because server is created asynchronously after ensureSeedUsers — scheduler needs the ref for graceful close
   - createGetUserById(stmts) factory avoids putting the stmts dependency in startup.js — server.js creates stmts and injects
   - Session config uses createRequire for connect-sqlite3 (CommonJS package in ESM context) — this stays in server.js as it's middleware config
+---
+
+## 2026-04-03 - US-014
+- Added GET /api/health endpoint to src/routes/system.js — unauthenticated, returns { status: 'ok' }
+- Created scripts/smoke-test.sh automating three checks:
+  1. node --check on server.js and all 22 backend src/ files
+  2. npm run build (Vite build)
+  3. Server startup + GET /api/health returns HTTP 200
+- Script is self-documented with inline comments, uses set -euo pipefail, cleans up server process on exit
+- Files changed: src/routes/system.js, scripts/smoke-test.sh (new)
+- **Learnings for future iterations:**
+  - /api/health did not exist prior — had to be added to system router (unauthenticated so monitoring tools can hit it)
+  - better-sqlite3 native bindings may not be built in all environments — smoke test health check will fail if native module is missing (npm rebuild needed)
+  - Frontend files (src/lib/, src/api/, src/pages.config.js) are Vite/React — excluded from node --check since they use JSX/browser APIs
 ---
