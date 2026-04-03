@@ -195,6 +195,7 @@ function initSchema(db) {
         slug TEXT,
         name TEXT,
         url TEXT,
+        token TEXT,
         last_seen TEXT,
         last_kpis TEXT,
         status TEXT DEFAULT 'unknown'

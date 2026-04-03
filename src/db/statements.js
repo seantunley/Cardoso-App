@@ -25,7 +25,7 @@ function buildStatements(db) {
   if (process.env.HUB_MODE === 'true') {
     stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
     stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url FROM hub_sites');
+    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url, token FROM hub_sites');
   }
 
   return stmts;
