@@ -132,11 +132,11 @@ async function syncSite(site) {
       INSERT INTO hub_records (
         site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
         outstanding_balance, unpaid_invoices, receipts,
-        updated_date, synced_at
+        updated_date, synced_at, auto_flagged, terms
       ) VALUES (
         @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
         @outstanding_balance, @unpaid_invoices, @receipts,
-        @updated_date, @synced_at
+        @updated_date, @synced_at, @auto_flagged, @terms
       )
       ON CONFLICT(site_id, record_id) DO UPDATE SET
         customer_number=excluded.customer_number,
@@ -147,7 +147,9 @@ async function syncSite(site) {
         unpaid_invoices=excluded.unpaid_invoices,
         receipts=excluded.receipts,
         updated_date=excluded.updated_date,
-        synced_at=excluded.synced_at
+        synced_at=excluded.synced_at,
+        auto_flagged=excluded.auto_flagged,
+        terms=excluded.terms
     `);
     const insertMany = db.transaction((records) => {
       const now = new Date().toISOString();
@@ -164,6 +166,8 @@ async function syncSite(site) {
           receipts: r.receipts || '[]',
           updated_date: r.updated_date,
           synced_at: now,
+          auto_flagged: r.auto_flagged ? 1 : 0,
+          terms: r.terms || null,
         });
       }
     });

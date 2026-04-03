@@ -324,7 +324,23 @@ function buildMigrations(db) {
         }
       },
     },
-  ];
+      {
+      version: 15,
+      name: 'datarecord_missing_columns',
+      up() {
+        // Ensure all columns that are in the CREATE TABLE definition exist on older installs.
+        // Uses try/catch so it's safe to run even if columns already exist.
+        const forceAdd = (table, col, def) => {
+          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); } catch (_) {}
+        };
+        forceAdd('datarecord', 'outstanding_balance', 'TEXT');
+        forceAdd('datarecord', 'unpaid_invoices', 'TEXT');
+        forceAdd('datarecord', 'receipts', 'TEXT');
+        forceAdd('datarecord', 'flag_source', 'TEXT DEFAULT NULL');
+        forceAdd('datarecord', 'terms', 'TEXT');
+      },
+    },
+    ];
 }
 
 function runMigrations(db) {
