@@ -250,6 +250,18 @@ function buildMigrations(db) {
         `);
       },
     },
+    {
+      version: 10,
+      name: 'hub_inventory_value_column',
+      up() {
+        if (process.env.HUB_MODE === 'true') {
+          const cols = db.pragma('table_info(hub_inventory)').map(c => c.name);
+          if (!cols.includes('inventory_value')) {
+            db.exec('ALTER TABLE hub_inventory ADD COLUMN inventory_value TEXT');
+          }
+        }
+      },
+    },
   ];
 }
 

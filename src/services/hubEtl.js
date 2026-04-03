@@ -60,6 +60,7 @@ function initHubTables() {
       price TEXT,
       stocking_uom TEXT,
       commodity TEXT,
+      inventory_value TEXT,
       terms TEXT,
       synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
