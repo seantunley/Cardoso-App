@@ -2810,11 +2810,15 @@ if (process.env.HUB_MODE === 'true') {
       price TEXT,
       stocking_uom TEXT,
       commodity TEXT,
+      inventory_value TEXT,
       terms TEXT,
       synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
     );
   `);
+
+  // Ensure inventory_value column exists on pre-existing hub_inventory tables
+  ensureColumn('hub_inventory', 'inventory_value', 'TEXT');
 
   // Seed default hub settings
   db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
