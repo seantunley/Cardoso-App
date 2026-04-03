@@ -182,8 +182,8 @@
         "Typecheck passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Reporting router: createReportingRouter({ requireAuth }) — owns /api/kpis, /api/top-balances, /api/inventory, /api/reporting/* and requireReportingToken middleware. Backup router: createBackupRouter() — owns /api/backup/status, /api/backup/download, imports db+dbPath directly. System router: createSystemRouter({ requireAuth, requireAdmin }) — owns /api/app-info, /api/app-version-status, /api/app-update-trigger, and auto-update background check."
     },
     {
       "id": "US-012",

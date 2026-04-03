@@ -27,6 +27,10 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Hub router: createHubRouter({ requireAuth, requireAdmin }) — imports db, stmts, boolFromRow, bcrypt, syncAllSites, HUB_SITES directly (no injection needed)
 - Non-hub fallback: createNonHubFallbackRouter() returns empty-response stubs for hub endpoints on non-hub installs
 - Hub table creation (initHubTables) must be called before hub router or ETL — tables needed for prepared statements
+- Reporting router: createReportingRouter({ requireAuth }) — owns KPIs, top-balances, inventory, and /api/reporting/* multi-site endpoints
+- Backup router: createBackupRouter() — no deps injected, imports db/dbPath singleton directly
+- System router: createSystemRouter({ requireAuth, requireAdmin }) — owns app-info, version-status, auto-update trigger + background hourly check
+- requireReportingToken middleware lives in reporting.js (module-scoped, not exported) — used only by /api/reporting/* routes
 
 ---
 
@@ -171,4 +175,22 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - initHubTables() must be called before buildStatements(db) for hub stmts (getHubSetting, setHubSetting, hubSitesForBackup) to work — tables must exist first
   - HUB_SITES parsed from env at module load time in hubEtl.js — exported for hub router to access (e.g., in /api/hub/sync response)
   - Hub backup pull cron schedule stays in server.js (just the cron.schedule call) since it needs to be referenced by gracefulShutdown
+---
+
+## 2026-04-03 - US-011
+- Extracted reporting, backup, and system routes into three new route files
+- Created src/routes/reporting.js with: /api/kpis, /api/top-balances, /api/inventory, /api/reporting/site-info, /api/reporting/kpis, /api/reporting/records, /api/reporting/health, /api/reporting/inventory
+- Created src/routes/backup.js with: /api/backup/status, /api/backup/download
+- Created src/routes/system.js with: /api/app-info, /api/app-version-status, /api/app-update-trigger + triggerWindowsUpdate function + hourly auto-update check
+- Cleaned up unused imports from server.js (decryptPassword, sql, fs, dbPath, activeSyncs, expandDataRecord, getVersionStatus, APP_VERSION, __dirname)
+- server.js mounts: reportingRouter, systemRouter, backupRouter
+- Removed ~430 lines of inline route definitions from server.js
+- Files changed: server.js, src/routes/reporting.js (new), src/routes/backup.js (new), src/routes/system.js (new)
+- **Learnings for future iterations:**
+  - reporting.js uses module-level imports (db, stmts, expandDataRecord) — no factory deps except requireAuth
+  - backup.js imports db+dbPath directly — no middleware deps needed (uses its own x-reporting-token check inline)
+  - system.js imports getVersionStatus, child_process, stream/promises — self-contained auto-update logic
+  - requireReportingToken is module-scoped in reporting.js, not exported — only /api/reporting/* routes use it
+  - APP_VERSION loaded via createRequire in reporting.js (module-level, not factory-scoped)
+  - Cleaned up many unused imports from server.js that accumulated from previous extractions
 ---
