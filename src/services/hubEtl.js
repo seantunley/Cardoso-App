@@ -8,8 +8,6 @@
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 
-const stmts = buildStatements(db);
-
 // --- Hub table creation (only called when HUB_MODE === 'true') ---
 function initHubTables() {
   db.exec(`
@@ -271,6 +269,7 @@ async function syncAllSites() {
 
 async function runHubBackupPull() {
   if (process.env.HUB_MODE !== 'true') return;
+  const stmts = buildStatements(db);
   const row = stmts.getHubSetting.get('backup_sync_enabled');
   const enabled = row ? row.value === 'true' : true;
   if (!enabled) {

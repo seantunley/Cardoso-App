@@ -181,18 +181,77 @@ function initSchema(db) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_syncrun_connection_id ON syncrun(connection_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
 
-  if (process.env.HUB_MODE === 'true') {
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color)`);
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id)`);
-  }
-
   // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
   ensureFlexibleCustomFieldConfigTable(db);
 
   // ==================== RUN MIGRATIONS ====================
   runMigrations(db);
+
+  // ==================== HUB TABLES (after migrations, so tables exist before any prepared statements) ====================
+  if (process.env.HUB_MODE === 'true') {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS hub_sites (
+        id TEXT PRIMARY KEY,
+        slug TEXT,
+        name TEXT,
+        url TEXT,
+        last_seen TEXT,
+        last_kpis TEXT,
+        status TEXT DEFAULT 'unknown'
+      );
+      CREATE TABLE IF NOT EXISTS hub_records (
+        site_id TEXT,
+        record_id TEXT,
+        customer_number TEXT,
+        customer_name TEXT,
+        flag_color TEXT,
+        flag_reason TEXT,
+        outstanding_balance TEXT,
+        unpaid_invoices TEXT,
+        receipts TEXT,
+        updated_date TEXT,
+        synced_at TEXT,
+        auto_flagged INTEGER DEFAULT 0,
+        terms TEXT,
+        PRIMARY KEY (site_id, record_id)
+      );
+      CREATE TABLE IF NOT EXISTS hub_sync_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_id TEXT,
+        started_at TEXT,
+        completed_at TEXT,
+        records_fetched INTEGER,
+        status TEXT,
+        error TEXT
+      );
+      CREATE TABLE IF NOT EXISTS hub_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      );
+      CREATE TABLE IF NOT EXISTS hub_inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_id TEXT NOT NULL,
+        item_number TEXT NOT NULL,
+        item_description TEXT,
+        qty_on_hand TEXT,
+        last_cost TEXT,
+        price_list TEXT,
+        price TEXT,
+        stocking_uom TEXT,
+        commodity TEXT,
+        terms TEXT,
+        synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(site_id, item_number)
+      );
+    `);
+    db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color);
+      CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id);
+    `);
+  }
 }
 
 function ensureFlexibleCustomFieldConfigTable(db) {
