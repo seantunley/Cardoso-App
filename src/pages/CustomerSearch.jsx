@@ -17,6 +17,7 @@ export default function CustomerSearch() {
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => api.auth.me(),
+    staleTime: Infinity,
   });
 
   const [selectedConnectionId, setSelectedConnectionId] = useState(null);

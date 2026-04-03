@@ -49,6 +49,7 @@ export default function Records() {
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => api.auth.me(),
+    staleTime: Infinity,
   });
 
   const canEditRecords = hasPermission(currentUser, "can_edit_records");
@@ -66,6 +67,7 @@ export default function Records() {
   const { data: customFields = [] } = useQuery({
     queryKey: ["customFields"],
     queryFn: () => api.entities.CustomFieldConfig.list(),
+    staleTime: Infinity,
   });
 
   const updateMutation = useMutation({

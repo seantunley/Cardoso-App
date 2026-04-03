@@ -58,6 +58,7 @@ export default function Reports() {
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
     queryFn: () => api.auth.me(),
+    staleTime: Infinity,
   });
 
   const {
