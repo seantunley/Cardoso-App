@@ -72,6 +72,10 @@ Function ConfigPageLeave
 FunctionEnd
 
 Section "Install" SecInstall
+  ; Stop existing service before copying files (prevents file-lock failures on upgrade)
+  ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
+  Sleep 2000
+
   SetOutPath "$INSTDIR"
 
   ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
