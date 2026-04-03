@@ -3,30 +3,27 @@ import cors from 'cors';
 import session from 'express-session';
 import bcrypt from 'bcryptjs';
 import cron from 'node-cron';
-import sql from 'mssql';
 import dotenv from 'dotenv';
 import path from 'path';
-import fs from 'fs';
 import { createRequire } from 'module';
-import { encryptPassword, decryptPassword, isEncryptedFormat, getEncryptionKey } from './src/services/encryption.js';
-import { normalizeVersion, isVersionNewer, getVersionStatus } from './src/services/versionCheck.js';
-import db, { dbPath } from './src/db/index.js';
+import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './src/services/encryption.js';
+import db from './src/db/index.js';
 import { initSchema } from './src/db/schema.js';
 import { buildStatements } from './src/db/statements.js';
 import { createAuthMiddleware } from './src/middleware/auth.js';
 import { loginLimiter } from './src/middleware/rateLimit.js';
-import { FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS, getMappingForKey, getRowValue, firstDefined, getMappedOrFallbackValue, shouldApplyMappedValue, buildFieldPatch, buildDynamicLocalFieldsPatch } from './src/fieldRegistry.js';
-import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection } from './src/helpers.js';
-import { _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord } from './src/services/autoFlag.js';
+import { sanitizeUser, defaultPermissionsForRole } from './src/helpers.js';
 import { createAuthRouter } from './src/routes/auth.js';
 import { createRecordsRouter } from './src/routes/records.js';
 import { createConnectionsRouter } from './src/routes/connections.js';
-import { runConnectionImport, activeSyncs } from './src/services/syncEngine.js';
+import { runConnectionImport } from './src/services/syncEngine.js';
 import { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull } from './src/services/hubEtl.js';
 import { createHubRouter, createNonHubFallbackRouter } from './src/routes/hub.js';
+import { createReportingRouter } from './src/routes/reporting.js';
+import { createBackupRouter } from './src/routes/backup.js';
+import { createSystemRouter } from './src/routes/system.js';
 
 const require = createRequire(import.meta.url);
-const { version: APP_VERSION } = require('./package.json');
 
 dotenv.config();
 
@@ -34,7 +31,6 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 const FRONTEND_ORIGIN = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
-const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const SESSION_SECRET = process.env.SESSION_SECRET;
 if (!SESSION_SECRET) {
   console.error('❌ SESSION_SECRET environment variable is required. Set it in your .env file.');
@@ -233,265 +229,17 @@ app.use(recordsRouter);
 const connectionsRouter = createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown: () => shuttingDown });
 app.use(connectionsRouter);
 
-// Auth routes (login, logout, set-initial-password, me) are now in src/routes/auth.js
+// Reporting, KPI, top-balances, inventory, and multi-site reporting API — extracted to src/routes/reporting.js
+const reportingRouter = createReportingRouter({ requireAuth });
+app.use(reportingRouter);
 
-app.get('/api/app-info', (req, res) => {
-  res.json({
-    hub_mode: process.env.HUB_MODE === 'true',
-    version: require('./package.json').version,
-  });
-});
+// System routes (app-info, version-status, auto-update) — extracted to src/routes/system.js
+const systemRouter = createSystemRouter({ requireAuth, requireAdmin });
+app.use(systemRouter);
 
-// test-rule route now in src/routes/records.js
-
-// GET /api/top-balances?limit=30
-// Returns top customers by outstanding balance, sorted descending.
-// In hub mode, queries the hub_records table (cross-site).
-// In site mode, queries the local datarecord table.
-app.get('/api/kpis', requireAuth, (req, res) => {
-  try {
-    const total = stmts.kpiTotalRecords.get();
-    const byFlag = stmts.kpiFlagCounts.all();
-    const lastSync = stmts.kpiLastSync.get();
-    const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
-    for (const row of byFlag) {
-      if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
-    }
-    res.json({
-      total_records: total.count,
-      records_by_flag: flagCounts,
-      last_sync_at: lastSync?.completed_at || null,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.get('/api/top-balances', requireAuth, (req, res) => {
-  const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-  const offset = (page - 1) * limit;
-  const isHub = process.env.HUB_MODE === 'true';
-
-  const balanceWhere = `outstanding_balance IS NOT NULL
-          AND outstanding_balance != ''
-          AND outstanding_balance != '0'
-          AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
-
-  try {
-    let rows, total;
-    if (isHub) {
-      total = db.prepare(`SELECT COUNT(*) AS count FROM hub_records r WHERE r.${balanceWhere}`).get().count;
-      const stmt = db.prepare(`
-        SELECT
-          r.customer_number,
-          r.customer_name,
-          r.outstanding_balance,
-          r.unpaid_invoices,
-          r.receipts,
-          r.flag_color,
-          r.flag_reason,
-          r.auto_flagged,
-          COALESCE(s.name, r.site_id) AS site_name
-        FROM hub_records r
-        LEFT JOIN hub_sites s ON s.id = r.site_id
-        WHERE r.${balanceWhere}
-        ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ? OFFSET ?
-      `);
-      rows = stmt.all(limit, offset).map(expandDataRecord);
-    } else {
-      total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
-      const stmt = db.prepare(`
-        SELECT
-          customer_number,
-          customer_name,
-          outstanding_balance,
-          unpaid_invoices,
-          receipts,
-          flag_color,
-          flag_reason,
-          auto_flagged,
-          ? AS site_name
-        FROM datarecord
-        WHERE ${balanceWhere}
-        ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        LIMIT ? OFFSET ?
-      `);
-      rows = stmt.all(SITE_NAME, limit, offset).map(expandDataRecord);
-    }
-    const totalPages = Math.ceil(total / limit);
-    res.json({ records: rows, total, page, totalPages });
-  } catch (err) {
-    console.error('top-balances error', err);
-    res.status(500).json({ error: 'Failed to fetch top balances' });
-  }
-});
-
-// GET /api/inventory?search=&commodity=&limit=
-app.get('/api/inventory', requireAuth, (req, res) => {
-  const search = (req.query.search || '').trim();
-  const commodity = (req.query.commodity || '').trim();
-  const limit = Math.min(parseInt(req.query.limit, 10) || 100000, 100000);
-  try {
-    const conditions = [];
-    const params = [];
-    if (search) {
-      conditions.push('(item_number LIKE ? OR item_description LIKE ?)');
-      params.push(`%${search}%`, `%${search}%`);
-    }
-    if (commodity) {
-      conditions.push('CAST(commodity AS TEXT) = ?');
-      params.push(commodity);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    params.push(limit);
-    const rows = db.prepare(
-      `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
-    ).all(...params);
-    res.json({ count: rows.length, records: rows });
-  } catch (err) {
-    console.error('inventory error', err);
-    res.status(500).json({ error: 'Failed to fetch inventory' });
-  }
-});
-
-app.get('/api/app-version-status', requireAuth, async (req, res) => {
-  try {
-    const versionStatus = await getVersionStatus();
-    res.json(versionStatus);
-  } catch (error) {
-    console.error('Version status error:', error);
-    res.status(500).json({ error: 'Failed to check app version' });
-  }
-});
-
-// Custom-field, record-history, login-log, and user routes are now in src/routes/records.js and src/routes/auth.js
-
-// Connection routes (test-connection, test-query, import) are now in src/routes/connections.js
-
-// ==================== MULTI-SITE REPORTING API ====================
-// Read-only endpoints for hub ETL. Requires X-Reporting-Token header.
-
-const SITE_ID = process.env.SITE_ID || 'local';
-const SITE_SLUG = process.env.SITE_SLUG || 'local';
-const SITE_NAME = process.env.SITE_NAME || 'Local';
-
-function requireReportingToken(req, res, next) {
-  const token = process.env.REPORTING_TOKEN;
-  if (!token) {
-    return res.status(503).json({ error: 'Reporting API not configured' });
-  }
-  if (req.headers['x-reporting-token'] !== token) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-  next();
-}
-
-// GET /api/reporting/site-info
-app.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    site_name: SITE_NAME,
-    app_version: APP_VERSION,
-    schema_version: 1,
-    reporting_at: new Date().toISOString(),
-  });
-});
-
-// GET /api/reporting/kpis
-app.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
-  const total = stmts.kpiTotalRecords.get();
-  const byFlag = stmts.kpiFlagCounts.all();
-  const lastSync = stmts.kpiLastSync.get();
-  const activeConns = stmts.kpiActiveConns.get();
-
-  const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
-  for (const row of byFlag) {
-    if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
-  }
-
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    total_records: total.count,
-    records_by_flag: flagCounts,
-    last_sync_at: lastSync?.completed_at || null,
-    active_connections: activeConns.count,
-    generated_at: new Date().toISOString(),
-  });
-});
-
-// GET /api/reporting/records?since=ISO_DATE&offset=0&limit=1000
-app.get('/api/reporting/records', requireReportingToken, (req, res) => {
-  const since = req.query.since;
-  const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
-  const offset = parseInt(req.query.offset) || 0;
-  let rows;
-  if (since) {
-    rows = db.prepare(
-      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, unpaid_invoices, receipts,
-              updated_date, synced_at, source_table, source_id
-       FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
-    ).all(since, limit, offset);
-  } else {
-    rows = db.prepare(
-      `SELECT id, customer_number, customer_name, flag_color, flag_reason,
-              outstanding_balance, unpaid_invoices, receipts,
-              updated_date, synced_at, source_table, source_id
-       FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
-    ).all(limit, offset);
-  }
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    since: since || null,
-    offset,
-    limit,
-    count: rows.length,
-    has_more: rows.length === limit,
-    records: rows,
-  });
-});
-
-// GET /api/reporting/health
-app.get('/api/reporting/health', requireReportingToken, (req, res) => {
-  const total = stmts.kpiTotalRecords.get();
-  const lastRun = stmts.kpiLastRun.get();
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    status: 'ok',
-    db_record_count: total.count,
-    last_sync_status: lastRun?.status || null,
-    last_sync_at: lastRun?.completed_at || null,
-    uptime_seconds: Math.floor(process.uptime()),
-    checked_at: new Date().toISOString(),
-  });
-});
-
-
-
-// GET /api/reporting/inventory?offset=0&limit=1000
-app.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
-  const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
-  const offset = parseInt(req.query.offset) || 0;
-  const rows = db.prepare(
-    `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, updated_date
-     FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
-  ).all(limit, offset);
-  res.json({
-    site_id: SITE_ID,
-    site_slug: SITE_SLUG,
-    offset,
-    limit,
-    count: rows.length,
-    has_more: rows.length === limit,
-    records: rows,
-  });
-});
+// Backup routes (status, download) — extracted to src/routes/backup.js
+const backupRouter = createBackupRouter();
+app.use(backupRouter);
 
 // ==================== HUB ETL ====================
 // Hub routes and ETL — extracted to src/routes/hub.js and src/services/hubEtl.js
@@ -590,84 +338,6 @@ function gracefulShutdown(signal) {
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
-// ==================== AUTO-UPDATE (WINDOWS SERVICE) ====================
-import { exec as execChild } from 'child_process';
-import { createWriteStream } from 'fs';
-import { pipeline } from 'stream/promises';
-
-let autoUpdateRunning = false;
-
-async function triggerWindowsUpdate() {
-  if (autoUpdateRunning) {
-    console.log('[AutoUpdate] Update already in progress, skipping.');
-    return { ok: false, reason: 'already_running' };
-  }
-  autoUpdateRunning = true;
-
-  try {
-    // Get download URL for latest release asset
-    const releaseResp = await fetch('https://api.github.com/repos/seantunley/Cardoso-App/releases/latest', {
-      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'cardoso-app-auto-update' }
-    });
-    if (!releaseResp.ok) throw new Error(`GitHub API error: ${releaseResp.status}`);
-    const release = await releaseResp.json();
-    const asset = release.assets.find(a => a.name.startsWith('CardosoSetup-') && a.name.endsWith('.exe'));
-    if (!asset) throw new Error('CardosoSetup.exe not found in latest release');
-
-    console.log(`[AutoUpdate] Downloading ${asset.name} (${(asset.size/1024/1024).toFixed(1)} MB)...`);
-
-    // Download to temp file
-    const tmpPath = path.join(process.env.TEMP || 'C:\Windows\Temp', 'CardosoSetup-update.exe');
-    const dlResp = await fetch(asset.browser_download_url);
-    if (!dlResp.ok) throw new Error(`Download failed: ${dlResp.status}`);
-    await pipeline(dlResp.body, createWriteStream(tmpPath));
-    console.log(`[AutoUpdate] Downloaded to ${tmpPath}`);
-
-    // Run installer silently — NSIS /S flag, detached so service can be replaced
-    const child = execChild(`"${tmpPath}" /S`, { detached: true, stdio: 'ignore', windowsHide: true });
-    child.unref();
-    console.log('[AutoUpdate] Silent installer launched. Service will restart momentarily.');
-    return { ok: true };
-  } catch (err) {
-    console.error('[AutoUpdate] Error:', err.message);
-    autoUpdateRunning = false;
-    return { ok: false, reason: err.message };
-  }
-  // Note: autoUpdateRunning stays true until service restarts — intentional
-}
-
-// Admin-triggered update endpoint
-app.post('/api/app-update-trigger', requireAuth, requireAdmin, async (req, res) => {
-  if (process.platform !== 'win32') {
-    return res.status(400).json({ error: 'Auto-update only supported on Windows.' });
-  }
-  const result = await triggerWindowsUpdate();
-  if (result.ok) {
-    res.json({ ok: true, message: 'Update started. Service will restart automatically.' });
-  } else {
-    res.status(500).json({ ok: false, error: result.reason });
-  }
-});
-
-// Background hourly check — auto-triggers update if new version available (Windows only)
-if (process.platform === 'win32' && IS_PRODUCTION) {
-  const AUTO_UPDATE_INTERVAL_MS = 1000 * 60 * 60; // 1 hour
-  setInterval(async () => {
-    try {
-      const status = await getVersionStatus();
-      if (status.updateAvailable) {
-        console.log(`[AutoUpdate] New version ${status.latestVersion} available (current: ${status.currentVersion}). Triggering update.`);
-        await triggerWindowsUpdate();
-      } else {
-        console.log(`[AutoUpdate] Version check: up to date (${status.currentVersion}).`);
-      }
-    } catch (err) {
-      console.error('[AutoUpdate] Hourly check error:', err.message);
-    }
-  }, AUTO_UPDATE_INTERVAL_MS);
-  console.log('[AutoUpdate] Hourly auto-update check enabled.');
-}
-
 // ==================== PRODUCTION SPA FALLBACK ====================
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
@@ -676,90 +346,6 @@ if (IS_PRODUCTION) {
     }
   });
 }
-
-
-
-// ==================== BACKUP STATUS ====================
-
-// GET /api/backup/status
-// Returns metadata about the most recent local backup file.
-// Used by the Hub to monitor backup health across sites.
-app.get('/api/backup/status', (req, res) => {
-  const token = req.headers['x-reporting-token'];
-  const expectedToken = process.env.REPORTING_TOKEN;
-  if (!expectedToken || token !== expectedToken) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  const fs = require('fs');
-  const backupDir = path.resolve(path.dirname(dbPath), 'backups');
-
-  let lastBackup = null;
-  if (fs.existsSync(backupDir)) {
-    const files = fs.readdirSync(backupDir)
-      .filter(f => f.endsWith('.db'))
-      .map(f => {
-        const full = path.join(backupDir, f);
-        const stat = fs.statSync(full);
-        return { name: f, size: stat.size, mtime: stat.mtime.toISOString() };
-      })
-      .sort((a, b) => new Date(b.mtime) - new Date(a.mtime));
-
-    if (files.length > 0) {
-      lastBackup = files[0];
-      lastBackup.total_backups = files.length;
-    }
-  }
-
-  const dbStat = fs.existsSync(dbPath) ? fs.statSync(path.resolve(dbPath)) : null;
-
-  res.json({
-    site_id: process.env.SITE_ID || 'unknown',
-    site_name: process.env.SITE_NAME || 'Unknown',
-    db_size: dbStat ? dbStat.size : null,
-    db_modified: dbStat ? dbStat.mtime.toISOString() : null,
-    last_backup: lastBackup,
-    backup_dir: backupDir,
-  });
-});
-
-// ==================== BACKUP ====================
-// GET /api/backup/download
-// Streams the live SQLite database to the caller as a binary file.
-// Protected by x-reporting-token header — same token used for hub reporting.
-// The database is checkpointed (WAL → main file) before streaming so the
-// downloaded file is consistent and can be opened directly with any SQLite tool.
-app.get('/api/backup/download', (req, res) => {
-  const token = req.headers['x-reporting-token'];
-  const expectedToken = process.env.REPORTING_TOKEN;
-
-  if (!expectedToken || token !== expectedToken) {
-    return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
-  }
-
-  try {
-    // Flush WAL to main DB file so the file on disk is complete
-    db.pragma('wal_checkpoint(TRUNCATE)');
-
-    const resolvedDbPath = path.resolve(dbPath);
-    const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0,10)}.db`;
-
-    res.setHeader('Content-Type', 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
-    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
-
-    const stream = require('fs').createReadStream(resolvedDbPath);
-    stream.on('error', (err) => {
-      console.error('[backup] Stream error:', err.message);
-      if (!res.headersSent) res.status(500).json({ error: 'Failed to stream database' });
-    });
-    stream.pipe(res);
-  } catch (err) {
-    console.error('[backup] Error preparing backup:', err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
 
 // ==================== STARTUP ====================
 recoverAbandonedSyncs();
