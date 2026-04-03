@@ -96,6 +96,9 @@ const AuthenticatedApp = () => {
 
       <Route path="*" element={<PageNotFound />} />
     </Routes>
+    {forcePasswordChange && (
+      <ForcePasswordChangeModal open={forcePasswordChange} onComplete={completePasswordChange} />
+    )}
     </Suspense>
   );
 };

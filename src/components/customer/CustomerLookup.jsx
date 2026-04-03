@@ -280,8 +280,6 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   today.setHours(0, 0, 0, 0);
 
   // DEBUG: raw date fields
-  console.log('[CreditAnalysis] raw record keys (first record):', records[0] ? Object.keys(records[0]).filter(k => k.includes('invoice') || k.includes('receipt')) : []);
-  console.log('[CreditAnalysis] sample date fields:', {
     inv1: records[0]?.last_unpaid_invoice_1_date,
     inv1_data: records[0]?.data?.last_unpaid_invoice_1_date,
     rec1: records[0]?.last_receipt_1_date,
@@ -529,10 +527,6 @@ function analyseInvoiceCredit(records, flagHistory = []) {
   ].filter(x => x.date !== null).sort((a, b) => a.date - b.date);
 
   // DEBUG: log what we have
-  console.log('[CreditAnalysis] invoices:', invoices.length, invoices.map(x => ({ num: x.number, amt: x.amount, date: x.date, rawDate: x._rawDate })));
-  console.log('[CreditAnalysis] receipts:', receipts.length, receipts.map(x => ({ num: x.number, amt: x.amount, date: x.date })));
-  console.log('[CreditAnalysis] lagData:', lagData);
-  console.log('[CreditAnalysis] timelineData:', timelineData);
 
   return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData };
 }
