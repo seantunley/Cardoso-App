@@ -4,9 +4,11 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 ## Codebase Patterns
 - server.js uses ESM (import/export) — all new src/ files must also use import/export (package.json has "type": "module")
 - `createRequire(import.meta.url)` is used for JSON imports (e.g., package.json)
-- db singleton: the db instance is created in server.js — future extraction will move it to src/db/index.js
+- db singleton: src/db/index.js exports the db instance. All modules import from there — never open new Database()
 - HUB_MODE routes: wrap in if (process.env.HUB_MODE === 'true') checks
-- Versioned migrations: MIGRATIONS array with version/name/up() objects, run via runMigrations(db)
+- Versioned migrations: src/db/migrations.js exports buildMigrations(db) and runMigrations(db)
+- Schema init: src/db/schema.js exports initSchema(db) — PRAGMAs, CREATE TABLEs, indexes, custom field config, migrations
+- Prepared statements: src/db/statements.js exports buildStatements(db)
 - server.js had pre-existing merge corruption from commit 47c41c5 — restored from 4a0e196 (last valid commit)
 
 ---
@@ -22,4 +24,21 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - The dev branch had a corrupted server.js from a bad merge (47c41c5) — this was fixed by restoring from 4a0e196
   - getEncryptionKey needed to be exported because migrateUnencryptedPasswords IIFE in server.js calls it directly
   - The `crypto` import was removed from server.js since it's only used by the encryption helpers now
+---
+
+## 2026-04-03 - US-002
+- Extracted database layer into src/db/ with 4 files:
+  - src/db/index.js: singleton db instance (opens SQLite once, exports `db` and `dbPath`)
+  - src/db/schema.js: initSchema(db) — PRAGMAs, CREATE TABLEs, indexes, customfieldconfig table, runs migrations
+  - src/db/migrations.js: ensureColumn, buildMigrations(db), runMigrations(db) with all 8 versioned migrations
+  - src/db/statements.js: buildStatements(db) returning all prepared statement objects
+- server.js now imports `db` and `dbPath` from src/db/index.js, calls initSchema(db) and buildStatements(db)
+- Removed ~530 lines of inline db-init, schema, migration, and statement code from server.js
+- Schema cache (getTableColumns, invalidateSchemaCache) kept in server.js for now — used by route handlers
+- Files changed: server.js, src/db/index.js (new), src/db/schema.js (new), src/db/migrations.js (new), src/db/statements.js (new)
+- **Learnings for future iterations:**
+  - ensureColumn in migrations needs db passed as parameter since it's no longer in server.js scope
+  - buildMigrations(db) pattern used instead of bare MIGRATIONS array so migration up() closures capture db
+  - dbPath needed to be exported from src/db/index.js because backup routes in server.js reference it
+  - Linter auto-removed dotenv import from src/db/index.js — dotenv.config() is already called in server.js before the import
 ---

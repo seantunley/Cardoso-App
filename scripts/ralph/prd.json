@@ -35,7 +35,7 @@
         "Typecheck passes"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Singleton pattern chosen: src/db/index.js exports the db instance. Modules require it directly rather than accepting db as a parameter at call time."
     },
     {
