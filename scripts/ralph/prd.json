@@ -115,8 +115,8 @@
         "Typecheck passes"
       ],
       "priority": 7,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Factory pattern: createRecordsRouter({ db, stmts, requireAuth, requireAdmin, checkTableAccess }). Includes test-rule, auto-flag apply/clear/export/import, and dynamic CRUD /:table routes. Schema cache (allowedTables, getTableColumns) moved into records module."
     },
     {
       "id": "US-008",
