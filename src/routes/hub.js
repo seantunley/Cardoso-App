@@ -12,9 +12,8 @@ import { buildStatements } from '../db/statements.js';
 import { boolFromRow } from '../helpers.js';
 import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
 
-const stmts = buildStatements(db);
-
 export function createHubRouter({ requireAuth, requireAdmin }) {
+  const stmts = buildStatements(db);
   const router = Router();
 
   // GET /api/hub/backup-settings
