@@ -194,6 +194,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       writeInventory(rows);
     };
 
+    const insertSnapshot = db.prepare(`
+      INSERT INTO record_snapshots (connection_id, customer_number, snapshot_data, synced_at)
+      VALUES (?, ?, ?, ?)
+    `);
+
     // Shared write-rows helper used by both query mode and legacy table mode
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
       const existingRows = db.prepare(`
@@ -287,6 +292,20 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
+            // Append-only snapshot for audit trail
+            try {
+              const updatedRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(existing.id);
+              if (updatedRecord) {
+                insertSnapshot.run(
+                  String(connectionId),
+                  String(updatedRecord.customer_number || ''),
+                  JSON.stringify(updatedRecord),
+                  syncTimestamp
+                );
+              }
+            } catch (snapshotErr) {
+              console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
+            }
           } else {
             insertNewRecord.run(
               baseRecordData.created_by,
@@ -309,14 +328,25 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.synced_at
             );
             // Apply auto-flag rules to new records (user hasn't touched them yet)
-            if (activeAutoFlagRules.length > 0) {
-              const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
-              if (newRecord) {
-                const autoFlag = applyAutoFlagRulesToRecord(newRecord, activeAutoFlagRules);
-                if (autoFlag) {
-                  updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
-                }
+            const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
+            if (activeAutoFlagRules.length > 0 && newRecord) {
+              const autoFlag = applyAutoFlagRulesToRecord(newRecord, activeAutoFlagRules);
+              if (autoFlag) {
+                updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
               }
+            }
+            // Append-only snapshot for audit trail
+            try {
+              if (newRecord) {
+                insertSnapshot.run(
+                  String(connectionId),
+                  String(newRecord.customer_number || ''),
+                  JSON.stringify(newRecord),
+                  syncTimestamp
+                );
+              }
+            } catch (snapshotErr) {
+              console.error('[snapshot] Failed to insert snapshot for new record:', snapshotErr.message);
             }
           }
         }
