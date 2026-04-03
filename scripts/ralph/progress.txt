@@ -15,6 +15,7 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
 - Field registry: src/fieldRegistry.js exports FIELD_REGISTRY, INVOICE_SLOTS, RECEIPT_SLOTS, buildFieldPatch, buildDynamicLocalFieldsPatch, and mapping helpers
 - Shared helpers: src/helpers.js exports sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, boolFromRow, defaultPermissionsForRole, sanitizeUser, sanitizeConnection
 - fieldRegistry.js imports parseJsonSafely from helpers.js — no circular deps since neither imports from routes/services
+- Auto-flag service: src/services/autoFlag.js exports _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord — pure functions, no deps
 
 ---
 
@@ -75,4 +76,14 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - fieldRegistry.js needs parseJsonSafely from helpers.js (buildDynamicLocalFieldsPatch uses it) — import is fine since both are leaf utility files
   - sanitizeUser and boolFromRow moved to helpers.js (previously noted as "remain in server.js" in US-003) — auth middleware factory still gets sanitizeUser injected from server.js which now re-imports it from helpers.js
   - getUserById stays in server.js because it depends on `stmts` (prepared statements) — will move when auth routes are extracted (US-006)
+---
+
+## 2026-04-03 - US-005
+- Extracted auto-flag rule evaluator to src/services/autoFlag.js:
+  - _evalCondition, _evalRuleConditions, applyAutoFlagRulesToRecord
+- server.js now imports from src/services/autoFlag.js; ~78 lines of inline auto-flag code removed
+- Files changed: server.js, src/services/autoFlag.js (new)
+- **Learnings for future iterations:**
+  - Auto-flag functions are pure (no db/stmts dependency) — simplest extraction so far, no factory pattern needed
+  - applyAutoFlagRulesToRecord is used in both sync logic (runConnectionImport) and the /api/apply-auto-flags route — both still in server.js, will be extracted in US-007/US-009
 ---

@@ -83,8 +83,8 @@
         "Typecheck passes"
       ],
       "priority": 5,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Pure functions — no dependencies on db, stmts, or other modules. Exported as named ESM exports."
     },
     {
       "id": "US-006",
