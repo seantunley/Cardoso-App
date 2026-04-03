@@ -2,12 +2,18 @@ import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
+const _require = createRequire(import.meta.url)
+const { version: APP_VERSION } = _require('./package.json')
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export default defineConfig({
   logLevel: 'error',
+  define: {
+    __APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   plugins: [react()],
   resolve: {
     alias: {
