@@ -601,14 +601,28 @@ ensureColumn('databaseconnection', 'record_type', `TEXT DEFAULT 'customer'`);
   const connections = db.prepare('SELECT id, table_configs, field_mappings FROM databaseconnection').all();
   for (const conn of connections) {
     try {
-      run();
-      console.log(`[migration] Applied v${migration.version}: ${migration.name}`);
-    } catch (err) {
-      console.error(`[migration] Failed v${migration.version} (${migration.name}):`, err.message);
-      throw err;
+      const raw = JSON.parse(conn.field_mappings || '{}');
+      const isFlat = Object.keys(raw).length > 0 &&
+        Object.values(raw).some((v) => v && typeof v === 'object' && v.sourceField);
+      if (!isFlat) continue;
+
+      const tableConfigs = JSON.parse(conn.table_configs || '[]');
+      if (!tableConfigs.length) continue;
+
+      const migrated = {};
+      for (const t of tableConfigs) {
+        migrated[t.table_name] = raw;
+      }
+
+      db.prepare('UPDATE databaseconnection SET field_mappings = ? WHERE id = ?')
+        .run(JSON.stringify(migrated), conn.id);
+
+      console.log(`[migration] Migrated field_mappings to per-table format for connection ${conn.id}`);
+    } catch (e) {
+      console.error(`[migration] Failed to migrate field_mappings for connection ${conn.id}:`, e.message);
     }
   }
-}
+})();
 
 try {
   runMigrations(db);
@@ -1386,9 +1400,6 @@ async function runConnectionImport(connectionId) {
 
       // Load active auto-flag rules once for the entire sync batch
       const activeAutoFlagRules = stmts.activeAutoFlagRules.all();
-      const activeAutoFlagRules = db.prepare(
-        `SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`
-      ).all();
 
       const updateRecordFlag = db.prepare(`
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
@@ -1454,7 +1465,6 @@ async function runConnectionImport(connectionId) {
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
              if (activeAutoFlagRules.length > 0 && !manuallyFlagged) {
                const mergedRecord = expandDataRecord({ ...existing, ...baseRecordData });
-               const mergedRecord = { ...existing, ...baseRecordData };
                const autoFlag = applyAutoFlagRulesToRecord(mergedRecord, activeAutoFlagRules);
                if (autoFlag) {
                  // Flag it (or update the auto-flag if the rule result changed)
@@ -3398,7 +3408,6 @@ if (process.env.HUB_MODE !== 'true') {
 app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
   try {
     const rules = stmts.activeAutoFlagRules.all();
-    const rules = db.prepare(`SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC`).all();
     const activeRules = rules.map(r => {
       try { r.conditions = JSON.parse(r.conditions || '[]'); } catch { r.conditions = []; }
       return r;
@@ -3410,11 +3419,6 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 
     const updateFlag = stmts.updateAutoFlag;
     const clearFlag = stmts.clearAutoFlag;
-    const records = db.prepare(`SELECT * FROM datarecord`).all();
-    let flagged = 0, cleared = 0;
-
-    const updateFlag = db.prepare(`UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`);
-    const clearFlag = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ?`);
 
     const applyAll = db.transaction(() => {
       for (const record of records) {
@@ -3443,7 +3447,6 @@ app.post('/api/apply-auto-flags', requireAuth, (req, res) => {
 app.post('/api/clear-auto-flags', requireAuth, (req, res) => {
   try {
     const result = stmts.clearAllAutoFlags.run();
-    const result = db.prepare(`UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1`).run();
     res.json({ cleared: result.changes });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -3526,8 +3529,6 @@ app.get('/api/:table', requireAuth, (req, res) => {
       const desc = sortParam.startsWith('-');
       const col = desc ? sortParam.slice(1) : sortParam;
       const validCols = getTableColumns(table);
-      const tableInfo = db.prepare(`PRAGMA table_info("${table}")`).all();
-      const validCols = new Set(tableInfo.map(c => c.name));
       if (validCols.has(col)) {
         orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
       }
