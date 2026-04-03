@@ -217,8 +217,8 @@
         "Typecheck passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": ""
+      "passes": true,
+      "notes": "Business logic extracted to src/startup.js (validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById) and src/scheduler.js (isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown). server.js is now 79 lines — imports, middleware, router mounting, and startup only."
     },
     {
       "id": "US-014",
