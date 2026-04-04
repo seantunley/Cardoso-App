@@ -281,7 +281,8 @@ const router = Router();
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
              can_access_connections, can_manage_users, can_manage_rules,
-             can_edit_records, can_flag_records
+             can_edit_records, can_flag_records,
+             password_hash, must_change_password
       FROM "user" WHERE id IN (${user_ids.map(() => '?').join(',')})
     `).all(...user_ids);
 
@@ -365,48 +366,84 @@ export function createReceiveUsersRouter() {
       try {
         const existing = db.prepare('SELECT id FROM "user" WHERE email = ?').get(u.email);
         if (existing) {
-          // Update everything except password_hash — never overwrite local password
-          db.prepare(`
-            UPDATE "user" SET
-              full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-              can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
-              can_edit_records = ?, can_flag_records = ?
-            WHERE email = ?
-          `).run(
-            u.full_name || null,
-            u.role || 'user',
-            u.is_active ? 1 : 0,
-            u.hub_redirect ? 1 : 0,
-            u.can_access_connections ? 1 : 0,
-            u.can_manage_users ? 1 : 0,
-            u.can_manage_rules ? 1 : 0,
-            u.can_edit_records ? 1 : 0,
-            u.can_flag_records ? 1 : 0,
-            u.email
-          );
+          // Update role, permissions, status — never overwrite a local password the user
+          // may have changed on-site. Exception: if hub user has must_change_password = 0
+          // (they set a real password at the hub), sync that hash + clear the flag so they
+          // can log in at the site with the same credentials without being forced to reset.
+          const hubHasRealPassword = u.password_hash && u.must_change_password === 0;
+          if (hubHasRealPassword) {
+            db.prepare(`
+              UPDATE "user" SET
+                full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+                can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
+                can_edit_records = ?, can_flag_records = ?,
+                password_hash = ?, must_change_password = 0
+              WHERE email = ?
+            `).run(
+              u.full_name || null,
+              u.role || 'user',
+              u.is_active ? 1 : 0,
+              u.hub_redirect ? 1 : 0,
+              u.can_access_connections ? 1 : 0,
+              u.can_manage_users ? 1 : 0,
+              u.can_manage_rules ? 1 : 0,
+              u.can_edit_records ? 1 : 0,
+              u.can_flag_records ? 1 : 0,
+              u.password_hash,
+              u.email
+            );
+          } else {
+            db.prepare(`
+              UPDATE "user" SET
+                full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+                can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
+                can_edit_records = ?, can_flag_records = ?
+              WHERE email = ?
+            `).run(
+              u.full_name || null,
+              u.role || 'user',
+              u.is_active ? 1 : 0,
+              u.hub_redirect ? 1 : 0,
+              u.can_access_connections ? 1 : 0,
+              u.can_manage_users ? 1 : 0,
+              u.can_manage_rules ? 1 : 0,
+              u.can_edit_records ? 1 : 0,
+              u.can_flag_records ? 1 : 0,
+              u.email
+            );
+          }
           updated++;
         } else {
-          // Create new user — password set to DEFAULT_USER_PASSWORD or Cardoso@YYYY
-          // must_change_password = 1 forces reset on first login
-          const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
-          const defaultHash = await bcrypt.hash(defaultPw, 12);
+          // New user — use the hub's password hash directly if available.
+          // If hub set a custom password (must_change_password = 0), push it as-is.
+          // If hub still has the default (must_change_password = 1), use the hub hash
+          // so credentials match, but keep must_change_password = 1 to force reset.
+          let passwordHash = u.password_hash;
+          let mustChange = u.must_change_password ? 1 : 0;
+          if (!passwordHash) {
+            // Fallback: hub didn't send a hash (old hub version) — generate default
+            const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+            passwordHash = await bcrypt.hash(defaultPw, 12);
+            mustChange = 1;
+          }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
               can_access_connections, can_manage_users, can_manage_rules,
               can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
             u.role || 'user',
             u.is_active ? 1 : 0,
             u.hub_redirect ? 1 : 0,
+            mustChange,
             u.can_access_connections ? 1 : 0,
             u.can_manage_users ? 1 : 0,
             u.can_manage_rules ? 1 : 0,
             u.can_edit_records ? 1 : 0,
             u.can_flag_records ? 1 : 0,
-            defaultHash
+            passwordHash
           );
           created++;
         }
