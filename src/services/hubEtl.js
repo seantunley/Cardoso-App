@@ -73,14 +73,18 @@ function initHubTables() {
 }
 
 // --- Site registry from env ---
+// HUB_SITES is parsed lazily inside initHubSiteRegistry() to avoid ES module
+// import-hoisting race where dotenv hasn't run yet at module load time.
 let HUB_SITES = [];
-try {
-  HUB_SITES = JSON.parse(process.env.HUB_SITES || '[]');
-} catch (e) {
-  console.error('[HUB] Invalid HUB_SITES JSON:', e.message);
-}
 
 function initHubSiteRegistry() {
+  try {
+    HUB_SITES = JSON.parse(process.env.HUB_SITES || '[]');
+  } catch (e) {
+    console.error('[HUB] Invalid HUB_SITES JSON:', e.message);
+    HUB_SITES = [];
+  }
+
   const upsertSite = db.prepare(`
     INSERT INTO hub_sites (id, slug, name, url, token, status)
     VALUES (@id, @slug, @name, @url, @token, 'unknown')
