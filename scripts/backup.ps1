@@ -24,6 +24,7 @@ function Write-Log {
 }
 
 $srcDb = Join-Path $AppDir $DbFile
+$srcEnv = Join-Path $AppDir ".env"
 $backupRoot = Join-Path $AppDir $BackDir
 
 New-Item -ItemType Directory -Force -Path (Split-Path $logFile) | Out-Null
@@ -43,8 +44,21 @@ try {
     $sizeMb = [math]::Round((Get-Item $destFile).Length / 1MB, 2)
     Write-Log "OK Backup saved to $destFile ($sizeMb MB)"
 } catch {
-    Write-Log "ERROR: Copy failed - $_"
+    Write-Log "ERROR: DB copy failed - $_"
     exit 1
+}
+
+# Backup .env (site identity + secrets — required for disaster recovery)
+if (Test-Path $srcEnv) {
+    $destEnv = Join-Path $backupRoot "cardoso-$siteId-latest.env"
+    try {
+        Copy-Item -Path $srcEnv -Destination $destEnv -Force
+        Write-Log "OK .env backed up to $destEnv"
+    } catch {
+        Write-Log "WARN: .env backup failed - $_ (non-fatal)"
+    }
+} else {
+    Write-Log "WARN: .env not found at $srcEnv — skipping config backup"
 }
 
 $allBackups = Get-ChildItem -Path $backupRoot -Filter "cardoso-*.db" |

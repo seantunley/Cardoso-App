@@ -68,7 +68,7 @@ async function fetchHubBackupStatus() {
 }
 
 // ── SiteCard ───────────────────────────────────────────────────────────────
-function SiteCard({ site, hubData, onDownload, downloading }) {
+function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig }) {
   const meta  = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon  = meta.icon;
   const lb    = site.last_backup;
@@ -114,7 +114,7 @@ function SiteCard({ site, hubData, onDownload, downloading }) {
       )}
 
       {/* Actions */}
-      <div className="flex gap-2 pt-1 border-t border-white/5">
+      <div className="flex gap-2 pt-1 border-t border-white/5 flex-wrap">
         <Button
           size="sm"
           variant="outline"
@@ -124,7 +124,19 @@ function SiteCard({ site, hubData, onDownload, downloading }) {
         >
           {downloading === site.site_id
             ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />Downloading…</>
-            : <><Download className="w-3 h-3 mr-1.5" />Pull backup now</>}
+            : <><Download className="w-3 h-3 mr-1.5" />Pull DB</>}
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!site.url || downloadingConfig === site.site_id}
+          onClick={() => onDownloadConfig(site)}
+          className="text-xs h-7 px-3 border-border text-amber-400"
+          title="Download .env (site identity + secrets)"
+        >
+          {downloadingConfig === site.site_id
+            ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />Downloading…</>
+            : <><Download className="w-3 h-3 mr-1.5" />Pull .env</>}
         </Button>
       </div>
     </div>
@@ -175,6 +187,7 @@ function SummaryBar({ sites }) {
 export default function HubBackups() {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(null);
+  const [downloadingConfig, setDownloadingConfig] = useState(null);
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [togglingSync, setTogglingSync] = useState(false);
 
@@ -238,6 +251,29 @@ export default function HubBackups() {
       toast({ title: "Download failed", description: err.message, variant: "destructive" });
     } finally {
       setDownloading(null);
+    }
+  }, [toast]);
+
+  const handleDownloadConfig = useCallback(async (site) => {
+    setDownloadingConfig(site.site_id);
+    try {
+      const proxyRes = await fetch(
+        `/api/hub/proxy-config?site_id=${encodeURIComponent(site.site_id)}`,
+        { credentials: "include" }
+      );
+      if (!proxyRes.ok) throw new Error(`HTTP ${proxyRes.status}`);
+      const blob = await proxyRes.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = `cardoso-config-${site.site_id}-${new Date().toISOString().slice(0,10)}.env`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast({ title: ".env downloaded", description: site.site_name });
+    } catch (err) {
+      toast({ title: ".env download failed", description: err.message, variant: "destructive" });
+    } finally {
+      setDownloadingConfig(null);
     }
   }, [toast]);
 
@@ -317,6 +353,8 @@ export default function HubBackups() {
                       hubData={hubBackupMap[site.site_id]}
                       onDownload={handleDownload}
                       downloading={downloading}
+                      onDownloadConfig={handleDownloadConfig}
+                      downloadingConfig={downloadingConfig}
                     />
                   ))}
                 </div>

@@ -45,6 +45,28 @@ export function createBackupRouter() {
     });
   });
 
+  // GET /api/backup/config
+  // Returns the site .env file for disaster recovery. Token-protected.
+  router.get('/api/backup/config', (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
+    }
+
+    const envPath = path.resolve(process.cwd(), '.env');
+    if (!fs.existsSync(envPath)) {
+      return res.status(404).json({ error: '.env file not found' });
+    }
+
+    const filename = `cardoso-config-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0,10)}.env`;
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
+    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
+    fs.createReadStream(envPath).pipe(res);
+  });
+
   // GET /api/backup/download
   router.get('/api/backup/download', (req, res) => {
     const token = req.headers['x-reporting-token'];

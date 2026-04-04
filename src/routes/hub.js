@@ -60,6 +60,35 @@ const router = Router();
     }
   });
 
+  // GET /api/hub/proxy-config?site_id=xxx
+  // Proxies the site .env download through the hub. Admin-only.
+  router.get('/api/hub/proxy-config', requireAuth, requireAdmin, async (req, res) => {
+    const { site_id } = req.query;
+    if (!site_id) return res.status(400).json({ error: 'site_id required' });
+
+    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
+    if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const upstream = await fetch(`${site.url}/api/backup/config`, {
+        headers: { 'x-reporting-token': site.token || '' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!upstream.ok) return res.status(upstream.status).json({ error: `Site returned ${upstream.status}` });
+
+      const filename = `cardoso-config-${site.id}-${new Date().toISOString().slice(0,10)}.env`;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      const text = await upstream.text();
+      res.send(text);
+    } catch (err) {
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/backup-status
   // Polls /api/backup/status on each registered site and returns aggregated results.
   // Admin-only (session required).
