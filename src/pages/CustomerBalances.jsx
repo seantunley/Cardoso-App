@@ -1,6 +1,19 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Scale } from "lucide-react";
+import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
+
+// ── Credit analysis (shared with CustomerLookup) ─────────────────────────
+function CreditBadge({ row }) {
+  const verdict = useMemo(() => analyseInvoiceCredit([row]).verdict, [row]);
+  const meta = CREDIT_BADGE_META[verdict] || CREDIT_BADGE_META.caution;
+
+  return (
+    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}>
+      {meta.label}
+    </span>
+  );
+}
 
 const PAGE_SIZE = 50;
 
@@ -353,6 +366,7 @@ export default function CustomerBalances() {
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Invoice</th>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Receipt</th>
                     <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Outstanding Balance</th>
+                    <th className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Credit</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -390,6 +404,9 @@ export default function CustomerBalances() {
                           <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
                             R {formatAmount(amount)}
                           </span>
+                        </td>
+                        <td className="px-2 py-1 text-center">
+                          <CreditBadge row={row} />
                         </td>
                       </tr>
                     );
