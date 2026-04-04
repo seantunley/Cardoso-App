@@ -241,7 +241,7 @@ export default function CustomerBalances() {
       <div className="min-h-screen bg-background text-foreground p-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="flex items-center justify-between mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Customer Balances</h1>
               <p className="text-sm text-muted-foreground mt-0.5">{subtitleParts.join(" · ")}</p>
@@ -250,7 +250,7 @@ export default function CustomerBalances() {
               {filtered.length > 0 && (
                 <button
                   onClick={() => window.print()}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cb-no-print"
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cb-no-print min-h-[44px]"
                   title="Print or save as PDF"
                 >
                   <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -263,7 +263,7 @@ export default function CustomerBalances() {
               )}
               <button
                 onClick={() => refetch()}
-                className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
+                className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M23 4v6h-6M1 20v-6h6"/>
@@ -302,7 +302,7 @@ export default function CustomerBalances() {
 
           {/* Summary */}
           {filtered.length > 0 && (
-            <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3 flex items-center justify-between">
+            <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
               <span className="text-sm text-muted-foreground">
                 Total outstanding ({filtered.length} customer{filtered.length !== 1 ? "s" : ""}
                 {siteFilter !== "all" ? ` · ${siteFilter}` : ""})
@@ -342,7 +342,7 @@ export default function CustomerBalances() {
             </div>
           )}
           {!isLoading && !isError && filtered.length > 0 && (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">

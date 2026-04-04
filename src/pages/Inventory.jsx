@@ -138,7 +138,7 @@ export default function Inventory() {
     <div className="min-h-screen bg-background text-foreground p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex items-center justify-between mb-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-3">
           <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
               <Package className="h-5 w-5 text-muted-foreground" />
@@ -166,7 +166,7 @@ export default function Inventory() {
             <button
               onClick={exportCSV}
               disabled={rows.length === 0}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
             >
               <Download className="h-3.5 w-3.5" />
               Export CSV
@@ -174,7 +174,7 @@ export default function Inventory() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
               Refresh
@@ -186,7 +186,7 @@ export default function Inventory() {
         {/* Filter bar */}
         <div className="mb-4 rounded-xl border border-border bg-card px-3 py-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-[220px] flex-1">
+            <div className="relative min-w-0 flex-1 w-full sm:min-w-[220px]">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search item number or description…"
                 className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
@@ -280,7 +280,7 @@ export default function Inventory() {
 
 // ─── Virtualised table ────────────────────────────────────────────────────────
 const ROW_HEIGHT = 30;
-const TABLE_HEIGHT = 600;
+const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
 function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost }) {
   const parentRef = useRef(null);
@@ -307,7 +307,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <div
         ref={parentRef}
-        style={{ height: TABLE_HEIGHT, overflowY: "auto", overflowX: "auto" }}
+        style={{ height: "min(600px, calc(100vh - 260px))", overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">

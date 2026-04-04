@@ -1295,25 +1295,25 @@ export default function CustomerLookup({
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
-              <div className="flex items-center gap-3.5">
-                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "dormant" && <Clock className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+              <div className="flex items-start gap-2 sm:gap-3.5 flex-wrap sm:flex-nowrap">
+                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "dormant" && <Clock className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
                 <div className="flex-1 min-w-0">
-                  <span className="text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
+                  <span className="text-base sm:text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
                   {creditAnalysis.summary && (
-                    <p className="text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
+                    <p className="text-xs sm:text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-4 shrink-0 pr-14">
+                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-4 shrink-0 pr-10 sm:pr-14">
                   {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                    <span className={cn("text-base font-bold px-4 py-1.5 rounded-full", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
+                    <span className={cn("hidden sm:inline-flex text-base font-bold px-4 py-1.5 rounded-full", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
                       ⏱ {creditAnalysis.avgLag}d avg
                     </span>
                   )}
                   <span className={cn(
-                    "text-sm font-semibold px-3 py-1.5 rounded-full",
+                    "text-xs font-semibold px-3 py-1.5 rounded-full",
                     verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
                   )}>
                     {creditAnalysis.score}/100
@@ -1338,8 +1338,8 @@ export default function CustomerLookup({
             {/* Pinned: customer header card */}
             <div className="shrink-0 px-5 pt-4 pb-0">
             <div className="bg-card border border-border rounded-xl p-4 mb-3">
-              <div className="flex items-start gap-3">
-                <User className="h-6 w-6 text-muted-foreground shrink-0 mt-1" />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <User className="hidden sm:block h-6 w-6 text-muted-foreground shrink-0 mt-1" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
                   <div className="text-sm text-muted-foreground mt-0.5">Account #{customer?.customer_number}</div>
@@ -1357,7 +1357,7 @@ export default function CustomerLookup({
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  <p className={cn("text-3xl font-bold tabular-nums", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                  <p className={cn("text-2xl sm:text-3xl font-bold tabular-nums", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
                     {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
                   </p>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Outstanding</p>
@@ -1411,7 +1411,7 @@ export default function CustomerLookup({
             )}
 
             {/* Invoices + Receipts side by side */}
-            <div className="grid grid-cols-2 gap-3 items-start">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
               <div>{renderGroupedTable({
                 title: "Invoices",
                 icon: Flag,
@@ -1450,7 +1450,7 @@ export default function CustomerLookup({
                     onClick={() => setPendingFlagColor(color)}
                     disabled={!canModifyFlag() || isUpdatingFlag}
                     className={cn(
-                      "rounded-full px-4 py-1.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] justify-center",
+                      "rounded-full px-4 py-2.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] min-h-[44px] justify-center",
                       isActive ? styles.active : styles.base,
                       isCurrent && !isActive && "ring-1 ring-white/30"
                     )}

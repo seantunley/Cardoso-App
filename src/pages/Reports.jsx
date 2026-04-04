@@ -333,8 +333,8 @@ export default function Reports() {
             </p>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={250}>
-              <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
+            <ResponsiveContainer width="100%" minWidth={0} height={250}>
+              <BarChart data={chartData} margin={{ top: 5, right: 10, left: 60, bottom: 5 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-color)" />
                 <XAxis
                   dataKey="name"
@@ -408,7 +408,7 @@ export default function Reports() {
                         : {}
                     }
                     className={cn(
-                      "flex h-7 items-center gap-1.5 px-2.5 text-xs",
+                      "flex h-10 items-center gap-1.5 px-3 text-xs",
                       flagFilters.includes(flag) &&
                         flag === "red" &&
                         "bg-red-500 text-white hover:bg-red-600",

@@ -145,9 +145,9 @@ export default function AuditLogTable({ logs = [] }) {
   };
 
   return (
-    <Card className="border-gray-700 bg-gray-900 text-white">
+    <Card className="border-border bg-card text-foreground">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-white">
+        <CardTitle className="flex items-center gap-2 text-foreground">
           <Shield className="h-5 w-5" />
           Audit Log
         </CardTitle>
@@ -156,25 +156,71 @@ export default function AuditLogTable({ logs = [] }) {
       <CardContent>
         <div className="space-y-4">
           <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search by user, resource, action..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="border-gray-700 bg-gray-950 pl-10 text-white placeholder:text-gray-500"
+              className="border-border bg-muted pl-10 text-foreground placeholder:text-muted-foreground"
             />
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile card list — visible only on small screens */}
+          <div className="block sm:hidden space-y-2">
+            {filteredAndSorted.map((log) => {
+              const isExpanded = !!expandedRows[log.id];
+              const isFlagUpdate = log.action_type === "update_flag";
+              const flagSummary = isFlagUpdate ? renderFlagSummary(log) : null;
+              return (
+                <div key={`m-${log.id}`} className="rounded-lg border border-border bg-muted/20 p-3 text-sm space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium text-foreground">{log.user_name || log.user_email || "Unknown"}</div>
+                      <div className="text-xs text-muted-foreground">{formatAppDate(log.created_date)}</div>
+                    </div>
+                    <Badge className={cn("text-xs shrink-0", actionColors[log.action_type] || "bg-muted text-muted-foreground")}>
+                      {actionLabels[log.action_type] || log.action_type}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {log.resource_type && <span className="font-medium text-foreground">{log.resource_type}</span>}
+                    {log.resource_name && <span className="ml-1">{log.resource_name}</span>}
+                  </div>
+                  {isFlagUpdate && flagSummary?.colorChange && (
+                    <div className="text-xs text-orange-300 font-medium">{flagSummary.colorChange}</div>
+                  )}
+                  {log.action_details && (
+                    <div className="text-xs text-muted-foreground truncate">{log.action_details}</div>
+                  )}
+                  <button
+                    onClick={() => toggleExpanded(log.id)}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    {isExpanded ? "Hide details" : "Show details"}
+                  </button>
+                  {isExpanded && (
+                    <div className="rounded-lg border border-border bg-muted/50 p-2 text-xs text-muted-foreground">
+                      <pre className="whitespace-pre-wrap break-words text-[11px]">
+                        {typeof log.changes === "string" ? log.changes : JSON.stringify(log.changes, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table — hidden on small screens */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-gray-700">
+                <tr className="border-b border-border">
                   <th className="px-4 py-3 text-left font-semibold">
                     <Button
                       variant="ghost"
                       size="sm"
                       onClick={() => handleSort("created_date")}
-                      className="flex h-8 items-center gap-1 text-gray-200 hover:bg-gray-800 hover:text-white"
+                      className="flex h-8 items-center gap-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
                       Date
                       <SortIcon column="created_date" />
@@ -186,7 +232,7 @@ export default function AuditLogTable({ logs = [] }) {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleSort("user_email")}
-                      className="flex h-8 items-center gap-1 text-gray-200 hover:bg-gray-800 hover:text-white"
+                      className="flex h-8 items-center gap-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
                       User
                       <SortIcon column="user_email" />
@@ -198,16 +244,16 @@ export default function AuditLogTable({ logs = [] }) {
                       variant="ghost"
                       size="sm"
                       onClick={() => handleSort("action_type")}
-                      className="flex h-8 items-center gap-1 text-gray-200 hover:bg-gray-800 hover:text-white"
+                      className="flex h-8 items-center gap-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                     >
                       Action
                       <SortIcon column="action_type" />
                     </Button>
                   </th>
 
-                  <th className="px-4 py-3 text-left font-semibold text-gray-200">Resource</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-200">Details</th>
-                  <th className="px-4 py-3 text-center font-semibold text-gray-200">Status</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Resource</th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Details</th>
+                  <th className="px-4 py-3 text-center font-semibold text-muted-foreground">Status</th>
                 </tr>
               </thead>
 
@@ -220,23 +266,23 @@ export default function AuditLogTable({ logs = [] }) {
                   return (
                     <tr
                       key={log.id}
-                      className="border-b border-gray-800 transition-colors hover:bg-gray-800/60"
+                      className="border-b border-border transition-colors hover:bg-muted/30"
                     >
-                      <td className="px-4 py-3 text-gray-300 align-top">
+                      <td className="px-4 py-3 text-muted-foreground align-top">
                         <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-gray-500" />
+                          <Clock className="h-4 w-4 text-muted-foreground/50" />
                           {formatAppDate(log.created_date)}
                         </div>
                       </td>
 
                       <td className="px-4 py-3 align-top">
                         <div className="flex items-start gap-2">
-                          <User className="mt-0.5 h-4 w-4 text-gray-500" />
+                          <User className="mt-0.5 h-4 w-4 text-muted-foreground/50" />
                           <div>
-                            <div className="font-medium text-white">
+                            <div className="font-medium text-foreground">
                               {log.user_name || "Unknown"}
                             </div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-muted-foreground">
                               {log.user_email || "-"}
                             </div>
                           </div>
@@ -247,7 +293,7 @@ export default function AuditLogTable({ logs = [] }) {
                         <Badge
                           className={cn(
                             "text-xs",
-                            actionColors[log.action_type] || "bg-gray-100 text-gray-800"
+                            actionColors[log.action_type] || "bg-muted text-muted-foreground"
                           )}
                         >
                           {actionLabels[log.action_type] || log.action_type}
@@ -255,10 +301,10 @@ export default function AuditLogTable({ logs = [] }) {
                       </td>
 
                       <td className="px-4 py-3 align-top">
-                        <div className="font-medium text-white">
+                        <div className="font-medium text-foreground">
                           {log.resource_type || "-"}
                         </div>
-                        <div className="text-xs text-gray-400">
+                        <div className="text-xs text-muted-foreground">
                           {log.resource_name || "-"}
                         </div>
                       </td>
@@ -271,24 +317,24 @@ export default function AuditLogTable({ logs = [] }) {
                                 {flagSummary.colorChange}
                               </div>
                             ) : (
-                              <div className="text-gray-300">
+                              <div className="text-muted-foreground">
                                 {flagSummary.fallback}
                               </div>
                             )}
 
                             {flagSummary.oldReason !== flagSummary.newReason && (
-                              <div className="text-xs text-gray-300">
-                                <span className="text-gray-500">Reason:</span>{" "}
+                              <div className="text-xs text-muted-foreground">
+                                <span className="text-muted-foreground">Reason:</span>{" "}
                                 {flagSummary.oldReason ? (
                                   <>
                                     <span className="text-red-300">"{flagSummary.oldReason}"</span>
-                                    <span className="mx-1 text-gray-500">→</span>
+                                    <span className="mx-1 text-muted-foreground">→</span>
                                   </>
                                 ) : null}
                                 {flagSummary.newReason ? (
                                   <span className="text-green-300">"{flagSummary.newReason}"</span>
                                 ) : (
-                                  <span className="text-gray-500">cleared</span>
+                                  <span className="text-muted-foreground">cleared</span>
                                 )}
                               </div>
                             )}
@@ -301,11 +347,11 @@ export default function AuditLogTable({ logs = [] }) {
                             </button>
 
                             {isExpanded && (
-                              <div className="rounded-lg border border-gray-700 bg-gray-950 p-3 text-xs text-gray-300">
-                                <div className="mb-2 text-gray-400">
+                              <div className="rounded-lg border border-border bg-muted/50 p-3 text-xs text-muted-foreground">
+                                <div className="mb-2 text-muted-foreground">
                                   {log.action_details || "-"}
                                 </div>
-                                <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-400">
+                                <pre className="whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
                                   {typeof log.changes === "string"
                                     ? log.changes
                                     : JSON.stringify(log.changes, null, 2)}
@@ -314,7 +360,7 @@ export default function AuditLogTable({ logs = [] }) {
                             )}
                           </div>
                         ) : (
-                          <div className="max-w-xs text-gray-300">
+                          <div className="max-w-xs text-muted-foreground">
                             {log.action_details || "-"}
                           </div>
                         )}
@@ -337,9 +383,10 @@ export default function AuditLogTable({ logs = [] }) {
               </tbody>
             </table>
           </div>
+          </div>{/* end desktop table wrapper */}
 
           {filteredAndSorted.length === 0 && (
-            <div className="py-8 text-center text-gray-500">
+            <div className="py-8 text-center text-muted-foreground">
               {logs.length === 0 ? "No audit logs yet" : "No results found"}
             </div>
           )}

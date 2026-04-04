@@ -29,7 +29,7 @@ export default function HubSyncLog() {
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Sync Log</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Last 50 hub sync events</p>
@@ -50,7 +50,7 @@ export default function HubSyncLog() {
           <p className="text-sm">No sync events yet.</p>
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="rounded-xl border border-border bg-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40">
