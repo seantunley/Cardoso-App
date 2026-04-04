@@ -641,7 +641,22 @@ function UpdateTab() {
       const d = await r.json();
       if (d.success || d.message?.toLowerCase().includes("download")) {
         setStatus("updating");
-        toast.success("Update downloading — service will restart automatically.");
+        toast.success("Update downloading — the page will reload automatically once ready.");
+        // Poll until the version changes, then reload
+        const targetVersion = info?.latestVersion;
+        const poll = async () => {
+          try {
+            const pr = await fetch("/api/app-version-status", { credentials: "include" });
+            if (!pr.ok) throw new Error("not ready");
+            const pd = await pr.json();
+            if (pd.currentVersion && pd.currentVersion === targetVersion) {
+              window.location.reload();
+              return;
+            }
+          } catch { /* service still restarting */ }
+          setTimeout(poll, 4000);
+        };
+        setTimeout(poll, 8000); // give it 8s before first check
       } else {
         setStatus("error");
         toast.error(d.error || "Update failed.");
