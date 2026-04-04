@@ -39,6 +39,7 @@ function initSchema(db) {
       age_7_days TEXT,
       age_14_days TEXT,
       age_21_days TEXT,
+      outstanding_balance TEXT,
       source_id TEXT,
       source_table TEXT,
       data TEXT,
@@ -52,12 +53,16 @@ function initSchema(db) {
       last_unpaid_invoice_2_amount TEXT,
       last_unpaid_invoice_3 TEXT,
       last_unpaid_invoice_3_amount TEXT,
+      unpaid_invoices TEXT,
+      receipts TEXT,
       flag_color TEXT CHECK(flag_color IN ('none', 'red', 'green', 'orange')) DEFAULT 'none',
       flag_reason TEXT,
       flag_created_by TEXT,
+      flag_source TEXT DEFAULT NULL,
       note TEXT,
       synced_at TEXT,
       last_checked TEXT,
+      terms TEXT,
       auto_flagged INTEGER DEFAULT 0
     );
 
@@ -182,13 +187,14 @@ function initSchema(db) {
   db.exec(`CREATE INDEX IF NOT EXISTS idx_auditlog_created_date ON auditlog(created_date)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_login_log_logged_in_at ON login_log(logged_in_at)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_syncrun_connection_id ON syncrun(connection_id)`);
-  db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
-
   // ==================== FLEXIBLE CUSTOM FIELD CONFIG TABLE ====================
   ensureFlexibleCustomFieldConfigTable(db);
 
   // ==================== RUN MIGRATIONS ====================
   runMigrations(db);
+
+  // Indexes on columns that may have been added by migrations — create after migrations run
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord(auto_flagged)`);
 
   // ==================== HUB TABLES (after migrations, so tables exist before any prepared statements) ====================
   if (process.env.HUB_MODE === 'true') {

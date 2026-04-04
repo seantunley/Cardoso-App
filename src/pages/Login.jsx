@@ -33,6 +33,14 @@ export default function Login() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [localError, setLocalError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [appVersion, setAppVersion] = useState("");
+
+  useEffect(() => {
+    fetch("/api/app-info")
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.version) setAppVersion(d.version); })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!isLoadingAuth && isAuthenticated) {
@@ -235,7 +243,11 @@ export default function Login() {
           </form>
         </div>
 
-        <p className="mt-6 text-xs text-slate-600 text-center lg:hidden">© 2026 Cardoso Cigarettes</p>
+        {appVersion && (
+          <p className="mt-4 text-[11px] text-slate-600 text-center">v{appVersion}</p>
+        )}
+
+        <p className="mt-2 text-xs text-slate-600 text-center lg:hidden">© 2026 Cardoso Cigarettes</p>
       </div>
     </div>
   );

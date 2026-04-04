@@ -1,4 +1,4 @@
-; Cardoso Customer Manager — Windows Installer
+; Cardoso Customer Manager - Windows Installer
 ; Requires: NSIS 3.x, Node.js bundled in build/node/, NSSM in build/nssm/
 ; Build via: makensis windows/installer.nsi
 
@@ -72,6 +72,18 @@ Function ConfigPageLeave
 FunctionEnd
 
 Section "Install" SecInstall
+  ; Ensure silent-mode installs get sane defaults (custom pages are skipped with /S)
+  ${If} "$PortValue" == ""
+    StrCpy $PortValue "3001"
+  ${EndIf}
+  ${If} "$SiteNameValue" == ""
+    StrCpy $SiteNameValue "Cardoso Site"
+  ${EndIf}
+
+  ; Stop existing service before copying files (prevents file-lock failures on upgrade)
+  ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
+  Sleep 6000
+
   SetOutPath "$INSTDIR"
 
   ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
@@ -103,11 +115,11 @@ Section "Install" SecInstall
   env_exists:
 
   ; Install Windows service via NSSM
-  ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "server.js"' $0
+  ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "-r dotenv/config server.js"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppDirectory "$INSTDIR"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppEnvironmentExtra "NODE_ENV=production"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} DisplayName "${APP_NAME}"' $0
-  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Description "Cardoso Customer Manager — runs as background service"' $0
+  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Description "Cardoso Customer Manager - runs as background service"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Start SERVICE_AUTO_START' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppStdout "$INSTDIR\logs\service.log"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppStderr "$INSTDIR\logs\service-error.log"' $0
@@ -150,6 +162,7 @@ Section "Uninstall"
   Delete "$INSTDIR\package.json"
   Delete "$INSTDIR\package-lock.json"
   Delete "$INSTDIR\${UNINSTALLER}"
+  RMDir /r "$INSTDIR\node_modules"
   Delete "$DESKTOP\Cardoso.lnk"
 
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${SERVICE_NAME}"

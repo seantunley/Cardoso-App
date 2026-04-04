@@ -192,7 +192,7 @@ export default function CustomerSearch() {
               triggerLookup={customerNumberToLookup}
               onLookupComplete={() => setCustomerNumberToLookup("")}
               selectedConnection={selectedConnection}
-              onFlagChange={() => queryClient.invalidateQueries({ queryKey: ["records"] })}
+              onFlagChange={() => { queryClient.invalidateQueries({ queryKey: ["records"] }); queryClient.invalidateQueries({ queryKey: ["kpis"] }); }}
             />
           </div>
 

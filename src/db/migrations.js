@@ -215,7 +215,7 @@ function buildMigrations(db) {
       version: 8,
       name: 'hub_schema_columns',
       up() {
-        if (process.env.HUB_MODE !== 'true') return;
+        // No HUB_MODE gate — use table-existence checks so non-hub → hub upgrades also get the columns
         const hubInventoryExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
         if (hubInventoryExists) {
           ensureColumn(db, 'hub_inventory', 'stocking_uom', 'TEXT');
@@ -272,6 +272,76 @@ function buildMigrations(db) {
         }
       },
     },
+    {
+      version: 12,
+      name: 'inventoryrecord_missing_columns',
+      up() {
+        // Sites upgraded from v2026.3.1 (monolithic server.js) may have had v4 recorded
+        // before stocking_uom/commodity/inventory_value were added to it.
+        // This migration ensures those columns exist unconditionally.
+        ensureColumn(db, 'inventoryrecord', 'stocking_uom', 'TEXT');
+        ensureColumn(db, 'inventoryrecord', 'commodity', 'TEXT');
+        ensureColumn(db, 'inventoryrecord', 'inventory_value', 'TEXT');
+      },
+    },
+    {
+      version: 13,
+      name: 'hub_sites_token_force',
+      up() {
+        // Migration v10 added hub_sites.token but may have been recorded before
+        // the column was actually present (schema drift from old server.js).
+        // This migration unconditionally ensures the column exists on any install
+        // where hub_sites exists, regardless of prior migration history.
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          ensureColumn(db, 'hub_sites', 'token', 'TEXT');
+        }
+      },
+    },
+
+    {
+      version: 14,
+      name: 'force_add_missing_columns',
+      up() {
+        // Force-add columns that may have been silently missed on older installs.
+        // Uses raw ALTER TABLE with try/catch instead of ensureColumn so it always
+        // attempts the add regardless of migration history.
+        const forceAdd = (table, col, def) => {
+          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); } catch (_) {}
+        };
+        forceAdd('inventoryrecord', 'stocking_uom', 'TEXT');
+        forceAdd('inventoryrecord', 'commodity', 'TEXT');
+        forceAdd('inventoryrecord', 'inventory_value', 'TEXT');
+        const hubInvExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
+        if (hubInvExists) {
+          forceAdd('hub_inventory', 'stocking_uom', 'TEXT');
+          forceAdd('hub_inventory', 'commodity', 'TEXT');
+          forceAdd('hub_inventory', 'inventory_value', 'TEXT');
+        }
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          forceAdd('hub_sites', 'token', 'TEXT');
+        }
+      },
+    },
+    {
+      version: 15,
+      name: 'datarecord_complete_schema',
+      up() {
+        // Force-add all columns that should exist on datarecord but may be missing
+        // on installs that created the table before these columns were in CREATE TABLE.
+        // safe to re-run — ALTER TABLE fails silently via try/catch
+        const forceAdd = (table, col, def) => {
+          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); } catch (_) {}
+        };
+        forceAdd('datarecord', 'outstanding_balance', 'TEXT');
+        forceAdd('datarecord', 'unpaid_invoices', 'TEXT');
+        forceAdd('datarecord', 'receipts', 'TEXT');
+        forceAdd('datarecord', 'flag_source', 'TEXT DEFAULT NULL');
+        forceAdd('datarecord', 'terms', 'TEXT');
+      },
+    },
+
   ];
 }
 

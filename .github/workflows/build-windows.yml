@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-2022  # pinned - windows-latest transitioning to 2025, breaks native module ABI
     permissions:
       contents: write
 
@@ -39,9 +39,13 @@ jobs:
           # Copy node_modules WITH pre-compiled native binaries (built on this windows runner)
           Copy-Item -Recurse node_modules windows/build/app/node_modules
           Write-Host "Staged app. node_modules size: $((Get-ChildItem windows/build/app/node_modules -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB) MB"
-          # Confirm native binaries are present
-          Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" | ForEach-Object { Write-Host "BSQ3: $($_.FullName)" }
-          Get-ChildItem windows/build/app/node_modules/sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "SQ3: $($_.FullName)" }
+          # Confirm native binaries are present - fail build if missing
+          $bsq3 = Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          $bsq3 | ForEach-Object { Write-Host "BSQ3: $($_.FullName)" }
+          if (-not $bsq3) { throw "better-sqlite3 native binary missing - build will not work" }
+          $sq3 = Get-ChildItem windows/build/app/node_modules/sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          $sq3 | ForEach-Object { Write-Host "SQ3 (session store): $($_.FullName)" }
+          if (-not $sq3) { throw "sqlite3 native binary missing - session store (logins) will not work" }
         shell: powershell
 
       - name: Install NSIS
