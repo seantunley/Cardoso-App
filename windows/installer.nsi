@@ -97,8 +97,6 @@ Section "Install" SecInstall
   SetOutPath "$INSTDIR\nssm"
   File ".\build\nssm\nssm.exe"
 
-  SetOutPath "$INSTDIR\scripts"
-  File ".\scripts\backup.ps1"
 
   ; Create logs dir
   CreateDirectory "$INSTDIR\logs"
