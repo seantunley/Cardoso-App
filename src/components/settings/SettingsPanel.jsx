@@ -608,6 +608,110 @@ function AutoFlagTab() {
 
 // ─── Main SettingsPanel ──────────────────────────────────────────────────────
 
+
+// ─── Update Tab ─────────────────────────────────────────────────────────────
+function UpdateTab() {
+  const [status, setStatus] = useState(null);
+  const [info, setInfo] = useState(null);
+
+  useEffect(() => {
+    fetch("/api/app-version-status", { credentials: "include" })
+      .then(r => r.json())
+      .then(d => setInfo(d))
+      .catch(() => {});
+  }, []);
+
+  const handleCheck = async () => {
+    setStatus("checking");
+    try {
+      const r = await fetch("/api/app-version-status", { credentials: "include" });
+      const d = await r.json();
+      setInfo(d);
+      setStatus(d.updateAvailable ? "update-available" : "up-to-date");
+    } catch {
+      setStatus("error");
+    }
+  };
+
+  const handleUpdate = async () => {
+    setStatus("updating");
+    try {
+      const r = await fetch("/api/app-update-trigger", { method: "POST", credentials: "include" });
+      const d = await r.json();
+      if (d.success || d.message?.toLowerCase().includes("download")) {
+        setStatus("updating");
+        toast.success("Update downloading — service will restart automatically.");
+      } else {
+        setStatus("error");
+        toast.error(d.error || "Update failed.");
+      }
+    } catch {
+      setStatus("error");
+      toast.error("Update request failed.");
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-lg">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Application Version</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Current: <span className="font-mono font-medium">{info?.currentVersion ?? "—"}</span>
+          {info?.latestVersion && info.latestVersion !== info.currentVersion && (
+            <span className="ml-3 text-amber-500 font-medium">Latest: {info.latestVersion}</span>
+          )}
+        </p>
+
+        {status === null && (
+          <Button variant="outline" size="sm" onClick={handleCheck}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Check for updates
+          </Button>
+        )}
+        {status === "checking" && (
+          <Button variant="outline" size="sm" disabled>
+            <RefreshCw className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Checking...
+          </Button>
+        )}
+        {status === "up-to-date" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-green-600">
+              <CheckCircle2 className="h-4 w-4" /> You are on the latest version.
+            </div>
+            <Button variant="outline" size="sm" onClick={handleCheck}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Check again
+            </Button>
+          </div>
+        )}
+        {status === "update-available" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-amber-600">
+              <Download className="h-4 w-4" /> Version {info?.latestVersion} is available.
+            </div>
+            <Button size="sm" onClick={handleUpdate}>
+              <Download className="h-3.5 w-3.5 mr-1.5" /> Install update
+            </Button>
+          </div>
+        )}
+        {status === "updating" && (
+          <div className="flex items-center gap-2 text-sm text-blue-600">
+            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Downloading update — service will restart shortly...
+          </div>
+        )}
+        {status === "error" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4" /> Something went wrong. Check server logs.
+            </div>
+            <Button variant="outline" size="sm" onClick={() => { setStatus(null); }}>
+              Try again
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsPanel({ open, onClose, hubMode }) {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const isAdmin = currentUser?.role === "admin";
@@ -621,6 +725,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
+    isAdmin && { id: "update", label: "Updates" },
     hubMode && { id: "synclog", label: "Sync Log" },
   ].filter(Boolean);
 
@@ -653,6 +758,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "audit"    && <AuditTab />}
                 {t.id === "synclog"       && <SyncLogTab />}
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
+                {t.id === "update"       && <UpdateTab />}
               </TabsContent>
             ))}
           </div>
