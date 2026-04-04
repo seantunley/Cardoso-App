@@ -252,8 +252,9 @@ const router = Router();
     try {
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
-               can_access_connections, can_manage_users, can_manage_rules,
-               can_edit_records, can_flag_records, created_date
+               can_access_customer_search, can_access_customer_balances, can_access_inventory,
+               can_access_records, can_access_reports, can_access_connections, can_access_settings,
+               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
         FROM "user" ORDER BY role DESC, full_name ASC
       `).all();
       const sitesByEmail = {};
@@ -266,7 +267,13 @@ const router = Router();
         ...u,
         is_active: boolFromRow(u.is_active, true),
         hub_redirect: boolFromRow(u.hub_redirect, false),
+        can_access_customer_search: boolFromRow(u.can_access_customer_search, true),
+        can_access_customer_balances: boolFromRow(u.can_access_customer_balances, true),
+        can_access_inventory: boolFromRow(u.can_access_inventory, true),
+        can_access_records: boolFromRow(u.can_access_records, false),
+        can_access_reports: boolFromRow(u.can_access_reports, false),
         can_access_connections: boolFromRow(u.can_access_connections, false),
+        can_access_settings: boolFromRow(u.can_access_settings, false),
         can_manage_users: boolFromRow(u.can_manage_users, false),
         can_manage_rules: boolFromRow(u.can_manage_rules, false),
         can_edit_records: boolFromRow(u.can_edit_records, true),
@@ -287,8 +294,9 @@ const router = Router();
 
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
-             can_access_connections, can_manage_users, can_manage_rules,
-             can_edit_records, can_flag_records,
+             can_access_customer_search, can_access_customer_balances, can_access_inventory,
+             can_access_records, can_access_reports, can_access_connections, can_access_settings,
+             can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
              password_hash, must_change_password
       FROM "user" WHERE id IN (${user_ids.map(() => '?').join(',')})
     `).all(...user_ids);
@@ -395,8 +403,9 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
-                can_edit_records = ?, can_flag_records = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
+                can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
                 password_hash = ?, must_change_password = 0
               WHERE email = ?
             `).run(
@@ -404,7 +413,13 @@ export function createReceiveUsersRouter() {
               u.role || 'user',
               u.is_active ? 1 : 0,
               u.hub_redirect ? 1 : 0,
+              u.can_access_customer_search !== false ? 1 : 0,
+              u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_records ? 1 : 0,
+              u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
+              u.can_access_settings ? 1 : 0,
               u.can_manage_users ? 1 : 0,
               u.can_manage_rules ? 1 : 0,
               u.can_edit_records ? 1 : 0,
@@ -416,15 +431,22 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
-                can_edit_records = ?, can_flag_records = ?
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
+                can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
               WHERE email = ?
             `).run(
               u.full_name || null,
               u.role || 'user',
               u.is_active ? 1 : 0,
               u.hub_redirect ? 1 : 0,
+              u.can_access_customer_search !== false ? 1 : 0,
+              u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_records ? 1 : 0,
+              u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
+              u.can_access_settings ? 1 : 0,
               u.can_manage_users ? 1 : 0,
               u.can_manage_rules ? 1 : 0,
               u.can_edit_records ? 1 : 0,
@@ -448,9 +470,10 @@ export function createReceiveUsersRouter() {
           }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
-              can_access_connections, can_manage_users, can_manage_rules,
-              can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              can_access_customer_search, can_access_customer_balances, can_access_inventory,
+              can_access_records, can_access_reports, can_access_connections, can_access_settings,
+              can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -458,7 +481,13 @@ export function createReceiveUsersRouter() {
             u.is_active ? 1 : 0,
             u.hub_redirect ? 1 : 0,
             mustChange,
+            u.can_access_customer_search !== false ? 1 : 0,
+            u.can_access_customer_balances !== false ? 1 : 0,
+            u.can_access_inventory !== false ? 1 : 0,
+            u.can_access_records ? 1 : 0,
+            u.can_access_reports ? 1 : 0,
             u.can_access_connections ? 1 : 0,
+            u.can_access_settings ? 1 : 0,
             u.can_manage_users ? 1 : 0,
             u.can_manage_rules ? 1 : 0,
             u.can_edit_records ? 1 : 0,
