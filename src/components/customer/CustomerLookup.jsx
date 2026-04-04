@@ -976,10 +976,10 @@ export default function CustomerLookup({
       });
     const analysis = analyseInvoiceCredit(allAccountRecords, flagHistory);
 
-    // User-set red flag is a hard override — no analysis can approve a manually flagged customer.
+    // User-set flags are hard overrides — no analysis can outrank a human decision.
     // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
-    const isManualRedFlag =
-      customer.flag_color === "red" && !customer.auto_flagged;
+    const isManualRedFlag    = customer.flag_color === "red"    && !customer.auto_flagged;
+    const isManualOrangeFlag = customer.flag_color === "orange" && !customer.auto_flagged;
 
     if (isManualRedFlag && analysis.verdict !== "hold") {
       return {
@@ -989,6 +989,19 @@ export default function CustomerLookup({
         summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
         factors: [
           { type: "block", text: "Customer is manually flagged red — staff review required before invoicing." },
+          ...analysis.factors,
+        ],
+      };
+    }
+
+    if (isManualOrangeFlag && analysis.verdict === "approve") {
+      return {
+        ...analysis,
+        verdict: "caution",
+        title: "Proceed with Caution — Manually Flagged",
+        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        factors: [
+          { type: "warn", text: "Customer is manually flagged orange — staff review recommended before invoicing." },
           ...analysis.factors,
         ],
       };
