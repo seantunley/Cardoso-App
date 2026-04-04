@@ -92,11 +92,10 @@ const getUserById = createGetUserById(stmts);
 const { requireAuth, requireAdmin, requirePermission, requireSelfOrAdmin, checkTableAccess } = createAuthMiddleware({ getUserById, sanitizeUser });
 
 app.use(createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }));
-app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
-app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
-app.use(createReportingRouter({ requireAuth }));
 app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createBackupRouter());
+app.use(createReportingRouter({ requireAuth }));
+app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
@@ -106,6 +105,8 @@ if (process.env.HUB_MODE === 'true') {
 } else {
   app.use(createNonHubFallbackRouter());
 }
+
+app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
 
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
