@@ -7,6 +7,8 @@
 
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { readdirSync, statSync } from 'fs';
+import path from 'path';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
@@ -149,8 +151,6 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   // Returns count and latest timestamp of backups stored on the hub (database/hub-backups/<site_id>/).
   router.get('/api/hub/hub-backup-status', requireAuth, requireAdmin, (req, res) => {
     try {
-      const { readdirSync, statSync } = require('fs');
-      const path = require('path');
       const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
       // Guard: hub_sites table may not exist on some installs
       let sites = [];
@@ -158,14 +158,39 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       const results = sites.map((site) => {
         const dir = path.join(baseDir, site.id);
         try {
-          const files = readdirSync(dir).filter(f => f.endsWith('.db'));
-          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+          const files = readdirSync(dir).filter((file) => file.endsWith('.db') || file.endsWith('.db.corrupt'));
+          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
           const sorted = files
-            .map(f => { const s = statSync(path.join(dir, f)); return { mtime: s.mtimeMs, size: s.size }; })
+            .map((file) => {
+              const stats = statSync(path.join(dir, file));
+              return { file, mtime: stats.mtimeMs, size: stats.size };
+            })
             .sort((a, b) => b.mtime - a.mtime);
-          return { site_id: site.id, hub_backup_count: files.length, hub_last_backup: new Date(sorted[0].mtime).toISOString(), hub_last_size: sorted[0].size };
+
+          let integrity = 'unchecked';
+          try {
+            const integrityRow = db.prepare(`
+              SELECT result
+              FROM hub_backup_integrity
+              WHERE site_id = ? AND filename = ?
+              ORDER BY id DESC
+              LIMIT 1
+            `).get(site.id, sorted[0].file);
+            if (integrityRow?.result) {
+              integrity = integrityRow.result === 'ok' ? 'ok' : 'corrupt';
+            }
+          } catch (_) { /* table not ready */ }
+
+          return {
+            site_id: site.id,
+            hub_backup_count: files.length,
+            hub_last_backup: new Date(sorted[0].mtime).toISOString(),
+            hub_last_size: sorted[0].size,
+            hub_last_filename: sorted[0].file,
+            integrity,
+          };
         } catch {
-          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
         }
       });
       res.json({ sites: results });

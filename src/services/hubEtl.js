@@ -6,7 +6,52 @@
  */
 
 import db from '../db/index.js';
+import BetterSqlite3 from 'better-sqlite3';
+import { mkdirSync, writeFileSync, renameSync } from 'fs';
+import path from 'path';
 import { buildStatements } from '../db/statements.js';
+
+function checkBackupIntegrity(siteId, filePath) {
+  let backupDb = null;
+  let finalPath = filePath;
+  let resultText = 'unchecked';
+
+  try {
+    backupDb = new BetterSqlite3(filePath, { readonly: true, fileMustExist: true });
+    const rows = backupDb.prepare('PRAGMA integrity_check').all();
+    const values = rows.map((row) => String(Object.values(row)[0] ?? '').trim()).filter(Boolean);
+    const ok = values.length > 0 && values.every((value) => value.toLowerCase() === 'ok');
+    resultText = ok ? 'ok' : JSON.stringify(values);
+
+    if (!ok) {
+      finalPath = `${filePath}.corrupt`;
+      renameSync(filePath, finalPath);
+      console.warn(`[HUB BACKUP] ${siteId}: integrity check failed, renamed to ${path.basename(finalPath)}`);
+    }
+  } catch (err) {
+    resultText = err.message || 'integrity_check_failed';
+    try {
+      finalPath = `${filePath}.corrupt`;
+      renameSync(filePath, finalPath);
+    } catch (_) {
+      finalPath = filePath;
+    }
+    console.warn(`[HUB BACKUP] ${siteId}: integrity check error: ${resultText}`);
+  } finally {
+    try { backupDb?.close(); } catch (_) {}
+  }
+
+  try {
+    db.prepare(`
+      INSERT INTO hub_backup_integrity (site_id, filename, result)
+      VALUES (?, ?, ?)
+    `).run(siteId, path.basename(finalPath), resultText);
+  } catch (err) {
+    console.warn(`[HUB BACKUP] ${siteId}: failed to record integrity result: ${err.message}`);
+  }
+
+  return { finalPath, integrity: resultText === 'ok' ? 'ok' : 'corrupt' };
+}
 
 // --- Hub table creation (only called when HUB_MODE === 'true') ---
 function initHubTables() {
@@ -333,8 +378,6 @@ async function runHubBackupPull() {
   }
   const sites = stmts.hubSitesForBackup.all();
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
-  const { mkdirSync, writeFileSync } = await import('fs');
-  const pathMod = await import('path');
   await Promise.allSettled(sites.map(async (site) => {
     try {
       const controller = new AbortController();
@@ -346,12 +389,13 @@ async function runHubBackupPull() {
       clearTimeout(hardTimeout);
       if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
       const buf = Buffer.from(await upstream.arrayBuffer());
-      const dir = pathMod.join(process.cwd(), 'database', 'hub-backups', site.id);
+      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
       mkdirSync(dir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const file = pathMod.join(dir, `cardoso-${site.id}-${ts}.db`);
+      const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
       writeFileSync(file, buf);
-      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${file}`);
+      const integrity = checkBackupIntegrity(site.id, file);
+      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
     } catch (err) {
       console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
     }
