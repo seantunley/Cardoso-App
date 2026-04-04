@@ -237,6 +237,19 @@ export function createReportingRouter({ requireAuth }) {
     });
   });
 
+  // GET /api/speedtest/results — last 30 speed test results
+  router.get('/api/speedtest/results', requireReportingToken, (req, res) => {
+    try {
+      const results = db.prepare(
+        `SELECT id, timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location, created_at
+         FROM site_speedtest ORDER BY timestamp DESC LIMIT 30`
+      ).all();
+      res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/reporting/inventory?offset=0&limit=1000
   router.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);

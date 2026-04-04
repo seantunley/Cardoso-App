@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
@@ -234,6 +234,41 @@ const router = Router();
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
       syncAllSites().catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/speedtest — returns speedtest results, optional ?site=slug filter
+  router.get('/api/hub/speedtest', requireAuth, (req, res) => {
+    const { site } = req.query;
+    try {
+      let rows;
+      if (site) {
+        rows = db.prepare('SELECT * FROM hub_speedtest WHERE site_slug = ? ORDER BY site_slug, timestamp DESC').all(site);
+      } else {
+        rows = db.prepare('SELECT * FROM hub_speedtest ORDER BY site_slug, timestamp DESC').all();
+      }
+      res.json({ results: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/speedtest/pull — admin only, triggers immediate pull from all sites
+  router.post('/api/hub/speedtest/pull', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      let pulled = 0;
+      await Promise.allSettled(HUB_SITES.map(async (site) => {
+        try {
+          await syncSpeedtest(site);
+          pulled++;
+        } catch (err) {
+          console.error(`[HUB SPEEDTEST PULL] ${site.slug}:`, err.message);
+        }
+      }));
+      console.log(`[HUB SPEEDTEST PULL] pulled from ${pulled}/${HUB_SITES.length} site(s)`);
+      res.json({ pulled });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
