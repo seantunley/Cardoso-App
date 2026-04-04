@@ -6,6 +6,7 @@ import path from 'path';
 import { createRequire } from 'module';
 import db from './src/db/index.js';
 import { initSchema } from './src/db/schema.js';
+import { runMigrations } from './src/db/migrations.js';
 import { buildStatements } from './src/db/statements.js';
 import { createAuthMiddleware } from './src/middleware/auth.js';
 import { loginLimiter } from './src/middleware/rateLimit.js';
@@ -44,6 +45,7 @@ app.use(session({
 }));
 
 initSchema(db);
+runMigrations(db);
 migrateUnencryptedPasswords();
 const stmts = buildStatements(db);
 const getUserById = createGetUserById(stmts);
