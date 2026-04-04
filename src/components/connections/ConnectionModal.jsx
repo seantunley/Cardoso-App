@@ -367,7 +367,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="col-span-2 space-y-2">
               <Label className="text-sm font-medium text-gray-300">Host</Label>
               <Input
@@ -392,7 +392,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-gray-300">Database</Label>
               <Input
