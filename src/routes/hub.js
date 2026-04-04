@@ -9,12 +9,12 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
-import { boolFromRow } from '../helpers.js';
+import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
-  const router = Router();
+const router = Router();
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
@@ -53,7 +53,8 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       const filename = `cardoso-${site.id}-${new Date().toISOString().slice(0,10)}.db`;
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      upstream.body.pipe(res);
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
     } catch (err) {
       if (!res.headersSent) res.status(500).json({ error: err.message });
     }
@@ -97,6 +98,29 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     res.json({ sites: results });
   });
 
+  // GET /api/hub/hub-backup-status
+  // Returns count and latest timestamp of backups stored on the hub (database/hub-backups/<site_id>/).
+  router.get('/api/hub/hub-backup-status', requireAuth, requireAdmin, (req, res) => {
+    const { readdirSync, statSync } = require('fs');
+    const path = require('path');
+    const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
+    const sites = db.prepare('SELECT id, name FROM hub_sites').all();
+    const results = sites.map((site) => {
+      const dir = path.join(baseDir, site.id);
+      try {
+        const files = readdirSync(dir).filter(f => f.endsWith('.db'));
+        if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+        const sorted = files
+          .map(f => { const s = statSync(path.join(dir, f)); return { mtime: s.mtimeMs, size: s.size }; })
+          .sort((a, b) => b.mtime - a.mtime);
+        return { site_id: site.id, hub_backup_count: files.length, hub_last_backup: new Date(sorted[0].mtime).toISOString(), hub_last_size: sorted[0].size };
+      } catch {
+        return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+      }
+    });
+    res.json({ sites: results });
+  });
+
   // GET /api/hub/sites
   // Accessible via session (dashboard) OR x-reporting-token (scripts/hub-pull-backups.ps1)
   router.get('/api/hub/sites', (req, res) => {
@@ -128,7 +152,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
       return r;
     });
-    res.json({ count: rows.length, records: rows });
+    res.json({ count: rows.length, records: rows.map(expandDataRecord) });
   });
 
   // GET /api/hub/kpis
@@ -173,7 +197,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     query += ' ORDER BY hi.item_number ASC';
     try {
       const rows = db.prepare(query).all(...params);
-      res.json({ count: rows.length, records: rows });
+      res.json({ count: rows.length, records: rows.map(expandDataRecord) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -374,7 +398,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
 // Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
 export function createNonHubFallbackRouter() {
-  const router = Router();
+const router = Router();
   router.get('/api/hub/sites', (req, res) => res.json([]));
   router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));

@@ -97,6 +97,9 @@ Section "Install" SecInstall
   SetOutPath "$INSTDIR\nssm"
   File ".\build\nssm\nssm.exe"
 
+  SetOutPath "$INSTDIR\scripts"
+  File ".\scripts\backup.ps1"
+
   ; Create logs dir
   CreateDirectory "$INSTDIR\logs"
   CreateDirectory "$INSTDIR\database"
@@ -127,6 +130,10 @@ Section "Install" SecInstall
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppRotateSeconds 86400' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" start ${SERVICE_NAME}' $0
 
+  ; Register daily backup scheduled task (runs at 02:00, overwrites if exists)
+  ExecWait '$SYSDIR\schtasks.exe /delete /tn "CardosoBackup" /f' $0
+  ExecWait '$SYSDIR\schtasks.exe /create /tn "CardosoBackup" /tr "powershell.exe -NonInteractive -ExecutionPolicy Bypass -File \"$INSTDIR\scripts\backup.ps1\"" /sc DAILY /st 02:00 /rl HIGHEST /f' $0
+
   ; Create desktop shortcut to open app in browser
   CreateShortcut "$DESKTOP\Cardoso.lnk" "http://localhost:$PortValue" "" "" 0
 
@@ -152,6 +159,7 @@ SectionEnd
 Section "Uninstall"
   ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" remove ${SERVICE_NAME} confirm' $0
+  ExecWait '$SYSDIR\schtasks.exe /delete /tn "CardosoBackup" /f' $0
 
   RMDir /r "$INSTDIR\node"
   RMDir /r "$INSTDIR\nssm"
