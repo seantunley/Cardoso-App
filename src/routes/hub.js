@@ -222,6 +222,64 @@ const router = Router();
     });
   });
 
+  // GET /api/hub/trends — weekly/monthly record count + flag rate per site
+  router.get('/api/hub/trends', requireAuth, requireAdmin, (req, res) => {
+    const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
+    const sinceParam = req.query.since ? String(req.query.since) : null;
+
+    if (sinceParam && !/^\d{4}-\d{2}-\d{2}$/.test(sinceParam)) {
+      return res.status(400).json({ error: 'since must be YYYY-MM-DD' });
+    }
+
+    const since = sinceParam || (() => {
+      const d = new Date();
+      if (period === 'monthly') {
+        d.setMonth(d.getMonth() - 6);
+      } else {
+        d.setDate(d.getDate() - (12 * 7));
+      }
+      return d.toISOString().slice(0, 10);
+    })();
+
+    const bucketExpr = period === 'monthly'
+      ? "strftime('%Y-%m', hr.updated_date)"
+      : "strftime('%Y-W%W', hr.updated_date)";
+
+    try {
+      const rows = db.prepare(`
+        SELECT
+          ${bucketExpr} AS period,
+          hr.site_id,
+          COALESCE(hs.name, hr.site_id) AS site_name,
+          COUNT(*) AS total_records,
+          SUM(CASE WHEN hr.flag_color IS NOT NULL AND hr.flag_color NOT IN ('', 'none') THEN 1 ELSE 0 END) AS flagged_records
+        FROM hub_records hr
+        LEFT JOIN hub_sites hs ON hs.id = hr.site_id
+        WHERE hr.updated_date >= ?
+          AND ${bucketExpr} IS NOT NULL
+        GROUP BY ${bucketExpr}, hr.site_id, hs.name
+        ORDER BY ${bucketExpr} ASC, hr.site_id ASC
+      `).all(since);
+
+      res.json({
+        period,
+        since,
+        data: rows.map((row) => ({
+          period: row.period,
+          site_id: row.site_id,
+          site_name: row.site_name,
+          total_records: row.total_records,
+          flagged_records: row.flagged_records,
+          flag_rate: row.total_records > 0
+            ? Math.round((row.flagged_records / row.total_records) * 1000) / 10
+            : 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/inventory
   router.get('/api/hub/inventory', requireAuth, (req, res) => {
     const { site_id, search, commodity } = req.query;
@@ -481,6 +539,7 @@ const router = Router();
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
   router.get('/api/hub/inventory', (req, res) => res.json([]));
   router.get('/api/hub/sync-log', (req, res) => res.json([]));
+  router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
   return router;
 }
 
