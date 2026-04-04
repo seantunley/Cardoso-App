@@ -69,7 +69,7 @@ export default function HubUserManager({ sites = [] }) {
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Push Users to Sites</h2>
         <p className="text-sm text-[var(--text-secondary)] mt-1">
           Select users and push their role, permissions, and status to site nodes.
-          Passwords are never overwritten — new users must set their password locally after being pushed.
+          Passwords are never overwritten unless you've set a real password at the hub. Site badges show where each user has been pushed.
         </p>
       </div>
 
@@ -135,7 +135,7 @@ export default function HubUserManager({ sites = [] }) {
                 onClick={e => e.stopPropagation()}
               />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-sm font-medium text-[var(--text-primary)] truncate">
                     {u.full_name || u.email}
                   </span>
@@ -146,6 +146,19 @@ export default function HubUserManager({ sites = [] }) {
                 </div>
                 {u.full_name && (
                   <p className="text-xs text-[var(--text-secondary)] truncate">{u.email}</p>
+                )}
+                {u.sites && u.sites.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5" onClick={e => e.stopPropagation()}>
+                    {u.sites.map(s => (
+                      <span
+                        key={s.slug}
+                        title={`Pushed ${new Date(s.pushed_at).toLocaleDateString()}`}
+                        className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800"
+                      >
+                        {s.slug}
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
               <Badge

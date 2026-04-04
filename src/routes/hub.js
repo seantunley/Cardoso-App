@@ -256,6 +256,12 @@ const router = Router();
                can_edit_records, can_flag_records, created_date
         FROM "user" ORDER BY role DESC, full_name ASC
       `).all();
+      const sitesByEmail = {};
+      db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all()
+        .forEach(row => {
+          if (!sitesByEmail[row.email]) sitesByEmail[row.email] = [];
+          sitesByEmail[row.email].push({ slug: row.site_slug, pushed_at: row.pushed_at });
+        });
       res.json(users.map(u => ({
         ...u,
         is_active: boolFromRow(u.is_active, true),
@@ -265,6 +271,7 @@ const router = Router();
         can_manage_rules: boolFromRow(u.can_manage_rules, false),
         can_edit_records: boolFromRow(u.can_edit_records, true),
         can_flag_records: boolFromRow(u.can_flag_records, true),
+        sites: sitesByEmail[u.email] || [],
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -313,9 +320,22 @@ const router = Router();
 
     const summary = results.map((r, i) => ({
       site: targetSites[i].name,
+      slug: targetSites[i].slug,
       ok: r.status === 'fulfilled',
       error: r.status === 'rejected' ? r.reason.message : null,
     }));
+
+    // Record which users were successfully pushed to which sites
+    const upsertSite = db.prepare(`
+      INSERT INTO hub_user_sites (email, site_slug, pushed_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(email, site_slug) DO UPDATE SET pushed_at = excluded.pushed_at
+    `);
+    for (const res_row of summary.filter(s => s.ok)) {
+      for (const u of usersToSync) {
+        upsertSite.run(u.email, res_row.slug);
+      }
+    }
 
     const allOk = summary.every(s => s.ok);
     res.status(allOk ? 200 : 207).json({ results: summary });
