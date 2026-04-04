@@ -49,6 +49,7 @@ import __Layout from './Layout.jsx';
 const AuditLog = React.lazy(() => import('./pages/AuditLog'));
 const Collections = React.lazy(() => import('./pages/Collections'));
 const CustomerBalances = React.lazy(() => import('./pages/CustomerBalances'));
+const HubAuditLog = React.lazy(() => import('./pages/HubAuditLog'));
 const HubDashboard = React.lazy(() => import('./pages/HubDashboard'));
 const HubBackups = React.lazy(() => import('./pages/HubBackups'));
 const HubMetrics = React.lazy(() => import('./pages/HubMetrics'));
@@ -68,6 +69,7 @@ export const PAGES = {
     "Collections": Collections,
     "CustomerBalances": CustomerBalances,
     "Inventory": Inventory,
+    "HubAuditLog": HubAuditLog,
     "HubDashboard": HubDashboard,
     "HubBackups": HubBackups,
     "HubMetrics": HubMetrics,

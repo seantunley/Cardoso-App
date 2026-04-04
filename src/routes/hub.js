@@ -14,7 +14,20 @@ import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
-const router = Router();
+  const router = Router();
+
+  const writeHubAudit = db.prepare(`
+    INSERT INTO hub_audit_log (action, performed_by, target, detail)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  function logHubAudit({ action, performedBy = null, target = null, detail = null }) {
+    try {
+      writeHubAudit.run(action, performedBy || null, target || null, detail == null ? null : String(detail));
+    } catch (err) {
+      console.warn('[hub-audit-log] failed:', err.message);
+    }
+  }
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
@@ -37,7 +50,7 @@ const router = Router();
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
+    const site = db.prepare('SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
     if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
 
     try {
@@ -54,6 +67,11 @@ const router = Router();
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       const buf = Buffer.from(await upstream.arrayBuffer());
+      logHubAudit({
+        action: 'backup_pull',
+        performedBy: req.user?.email,
+        target: site.slug || site.id,
+      });
       res.send(buf);
     } catch (err) {
       if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -306,12 +324,32 @@ const router = Router();
     res.json(rows);
   });
 
+  router.get('/api/hub/audit-log', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+      const rows = db.prepare(`
+        SELECT *
+        FROM hub_audit_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(limit);
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/force-resync — clears sync history and hub_records, triggers full re-pull
   router.post('/api/hub/force-resync', requireAuth, requireAdmin, (req, res) => {
     try {
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
+      logHubAudit({
+        action: 'force_resync',
+        performedBy: req.user?.email,
+        target: 'all_sites',
+      });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
       syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
@@ -326,6 +364,12 @@ const router = Router();
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      const site = db.prepare('SELECT slug FROM hub_sites WHERE id = ?').get(siteId);
+      logHubAudit({
+        action: 'force_resync',
+        performedBy: req.user?.email,
+        target: site?.slug || siteId,
+      });
       syncAllSites().catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
     } catch (err) {
@@ -517,10 +561,37 @@ const router = Router();
       for (const u of usersToSync) {
         upsertSite.run(u.email, res_row.slug);
       }
+      logHubAudit({
+        action: 'push_users',
+        performedBy: req.user?.email,
+        target: res_row.slug,
+        detail: JSON.stringify(usersToSync.map((user) => user.email)),
+      });
     }
 
     const allOk = summary.every(s => s.ok);
     res.status(allOk ? 200 : 207).json({ results: summary });
+  });
+
+  router.post('/api/hub/clear-auto-flags', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const result = db.prepare(`
+        UPDATE hub_records
+        SET flag_color = NULL,
+            flag_reason = NULL,
+            auto_flagged = 0
+        WHERE auto_flagged = 1
+      `).run();
+      logHubAudit({
+        action: 'clear_auto_flags',
+        performedBy: req.user?.email,
+        target: 'all_sites',
+        detail: String(result.changes),
+      });
+      res.json({ cleared: result.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
@@ -533,12 +604,13 @@ const router = Router();
 
 // Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
 export function createNonHubFallbackRouter() {
-const router = Router();
+  const router = Router();
   router.get('/api/hub/sites', (req, res) => res.json([]));
   router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
   router.get('/api/hub/inventory', (req, res) => res.json([]));
   router.get('/api/hub/sync-log', (req, res) => res.json([]));
+  router.get('/api/hub/audit-log', (req, res) => res.json([]));
   router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
   return router;
 }

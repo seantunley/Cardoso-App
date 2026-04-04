@@ -5,6 +5,7 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  ClipboardList,
 } from "lucide-react";
 
 // ── Custom nav SVG icons ──────────────────────────────────────────────────────
@@ -81,6 +82,7 @@ const navItems = [
   { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
   { name: "Site Metrics",        icon: BarChart2,           page: "HubMetrics",       hubOnly: true, adminOnly: true },
   { name: "Site Backups",        icon: IconSiteBackups,     page: "HubBackups",       hubOnly: true, adminOnly: true },
+  { name: "Hub Audit Log",       icon: ClipboardList,       page: "HubAuditLog",      hubOnly: true, adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {

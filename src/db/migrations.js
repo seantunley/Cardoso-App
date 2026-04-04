@@ -494,6 +494,23 @@ function buildMigrations(db) {
       },
     },
 
+    {
+      version: 23,
+      name: 'hub_audit_log_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT,
+            performed_by TEXT,
+            target TEXT,
+            detail TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+
   ];
 }
 
