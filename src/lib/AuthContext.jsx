@@ -3,6 +3,19 @@ import { appParams } from "@/lib/app-params";
 
 const AuthContext = createContext();
 
+// Apply theme to <html> and persist to localStorage so it survives page reload
+export function applyTheme(theme) {
+  const t = theme === 'light' ? 'light' : 'dark';
+  if (t === 'dark') {
+    document.documentElement.classList.add('dark');
+    document.documentElement.classList.remove('light');
+  } else {
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
+  }
+  localStorage.setItem('cardoso-theme', t);
+}
+
 async function readJsonResponse(res) {
   const text = await res.text();
 
@@ -74,6 +87,7 @@ export const AuthProvider = ({ children }) => {
 
       const currentUser = await readJsonResponse(res);
 
+      applyTheme(currentUser.theme_preference || 'dark');
       setUser(currentUser);
       setIsAuthenticated(true);
       setAuthError(null);
@@ -116,6 +130,7 @@ export const AuthProvider = ({ children }) => {
       return null;
     }
 
+    applyTheme(data.user.theme_preference || 'dark');
     setUser(data.user);
     setIsAuthenticated(true);
     setAuthError(null);
@@ -139,6 +154,7 @@ export const AuthProvider = ({ children }) => {
       console.error("Logout failed:", error);
     }
 
+    applyTheme('dark');
     setUser(null);
     setIsAuthenticated(false);
 

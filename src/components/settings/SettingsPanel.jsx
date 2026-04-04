@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { applyTheme } from "@/lib/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -451,7 +452,7 @@ function ThemeTab() {
     mutationFn: (theme) => api.auth.updateMe({ theme_preference: theme }),
     onSuccess: (_, theme) => {
       queryClient.invalidateQueries({ queryKey: ["currentUser"] });
-      document.documentElement.setAttribute("data-theme", theme);
+      applyTheme(theme);
       toast.success(`Switched to ${theme} mode`);
     },
   });
