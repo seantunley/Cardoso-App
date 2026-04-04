@@ -236,9 +236,14 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
   // GET /api/hub/kpis
   router.get('/api/hub/kpis', requireAuth, (req, res) => {
+    const since = typeof req.query.since === 'string' && req.query.since.trim() ? req.query.since.trim() : null;
     const sites = db.prepare('SELECT * FROM hub_sites').all();
-    const totals = db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
-    const totalRecords = db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
+    const totals = since
+      ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY flag_color').all(since)
+      : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
+    const totalRecords = since
+      ? db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE updated_date >= ?').get(since)
+      : db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
 
     const flagTotals = { none: 0, red: 0, orange: 0, green: 0 };
     for (const row of totals) {
@@ -261,6 +266,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       total_records: totalRecords.count,
       records_by_flag: flagTotals,
       sites: perSite,
+      since,
       generated_at: new Date().toISOString(),
     });
   });

@@ -50,6 +50,21 @@ function fuzzyMatch(str, pattern) {
   return { matches: pi === p.length, score };
 }
 
+const KPI_RANGE_OPTIONS = [
+  { value: "all", label: "All time", days: null },
+  { value: "7", label: "Last 7 days", days: 7 },
+  { value: "30", label: "Last 30 days", days: 30 },
+  { value: "90", label: "Last 90 days", days: 90 },
+];
+
+function getSinceDate(rangeValue) {
+  const option = KPI_RANGE_OPTIONS.find((entry) => entry.value === rangeValue);
+  if (!option?.days) return null;
+  const date = new Date();
+  date.setDate(date.getDate() - option.days);
+  return date.toISOString().slice(0, 10);
+}
+
 // ─── site card ──────────────────────────────────────────────────────────────
 
 function SiteCard({ site, onFlagClick, onResync }) {
@@ -579,6 +594,7 @@ export default function HubDashboard() {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
+  const [dateRange, setDateRange] = useState("all");
 
   // Flag drill-down
   const [flagModal, setFlagModal] = useState({ open: false, color: null, customers: [], siteName: "" });
@@ -608,7 +624,11 @@ export default function HubDashboard() {
 
   const fetchAll = useCallback(async () => {
     try {
-      const kpiRes = await fetch("/api/hub/kpis", { credentials: "include" });
+      const params = new URLSearchParams();
+      const since = getSinceDate(dateRange);
+      if (since) params.set("since", since);
+      const url = params.toString() ? `/api/hub/kpis?${params.toString()}` : "/api/hub/kpis";
+      const kpiRes = await fetch(url, { credentials: "include" });
       if (!kpiRes.ok) throw new Error("Hub API unavailable — is this the Head Office instance?");
       setKpis(await kpiRes.json());
       setError(null);
@@ -617,7 +637,7 @@ export default function HubDashboard() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [dateRange]);
 
   useEffect(() => { fetchAll(); }, [fetchAll]);
 
@@ -686,6 +706,22 @@ export default function HubDashboard() {
             Force Resync
           </Button>
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Calendar className="h-4 w-4" />
+          KPI range
+        </div>
+        <select
+          value={dateRange}
+          onChange={(event) => setDateRange(event.target.value)}
+          className="min-h-[40px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+        >
+          {KPI_RANGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
+        </select>
       </div>
 
       {/* Customer search */}
