@@ -61,8 +61,14 @@ async function fetchBackupStatus() {
   return res.json();
 }
 
+async function fetchHubBackupStatus() {
+  const res = await fetch("/api/hub/hub-backup-status", { credentials: "include" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 // ── SiteCard ───────────────────────────────────────────────────────────────
-function SiteCard({ site, onDownload, downloading }) {
+function SiteCard({ site, hubData, onDownload, downloading }) {
   const meta  = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon  = meta.icon;
   const lb    = site.last_backup;
@@ -101,7 +107,9 @@ function SiteCard({ site, onDownload, downloading }) {
           <Stat label="Last Backup" value={lb ? fmtRelative(lb.mtime) : "Never"} sub={lb ? fmtDate(lb.mtime) : ""} />
           <Stat label="Backup Size" value={fmtBytes(lb?.size)} />
           <Stat label="Live DB Size" value={fmtBytes(site.db_size)} />
-          <Stat label="Backups Stored" value={lb?.total_backups ?? "0"} />
+          <Stat label="On Site" value={lb?.total_backups ?? "0"} />
+          <Stat label="On Hub" value={hubData?.hub_backup_count ?? "0"} sub={hubData?.hub_last_backup ? fmtRelative(hubData.hub_last_backup) : ""} />
+          <Stat label="Hub Latest" value={fmtBytes(hubData?.hub_last_size)} />
         </div>
       )}
 
@@ -200,7 +208,14 @@ export default function HubBackups() {
     refetchInterval: 60_000,
   });
 
+  const { data: hubBackupData } = useQuery({
+    queryKey: ["hub-hub-backup-status"],
+    queryFn: fetchHubBackupStatus,
+    refetchInterval: 60_000,
+  });
+
   const sites = data?.sites || [];
+  const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map(s => [s.site_id, s]));
 
   const handleDownload = useCallback(async (site) => {
     setDownloading(site.site_id);
@@ -299,6 +314,7 @@ export default function HubBackups() {
                     <SiteCard
                       key={site.site_id}
                       site={site}
+                      hubData={hubBackupMap[site.site_id]}
                       onDownload={handleDownload}
                       downloading={downloading}
                     />

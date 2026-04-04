@@ -98,6 +98,29 @@ const router = Router();
     res.json({ sites: results });
   });
 
+  // GET /api/hub/hub-backup-status
+  // Returns count and latest timestamp of backups stored on the hub (database/hub-backups/<site_id>/).
+  router.get('/api/hub/hub-backup-status', requireAuth, requireAdmin, (req, res) => {
+    const { readdirSync, statSync } = require('fs');
+    const path = require('path');
+    const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
+    const sites = db.prepare('SELECT id, name FROM hub_sites').all();
+    const results = sites.map((site) => {
+      const dir = path.join(baseDir, site.id);
+      try {
+        const files = readdirSync(dir).filter(f => f.endsWith('.db'));
+        if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+        const sorted = files
+          .map(f => { const s = statSync(path.join(dir, f)); return { mtime: s.mtimeMs, size: s.size }; })
+          .sort((a, b) => b.mtime - a.mtime);
+        return { site_id: site.id, hub_backup_count: files.length, hub_last_backup: new Date(sorted[0].mtime).toISOString(), hub_last_size: sorted[0].size };
+      } catch {
+        return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+      }
+    });
+    res.json({ sites: results });
+  });
+
   // GET /api/hub/sites
   // Accessible via session (dashboard) OR x-reporting-token (scripts/hub-pull-backups.ps1)
   router.get('/api/hub/sites', (req, res) => {
