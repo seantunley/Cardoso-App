@@ -45,7 +45,7 @@ $destFile = Join-Path $backupRoot "cardoso-$siteId-$stamp.db"
 try {
     Copy-Item -Path $srcDb -Destination $destFile -Force
     $sizeMb = [math]::Round((Get-Item $destFile).Length / 1MB, 2)
-    Write-Log "OK  Backup saved → $destFile ($sizeMb MB)"
+    Write-Log "OK  Backup saved -> $destFile ($sizeMb MB)"
 } catch {
     Write-Log "ERROR: Copy failed — $_"
     exit 1
