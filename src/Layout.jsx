@@ -75,9 +75,9 @@ const APP_VERSION = "2026.3.9";
 const navItems = [
   { name: "Customer Management", icon: IconCustomerSearch,   page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
   { name: "Customer Management", icon: IconHubDashboard,     page: "HubDashboard",     hubOnly: true },
-  { name: "Site Metrics",          icon: BarChart2,             page: "HubMetrics",       hubOnly: true, adminOnly: true },
   { name: "Customer Balances",   icon: IconCustomerBalances, page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Site Metrics",          icon: BarChart2,             page: "HubMetrics",       hubOnly: true, adminOnly: true },
   { name: "Site Backups",          icon: IconSiteBackups,      page: "HubBackups",      hubOnly: true, adminOnly: true },
 ];
 
