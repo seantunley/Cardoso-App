@@ -321,7 +321,7 @@ export default function HubMetrics() {
                 <p>No site data yet. Click "Pull all" or wait for the next scheduled run.</p>
               </div>
             ) : (
-              <div className="flex flex-col gap-6">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {allSlugs.map(slug => (
                   <SiteSection
                     key={slug}
