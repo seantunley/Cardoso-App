@@ -382,7 +382,6 @@ export default function AuditLogTable({ logs = [] }) {
                 })}
               </tbody>
             </table>
-          </div>
           </div>{/* end desktop table wrapper */}
 
           {filteredAndSorted.length === 0 && (
