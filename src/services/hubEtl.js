@@ -246,6 +246,9 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
+    // Speedtest results
+    await syncSpeedtest(site);
+
     // Update hub_sites
     db.prepare(`
       UPDATE hub_sites SET last_seen=?, last_kpis=?, status='ok' WHERE id=?
@@ -263,6 +266,48 @@ async function syncSite(site) {
   `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, syncError ? 'error' : 'ok', syncError || null);
 
   return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
+}
+
+async function syncSpeedtest(site) {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    const res = await fetch(`${site.url}/api/speedtest/results`, {
+      headers: { 'Authorization': `Bearer ${site.token}`, 'X-Reporting-Token': site.token },
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      console.warn(`[HUB SPEEDTEST] ${site.slug}: HTTP ${res.status}`);
+      return;
+    }
+    const data = await res.json();
+    const results = data.results || [];
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO hub_speedtest
+        (site_slug, timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location)
+      VALUES
+        (@site_slug, @timestamp, @download_mbps, @upload_mbps, @ping_ms, @isp, @server_name, @server_location)
+    `);
+    const insertMany = db.transaction((rows) => {
+      for (const r of rows) {
+        insert.run({
+          site_slug: site.slug,
+          timestamp: r.timestamp,
+          download_mbps: r.download_mbps ?? null,
+          upload_mbps: r.upload_mbps ?? null,
+          ping_ms: r.ping_ms ?? null,
+          isp: r.isp ?? null,
+          server_name: r.server_name ?? null,
+          server_location: r.server_location ?? null,
+        });
+      }
+    });
+    insertMany(results);
+    console.log(`[HUB SPEEDTEST] ${site.slug}: upserted ${results.length} result(s)`);
+  } catch (err) {
+    console.error(`[HUB SPEEDTEST] ${site.slug}: ${err.message}`);
+  }
 }
 
 async function syncAllSites() {
@@ -313,4 +358,4 @@ async function runHubBackupPull() {
   }));
 }
 
-export { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES };
+export { initHubTables, initHubSiteRegistry, syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES };

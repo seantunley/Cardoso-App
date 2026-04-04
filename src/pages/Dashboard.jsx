@@ -25,11 +25,8 @@ const FLAG_COLORS = {
 export default function Dashboard() {
   const { data: kpis, isError: kpisError } = useQuery({
     queryKey: ["kpis"],
-    queryFn: async () => {
-      const res = await fetch("/api/kpis", { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load KPIs");
-      return res.json();
-    },
+    queryFn: () => api.kpis(),
+    staleTime: 30_000,
   });
 
   const { data: connections = [] } = useQuery({

@@ -199,9 +199,10 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const info = db.prepare(`
         INSERT INTO "user" (
           email, full_name, role, password_hash, is_active, must_change_password,
-          can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
+          can_access_customer_search, can_access_customer_balances, can_access_inventory,
+          can_access_records, can_access_reports, can_access_connections, can_access_settings,
           can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         email.trim().toLowerCase(),
         full_name,
@@ -210,6 +211,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         1,
         mustChange,
         defaults.can_access_customer_search ? 1 : 0,
+        defaults.can_access_customer_balances !== false ? 1 : 0,
+        defaults.can_access_inventory !== false ? 1 : 0,
         defaults.can_access_records ? 1 : 0,
         defaults.can_access_reports ? 1 : 0,
         defaults.can_access_connections ? 1 : 0,
@@ -237,6 +240,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
     const allowed = [
       'can_access_customer_search',
+      'can_access_customer_balances',
+      'can_access_inventory',
       'can_access_records',
       'can_access_reports',
       'can_access_connections',
@@ -245,6 +250,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_manage_rules',
       'can_edit_records',
       'can_flag_records',
+      'hub_redirect',
       'is_active',
     ];
 

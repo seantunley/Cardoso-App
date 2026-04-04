@@ -85,6 +85,8 @@ export function defaultPermissionsForRole(role) {
   if (role === 'admin') {
     return {
       can_access_customer_search: true,
+      can_access_customer_balances: true,
+      can_access_inventory: true,
       can_access_records: true,
       can_access_reports: true,
       can_access_connections: true,
@@ -98,6 +100,8 @@ export function defaultPermissionsForRole(role) {
 
   return {
     can_access_customer_search: true,
+    can_access_customer_balances: true,
+    can_access_inventory: true,
     can_access_records: false,
     can_access_reports: false,
     can_access_connections: false,
@@ -120,6 +124,8 @@ export function sanitizeUser(user) {
     theme_preference: user.theme_preference,
     is_active: boolFromRow(user.is_active, true),
     can_access_customer_search: boolFromRow(user.can_access_customer_search, true),
+    can_access_customer_balances: boolFromRow(user.can_access_customer_balances, true),
+    can_access_inventory: boolFromRow(user.can_access_inventory, true),
     can_access_records: boolFromRow(user.can_access_records, false),
     can_access_reports: boolFromRow(user.can_access_reports, false),
     can_access_connections: boolFromRow(user.can_access_connections, false),

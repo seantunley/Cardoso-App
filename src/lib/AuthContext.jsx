@@ -3,6 +3,19 @@ import { appParams } from "@/lib/app-params";
 
 const AuthContext = createContext();
 
+// Apply theme to <html> and persist to localStorage so it survives page reload
+export function applyTheme(theme) {
+  const t = theme === 'light' ? 'light' : 'dark';
+  if (t === 'dark') {
+    document.documentElement.classList.add('dark');
+    document.documentElement.classList.remove('light');
+  } else {
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
+  }
+  localStorage.setItem('cardoso-theme', t);
+}
+
 async function readJsonResponse(res) {
   const text = await res.text();
 
@@ -38,12 +51,11 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingPublicSettings(true);
       setAuthError(null);
 
-      const mockPublicSettings = {
-        id: appParams.appId,
-        public_settings: {},
-      };
+      // Set mock public settings synchronously — no async work needed
+      setAppPublicSettings({ id: appParams.appId, public_settings: {} });
+      setIsLoadingPublicSettings(false); // done immediately, no async work
 
-      setAppPublicSettings(mockPublicSettings);
+      // Run auth check immediately
       await checkUserAuth();
     } catch (error) {
       console.error("Unexpected error:", error);
@@ -51,8 +63,9 @@ export const AuthProvider = ({ children }) => {
         type: "unknown",
         message: error.message || "An unexpected error occurred",
       });
-    } finally {
-      setIsLoadingPublicSettings(false);
+    } catch (innerErr) {
+      // checkUserAuth handles its own errors; this is for unexpected throws above it
+      console.error("checkAppState outer error:", innerErr);
     }
   };
 
@@ -74,6 +87,7 @@ export const AuthProvider = ({ children }) => {
 
       const currentUser = await readJsonResponse(res);
 
+      applyTheme(currentUser.theme_preference || 'dark');
       setUser(currentUser);
       setIsAuthenticated(true);
       setAuthError(null);
@@ -116,6 +130,7 @@ export const AuthProvider = ({ children }) => {
       return null;
     }
 
+    applyTheme(data.user.theme_preference || 'dark');
     setUser(data.user);
     setIsAuthenticated(true);
     setAuthError(null);
@@ -139,6 +154,7 @@ export const AuthProvider = ({ children }) => {
       console.error("Logout failed:", error);
     }
 
+    applyTheme('dark');
     setUser(null);
     setIsAuthenticated(false);
 

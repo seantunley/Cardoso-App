@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
@@ -239,6 +239,41 @@ const router = Router();
     }
   });
 
+  // GET /api/hub/speedtest — returns speedtest results, optional ?site=slug filter
+  router.get('/api/hub/speedtest', requireAuth, (req, res) => {
+    const { site } = req.query;
+    try {
+      let rows;
+      if (site) {
+        rows = db.prepare('SELECT * FROM hub_speedtest WHERE site_slug = ? ORDER BY site_slug, timestamp DESC').all(site);
+      } else {
+        rows = db.prepare('SELECT * FROM hub_speedtest ORDER BY site_slug, timestamp DESC').all();
+      }
+      res.json({ results: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/speedtest/pull — admin only, triggers immediate pull from all sites
+  router.post('/api/hub/speedtest/pull', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      let pulled = 0;
+      await Promise.allSettled(HUB_SITES.map(async (site) => {
+        try {
+          await syncSpeedtest(site);
+          pulled++;
+        } catch (err) {
+          console.error(`[HUB SPEEDTEST PULL] ${site.slug}:`, err.message);
+        }
+      }));
+      console.log(`[HUB SPEEDTEST PULL] pulled from ${pulled}/${HUB_SITES.length} site(s)`);
+      res.json({ pulled });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/sync
   router.post('/api/hub/sync', requireAuth, requireAdmin, (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
@@ -252,19 +287,33 @@ const router = Router();
     try {
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
-               can_access_connections, can_manage_users, can_manage_rules,
-               can_edit_records, can_flag_records, created_date
+               can_access_customer_search, can_access_customer_balances, can_access_inventory,
+               can_access_records, can_access_reports, can_access_connections, can_access_settings,
+               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
         FROM "user" ORDER BY role DESC, full_name ASC
       `).all();
+      const sitesByEmail = {};
+      db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all()
+        .forEach(row => {
+          if (!sitesByEmail[row.email]) sitesByEmail[row.email] = [];
+          sitesByEmail[row.email].push({ slug: row.site_slug, pushed_at: row.pushed_at });
+        });
       res.json(users.map(u => ({
         ...u,
         is_active: boolFromRow(u.is_active, true),
         hub_redirect: boolFromRow(u.hub_redirect, false),
+        can_access_customer_search: boolFromRow(u.can_access_customer_search, true),
+        can_access_customer_balances: boolFromRow(u.can_access_customer_balances, true),
+        can_access_inventory: boolFromRow(u.can_access_inventory, true),
+        can_access_records: boolFromRow(u.can_access_records, false),
+        can_access_reports: boolFromRow(u.can_access_reports, false),
         can_access_connections: boolFromRow(u.can_access_connections, false),
+        can_access_settings: boolFromRow(u.can_access_settings, false),
         can_manage_users: boolFromRow(u.can_manage_users, false),
         can_manage_rules: boolFromRow(u.can_manage_rules, false),
         can_edit_records: boolFromRow(u.can_edit_records, true),
         can_flag_records: boolFromRow(u.can_flag_records, true),
+        sites: sitesByEmail[u.email] || [],
       })));
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -280,8 +329,10 @@ const router = Router();
 
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
-             can_access_connections, can_manage_users, can_manage_rules,
-             can_edit_records, can_flag_records
+             can_access_customer_search, can_access_customer_balances, can_access_inventory,
+             can_access_records, can_access_reports, can_access_connections, can_access_settings,
+             can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
+             password_hash, must_change_password
       FROM "user" WHERE id IN (${user_ids.map(() => '?').join(',')})
     `).all(...user_ids);
 
@@ -312,16 +363,55 @@ const router = Router();
 
     const summary = results.map((r, i) => ({
       site: targetSites[i].name,
+      slug: targetSites[i].slug,
       ok: r.status === 'fulfilled',
       error: r.status === 'rejected' ? r.reason.message : null,
     }));
+
+    // Record which users were successfully pushed to which sites
+    const upsertSite = db.prepare(`
+      INSERT INTO hub_user_sites (email, site_slug, pushed_at)
+      VALUES (?, ?, datetime('now'))
+      ON CONFLICT(email, site_slug) DO UPDATE SET pushed_at = excluded.pushed_at
+    `);
+    for (const res_row of summary.filter(s => s.ok)) {
+      for (const u of usersToSync) {
+        upsertSite.run(u.email, res_row.slug);
+      }
+    }
 
     const allOk = summary.every(s => s.ok);
     res.status(allOk ? 200 : 207).json({ results: summary });
   });
 
-  // POST /api/hub/receive-users — site endpoint: receive users pushed from hub
-  router.post(`/api/hub/receive-users`, async (req, res) => {
+  // POST /api/hub/receive-users is registered on ALL installs (hub + site).
+  // See createReceiveUsersRouter() below — mounted separately in server.js.
+
+  console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
+
+  return router;
+}
+
+// Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
+export function createNonHubFallbackRouter() {
+const router = Router();
+  router.get('/api/hub/sites', (req, res) => res.json([]));
+  router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
+  router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
+  router.get('/api/hub/inventory', (req, res) => res.json([]));
+  router.get('/api/hub/sync-log', (req, res) => res.json([]));
+  return router;
+}
+
+/**
+ * createReceiveUsersRouter — ALWAYS mounted, on both hub and site installs.
+ * Sites need this endpoint so the hub can push users to them.
+ * Authenticated via X-Reporting-Token (site's own REPORTING_TOKEN env var).
+ */
+export function createReceiveUsersRouter() {
+  const router = Router();
+
+  router.post('/api/hub/receive-users', async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
     if (!expectedToken || token !== expectedToken) {
@@ -339,47 +429,105 @@ const router = Router();
       try {
         const existing = db.prepare('SELECT id FROM "user" WHERE email = ?').get(u.email);
         if (existing) {
-          // Update everything except password_hash — never overwrite local password
-          db.prepare(`
-            UPDATE "user" SET
-              full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-              can_access_connections = ?, can_manage_users = ?, can_manage_rules = ?,
-              can_edit_records = ?, can_flag_records = ?
-            WHERE email = ?
-          `).run(
-            u.full_name || null,
-            u.role || 'user',
-            u.is_active ? 1 : 0,
-            u.hub_redirect ? 1 : 0,
-            u.can_access_connections ? 1 : 0,
-            u.can_manage_users ? 1 : 0,
-            u.can_manage_rules ? 1 : 0,
-            u.can_edit_records ? 1 : 0,
-            u.can_flag_records ? 1 : 0,
-            u.email
-          );
+          // Update role, permissions, status — never overwrite a local password the user
+          // may have changed on-site. Exception: if hub user has must_change_password = 0
+          // (they set a real password at the hub), sync that hash + clear the flag so they
+          // can log in at the site with the same credentials without being forced to reset.
+          const hubHasRealPassword = u.password_hash && u.must_change_password === 0;
+          if (hubHasRealPassword) {
+            db.prepare(`
+              UPDATE "user" SET
+                full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
+                can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
+                password_hash = ?, must_change_password = 0
+              WHERE email = ?
+            `).run(
+              u.full_name || null,
+              u.role || 'user',
+              u.is_active ? 1 : 0,
+              u.hub_redirect ? 1 : 0,
+              u.can_access_customer_search !== false ? 1 : 0,
+              u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_records ? 1 : 0,
+              u.can_access_reports ? 1 : 0,
+              u.can_access_connections ? 1 : 0,
+              u.can_access_settings ? 1 : 0,
+              u.can_manage_users ? 1 : 0,
+              u.can_manage_rules ? 1 : 0,
+              u.can_edit_records ? 1 : 0,
+              u.can_flag_records ? 1 : 0,
+              u.password_hash,
+              u.email
+            );
+          } else {
+            db.prepare(`
+              UPDATE "user" SET
+                full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
+                can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
+              WHERE email = ?
+            `).run(
+              u.full_name || null,
+              u.role || 'user',
+              u.is_active ? 1 : 0,
+              u.hub_redirect ? 1 : 0,
+              u.can_access_customer_search !== false ? 1 : 0,
+              u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_records ? 1 : 0,
+              u.can_access_reports ? 1 : 0,
+              u.can_access_connections ? 1 : 0,
+              u.can_access_settings ? 1 : 0,
+              u.can_manage_users ? 1 : 0,
+              u.can_manage_rules ? 1 : 0,
+              u.can_edit_records ? 1 : 0,
+              u.can_flag_records ? 1 : 0,
+              u.email
+            );
+          }
           updated++;
         } else {
-          // Create new user — no password set (they must set one or reset locally)
-          const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
-          const defaultHash = await bcrypt.hash(defaultPw, 12);
+          // New user — use the hub's password hash directly if available.
+          // If hub set a custom password (must_change_password = 0), push it as-is.
+          // If hub still has the default (must_change_password = 1), use the hub hash
+          // so credentials match, but keep must_change_password = 1 to force reset.
+          let passwordHash = u.password_hash;
+          let mustChange = u.must_change_password ? 1 : 0;
+          if (!passwordHash) {
+            // Fallback: hub didn't send a hash (old hub version) — generate default
+            const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
+            passwordHash = await bcrypt.hash(defaultPw, 12);
+            mustChange = 1;
+          }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
-              can_access_connections, can_manage_users, can_manage_rules,
-              can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
+              can_access_customer_search, can_access_customer_balances, can_access_inventory,
+              can_access_records, can_access_reports, can_access_connections, can_access_settings,
+              can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
             u.role || 'user',
             u.is_active ? 1 : 0,
             u.hub_redirect ? 1 : 0,
+            mustChange,
+            u.can_access_customer_search !== false ? 1 : 0,
+            u.can_access_customer_balances !== false ? 1 : 0,
+            u.can_access_inventory !== false ? 1 : 0,
+            u.can_access_records ? 1 : 0,
+            u.can_access_reports ? 1 : 0,
             u.can_access_connections ? 1 : 0,
+            u.can_access_settings ? 1 : 0,
             u.can_manage_users ? 1 : 0,
             u.can_manage_rules ? 1 : 0,
             u.can_edit_records ? 1 : 0,
             u.can_flag_records ? 1 : 0,
-            defaultHash
+            passwordHash
           );
           created++;
         }
@@ -391,18 +539,5 @@ const router = Router();
     res.json({ created, updated, errors });
   });
 
-  console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
-
-  return router;
-}
-
-// Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
-export function createNonHubFallbackRouter() {
-const router = Router();
-  router.get('/api/hub/sites', (req, res) => res.json([]));
-  router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
-  router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
-  router.get('/api/hub/inventory', (req, res) => res.json([]));
-  router.get('/api/hub/sync-log', (req, res) => res.json([]));
   return router;
 }

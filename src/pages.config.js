@@ -50,6 +50,7 @@ const AuditLog = React.lazy(() => import('./pages/AuditLog'));
 const CustomerBalances = React.lazy(() => import('./pages/CustomerBalances'));
 const HubDashboard = React.lazy(() => import('./pages/HubDashboard'));
 const HubBackups = React.lazy(() => import('./pages/HubBackups'));
+const HubMetrics = React.lazy(() => import('./pages/HubMetrics'));
 const HubSyncLog = React.lazy(() => import('./pages/HubSyncLog'));
 const Connections = React.lazy(() => import('./pages/Connections'));
 const CustomerSearch = React.lazy(() => import('./pages/CustomerSearch'));
@@ -66,6 +67,7 @@ export const PAGES = {
     "Inventory": Inventory,
     "HubDashboard": HubDashboard,
     "HubBackups": HubBackups,
+    "HubMetrics": HubMetrics,
     "HubSyncLog": HubSyncLog,
     "Connections": Connections,
     "CustomerSearch": CustomerSearch,

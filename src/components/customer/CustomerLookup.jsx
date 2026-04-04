@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   AlertTriangle,
   XCircle,
+  Clock,
   ChevronDown,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
@@ -482,6 +483,23 @@ function analyseInvoiceCredit(records, flagHistory = []) {
     summary = `Customer is paying reliably and within terms.${inactiveNote}`;
   }
 
+  // ── Dormant check: latest invoice >12 months after the preceding one ──────
+  // Only applies when there are ≥2 invoices to compare.
+  // Sorted invByDate is oldest→newest; compare last two entries.
+  let isDormantReactivation = false;
+  let dormantMonths = null;
+  if (invByDate.length >= 2) {
+    const latestInv = invByDate[invByDate.length - 1];
+    const prevInv   = invByDate[invByDate.length - 2];
+    if (latestInv.date && prevInv.date) {
+      const gapDays = Math.floor((latestInv.date - prevInv.date) / 86400000);
+      if (gapDays > 365) {
+        isDormantReactivation = true;
+        dormantMonths = Math.floor(gapDays / 30);
+      }
+    }
+  }
+
   // ── Build chart data ─────────────────────────────────────────────────────
   // lagData: one entry per invoice, with days to pay or days outstanding
   const lagData = invByDate.map((inv, idx) => {
@@ -521,7 +539,7 @@ function analyseInvoiceCredit(records, flagHistory = []) {
 
   // DEBUG: log what we have
 
-  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData };
+  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData, isDormantReactivation, dormantMonths };
 }
 // ── End Invoice Credit Analysis ────────────────────────────────────────────
 
@@ -687,18 +705,21 @@ const verdictBannerStyles = {
   approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
   caution: "bg-amber-500/20 border-amber-500/40 text-amber-200",
   hold: "bg-red-500/20 border-red-500/40 text-red-200",
+  dormant: "bg-purple-500/20 border-purple-500/40 text-purple-200",
 };
 
 const verdictIcons = {
   approve: ShieldCheck,
   caution: AlertTriangle,
   hold: XCircle,
+  dormant: Clock,
 };
 
 const verdictScoreStyles = {
   approve: "bg-emerald-800/60 text-emerald-200 ring-1 ring-emerald-600/40",
   caution: "bg-amber-800/60 text-amber-200 ring-1 ring-amber-600/40",
   hold: "bg-red-800/60 text-red-200 ring-1 ring-red-600/40",
+  dormant: "bg-purple-800/60 text-purple-200 ring-1 ring-purple-600/40",
 };
 
 const flagDotColor = {
@@ -781,7 +802,10 @@ export default function CustomerLookup({
     }
   }, []);
 
+  // currentUser is fetched by the parent via React Query (shared cache); no extra fetch needed here.
+  // We lazily load it only if not passed as a prop.
   useEffect(() => {
+    if (currentUser) return; // already set from prop or prior fetch
     const fetchUser = async () => {
       try {
         const user = await api.auth.me();
@@ -791,7 +815,7 @@ export default function CustomerLookup({
       }
     };
     fetchUser();
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     refreshRecords();
@@ -885,7 +909,8 @@ export default function CustomerLookup({
     setShowSuggestions(false);
 
     try {
-      const freshRecords = await refreshRecords();
+      // Use cached records — only refresh if cache is empty
+      const freshRecords = allRecords.length > 0 ? allRecords : await refreshRecords();
 
       const record = freshRecords.find(
         (r) =>
@@ -974,7 +999,60 @@ export default function CustomerLookup({
         } catch {}
         return { action: 'flag_changed', new_value };
       });
-    return analyseInvoiceCredit(allAccountRecords, flagHistory);
+    const analysis = analyseInvoiceCredit(allAccountRecords, flagHistory);
+
+    // User-set flags are hard overrides — no analysis can outrank a human decision.
+    // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
+    const isManualRedFlag    = customer.flag_color === "red"    && !customer.auto_flagged;
+    const isManualOrangeFlag = customer.flag_color === "orange" && !customer.auto_flagged;
+
+    if (isManualRedFlag && analysis.verdict !== "hold") {
+      return {
+        ...analysis,
+        verdict: "hold",
+        title: "Hold — Manually Flagged",
+        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        factors: [
+          { type: "block", text: "Customer is manually flagged red — staff review required before invoicing." },
+          ...analysis.factors,
+        ],
+      };
+    }
+
+    if (isManualOrangeFlag && analysis.verdict === "approve") {
+      return {
+        ...analysis,
+        verdict: "caution",
+        title: "Proceed with Caution — Manually Flagged",
+        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        factors: [
+          { type: "warn", text: "Customer is manually flagged orange — staff review recommended before invoicing." },
+          ...analysis.factors,
+        ],
+      };
+    }
+
+    // Dormant reactivation: latest invoice >12 months after previous invoice.
+    // Only applied if the analysis is already Approve (red/orange override first).
+    if (
+      analysis.isDormantReactivation &&
+      analysis.verdict === "approve" &&
+      !isManualRedFlag &&
+      !isManualOrangeFlag
+    ) {
+      return {
+        ...analysis,
+        verdict: "dormant",
+        title: "Dormant Account — Reactivation",
+        summary: `This customer has not bought in over ${analysis.dormantMonths} months. Verify account details and intent before invoicing.`,
+        factors: [
+          { type: "warn", text: `Latest invoice is over ${analysis.dormantMonths} months after the previous one — customer was dormant.` },
+          ...analysis.factors,
+        ],
+      };
+    }
+
+    return analysis;
   }, [customer, subAccounts]);
 
   const canModifyFlag = () => {
@@ -1221,6 +1299,7 @@ export default function CustomerLookup({
                 {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "dormant" && <Clock className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
                 <div className="flex-1 min-w-0">
                   <span className="text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
                   {creditAnalysis.summary && (

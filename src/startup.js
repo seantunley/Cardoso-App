@@ -67,9 +67,10 @@ export async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
+        can_access_customer_search, can_access_customer_balances, can_access_inventory,
+        can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'admin@example.com',
       'Admin User',
@@ -77,6 +78,8 @@ export async function ensureSeedUsers() {
       hash,
       1,
       adminDefaults.can_access_customer_search ? 1 : 0,
+      adminDefaults.can_access_customer_balances !== false ? 1 : 0,
+      adminDefaults.can_access_inventory !== false ? 1 : 0,
       adminDefaults.can_access_records ? 1 : 0,
       adminDefaults.can_access_reports ? 1 : 0,
       adminDefaults.can_access_connections ? 1 : 0,
@@ -98,9 +101,10 @@ export async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_records, can_access_reports, can_access_connections, can_access_settings,
+        can_access_customer_search, can_access_customer_balances, can_access_inventory,
+        can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'user@example.com',
       'Regular User',
@@ -108,6 +112,8 @@ export async function ensureSeedUsers() {
       hash,
       1,
       userDefaults.can_access_customer_search ? 1 : 0,
+      userDefaults.can_access_customer_balances !== false ? 1 : 0,
+      userDefaults.can_access_inventory !== false ? 1 : 0,
       userDefaults.can_access_records ? 1 : 0,
       userDefaults.can_access_reports ? 1 : 0,
       userDefaults.can_access_connections ? 1 : 0,

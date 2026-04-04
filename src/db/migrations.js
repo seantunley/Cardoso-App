@@ -341,6 +341,63 @@ function buildMigrations(db) {
         forceAdd('datarecord', 'terms', 'TEXT');
       },
     },
+    {
+      version: 16,
+      name: 'hub_user_sites_table',
+      up() {
+        db.prepare(`
+          CREATE TABLE IF NOT EXISTS hub_user_sites (
+            email TEXT NOT NULL,
+            site_slug TEXT NOT NULL,
+            pushed_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (email, site_slug)
+          )
+        `).run();
+      },
+    },
+    {
+      version: 17,
+      name: 'feature_permissions_balances_inventory',
+      up() {
+        ensureColumn(db, 'user', 'can_access_customer_balances', 'INTEGER DEFAULT 1');
+        ensureColumn(db, 'user', 'can_access_inventory', 'INTEGER DEFAULT 1');
+        // Grant to all existing users so no one loses access
+        db.prepare(`UPDATE "user" SET can_access_customer_balances = 1 WHERE can_access_customer_balances = 0`).run();
+        db.prepare(`UPDATE "user" SET can_access_inventory = 1 WHERE can_access_inventory = 0`).run();
+      },
+    },
+    {
+      version: 18,
+      name: 'speedtest_tables',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS site_speedtest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            download_mbps REAL,
+            upload_mbps REAL,
+            ping_ms REAL,
+            isp TEXT,
+            server_name TEXT,
+            server_location TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+          );
+          CREATE TABLE IF NOT EXISTS hub_speedtest (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_slug TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            download_mbps REAL,
+            upload_mbps REAL,
+            ping_ms REAL,
+            isp TEXT,
+            server_name TEXT,
+            server_location TEXT,
+            pulled_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(site_slug, timestamp)
+          );
+        `);
+      },
+    },
 
   ];
 }

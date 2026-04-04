@@ -82,6 +82,15 @@
   --sidebar-accent-foreground: 0 0% 95%;
   --sidebar-border: 220 8% 26%;
   --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Cardoso semantic vars — dark mode */
+    --bg-primary: #16181d;
+    --bg-secondary: #1e2028;
+    --bg-tertiary: #272a33;
+    --text-primary: #f9fafb;
+    --text-secondary: #9ca3af;
+    --text-tertiary: #6b7280;
+    --border-color: #374151;
   }
 }
 

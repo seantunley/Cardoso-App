@@ -17,10 +17,12 @@ const permissionGroups = [
     description: "Control which pages users can view",
     permissions: [
       { key: "can_access_customer_search", label: "Customer Search", description: "Look up and view customer records" },
-      { key: "can_access_records", label: "Records", description: "View and browse all data records" },
+      { key: "can_access_customer_balances", label: "Customer Balances", description: "View the customer balances page" },
+      { key: "can_access_inventory", label: "Inventory", description: "View and browse inventory records" },
+      { key: "can_access_records", label: "Records", description: "View and browse all raw data records" },
       { key: "can_access_reports", label: "Reports", description: "View reports and analytics" },
       { key: "can_access_connections", label: "Connections", description: "Manage database connections" },
-      { key: "can_access_settings", label: "Settings", description: "Configure auto-flag rules" },
+      { key: "can_access_settings", label: "Settings", description: "Access settings panel" },
     ]
   },
   {
