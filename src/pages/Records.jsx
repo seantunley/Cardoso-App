@@ -167,7 +167,7 @@ export default function Records() {
   return (
     <div className="min-h-screen bg-background">
       {/* Extra bottom padding when selection bar is visible */}
-      <div className={cn("max-w-6xl mx-auto p-6 lg:p-8 space-y-5", hasSelection && "pb-24")}>
+      <div className={cn("max-w-6xl mx-auto p-6 lg:p-8 space-y-5", hasSelection ? "pb-40 lg:pb-24" : "")}>
 
         {/* Page header */}
         <div className="flex items-start justify-between gap-4">
@@ -275,7 +275,7 @@ export default function Records() {
       {/* Selection bar — fixed bottom, slides in when records are selected */}
       <div
         className={cn(
-          "fixed bottom-0 left-0 right-0 z-50 transition-all duration-200",
+          "fixed bottom-0 left-0 right-0 z-[60] transition-all duration-200",
           hasSelection ? "translate-y-0 opacity-100" : "translate-y-full opacity-0 pointer-events-none"
         )}
       >
