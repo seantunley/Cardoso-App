@@ -324,8 +324,9 @@ const router = Router();
         FROM "user" ORDER BY role DESC, full_name ASC
       `).all();
       const sitesByEmail = {};
-      db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all()
-        .forEach(row => {
+      let userSiteRows = [];
+      try { userSiteRows = db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all(); } catch (_) { /* table may not exist yet */ }
+      userSiteRows.forEach(row => {
           if (!sitesByEmail[row.email]) sitesByEmail[row.email] = [];
           sitesByEmail[row.email].push({ slug: row.site_slug, pushed_at: row.pushed_at });
         });
