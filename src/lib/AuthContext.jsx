@@ -51,12 +51,11 @@ export const AuthProvider = ({ children }) => {
       setIsLoadingPublicSettings(true);
       setAuthError(null);
 
-      const mockPublicSettings = {
-        id: appParams.appId,
-        public_settings: {},
-      };
+      // Set mock public settings synchronously — no async work needed
+      setAppPublicSettings({ id: appParams.appId, public_settings: {} });
+      setIsLoadingPublicSettings(false); // done immediately, no async work
 
-      setAppPublicSettings(mockPublicSettings);
+      // Run auth check immediately
       await checkUserAuth();
     } catch (error) {
       console.error("Unexpected error:", error);
@@ -64,8 +63,9 @@ export const AuthProvider = ({ children }) => {
         type: "unknown",
         message: error.message || "An unexpected error occurred",
       });
-    } finally {
-      setIsLoadingPublicSettings(false);
+    } catch (innerErr) {
+      // checkUserAuth handles its own errors; this is for unexpected throws above it
+      console.error("checkAppState outer error:", innerErr);
     }
   };
 

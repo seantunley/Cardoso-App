@@ -802,7 +802,10 @@ export default function CustomerLookup({
     }
   }, []);
 
+  // currentUser is fetched by the parent via React Query (shared cache); no extra fetch needed here.
+  // We lazily load it only if not passed as a prop.
   useEffect(() => {
+    if (currentUser) return; // already set from prop or prior fetch
     const fetchUser = async () => {
       try {
         const user = await api.auth.me();
@@ -812,7 +815,7 @@ export default function CustomerLookup({
       }
     };
     fetchUser();
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
     refreshRecords();
@@ -906,7 +909,8 @@ export default function CustomerLookup({
     setShowSuggestions(false);
 
     try {
-      const freshRecords = await refreshRecords();
+      // Use cached records — only refresh if cache is empty
+      const freshRecords = allRecords.length > 0 ? allRecords : await refreshRecords();
 
       const record = freshRecords.find(
         (r) =>
