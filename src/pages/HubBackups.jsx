@@ -283,7 +283,7 @@ export default function HubBackups() {
     >
       <div className="max-w-5xl mx-auto">
         {/* Page header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15 border border-blue-500/30"
@@ -301,7 +301,7 @@ export default function HubBackups() {
               size="sm"
               onClick={handleToggleSync}
               disabled={togglingSync}
-              className={`text-xs ${syncEnabled ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}`}
+              className={`text-xs h-10 ${syncEnabled ? "border-emerald-500/40 text-emerald-300" : "border-red-500/40 text-red-300"}`}
             >
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
@@ -311,7 +311,7 @@ export default function HubBackups() {
               size="sm"
               onClick={() => refetch()}
               disabled={isFetching}
-              className="text-xs border-border text-muted-foreground"
+              className="text-xs h-10 border-border text-muted-foreground"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
               Refresh
