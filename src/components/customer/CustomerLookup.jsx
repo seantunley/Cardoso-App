@@ -974,7 +974,27 @@ export default function CustomerLookup({
         } catch {}
         return { action: 'flag_changed', new_value };
       });
-    return analyseInvoiceCredit(allAccountRecords, flagHistory);
+    const analysis = analyseInvoiceCredit(allAccountRecords, flagHistory);
+
+    // User-set red flag is a hard override — no analysis can approve a manually flagged customer.
+    // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
+    const isManualRedFlag =
+      customer.flag_color === "red" && !customer.auto_flagged;
+
+    if (isManualRedFlag && analysis.verdict !== "hold") {
+      return {
+        ...analysis,
+        verdict: "hold",
+        title: "Hold — Manually Flagged",
+        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        factors: [
+          { type: "block", text: "Customer is manually flagged red — staff review required before invoicing." },
+          ...analysis.factors,
+        ],
+      };
+    }
+
+    return analysis;
   }, [customer, subAccounts]);
 
   const canModifyFlag = () => {
