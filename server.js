@@ -96,7 +96,6 @@ app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createBackupRouter());
 app.use(createReportingRouter({ requireAuth }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
-app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
@@ -106,6 +105,8 @@ if (process.env.HUB_MODE === 'true') {
 } else {
   app.use(createNonHubFallbackRouter());
 }
+
+app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
 
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
