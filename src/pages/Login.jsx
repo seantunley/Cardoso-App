@@ -130,7 +130,7 @@ export default function Login() {
       </div>
 
       {/* ── Right panel (login form) ── */}
-      <div className="w-full lg:w-[420px] flex flex-col items-center justify-center p-8 lg:p-12">
+      <div className="w-full lg:w-[420px] flex flex-col items-center justify-center p-4 sm:p-8 lg:p-12">
         {/* Mobile brand header */}
         <div className="lg:hidden flex flex-col items-center mb-8 gap-2">
           <CardosoBriefcase size={44} />
@@ -140,7 +140,7 @@ export default function Login() {
 
         {/* Card */}
         <div
-          className="w-full rounded-2xl p-8"
+          className="w-full rounded-2xl p-5 sm:p-8"
           style={{
             background: "rgba(15,23,42,0.85)",
             border: "1px solid rgba(99,102,241,0.2)",
@@ -205,7 +205,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-slate-300 transition-colors"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -228,7 +228,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 rounded-lg py-3 text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px]"
               style={{
                 background: isSubmitting
                   ? "rgba(99,102,241,0.6)"
