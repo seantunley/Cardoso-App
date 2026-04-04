@@ -84,12 +84,12 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       {/* Site heading */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 border-b border-border">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
-            <Wifi className="w-4 h-4 text-indigo-400" />
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 px-4 py-2.5 border-b border-border">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-md flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
+            <Wifi className="w-3 h-3 text-indigo-400" />
           </div>
-          <h2 className="text-base font-semibold text-foreground">{slug}</h2>
+          <h2 className="text-sm font-semibold text-foreground">{slug}</h2>
           <StatusBadge pingInfo={pingInfo} />
         </div>
         <Button
@@ -98,7 +98,7 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
           onClick={handleRunNow}
           disabled={running || (pingInfo && !pingInfo.online)}
           title={pingInfo && !pingInfo.online ? "Site is offline" : "Run speed test now"}
-          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-10"
+          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-7"
         >
           {running ? (
             <RefreshCw className="w-3 h-3 animate-spin" />
@@ -118,24 +118,24 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
       ) : (
         <>
           {/* Latest reading highlight */}
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 px-5 py-4 border-b border-border">
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-500 uppercase tracking-wide">↓ Download</span>
-              <span className={`inline-flex items-center gap-1.5 text-xl font-bold px-3 py-1.5 rounded-lg self-start ${downloadBadgeCls(latest.download_mbps)}`}>
-                <ArrowDown className="w-4 h-4" />
+          <div className="grid grid-cols-3 gap-2 px-4 py-2.5 border-b border-border">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide">↓ Download</span>
+              <span className={`inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start ${downloadBadgeCls(latest.download_mbps)}`}>
+                <ArrowDown className="w-3 h-3" />
                 {fmt(latest.download_mbps, " Mbps")}
               </span>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-500 uppercase tracking-wide">↑ Upload</span>
-              <span className="inline-flex items-center gap-1.5 text-xl font-bold px-3 py-1.5 rounded-lg self-start bg-blue-500/10 border border-blue-500/30 text-blue-400">
-                <ArrowUp className="w-4 h-4" />
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide">↑ Upload</span>
+              <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start bg-blue-500/10 border border-blue-500/30 text-blue-400">
+                <ArrowUp className="w-3 h-3" />
                 {fmt(latest.upload_mbps, " Mbps")}
               </span>
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="text-[11px] text-slate-500 uppercase tracking-wide">Ping</span>
-              <span className="inline-flex items-center gap-1.5 text-xl font-bold px-3 py-1.5 rounded-lg self-start bg-purple-500/10 border border-purple-500/30 text-purple-400">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] text-slate-500 uppercase tracking-wide">Ping</span>
+              <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start bg-purple-500/10 border border-purple-500/30 text-purple-400">
                 {fmt(latest.ping_ms, " ms")}
               </span>
             </div>
@@ -143,14 +143,14 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
 
           {/* History table */}
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full text-xs">
               <thead>
-                <tr className="text-[11px] text-slate-500 uppercase tracking-wide border-b border-border">
-                  <th className="text-left px-5 py-2.5 font-medium">Time</th>
-                  <th className="text-right px-4 py-2.5 font-medium">↓ Mbps</th>
-                  <th className="text-right px-4 py-2.5 font-medium">↑ Mbps</th>
-                  <th className="text-right px-4 py-2.5 font-medium">Ping ms</th>
-                  <th className="text-left px-4 py-2.5 font-medium">Server</th>
+                <tr className="text-[10px] text-slate-500 uppercase tracking-wide border-b border-border">
+                  <th className="text-left px-4 py-1.5 font-medium">Time</th>
+                  <th className="text-right px-3 py-1.5 font-medium">↓ Mbps</th>
+                  <th className="text-right px-3 py-1.5 font-medium">↑ Mbps</th>
+                  <th className="text-right px-3 py-1.5 font-medium">Ping ms</th>
+                  <th className="text-left px-3 py-1.5 font-medium">Server</th>
                 </tr>
               </thead>
               <tbody>
@@ -159,15 +159,15 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
                     key={row.id ?? i}
                     className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors"
                   >
-                    <td className="px-5 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtTime(row.timestamp)}</td>
-                    <td className="px-4 py-2.5 text-right">
-                      <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold ${downloadBadgeCls(row.download_mbps)}`}>
+                    <td className="px-4 py-1.5 text-muted-foreground whitespace-nowrap">{fmtTime(row.timestamp)}</td>
+                    <td className="px-3 py-1.5 text-right">
+                      <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${downloadBadgeCls(row.download_mbps)}`}>
                         {fmt(row.download_mbps)}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-right text-xs font-medium text-blue-400">{fmt(row.upload_mbps)}</td>
-                    <td className="px-4 py-2.5 text-right text-xs font-medium text-purple-400">{fmt(row.ping_ms)}</td>
-                    <td className="px-4 py-2.5 text-xs text-muted-foreground truncate max-w-[180px]">
+                    <td className="px-3 py-1.5 text-right font-medium text-blue-400">{fmt(row.upload_mbps)}</td>
+                    <td className="px-3 py-1.5 text-right font-medium text-purple-400">{fmt(row.ping_ms)}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[180px]">
                       {row.server_name ?? row.isp ?? "—"}
                     </td>
                   </tr>
