@@ -68,7 +68,7 @@ function SiteCard({ site, onFlagClick, onResync }) {
           <button
             onClick={(e) => { e.stopPropagation(); onResync(site); }}
             aria-label="Force resync this site"
-            className="flex items-center gap-1 rounded-md border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[36px]"
             title={`Resync ${site.site_name || site.site_slug}`}
           >
             <RefreshCw className="h-3 w-3" />
@@ -82,13 +82,13 @@ function SiteCard({ site, onFlagClick, onResync }) {
       </div>
 
       {site.kpis ? (
-        <div className="grid grid-cols-4 gap-2">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
 
           {/* Total */}
           <div className="group relative overflow-hidden rounded-xl border border-border bg-muted p-3">
-            <p className="text-[9px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">Total</p>
+            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">Total</p>
             <p className="text-xl font-extrabold text-foreground leading-none">{total ?? "—"}</p>
-            <p className="text-[9px] text-muted-foreground/60 mt-1">Records</p>
+            <p className="text-[11px] text-muted-foreground/60 mt-1">Records</p>
             <div className="mt-2 h-0.5 rounded-full bg-border">
               <div className="h-full rounded-full bg-muted-foreground/40 w-full" />
             </div>
@@ -96,9 +96,9 @@ function SiteCard({ site, onFlagClick, onResync }) {
           {/* Red */}
           <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[9px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
+            <p className="text-[11px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
             <p className="text-xl font-extrabold text-foreground leading-none">{flags.red ?? 0}</p>
-            <p className="text-[9px] text-rose-300/60 mt-1">Red Flagged</p>
+            <p className="text-[11px] text-rose-300/60 mt-1">Red Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
               <div className="h-full rounded-full bg-rose-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.red ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
@@ -106,9 +106,9 @@ function SiteCard({ site, onFlagClick, onResync }) {
           {/* Orange */}
           <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[9px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
+            <p className="text-[11px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
             <p className="text-xl font-extrabold text-foreground leading-none">{flags.orange ?? 0}</p>
-            <p className="text-[9px] text-amber-300/60 mt-1">Orange Flagged</p>
+            <p className="text-[11px] text-amber-300/60 mt-1">Orange Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
               <div className="h-full rounded-full bg-amber-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.orange ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
@@ -116,9 +116,9 @@ function SiteCard({ site, onFlagClick, onResync }) {
           {/* Green */}
           <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 cursor-pointer">
             <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[9px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
+            <p className="text-[11px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
             <p className="text-xl font-extrabold text-foreground leading-none">{flags.green ?? 0}</p>
-            <p className="text-[9px] text-emerald-300/60 mt-1">Green Flagged</p>
+            <p className="text-[11px] text-emerald-300/60 mt-1">Green Flagged</p>
             <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
               <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.green ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
             </div>
@@ -309,19 +309,19 @@ function HubCustomerModal({ record, open, onClose }) {
         {/* Verdict banner */}
         {credit && (
           <div className={cn("w-full px-5 py-3 border-b shrink-0", verdictBannerHub[credit.verdict])}>
-            <div className="flex items-center gap-3">
+            <div className="flex items-start gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
               {credit.verdict === "approve"
-                ? <ShieldCheck className="h-6 w-6 shrink-0 opacity-90" strokeWidth={1.75} />
-                : <AlertCircle className="h-6 w-6 shrink-0 opacity-90" strokeWidth={1.75} />}
+                ? <ShieldCheck className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />
+                : <AlertCircle className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
               <div className="flex-1 min-w-0">
                 <span className="text-base font-extrabold tracking-tight leading-tight">{credit.title}</span>
                 {credit.summary && (
                   <p className="text-xs font-semibold mt-0.5 opacity-90">{credit.summary}</p>
                 )}
               </div>
-              <div className="flex items-center gap-3 shrink-0 pr-8">
+              <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-3 shrink-0 sm:pr-8">
                 {credit.avgLag !== null && (
-                  <span className={cn("text-sm font-bold px-3 py-1 rounded-full", verdictScoreHub[credit.verdict])}>
+                  <span className={cn("hidden sm:inline-flex text-sm font-bold px-3 py-1 rounded-full", verdictScoreHub[credit.verdict])}>
                     &#9201; {credit.avgLag}d avg
                   </span>
                 )}
@@ -360,7 +360,7 @@ function HubCustomerModal({ record, open, onClose }) {
 
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-5 py-4">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Invoices */}
             <div className="bg-card border border-border rounded-xl p-3">
               <p className="text-xs font-semibold text-orange-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
@@ -501,7 +501,7 @@ function HubCustomerSearch({ sites }) {
           </div>
           <div className="flex items-center gap-2">
             <select
-              className="rounded-md border border-input bg-background px-2.5 py-1.5 text-xs h-8"
+              className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm h-10"
               value={selectedSiteId}
               onChange={e => setSelectedSiteId(e.target.value)}
             >
@@ -672,7 +672,7 @@ export default function HubDashboard() {
   return (
     <div className="p-6 space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Customer Management</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
