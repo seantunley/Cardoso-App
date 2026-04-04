@@ -104,7 +104,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6 py-4 max-h-96 overflow-y-auto">
+        <form onSubmit={handleSubmit} className="space-y-6 py-4 max-h-[60vh] overflow-y-auto">
           <div className="space-y-3">
             <div className="border-b border-[var(--border-color)] pb-2">
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">Account Status</h3>
