@@ -2,6 +2,29 @@ import cron from 'node-cron';
 import db from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 
+export async function runSpeedTestNow() {
+  const { default: speedTest } = await import('speedtest-net');
+  console.log('[speedtest] Starting on-demand speed test...');
+  const result = await speedTest({ acceptLicense: true, acceptGdpr: true });
+  const download_mbps = result.download?.bandwidth != null ? (result.download.bandwidth * 8) / 1_000_000 : null;
+  const upload_mbps = result.upload?.bandwidth != null ? (result.upload.bandwidth * 8) / 1_000_000 : null;
+  const ping_ms = result.ping?.latency ?? null;
+  const isp = result.isp ?? null;
+  const server_name = result.server?.name ?? null;
+  const server_location = result.server?.location ?? result.server?.country ?? null;
+  const timestamp = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO site_speedtest (timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location);
+  db.prepare(`
+    DELETE FROM site_speedtest WHERE id NOT IN (
+      SELECT id FROM site_speedtest ORDER BY id DESC LIMIT 90
+    )
+  `).run();
+  console.log(`[speedtest] Done — ↓${download_mbps?.toFixed(1)} ↑${upload_mbps?.toFixed(1)} ping=${ping_ms}ms`);
+}
+
 async function runSpeedTest() {
   if (process.env.HUB_MODE === 'true') return;
   try {
@@ -97,10 +120,15 @@ export function startSchedulers() {
   }, 5 * 60 * 1000));
 }
 
-export function startHubSchedulers(syncAllSites, runHubBackupPull) {
+export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites) {
   setTimeout(syncAllSites, 10000);
   intervals.push(setInterval(syncAllSites, 5 * 60 * 1000));
   cronTasks.push(cron.schedule('0 3 * * *', runHubBackupPull));
+  // Ping sites every 15 minutes
+  if (pingAllSites) {
+    setTimeout(pingAllSites, 15000); // initial ping 15s after startup
+    intervals.push(setInterval(pingAllSites, 15 * 60 * 1000));
+  }
 }
 
 export function gracefulShutdown() {

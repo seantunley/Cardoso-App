@@ -358,4 +358,47 @@ async function runHubBackupPull() {
   }));
 }
 
+// --- Site ping ---
+// Pings each site by hitting /api/health and records online/offline status.
+export async function pingAllSites() {
+  if (!HUB_SITES.length) return;
+  const now = new Date().toISOString();
+  for (const site of HUB_SITES) {
+    let online = false;
+    let latency_ms = null;
+    const t0 = Date.now();
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(`${site.url}/api/health`, {
+        signal: controller.signal,
+        headers: { 'x-reporting-token': site.token || '' },
+      });
+      clearTimeout(timeout);
+      latency_ms = Date.now() - t0;
+      online = res.ok;
+    } catch (_) {
+      latency_ms = null;
+    }
+    try {
+      db.prepare(`
+        INSERT INTO hub_site_ping (site_slug, timestamp, online, latency_ms)
+        VALUES (?, ?, ?, ?)
+      `).run(site.slug, now, online ? 1 : 0, latency_ms);
+      // Prune to last 200 rows per site
+      db.prepare(`
+        DELETE FROM hub_site_ping
+        WHERE site_slug = ? AND id NOT IN (
+          SELECT id FROM hub_site_ping WHERE site_slug = ? ORDER BY id DESC LIMIT 200
+        )
+      `).run(site.slug, site.slug);
+      // Update hub_sites.status
+      db.prepare(`UPDATE hub_sites SET status = ? WHERE slug = ?`).run(online ? 'online' : 'offline', site.slug);
+    } catch (e) {
+      console.error(`[HUB PING] DB error for ${site.slug}:`, e.message);
+    }
+    console.log(`[HUB PING] ${site.slug}: ${online ? 'online' : 'OFFLINE'} ${latency_ms != null ? latency_ms + 'ms' : '(timeout)'}`);
+  }
+}
+
 export { initHubTables, initHubSiteRegistry, syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES };

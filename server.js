@@ -14,7 +14,7 @@ import { sanitizeUser } from './src/helpers.js';
 import { createAuthRouter } from './src/routes/auth.js';
 import { createRecordsRouter } from './src/routes/records.js';
 import { createConnectionsRouter } from './src/routes/connections.js';
-import { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull } from './src/services/hubEtl.js';
+import { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, pingAllSites } from './src/services/hubEtl.js';
 import { createHubRouter, createNonHubFallbackRouter, createReceiveUsersRouter } from './src/routes/hub.js';
 import { createReportingRouter } from './src/routes/reporting.js';
 import { createBackupRouter } from './src/routes/backup.js';
@@ -61,7 +61,7 @@ if (process.env.HUB_MODE === 'true') {
   initHubTables();
   initHubSiteRegistry();
   app.use(createHubRouter({ requireAuth, requireAdmin }));
-  startHubSchedulers(syncAllSites, runHubBackupPull);
+  startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites);
 } else {
   app.use(createNonHubFallbackRouter());
 }

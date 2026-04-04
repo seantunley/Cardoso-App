@@ -237,6 +237,19 @@ export function createReportingRouter({ requireAuth }) {
     });
   });
 
+  // POST /api/speedtest/run — trigger an on-demand speed test immediately
+  router.post('/api/speedtest/run', requireReportingToken, async (req, res) => {
+    // Dynamically import and run so we don't block startup
+    import('../scheduler.js').then(({ runSpeedTestNow }) => {
+      if (typeof runSpeedTestNow !== 'function') {
+        return res.status(501).json({ error: 'runSpeedTestNow not exported' });
+      }
+      runSpeedTestNow()
+        .then(() => res.json({ ok: true }))
+        .catch(err => res.status(500).json({ error: err.message }));
+    }).catch(err => res.status(500).json({ error: err.message }));
+  });
+
   // GET /api/speedtest/results — last 30 speed test results
   router.get('/api/speedtest/results', requireReportingToken, (req, res) => {
     try {

@@ -305,6 +305,48 @@ const router = Router();
     }
   });
 
+  // GET /api/hub/ping-status — latest ping result per site
+  router.get('/api/hub/ping-status', requireAuth, (req, res) => {
+    try {
+      let rows = [];
+      try {
+        rows = db.prepare(`
+          SELECT p.site_slug, p.online, p.latency_ms, p.timestamp
+          FROM hub_site_ping p
+          INNER JOIN (
+            SELECT site_slug, MAX(id) AS max_id FROM hub_site_ping GROUP BY site_slug
+          ) latest ON p.id = latest.max_id
+        `).all();
+      } catch (_) { /* table not yet created */ }
+      res.json({ sites: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/speedtest/run-site — trigger on-demand speedtest on a specific site
+  router.post('/api/hub/speedtest/run-site', requireAuth, requireAdmin, async (req, res) => {
+    const { slug } = req.body;
+    const site = HUB_SITES.find(s => s.slug === slug);
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      const r = await fetch(`${site.url}/api/speedtest/run`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'x-reporting-token': site.token || '' },
+      });
+      clearTimeout(timeout);
+      if (!r.ok) return res.status(r.status).json({ error: `Site returned ${r.status}` });
+      // Pull fresh results immediately after
+      await syncSpeedtest(site);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/sync
   router.post('/api/hub/sync', requireAuth, requireAdmin, (req, res) => {
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
