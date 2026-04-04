@@ -58,14 +58,11 @@ export const AuthProvider = ({ children }) => {
       // Run auth check immediately
       await checkUserAuth();
     } catch (error) {
-      console.error("Unexpected error:", error);
+      console.error("checkAppState error:", error);
       setAuthError({
         type: "unknown",
         message: error.message || "An unexpected error occurred",
       });
-    } catch (innerErr) {
-      // checkUserAuth handles its own errors; this is for unexpected throws above it
-      console.error("checkAppState outer error:", innerErr);
     }
   };
 
