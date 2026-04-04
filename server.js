@@ -15,7 +15,7 @@ import { createAuthRouter } from './src/routes/auth.js';
 import { createRecordsRouter } from './src/routes/records.js';
 import { createConnectionsRouter } from './src/routes/connections.js';
 import { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull } from './src/services/hubEtl.js';
-import { createHubRouter, createNonHubFallbackRouter } from './src/routes/hub.js';
+import { createHubRouter, createNonHubFallbackRouter, createReceiveUsersRouter } from './src/routes/hub.js';
 import { createReportingRouter } from './src/routes/reporting.js';
 import { createBackupRouter } from './src/routes/backup.js';
 import { createSystemRouter } from './src/routes/system.js';
@@ -65,6 +65,8 @@ if (process.env.HUB_MODE === 'true') {
 } else {
   app.use(createNonHubFallbackRouter());
 }
+// receive-users is always mounted — sites need it even when HUB_MODE is not set
+app.use(createReceiveUsersRouter());
 
 app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
 

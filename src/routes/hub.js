@@ -320,8 +320,34 @@ const router = Router();
     res.status(allOk ? 200 : 207).json({ results: summary });
   });
 
-  // POST /api/hub/receive-users — site endpoint: receive users pushed from hub
-  router.post(`/api/hub/receive-users`, async (req, res) => {
+  // POST /api/hub/receive-users is registered on ALL installs (hub + site).
+  // See createReceiveUsersRouter() below — mounted separately in server.js.
+
+  console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
+
+  return router;
+}
+
+// Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
+export function createNonHubFallbackRouter() {
+const router = Router();
+  router.get('/api/hub/sites', (req, res) => res.json([]));
+  router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
+  router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
+  router.get('/api/hub/inventory', (req, res) => res.json([]));
+  router.get('/api/hub/sync-log', (req, res) => res.json([]));
+  return router;
+}
+
+/**
+ * createReceiveUsersRouter — ALWAYS mounted, on both hub and site installs.
+ * Sites need this endpoint so the hub can push users to them.
+ * Authenticated via X-Reporting-Token (site's own REPORTING_TOKEN env var).
+ */
+export function createReceiveUsersRouter() {
+  const router = Router();
+
+  router.post('/api/hub/receive-users', async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
     if (!expectedToken || token !== expectedToken) {
@@ -360,7 +386,8 @@ const router = Router();
           );
           updated++;
         } else {
-          // Create new user — no password set (they must set one or reset locally)
+          // Create new user — password set to DEFAULT_USER_PASSWORD or Cardoso@YYYY
+          // must_change_password = 1 forces reset on first login
           const defaultPw = process.env.DEFAULT_USER_PASSWORD || `Cardoso@${new Date().getFullYear()}`;
           const defaultHash = await bcrypt.hash(defaultPw, 12);
           db.prepare(`
@@ -391,18 +418,5 @@ const router = Router();
     res.json({ created, updated, errors });
   });
 
-  console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
-
-  return router;
-}
-
-// Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
-export function createNonHubFallbackRouter() {
-const router = Router();
-  router.get('/api/hub/sites', (req, res) => res.json([]));
-  router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
-  router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
-  router.get('/api/hub/inventory', (req, res) => res.json([]));
-  router.get('/api/hub/sync-log', (req, res) => res.json([]));
   return router;
 }
