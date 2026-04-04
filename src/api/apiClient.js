@@ -193,6 +193,8 @@ export const api = {
 
   functions: {
     call: async (name, params = {}) => {
+      const fn = api.functions[name];
+      if (typeof fn === 'function') return fn(params);
       console.warn(`No local function endpoint mapped for "${name}"`, params);
       return { success: false, message: `Function "${name}" is not implemented locally.` };
     },
