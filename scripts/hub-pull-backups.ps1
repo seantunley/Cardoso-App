@@ -88,6 +88,7 @@ foreach ($site in $sites) {
     New-Item -ItemType Directory -Force -Path $siteDir | Out-Null
 
     $destFile = Join-Path $siteDir "cardoso-$siteId-$stamp.db"
+    $destEnv  = Join-Path $siteDir "cardoso-$siteId-latest.env"
 
     try {
         Invoke-WebRequest -Uri "$apiUrl/api/backup/download" `
@@ -96,9 +97,19 @@ foreach ($site in $sites) {
         $sizeMb = [math]::Round((Get-Item $destFile).Length / 1MB, 2)
         Write-Log "OK  $siteId → $destFile ($sizeMb MB)"
     } catch {
-        Write-Log "ERROR $siteId — download failed: $_"
+        Write-Log "ERROR $siteId — DB download failed: $_"
         if (Test-Path $destFile) { Remove-Item $destFile -Force }
         continue
+    }
+
+    # Pull site .env for disaster recovery
+    try {
+        Invoke-WebRequest -Uri "$apiUrl/api/backup/config" `
+            -Headers @{ "x-reporting-token" = $token } `
+            -OutFile $destEnv -UseBasicParsing
+        Write-Log "OK  $siteId → .env backed up"
+    } catch {
+        Write-Log "WARN $siteId — .env backup failed (non-fatal): $_"
     }
 
     # Rotate old backups for this site

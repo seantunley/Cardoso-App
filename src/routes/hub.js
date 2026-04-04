@@ -60,6 +60,35 @@ const router = Router();
     }
   });
 
+  // GET /api/hub/proxy-config?site_id=xxx
+  // Proxies the site .env download through the hub. Admin-only.
+  router.get('/api/hub/proxy-config', requireAuth, requireAdmin, async (req, res) => {
+    const { site_id } = req.query;
+    if (!site_id) return res.status(400).json({ error: 'site_id required' });
+
+    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
+    if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const upstream = await fetch(`${site.url}/api/backup/config`, {
+        headers: { 'x-reporting-token': site.token || '' },
+        signal: controller.signal,
+      });
+      clearTimeout(timeout);
+      if (!upstream.ok) return res.status(upstream.status).json({ error: `Site returned ${upstream.status}` });
+
+      const filename = `cardoso-config-${site.id}-${new Date().toISOString().slice(0,10)}.env`;
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      const text = await upstream.text();
+      res.send(text);
+    } catch (err) {
+      if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/backup-status
   // Polls /api/backup/status on each registered site and returns aggregated results.
   // Admin-only (session required).
@@ -251,6 +280,8 @@ const router = Router();
       }
       res.json({ results: rows });
     } catch (err) {
+      // If table doesn't exist yet, return empty rather than crashing the page
+      if (err.message?.includes('no such table')) return res.json({ results: [] });
       res.status(500).json({ error: err.message });
     }
   });
@@ -269,6 +300,48 @@ const router = Router();
       }));
       console.log(`[HUB SPEEDTEST PULL] pulled from ${pulled}/${HUB_SITES.length} site(s)`);
       res.json({ pulled });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/ping-status — latest ping result per site
+  router.get('/api/hub/ping-status', requireAuth, (req, res) => {
+    try {
+      let rows = [];
+      try {
+        rows = db.prepare(`
+          SELECT p.site_slug, p.online, p.latency_ms, p.timestamp
+          FROM hub_site_ping p
+          INNER JOIN (
+            SELECT site_slug, MAX(id) AS max_id FROM hub_site_ping GROUP BY site_slug
+          ) latest ON p.id = latest.max_id
+        `).all();
+      } catch (_) { /* table not yet created */ }
+      res.json({ sites: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/hub/speedtest/run-site — trigger on-demand speedtest on a specific site
+  router.post('/api/hub/speedtest/run-site', requireAuth, requireAdmin, async (req, res) => {
+    const { slug } = req.body;
+    const site = HUB_SITES.find(s => s.slug === slug);
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 120_000);
+      const r = await fetch(`${site.url}/api/speedtest/run`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'x-reporting-token': site.token || '' },
+      });
+      clearTimeout(timeout);
+      if (!r.ok) return res.status(r.status).json({ error: `Site returned ${r.status}` });
+      // Pull fresh results immediately after
+      await syncSpeedtest(site);
+      res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -293,8 +366,9 @@ const router = Router();
         FROM "user" ORDER BY role DESC, full_name ASC
       `).all();
       const sitesByEmail = {};
-      db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all()
-        .forEach(row => {
+      let userSiteRows = [];
+      try { userSiteRows = db.prepare(`SELECT email, site_slug, pushed_at FROM hub_user_sites`).all(); } catch (_) { /* table may not exist yet */ }
+      userSiteRows.forEach(row => {
           if (!sitesByEmail[row.email]) sitesByEmail[row.email] = [];
           sitesByEmail[row.email].push({ slug: row.site_slug, pushed_at: row.pushed_at });
         });

@@ -3,7 +3,7 @@
 
 import { useState, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { BarChart2, RefreshCw, Wifi, ArrowDown, ArrowUp, Activity } from "lucide-react";
+import { BarChart2, RefreshCw, Wifi, ArrowDown, ArrowUp, Activity, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
@@ -28,6 +28,31 @@ function fmt(val, unit = "") {
   return `${Number(val).toFixed(1)}${unit}`;
 }
 
+function StatusBadge({ pingInfo }) {
+  if (!pingInfo) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-500/10 border border-slate-500/30 text-slate-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+        Unknown
+      </span>
+    );
+  }
+  if (pingInfo.online) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+        Online{pingInfo.latency_ms != null ? ` · ${pingInfo.latency_ms}ms` : ""}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400">
+      <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
+      Offline
+    </span>
+  );
+}
+
 // ── fetch ──────────────────────────────────────────────────────────────────
 async function fetchSpeedtestResults() {
   const res = await fetch("/api/hub/speedtest", { credentials: "include" });
@@ -35,26 +60,60 @@ async function fetchSpeedtestResults() {
   return res.json();
 }
 
+async function fetchPingStatus() {
+  const res = await fetch("/api/hub/ping-status", { credentials: "include" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
 // ── SiteSection ────────────────────────────────────────────────────────────
-function SiteSection({ slug, rows }) {
+function SiteSection({ slug, rows, pingInfo, onRunNow }) {
   const latest = rows[0] ?? null;
   const tableRows = rows.slice(0, 10);
+  const [running, setRunning] = useState(false);
+
+  const handleRunNow = useCallback(async () => {
+    setRunning(true);
+    try {
+      await onRunNow(slug);
+    } finally {
+      setRunning(false);
+    }
+  }, [slug, onRunNow]);
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       {/* Site heading */}
-      <div className="flex items-center gap-3 px-5 py-4 border-b border-border">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
-          <Wifi className="w-4 h-4 text-indigo-400" />
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
+            <Wifi className="w-4 h-4 text-indigo-400" />
+          </div>
+          <h2 className="text-base font-semibold text-foreground">{slug}</h2>
+          <StatusBadge pingInfo={pingInfo} />
         </div>
-        <h2 className="text-base font-semibold text-foreground">{slug}</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleRunNow}
+          disabled={running || (pingInfo && !pingInfo.online)}
+          title={pingInfo && !pingInfo.online ? "Site is offline" : "Run speed test now"}
+          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5"
+        >
+          {running ? (
+            <RefreshCw className="w-3 h-3 animate-spin" />
+          ) : (
+            <Play className="w-3 h-3" />
+          )}
+          {running ? "Running…" : "Run now"}
+        </Button>
       </div>
 
       {/* No data */}
       {!latest ? (
         <div className="flex flex-col items-center py-10 text-slate-500 gap-2">
           <Activity className="w-8 h-8 opacity-30" />
-          <p className="text-sm">No data yet</p>
+          <p className="text-sm">No data yet — click "Run now" or wait for the next scheduled test</p>
         </div>
       ) : (
         <>
@@ -134,6 +193,18 @@ export default function HubMetrics() {
     refetchInterval: 300_000,
   });
 
+  const { data: pingData } = useQuery({
+    queryKey: ["hub-ping-status"],
+    queryFn: fetchPingStatus,
+    refetchInterval: 60_000, // refresh ping display every minute
+  });
+
+  // Build ping lookup by slug
+  const pingBySite = {};
+  for (const p of pingData?.sites ?? []) {
+    pingBySite[p.site_slug] = p;
+  }
+
   const handlePullNow = useCallback(async () => {
     setPulling(true);
     try {
@@ -152,13 +223,38 @@ export default function HubMetrics() {
     }
   }, [toast, queryClient]);
 
+  const handleRunNow = useCallback(async (slug) => {
+    try {
+      toast({ title: `Running speed test on ${slug}…`, description: "This may take up to 60 seconds." });
+      const res = await fetch("/api/hub/speedtest/run-site", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `HTTP ${res.status}`);
+      }
+      toast({ title: `Speed test complete for ${slug}` });
+      queryClient.invalidateQueries({ queryKey: ["hub-speedtest"] });
+    } catch (err) {
+      toast({ title: `Failed for ${slug}`, description: err.message, variant: "destructive" });
+    }
+  }, [toast, queryClient]);
+
   // Group results by site_slug
   const grouped = {};
   for (const row of data?.results ?? []) {
     if (!grouped[row.site_slug]) grouped[row.site_slug] = [];
     grouped[row.site_slug].push(row);
   }
-  const slugs = Object.keys(grouped).sort();
+
+  // Merge slugs from speedtest data AND ping data so offline sites still appear
+  const allSlugs = Array.from(new Set([
+    ...Object.keys(grouped),
+    ...Object.keys(pingBySite),
+  ])).sort();
 
   return (
     <div className="min-h-screen p-6 bg-background">
@@ -171,7 +267,7 @@ export default function HubMetrics() {
             </div>
             <div>
               <h1 className="text-2xl font-bold text-foreground">Site Metrics</h1>
-              <p className="text-xs text-muted-foreground">Speed test results across all registered sites</p>
+              <p className="text-xs text-muted-foreground">Speed test results · ping status every 15 min</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -183,12 +279,15 @@ export default function HubMetrics() {
               className="text-xs border-indigo-500/40 text-indigo-300"
             >
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${pulling ? "animate-spin" : ""}`} />
-              {pulling ? "Pulling…" : "Pull now"}
+              {pulling ? "Pulling…" : "Pull all"}
             </Button>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => refetch()}
+              onClick={() => {
+                refetch();
+                queryClient.invalidateQueries({ queryKey: ["hub-ping-status"] });
+              }}
               disabled={isFetching}
               className="text-xs border-border text-muted-foreground"
             >
@@ -216,15 +315,21 @@ export default function HubMetrics() {
         {/* Content */}
         {!isLoading && !isError && (
           <>
-            {slugs.length === 0 ? (
+            {allSlugs.length === 0 ? (
               <div className="text-center py-16 text-slate-500">
                 <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-30" />
-                <p>No speedtest data yet. Click "Pull now" or wait for the next scheduled run.</p>
+                <p>No site data yet. Click "Pull all" or wait for the next scheduled run.</p>
               </div>
             ) : (
               <div className="flex flex-col gap-6">
-                {slugs.map(slug => (
-                  <SiteSection key={slug} slug={slug} rows={grouped[slug]} />
+                {allSlugs.map(slug => (
+                  <SiteSection
+                    key={slug}
+                    slug={slug}
+                    rows={grouped[slug] ?? []}
+                    pingInfo={pingBySite[slug] ?? null}
+                    onRunNow={handleRunNow}
+                  />
                 ))}
               </div>
             )}

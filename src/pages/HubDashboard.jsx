@@ -153,6 +153,8 @@ function analyseHubCredit(record) {
   const today = new Date(); today.setHours(0,0,0,0);
   const rawBalance = parseAmount(record.outstanding_balance);
   const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
+  const isManualRedFlag = record.flag_color === "red" && !record.auto_flagged;
+  const isManualOrangeFlag = record.flag_color === "orange" && !record.auto_flagged;
 
   const invoices = [1,2,3,4,5].map(i => ({
     number: record[`last_unpaid_invoice_${i}`],
@@ -173,12 +175,30 @@ function analyseHubCredit(record) {
   const inactiveNote = inactiveYears ? ` No transactions in over ${inactiveYears} year${inactiveYears > 1 ? "s" : ""}.` : "";
 
   if (outstandingBalance === 0) {
-    return {
+    let result = {
       verdict: "approve",
       title: invoices.length > 0 ? "Approve Invoice" : "New Customer",
       summary: (invoices.length > 0 ? "Balance is zero — account fully settled." : "No history — safe to issue first invoice.") + inactiveNote,
       score: 100, avgLag: null,
     };
+
+    if (isManualRedFlag) {
+      result = {
+        ...result,
+        verdict: "hold",
+        title: "Hold — Manually Flagged",
+        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+      };
+    } else if (isManualOrangeFlag && result.verdict === "approve") {
+      result = {
+        ...result,
+        verdict: "caution",
+        title: "Proceed with Caution — Manually Flagged",
+        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+      };
+    }
+
+    return result;
   }
   if (invoices.length === 0 && receipts.length === 0) {
     return { verdict: "caution", title: "Proceed with Caution",
@@ -215,13 +235,24 @@ function analyseHubCredit(record) {
   if (outstandingBalance > 0) deductions = Math.max(deductions, 20);
 
   const score = Math.max(0, 100 - deductions);
-  const verdict = deductions >= 60 ? "hold" : deductions >= 25 ? "caution" : "approve";
-  const title = verdict === "hold" ? "Hold — Do Not Issue" : verdict === "caution" ? "Proceed with Caution" : "Approve Invoice";
-  const summary = verdict === "hold"
+  let verdict = deductions >= 60 ? "hold" : deductions >= 25 ? "caution" : "approve";
+  let title = verdict === "hold" ? "Hold — Do Not Issue" : verdict === "caution" ? "Proceed with Caution" : "Approve Invoice";
+  let summary = verdict === "hold"
     ? `Unpaid invoice is ${oldestUnpaid} days old — exceeds the 21-day limit.${inactiveNote}`
     : verdict === "caution"
     ? `Outstanding balance present${avgLag !== null ? `, avg payment lag ${avgLag}d` : ""}.${inactiveNote}`
     : `Account in good standing${avgLag !== null ? ` — avg payment lag ${avgLag}d` : ""}.${inactiveNote}`;
+
+  if (isManualRedFlag && verdict !== "hold") {
+    verdict = "hold";
+    title = "Hold — Manually Flagged";
+    summary = "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.";
+  } else if (isManualOrangeFlag && verdict === "approve") {
+    verdict = "caution";
+    title = "Proceed with Caution — Manually Flagged";
+    summary = "This customer has been manually flagged orange by staff. Review before issuing an invoice.";
+  }
+
   return { verdict, title, summary, score, avgLag };
 }
 
