@@ -9,7 +9,7 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
-import { boolFromRow } from '../helpers.js';
+import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
@@ -122,12 +122,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
     if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     query += ` ORDER BY updated_date DESC LIMIT ${limit}`;
-    const rows = db.prepare(query).all(...params).map(r => {
-      // Parse JSON blob fields so frontend receives arrays, not raw strings
-      try { r.unpaid_invoices = r.unpaid_invoices ? JSON.parse(r.unpaid_invoices) : []; } catch { r.unpaid_invoices = []; }
-      try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
-      return r;
-    });
+    const rows = db.prepare(query).all(...params).map(r => expandDataRecord(r));
     res.json({ count: rows.length, records: rows });
   });
 
