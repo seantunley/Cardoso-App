@@ -84,7 +84,7 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
       {/* Site heading */}
-      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 px-5 py-4 border-b border-border">
         <div className="flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
             <Wifi className="w-4 h-4 text-indigo-400" />
@@ -98,7 +98,7 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
           onClick={handleRunNow}
           disabled={running || (pingInfo && !pingInfo.online)}
           title={pingInfo && !pingInfo.online ? "Site is offline" : "Run speed test now"}
-          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5"
+          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-10"
         >
           {running ? (
             <RefreshCw className="w-3 h-3 animate-spin" />
@@ -118,7 +118,7 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
       ) : (
         <>
           {/* Latest reading highlight */}
-          <div className="grid grid-cols-3 gap-4 px-5 py-4 border-b border-border">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4 px-5 py-4 border-b border-border">
             <div className="flex flex-col gap-1">
               <span className="text-[11px] text-slate-500 uppercase tracking-wide">↓ Download</span>
               <span className={`inline-flex items-center gap-1.5 text-xl font-bold px-3 py-1.5 rounded-lg self-start ${downloadBadgeCls(latest.download_mbps)}`}>
@@ -260,7 +260,7 @@ export default function HubMetrics() {
     <div className="min-h-screen p-6 bg-background">
       <div className="max-w-5xl mx-auto">
         {/* Page header */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
               <BarChart2 className="w-5 h-5 text-indigo-400" />
