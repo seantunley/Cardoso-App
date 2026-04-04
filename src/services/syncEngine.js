@@ -12,8 +12,6 @@ import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLo
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
 
-const stmts = buildStatements(db);
-
 const activeSyncs = new Set();
 
 function acquireSyncLock(connectionId) {
@@ -28,6 +26,7 @@ function releaseSyncLock(connectionId) {
 }
 
 async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
+  const stmts = buildStatements(db);
   let pool;
   let syncRunId = null;
 
