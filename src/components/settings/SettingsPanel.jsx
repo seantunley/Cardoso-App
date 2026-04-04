@@ -474,11 +474,21 @@ function ThemeTab() {
 
 // ─── Auto-Flag Rules Tab ─────────────────────────────────────────────────────
 
-function AutoFlagTab() {
+function AutoFlagTab({ hubMode = false }) {
   const queryClient = useQueryClient();
   const [showNewRule, setShowNewRule] = useState(false);
+  const [pushModalOpen, setPushModalOpen] = useState(false);
+  const [selectedSiteIds, setSelectedSiteIds] = useState(new Set());
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const canManageRules = hasPermission(currentUser, "can_manage_rules");
+
+  const { data: hubKpis } = useQuery({
+    queryKey: ["hub-kpis-rules"],
+    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then((response) => response.ok ? response.json() : null).catch(() => null),
+    enabled: hubMode && canManageRules,
+    retry: false,
+  });
+  const hubSites = hubKpis?.sites || [];
 
   const handleExport = async () => {
     try {
@@ -543,12 +553,39 @@ function AutoFlagTab() {
 
   const clearMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/clear-auto-flags', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+      const res = await fetch(hubMode ? '/api/hub/clear-auto-flags' : '/api/clear-auto-flags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
     onSuccess: ({ cleared }) => { queryClient.invalidateQueries({ queryKey: ["records"] }); toast.success(`Cleared ${cleared} auto-flagged record(s)`); },
     onError: (e) => toast.error(`Failed to clear: ${e.message}`),
+  });
+
+  const pushRulesMutation = useMutation({
+    mutationFn: async () => {
+      const site_ids = selectedSiteIds.size > 0 ? Array.from(selectedSiteIds) : [];
+      const res = await fetch('/api/hub/push-rules', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ site_ids }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      return data;
+    },
+    onSuccess: (data) => {
+      const failed = (data.results || []).filter((result) => result.status !== 'ok');
+      if (data.pushed) toast.success(`Pushed rules to ${data.pushed} site${data.pushed === 1 ? '' : 's'}`);
+      failed.forEach((result) => toast.error(`${result.site}: ${result.status}`));
+      setPushModalOpen(false);
+      setSelectedSiteIds(new Set());
+    },
+    onError: (error) => toast.error(error.message || 'Failed to push rules'),
   });
 
   const handleSave = (data, id) => {
@@ -560,10 +597,18 @@ function AutoFlagTab() {
     if (confirm("Delete this rule?")) deleteMutation.mutate(id);
   };
 
+  const toggleSite = (siteId) => {
+    setSelectedSiteIds((current) => {
+      const next = new Set(current);
+      next.has(siteId) ? next.delete(siteId) : next.add(siteId);
+      return next;
+    });
+  };
+
   return (
     <div className="space-y-4">
       <div className="flex justify-end gap-2">
-        {canManageRules && (
+        {canManageRules && !hubMode && (
           <Button size="sm" variant="outline" onClick={() => applyMutation.mutate()} disabled={applyMutation.isPending} className="gap-1.5">
             <Zap className="h-3.5 w-3.5" />{applyMutation.isPending ? "Applying…" : "Apply Now"}
           </Button>
@@ -571,6 +616,11 @@ function AutoFlagTab() {
         {canManageRules && (
           <Button size="sm" variant="outline" onClick={() => { if (confirm("Clear all auto-flagged records?")) clearMutation.mutate(); }} disabled={clearMutation.isPending} className="gap-1.5 border-rose-700 text-rose-400 hover:bg-rose-900/20">
             {clearMutation.isPending ? "Clearing…" : "Clear Auto Flags"}
+          </Button>
+        )}
+        {canManageRules && hubMode && (
+          <Button size="sm" variant="outline" onClick={() => setPushModalOpen(true)} className="gap-1.5">
+            <ClipboardList className="h-3.5 w-3.5" /> Push Rules to Sites
           </Button>
         )}
         {canManageRules && (
@@ -602,6 +652,52 @@ function AutoFlagTab() {
             <div className="text-center py-10 border border-dashed border-border rounded-xl text-muted-foreground text-sm">No rules yet — add one above</div>
           )}
         </div>
+      )}
+
+      {hubMode && (
+        <Dialog open={pushModalOpen} onOpenChange={setPushModalOpen}>
+          <DialogContent className="sm:max-w-lg">
+            <DialogHeader>
+              <DialogTitle>Push Rules to Sites</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Choose target sites. Leave all unselected to push to every registered site.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {hubSites.map((site) => {
+                  const selected = selectedSiteIds.has(site.site_id);
+                  return (
+                    <button
+                      key={site.site_id}
+                      type="button"
+                      onClick={() => toggleSite(site.site_id)}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
+                        selected
+                          ? "border-indigo-500 bg-indigo-500/15 text-indigo-300"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {site.site_name || site.site_slug || site.site_id}
+                    </button>
+                  );
+                })}
+                {hubSites.length === 0 && (
+                  <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">
+                    No hub sites available.
+                  </div>
+                )}
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setPushModalOpen(false)}>Cancel</Button>
+                <Button onClick={() => pushRulesMutation.mutate()} disabled={pushRulesMutation.isPending || hubSites.length === 0}>
+                  {pushRulesMutation.isPending ? "Pushing…" : "Confirm Push"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
@@ -737,7 +833,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
   const tabs = [
     canManageUsers && { id: "users", label: "Users" },
     { id: "theme", label: "Theme" },
-    !hubMode && { id: "autoflag", label: "Auto-Flag Rules" },
+    { id: "autoflag", label: "Auto-Flag Rules" },
     { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
@@ -769,7 +865,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
               <TabsContent key={t.id} value={t.id} className="mt-0">
                 {t.id === "users"    && <UsersTabContent />}
                 {t.id === "theme"    && <ThemeTab />}
-                {t.id === "autoflag" && <AutoFlagTab />}
+                {t.id === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
                 {t.id === "fields"   && <FieldsTab />}
                 {t.id === "audit"    && <AuditTab />}
                 {t.id === "synclog"       && <SyncLogTab />}

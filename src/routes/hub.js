@@ -625,6 +625,62 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  router.post('/api/hub/push-rules', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const rawSiteIds = Array.isArray(req.body?.site_ids) ? req.body.site_ids.filter(Boolean) : null;
+      const rules = db.prepare(`
+        SELECT rule_name, conditions, logic, flag_color, is_active, priority, created_by
+        FROM autoflagrule
+        ORDER BY priority DESC, id ASC
+      `).all();
+
+      const targetSites = rawSiteIds && rawSiteIds.length > 0
+        ? HUB_SITES.filter((site) => rawSiteIds.includes(site.id))
+        : HUB_SITES;
+
+      if (targetSites.length === 0) {
+        return res.status(400).json({ error: 'No target sites' });
+      }
+
+      const results = await Promise.all(targetSites.map(async (site) => {
+        try {
+          const response = await fetch(`${site.url}/api/hub/receive-rules`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-hub-token': site.token,
+            },
+            body: JSON.stringify({ rules }),
+            signal: AbortSignal.timeout(15000),
+          });
+
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(body || `HTTP ${response.status}`);
+          }
+
+          logHubAudit({
+            action: 'push_rules',
+            performedBy: req.user?.email,
+            target: site.slug || site.id,
+            detail: String(rules.length),
+          });
+
+          return { site: site.name || site.slug || site.id, status: 'ok' };
+        } catch (err) {
+          return { site: site.name || site.slug || site.id, status: err.message || 'failed' };
+        }
+      }));
+
+      res.status(results.every((result) => result.status === 'ok') ? 200 : 207).json({
+        pushed: results.filter((result) => result.status === 'ok').length,
+        results,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
   // See createReceiveUsersRouter() below — mounted separately in server.js.
 
@@ -780,6 +836,46 @@ export function createReceiveUsersRouter() {
     }
 
     res.json({ created, updated, errors });
+  });
+
+  router.post('/api/hub/receive-rules', (req, res) => {
+    const token = req.headers['x-hub-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { rules } = req.body;
+    if (!Array.isArray(rules)) {
+      return res.status(400).json({ error: 'rules array required' });
+    }
+
+    try {
+      const replaceRules = db.transaction(() => {
+        db.prepare('DELETE FROM autoflagrule').run();
+        const insertRule = db.prepare(`
+          INSERT INTO autoflagrule (rule_name, conditions, logic, flag_color, is_active, priority, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const rule of rules) {
+          insertRule.run(
+            rule.rule_name || rule.name,
+            typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions || []),
+            rule.logic || 'AND',
+            rule.flag_color || rule.color || 'red',
+            rule.is_active ?? 1,
+            rule.priority ?? 1,
+            rule.created_by || null,
+          );
+        }
+      });
+
+      replaceRules();
+      res.json({ received: rules.length });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;
