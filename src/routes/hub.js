@@ -9,12 +9,12 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
-import { boolFromRow } from '../helpers.js';
+import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
-  const router = Router();
+const router = Router();
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
@@ -129,7 +129,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
       return r;
     });
-    res.json({ count: rows.length, records: rows });
+    res.json({ count: rows.length, records: rows.map(expandDataRecord) });
   });
 
   // GET /api/hub/kpis
@@ -174,7 +174,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     query += ' ORDER BY hi.item_number ASC';
     try {
       const rows = db.prepare(query).all(...params);
-      res.json({ count: rows.length, records: rows });
+      res.json({ count: rows.length, records: rows.map(expandDataRecord) });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -375,7 +375,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
 // Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
 export function createNonHubFallbackRouter() {
-  const router = Router();
+const router = Router();
   router.get('/api/hub/sites', (req, res) => res.json([]));
   router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
