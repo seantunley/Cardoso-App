@@ -165,7 +165,53 @@ export default function AuditLogTable({ logs = [] }) {
             />
           </div>
 
-          <div className="overflow-x-auto">
+          {/* Mobile card list — visible only on small screens */}
+          <div className="block sm:hidden space-y-2">
+            {filteredAndSorted.map((log) => {
+              const isExpanded = !!expandedRows[log.id];
+              const isFlagUpdate = log.action_type === "update_flag";
+              const flagSummary = isFlagUpdate ? renderFlagSummary(log) : null;
+              return (
+                <div key={`m-${log.id}`} className="rounded-lg border border-border bg-muted/20 p-3 text-sm space-y-1.5">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium text-foreground">{log.user_name || log.user_email || "Unknown"}</div>
+                      <div className="text-xs text-muted-foreground">{formatAppDate(log.created_date)}</div>
+                    </div>
+                    <Badge className={cn("text-xs shrink-0", actionColors[log.action_type] || "bg-muted text-muted-foreground")}>
+                      {actionLabels[log.action_type] || log.action_type}
+                    </Badge>
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {log.resource_type && <span className="font-medium text-foreground">{log.resource_type}</span>}
+                    {log.resource_name && <span className="ml-1">{log.resource_name}</span>}
+                  </div>
+                  {isFlagUpdate && flagSummary?.colorChange && (
+                    <div className="text-xs text-orange-300 font-medium">{flagSummary.colorChange}</div>
+                  )}
+                  {log.action_details && (
+                    <div className="text-xs text-muted-foreground truncate">{log.action_details}</div>
+                  )}
+                  <button
+                    onClick={() => toggleExpanded(log.id)}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    {isExpanded ? "Hide details" : "Show details"}
+                  </button>
+                  {isExpanded && (
+                    <div className="rounded-lg border border-border bg-muted/50 p-2 text-xs text-muted-foreground">
+                      <pre className="whitespace-pre-wrap break-words text-[11px]">
+                        {typeof log.changes === "string" ? log.changes : JSON.stringify(log.changes, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Desktop table — hidden on small screens */}
+          <div className="hidden sm:block overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border">
@@ -337,6 +383,7 @@ export default function AuditLogTable({ logs = [] }) {
               </tbody>
             </table>
           </div>
+          </div>{/* end desktop table wrapper */}
 
           {filteredAndSorted.length === 0 && (
             <div className="py-8 text-center text-muted-foreground">
