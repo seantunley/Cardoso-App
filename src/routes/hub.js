@@ -280,6 +280,8 @@ const router = Router();
       }
       res.json({ results: rows });
     } catch (err) {
+      // If table doesn't exist yet, return empty rather than crashing the page
+      if (err.message?.includes('no such table')) return res.json({ results: [] });
       res.status(500).json({ error: err.message });
     }
   });
