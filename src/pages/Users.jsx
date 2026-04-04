@@ -85,7 +85,7 @@ export default function Users({ embedded = false }) {
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">{activeUsers.length} active · {adminCount} admin{adminCount !== 1 ? "s" : ""}</p>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => refetch()} disabled={isFetching}>
+          <Button variant="ghost" size="sm" className="h-10 w-10" onClick={() => refetch()} disabled={isFetching}>
             <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
           </Button>
           <Button size="sm" onClick={() => setCreateModalOpen(true)} className="gap-1.5">
@@ -134,11 +134,11 @@ export default function Users({ embedded = false }) {
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center justify-end gap-1">
-                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit" onClick={() => setEditingUser(user)}><Pencil className="h-3.5 w-3.5" /></Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Permissions" onClick={() => setEditingPermissionsUser(user)}><Shield className="h-3.5 w-3.5" /></Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8" title="Set Password" onClick={() => setPasswordUser(user)}><KeyRound className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-10 w-10" title="Edit" onClick={() => setEditingUser(user)}><Pencil className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-10 w-10" title="Permissions" onClick={() => setEditingPermissionsUser(user)}><Shield className="h-3.5 w-3.5" /></Button>
+                      <Button size="icon" variant="ghost" className="h-10 w-10" title="Set Password" onClick={() => setPasswordUser(user)}><KeyRound className="h-3.5 w-3.5" /></Button>
                       {currentUser?.id !== user.id && (
-                        <Button size="icon" variant="ghost" className="h-8 w-8 text-red-400 hover:text-red-500" title="Delete" onClick={() => handleDeleteUser(user)} disabled={deleteUserMutation.isPending}>
+                        <Button size="icon" variant="ghost" className="h-10 w-10 text-red-400 hover:text-red-500" title="Delete" onClick={() => handleDeleteUser(user)} disabled={deleteUserMutation.isPending}>
                           {deleteUserMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                         </Button>
                       )}
