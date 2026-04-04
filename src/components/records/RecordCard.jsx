@@ -125,7 +125,7 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 onClick={(e) => { e.stopPropagation(); onEdit(record); }}
                 title="Edit record"
               >
@@ -135,7 +135,7 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                 disabled
                 title="You don't have edit permission"
               >
@@ -146,7 +146,7 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7"
+              className="h-9 w-9 sm:h-7 sm:w-7"
               title={expanded ? "Hide source data" : "Show source data"}
               onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
             >

@@ -184,7 +184,7 @@ export default function CustomerSearch() {
 
 
         {/* Customer Lookup + Last Sync side by side */}
-        <div className="flex gap-3 items-stretch">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch">
           {/* Customer Lookup */}
           <div className="flex-1 ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10 min-w-0">
             <CustomerLookup 
@@ -198,7 +198,7 @@ export default function CustomerSearch() {
 
           {/* Last Sync Info */}
           {selectedConnection && (
-            <div className="flex-shrink-0 w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
+            <div className="w-full sm:flex-shrink-0 sm:w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="p-1.5 rounded-md bg-indigo-500/20">
                   <RefreshCw className="w-3 h-3 text-indigo-400" />

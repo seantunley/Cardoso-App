@@ -103,7 +103,7 @@ export default function Users({ embedded = false }) {
           <Button size="sm" onClick={() => setCreateModalOpen(true)}><Plus className="h-3.5 w-3.5 mr-1.5" />Add User</Button>
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="rounded-xl border border-border bg-card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-muted/40">

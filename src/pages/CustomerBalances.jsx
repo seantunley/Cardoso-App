@@ -342,7 +342,7 @@ export default function CustomerBalances() {
             </div>
           )}
           {!isLoading && !isError && filtered.length > 0 && (
-            <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
