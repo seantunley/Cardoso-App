@@ -53,7 +53,8 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
       const filename = `cardoso-${site.id}-${new Date().toISOString().slice(0,10)}.db`;
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      upstream.body.pipe(res);
+      const buf = Buffer.from(await upstream.arrayBuffer());
+      res.send(buf);
     } catch (err) {
       if (!res.headersSent) res.status(500).json({ error: err.message });
     }
