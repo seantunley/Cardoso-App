@@ -232,6 +232,27 @@ export const api = {
     return readResponse(res, 'KPIs');
   },
 
+  records: {
+    search: async ({ search = '', flagColor = 'all', limit = 50, offset = 0 } = {}) => {
+      const params = new URLSearchParams();
+      if (search?.trim()) params.set('search', search.trim());
+      if (flagColor && flagColor !== 'all') params.set('flag_color', flagColor);
+      params.set('limit', String(limit));
+      params.set('offset', String(offset));
+      const res = await fetch(`${API_BASE}/datarecord/search?${params.toString()}`, {
+        credentials: 'include',
+      });
+      return readResponse(res, 'Search records');
+    },
+
+    flagCounts: async () => {
+      const res = await fetch(`${API_BASE}/datarecord/flag-counts`, {
+        credentials: 'include',
+      });
+      return readResponse(res, 'Record flag counts');
+    },
+  },
+
   importData: async (connectionId) => {
     const res = await fetch(`${API_BASE}/import/${connectionId}`, {
       method: "POST",

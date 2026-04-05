@@ -467,6 +467,92 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
   });
 
+  // ==================== RECORD SEARCH / AGGREGATES ====================
+
+  router.get(
+    '/api/datarecord/search',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const flagColor = typeof req.query.flag_color === 'string' ? req.query.flag_color.trim() : '';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 250);
+        const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+        const whereParts = [];
+        const params = [];
+
+        if (flagColor && flagColor !== 'all') {
+          if (flagColor === 'none') {
+            whereParts.push(`COALESCE(flag_color, 'none') = 'none'`);
+          } else {
+            whereParts.push('flag_color = ?');
+            params.push(flagColor);
+          }
+        }
+
+        if (rawSearch) {
+          whereParts.push(`(
+            customer_number LIKE ? OR
+            customer_name LIKE ? OR
+            source_id LIKE ? OR
+            source_table LIKE ? OR
+            data LIKE ?
+          )`);
+          const like = `%${rawSearch}%`;
+          params.push(like, like, like, like, like);
+        }
+
+        const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+        const countRow = db.prepare(`SELECT COUNT(*) AS total FROM datarecord ${whereClause}`).get(...params);
+        const rows = db.prepare(`
+          SELECT *
+          FROM datarecord
+          ${whereClause}
+          ORDER BY datetime(updated_date) DESC, id DESC
+          LIMIT ? OFFSET ?
+        `).all(...params, limit, offset);
+
+        res.json({
+          records: rows.map(expandDataRecord),
+          total: countRow?.total ?? 0,
+          limit,
+          offset,
+          has_more: offset + rows.length < (countRow?.total ?? 0),
+        });
+      } catch (error) {
+        console.error('Search records error:', error);
+        res.status(500).json({ error: 'Failed to search records' });
+      }
+    }
+  );
+
+  router.get(
+    '/api/datarecord/flag-counts',
+    requireAuth,
+    requirePermission('can_access_customer_search'),
+    (req, res) => {
+      try {
+        const rows = db.prepare(`
+          SELECT COALESCE(flag_color, 'none') AS flag_color, COUNT(*) AS count
+          FROM datarecord
+          GROUP BY COALESCE(flag_color, 'none')
+        `).all();
+
+        const counts = { none: 0, red: 0, orange: 0, green: 0 };
+        for (const row of rows) {
+          if (row.flag_color in counts) counts[row.flag_color] = row.count;
+        }
+
+        res.json({ records_by_flag: counts, total_records: Object.values(counts).reduce((sum, value) => sum + value, 0) });
+      } catch (error) {
+        console.error('Record flag counts error:', error);
+        res.status(500).json({ error: 'Failed to load record flag counts' });
+      }
+    }
+  );
+
   // ==================== DYNAMIC CRUD ROUTES ====================
 
   router.get('/api/:table', requireAuth, (req, res) => {

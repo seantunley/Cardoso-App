@@ -342,20 +342,34 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // GET /api/hub/records
   router.get('/api/hub/records', requireAuth, (req, res) => {
     const { site_id, flag_color, search } = req.query;
-    const limit = Math.min(parseInt(req.query.limit) || 500, 10000);
-    let query = 'SELECT * FROM hub_records WHERE 1=1';
+    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    let whereClause = 'WHERE 1=1';
     const params = [];
-    if (site_id) { query += ' AND site_id=?'; params.push(site_id); }
-    if (flag_color) { query += ' AND flag_color=?'; params.push(flag_color); }
-    if (search) { query += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    query += ` ORDER BY updated_date DESC LIMIT ${limit}`;
-    const rows = db.prepare(query).all(...params).map(r => {
+    if (site_id) { whereClause += ' AND site_id=?'; params.push(site_id); }
+    if (flag_color) { whereClause += ' AND flag_color=?'; params.push(flag_color); }
+    if (search) { whereClause += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+
+    const countRow = db.prepare(`SELECT COUNT(*) AS total FROM hub_records ${whereClause}`).get(...params);
+    const rows = db.prepare(`
+      SELECT * FROM hub_records
+      ${whereClause}
+      ORDER BY datetime(updated_date) DESC, rowid DESC
+      LIMIT ? OFFSET ?
+    `).all(...params, limit, offset).map(r => {
       // Parse JSON blob fields so frontend receives arrays, not raw strings
       try { r.unpaid_invoices = r.unpaid_invoices ? JSON.parse(r.unpaid_invoices) : []; } catch { r.unpaid_invoices = []; }
       try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
       return r;
     });
-    res.json({ count: rows.length, records: rows.map(expandDataRecord) });
+    res.json({
+      count: rows.length,
+      total: countRow?.total ?? rows.length,
+      limit,
+      offset,
+      has_more: offset + rows.length < (countRow?.total ?? 0),
+      records: rows.map(expandDataRecord),
+    });
   });
 
   // GET /api/hub/kpis

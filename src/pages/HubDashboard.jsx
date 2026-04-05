@@ -598,24 +598,17 @@ export default function HubDashboard() {
   const [dateRange, setDateRange] = useState("all");
 
   // Flag drill-down
-  const [flagModal, setFlagModal] = useState({ open: false, color: null, customers: [], siteName: "" });
+  const [flagModal, setFlagModal] = useState({ open: false, color: null, siteName: "", siteId: null });
   const [flagDetailRecord, setFlagDetailRecord] = useState(null);
   const [flagDetailOpen, setFlagDetailOpen] = useState(false);
 
-  const handleFlagClick = useCallback(async (site, flagColor) => {
-    try {
-      const params = new URLSearchParams({ site_id: site.site_id, flag_color: flagColor, limit: 5000 });
-      const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setFlagModal({
-        open: true,
-        color: flagColor,
-        customers: data.records || [],
-        siteName: site.site_name || site.site_slug,
-        siteId: site.site_id,
-      });
-    } catch {}
+  const handleFlagClick = useCallback((site, flagColor) => {
+    setFlagModal({
+      open: true,
+      color: flagColor,
+      siteName: site.site_name || site.site_slug,
+      siteId: site.site_id,
+    });
   }, []);
 
   const openFlagDetail = useCallback((customer) => {
@@ -747,9 +740,10 @@ export default function HubDashboard() {
       {/* Flag drill-down modal */}
       <FlaggedCustomersModal
         flagColor={flagModal.color}
-        customers={flagModal.customers}
         open={flagModal.open}
         siteName={flagModal.siteName}
+        siteId={flagModal.siteId}
+        mode="hub"
         onClose={() => setFlagModal(m => ({ ...m, open: false }))}
         onCustomerClick={openFlagDetail}
       />
