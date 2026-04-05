@@ -21,7 +21,7 @@ import { createBackupRouter } from './src/routes/backup.js';
 import { createSystemRouter } from './src/routes/system.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
-import { validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
+import { validateSessionSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 
 const require = createRequire(import.meta.url);
@@ -48,6 +48,7 @@ app.use(session({
 
 initSchema(db);
 runMigrations(db);
+validateEncryptionKey();
 migrateUnencryptedPasswords();
 const stmts = buildStatements(db);
 const getUserById = createGetUserById(stmts);

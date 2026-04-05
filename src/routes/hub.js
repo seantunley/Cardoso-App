@@ -178,6 +178,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const filename = `cardoso-config-${site.id}-${new Date().toISOString().slice(0,10)}.env`;
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Backup-Config-Mode', upstream.headers.get('x-backup-config-mode') || 'unknown');
       const text = await upstream.text();
       res.send(text);
     } catch (err) {

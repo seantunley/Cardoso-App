@@ -1,7 +1,7 @@
 import express from 'express';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, sanitizeConnection } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from '../services/autoFlag.js';
-import { encryptPassword } from '../services/encryption.js';
+import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
 
 /**
  * Creates the data-record, auto-flag, and dynamic CRUD routes router.
@@ -787,6 +787,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
     // Encrypt MSSQL password before storing
     if (table === 'databaseconnection' && data.encrypted_password) {
+      if (process.env.NODE_ENV === 'production' && !getEncryptionKey()) {
+        return res.status(503).json({ error: 'ENCRYPTION_KEY must be configured before storing MSSQL credentials in production' });
+      }
       data.encrypted_password = encryptPassword(data.encrypted_password);
     }
 
@@ -845,6 +848,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
     // Encrypt MSSQL password before storing
     if (table === 'databaseconnection' && data.encrypted_password) {
+      if (process.env.NODE_ENV === 'production' && !getEncryptionKey()) {
+        return res.status(503).json({ error: 'ENCRYPTION_KEY must be configured before storing MSSQL credentials in production' });
+      }
       data.encrypted_password = encryptPassword(data.encrypted_password);
     }
 

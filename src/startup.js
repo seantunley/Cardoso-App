@@ -1,8 +1,18 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import db from './db/index.js';
-import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './services/encryption.js';
 import { defaultPermissionsForRole } from './helpers.js';
+import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './services/encryption.js';
+
+function hasStoredDatabasePasswords() {
+  const row = db.prepare(`
+    SELECT id
+    FROM databaseconnection
+    WHERE encrypted_password IS NOT NULL AND TRIM(encrypted_password) <> ''
+    LIMIT 1
+  `).get();
+  return !!row;
+}
 
 function generateBootstrapPassword() {
   return crypto.randomBytes(18).toString('base64url');
@@ -21,6 +31,18 @@ export function validateSessionSecret(secret) {
     console.error('FATAL: SESSION_SECRET must be at least 32 characters long.');
     process.exit(1);
   }
+}
+
+export function validateEncryptionKey() {
+  const key = getEncryptionKey();
+  if (key) return;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!isProduction) return;
+  if (!hasStoredDatabasePasswords()) return;
+
+  console.error('FATAL: ENCRYPTION_KEY is required in production when MSSQL credentials are stored. Refusing to start insecurely.');
+  process.exit(1);
 }
 
 export function migrateUnencryptedPasswords() {

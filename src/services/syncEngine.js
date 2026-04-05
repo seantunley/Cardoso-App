@@ -7,6 +7,7 @@
 import sql from 'mssql';
 import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
+import { buildSqlServerConfig } from './mssqlSecurity.js';
 import { buildStatements } from '../db/statements.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
@@ -58,19 +59,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       VALUES (?, ?, 'running')
     `).run(connectionId, new Date().toISOString()).lastInsertRowid;
 
-    const sqlConfig = {
+    const sqlConfig = buildSqlServerConfig({
       user: connConfig.username,
       password: decryptPassword(connConfig.encrypted_password),
       server: connConfig.host,
       database: connConfig.database_name,
-      port: parseInt(connConfig.port, 10),
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-      },
-      requestTimeout: 30000,
-      connectionTimeout: 15000,
-    };
+      port: connConfig.port,
+    });
 
     pool = await sql.connect(sqlConfig);
 
