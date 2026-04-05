@@ -97,117 +97,139 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
   const SqlIcon = sqlMeta.icon;
 
   return (
-    <div className={`bg-card rounded-xl p-5 flex flex-col gap-4 ${meta.cls}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5 min-w-0">
-          <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/15 border border-blue-500/30">
-            <Database className="w-4 h-4 text-blue-400" />
-          </div>
-          <div className="min-w-0">
-            <div className="font-semibold text-foreground text-sm truncate">{site.site_name || site.site_id}</div>
-            <div className="text-xs text-slate-500 truncate">{site.url || "No URL"}</div>
-          </div>
-        </div>
-        <span className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${meta.cls}`}>
-          <Icon className="w-3.5 h-3.5" />
-          {meta.label}
-        </span>
-      </div>
-
-      <div className="flex flex-wrap justify-end gap-2">
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sqlMeta.cls}`}>
-          <SqlIcon className="w-3.5 h-3.5" />
-          {sqlMeta.label}
-        </span>
-        {integrityMeta && (
-          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
-            {integrityMeta.label}
-          </span>
-        )}
-      </div>
-
-      {site.error ? (
-        <p className="text-xs text-red-400">{site.error}</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <Stat label="Last Backup" value={lb ? fmtRelative(lb.mtime) : "Never"} sub={lb ? fmtDate(lb.mtime) : ""} />
-          <Stat label="Backup Size" value={fmtBytes(lb?.size)} />
-          <Stat label="Live DB Size" value={fmtBytes(site.db_size)} />
-          <Stat label="On Site" value={lb?.total_backups ?? "0"} />
-          <Stat label="On Hub" value={hubData?.hub_backup_count ?? "0"} sub={hubData?.hub_last_backup ? fmtRelative(hubData.hub_last_backup) : ""} />
-          <Stat label="Hub Latest" value={fmtBytes(hubData?.hub_last_size)} />
-        </div>
-      )}
-
-      <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-        <div className="flex items-start justify-between gap-3 mb-2">
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-slate-500">SQL Full Backup</div>
-            <div className="text-sm font-semibold text-foreground">
-              {sqlHealth.last_success_at ? fmtRelative(sqlHealth.last_success_at) : "Unavailable"}
+    <div className="rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm shadow-black/5 backdrop-blur-sm">
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl border border-blue-500/30 bg-blue-500/15">
+              <Database className="h-4 w-4 text-blue-400" />
             </div>
-            {sqlHealth.last_success_at && (
-              <div className="text-[11px] text-slate-500">{fmtDate(sqlHealth.last_success_at)}</div>
+            <div className="min-w-0">
+              <div className="text-base font-semibold text-foreground truncate">{site.site_name || site.site_id}</div>
+              <div className="text-xs text-slate-500 truncate">{site.url || "No URL"}</div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 sm:justify-end">
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${meta.cls}`}>
+              <Icon className="h-3.5 w-3.5" />
+              App {meta.label}
+            </span>
+            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sqlMeta.cls}`}>
+              <SqlIcon className="h-3.5 w-3.5" />
+              {sqlMeta.label}
+            </span>
+            {integrityMeta && (
+              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
+                Hub {integrityMeta.label}
+              </span>
             )}
           </div>
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
-            <SqlIcon className="w-3 h-3" />
-            {sqlMeta.label}
-          </span>
         </div>
 
-        {!site.sql_backup?.ok ? (
-          <p className="text-xs text-slate-500">{site.sql_backup?.message || "SQL backup status unavailable."}</p>
-        ) : site.sql_backup?.databases?.length ? (
-          <div className="space-y-2">
-            {site.sql_backup.databases.map((database) => {
-              const good = database.isSuccess === true;
-              const bad = database.isSuccess === false;
-              return (
-                <div key={database.name} className="flex items-start justify-between gap-3 rounded-md border border-border/50 px-2.5 py-2">
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium text-foreground truncate">{database.name}</div>
-                    <div className="text-[11px] text-slate-500">{database.backupAt ? fmtDate(database.backupAt) : "No timestamp"}</div>
-                    {database.objectStatus && (
-                      <div className="text-[11px] text-slate-500 truncate">{database.objectStatus}</div>
-                    )}
-                  </div>
-                  <span className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${good ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" : bad ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-slate-500/10 border border-slate-500/30 text-slate-400"}`}>
-                    {good ? "Success" : bad ? "Failed" : "Unknown"}
-                  </span>
-                </div>
-              );
-            })}
+        {site.error ? (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-xs text-red-400">
+            {site.error}
           </div>
         ) : (
-          <p className="text-xs text-slate-500">{site.sql_backup?.message || "No DAT backup objects found."}</p>
-        )}
-      </div>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <div className={`rounded-xl border bg-background/80 p-4 ${meta.cls}`}>
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">App Backup</div>
+                  <div className="mt-1 text-sm font-semibold text-foreground">
+                    {lb ? fmtRelative(lb.mtime) : "Never"}
+                  </div>
+                  {lb?.mtime && <div className="text-[11px] text-slate-500">{fmtDate(lb.mtime)}</div>}
+                </div>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${meta.cls}`}>
+                  <Icon className="h-3 w-3" />
+                  {meta.label}
+                </span>
+              </div>
 
-      <div className="flex gap-2 pt-1 border-t border-white/5 flex-wrap">
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!site.url || downloading === site.site_id}
-          onClick={() => onDownload(site)}
-          className="text-xs h-7 px-3 border-border text-primary"
-        >
-          {downloading === site.site_id
-            ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />Downloading…</>
-            : <><Download className="w-3 h-3 mr-1.5" />Pull DB</>}
-        </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={!site.url || downloadingConfig === site.site_id}
-          onClick={() => onDownloadConfig(site)}
-          className="text-xs h-7 px-3 border-border text-amber-400"
-          title="Download .env (site identity + secrets)"
-        >
-          {downloadingConfig === site.site_id
-            ? <><RefreshCw className="w-3 h-3 mr-1.5 animate-spin" />Downloading…</>
-            : <><Download className="w-3 h-3 mr-1.5" />Pull .env</>}
-        </Button>
+              <div className="grid grid-cols-2 gap-3">
+                <Stat label="Backup Size" value={fmtBytes(lb?.size)} />
+                <Stat label="Live DB Size" value={fmtBytes(site.db_size)} />
+                <Stat label="On Site" value={lb?.total_backups ?? "0"} />
+                <Stat label="On Hub" value={hubData?.hub_backup_count ?? "0"} sub={hubData?.hub_last_backup ? fmtRelative(hubData.hub_last_backup) : ""} />
+                <Stat label="Hub Latest" value={fmtBytes(hubData?.hub_last_size)} />
+                <Stat label="Hub Time" value={hubData?.hub_last_backup ? fmtDate(hubData.hub_last_backup) : "—"} />
+              </div>
+
+              <div className="mt-4 flex gap-2 border-t border-border/50 pt-4 flex-wrap">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!site.url || downloading === site.site_id}
+                  onClick={() => onDownload(site)}
+                  className="h-7 border-border px-3 text-xs text-primary"
+                >
+                  {downloading === site.site_id
+                    ? <><RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />Downloading…</>
+                    : <><Download className="mr-1.5 h-3 w-3" />Pull DB</>}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!site.url || downloadingConfig === site.site_id}
+                  onClick={() => onDownloadConfig(site)}
+                  className="h-7 border-border px-3 text-xs text-amber-400"
+                  title="Download .env (site identity + secrets)"
+                >
+                  {downloadingConfig === site.site_id
+                    ? <><RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />Downloading…</>
+                    : <><Download className="mr-1.5 h-3 w-3" />Pull .env</>}
+                </Button>
+              </div>
+            </div>
+
+            <div className={`rounded-xl border bg-background/80 p-4 ${sqlMeta.cls}`}>
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">SQL Backup</div>
+                  <div className="mt-1 text-sm font-semibold text-foreground">
+                    {sqlHealth.last_success_at ? fmtRelative(sqlHealth.last_success_at) : "Unavailable"}
+                  </div>
+                  {sqlHealth.last_success_at && (
+                    <div className="text-[11px] text-slate-500">{fmtDate(sqlHealth.last_success_at)}</div>
+                  )}
+                </div>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
+                  <SqlIcon className="h-3 w-3" />
+                  {sqlMeta.label}
+                </span>
+              </div>
+
+              {!site.sql_backup?.ok ? (
+                <p className="text-xs text-slate-500">{site.sql_backup?.message || "SQL backup status unavailable."}</p>
+              ) : site.sql_backup?.databases?.length ? (
+                <div className="space-y-2">
+                  {site.sql_backup.databases.map((database) => {
+                    const good = database.isSuccess === true;
+                    const bad = database.isSuccess === false;
+                    return (
+                      <div key={database.name} className="flex items-start justify-between gap-3 rounded-lg border border-border/60 bg-card/70 px-3 py-2.5">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-foreground truncate">{database.name}</div>
+                          <div className="text-[11px] text-slate-500">{database.backupAt ? fmtDate(database.backupAt) : "No timestamp"}</div>
+                          {database.objectStatus && (
+                            <div className="text-[11px] text-slate-500 truncate">{database.objectStatus}</div>
+                          )}
+                        </div>
+                        <span className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${good ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" : bad ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-slate-500/10 border border-slate-500/30 text-slate-400"}`}>
+                          {good ? "Success" : bad ? "Failed" : "Unknown"}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">{site.sql_backup?.message || "No DAT backup objects found."}</p>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -329,7 +351,7 @@ export default function HubBackups() {
 
   return (
     <div className="min-h-screen p-6 bg-background">
-      <div className="max-w-5xl mx-auto">
+      <div className="mx-auto max-w-7xl">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15 border border-blue-500/30">
@@ -373,7 +395,7 @@ export default function HubBackups() {
 
         {isError && (
           <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-            Failed to load backup status. Make sure you are logged in as an admin.
+            Failed to load backup status. Make sure you are logged in with access to Site Backups.
           </div>
         )}
 
@@ -387,7 +409,7 @@ export default function HubBackups() {
             ) : (
               <>
                 <SummaryBar sites={sites} />
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   {sites.map((site) => (
                     <SiteCard
                       key={site.site_id}

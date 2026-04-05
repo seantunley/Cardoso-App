@@ -10,6 +10,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 import { buildStatements } from '../db/statements.js';
+import { syncHubNetworkDevicesForSite } from './networkDevices.js';
 
 function checkBackupIntegrity(siteId, filePath) {
   let backupDb = null;
@@ -64,7 +65,12 @@ function initHubTables() {
       token TEXT,
       last_seen TEXT,
       last_kpis TEXT,
-      status TEXT DEFAULT 'unknown'
+      status TEXT DEFAULT 'unknown',
+      logic_version INTEGER,
+      logic_sync_status TEXT DEFAULT 'never_synced',
+      logic_last_error TEXT,
+      logic_last_synced_at TEXT,
+      logic_status_updated_at TEXT
     );
     CREATE TABLE IF NOT EXISTS hub_records (
       site_id TEXT,
@@ -73,6 +79,7 @@ function initHubTables() {
       customer_name TEXT,
       flag_color TEXT,
       flag_reason TEXT,
+      flag_created_by TEXT,
       outstanding_balance TEXT,
       unpaid_invoices TEXT,
       receipts TEXT,
@@ -172,11 +179,11 @@ async function syncSite(site) {
     // Records — paginate until has_more is false
     const upsertRec = db.prepare(`
       INSERT INTO hub_records (
-        site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
+        site_id, record_id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
         outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
         updated_date, synced_at
       ) VALUES (
-        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
+        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @flag_created_by,
         @outstanding_balance, @unpaid_invoices, @receipts, @auto_flagged, @terms,
         @updated_date, @synced_at
       )
@@ -185,6 +192,7 @@ async function syncSite(site) {
         customer_name=excluded.customer_name,
         flag_color=excluded.flag_color,
         flag_reason=excluded.flag_reason,
+        flag_created_by=excluded.flag_created_by,
         outstanding_balance=excluded.outstanding_balance,
         unpaid_invoices=excluded.unpaid_invoices,
         receipts=excluded.receipts,
@@ -203,6 +211,7 @@ async function syncSite(site) {
           customer_name: r.customer_name,
           flag_color: r.flag_color || 'none',
           flag_reason: r.flag_reason || null,
+          flag_created_by: r.flag_created_by || null,
           outstanding_balance: r.outstanding_balance || null,
           unpaid_invoices: r.unpaid_invoices || '[]',
           receipts: r.receipts || '[]',
@@ -293,6 +302,13 @@ async function syncSite(site) {
 
     // Speedtest results
     await syncSpeedtest(site);
+
+    // Network devices snapshot
+    try {
+      await syncHubNetworkDevicesForSite(site);
+    } catch (err) {
+      console.error(`[HUB NETWORK DEVICES] ${site.slug}: ${err.message}`);
+    }
 
     // Update hub_sites
     db.prepare(`

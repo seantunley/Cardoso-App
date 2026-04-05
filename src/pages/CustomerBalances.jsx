@@ -1,11 +1,12 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Scale } from "lucide-react";
+import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
+import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
-function CreditBadge({ row }) {
-  const verdict = useMemo(() => analyseInvoiceCredit([row]).verdict, [row]);
+function CreditBadge({ row, creditLogicConfig }) {
+  const verdict = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG).verdict, [row, creditLogicConfig]);
   const meta = CREDIT_BADGE_META[verdict] || CREDIT_BADGE_META.caution;
 
   return (
@@ -16,6 +17,13 @@ function CreditBadge({ row }) {
 }
 
 const PAGE_SIZE = 50;
+
+const AGE_BUCKETS = [
+  { value: "all", label: "All" },
+  { value: "7-13", label: "7–13 days" },
+  { value: "14-20", label: "14–20 days" },
+  { value: "21+", label: "21+ days" },
+];
 
 /* ── print styles (injected once) ── */
 const PRINT_STYLE = `
@@ -105,7 +113,7 @@ function FilterToggle({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+      className={`min-h-[42px] rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
         active ? "border-amber-500 bg-amber-500/15 text-amber-400"
                : "border-border bg-card text-muted-foreground hover:text-foreground"
       }`}
@@ -115,8 +123,32 @@ function FilterToggle({ active, onClick, children }) {
   );
 }
 
-async function fetchTopBalances(page, limit) {
-  const res = await fetch(`/api/top-balances?page=${page}&limit=${limit}`, { credentials: "include" });
+function AgeBucketPill({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[40px] rounded-full border px-3.5 py-2 text-xs font-semibold transition-all ${
+        active
+          ? "border-amber-500 bg-amber-500 text-black shadow-[0_0_0_1px_rgba(245,158,11,0.2)]"
+          : "border-border bg-background text-muted-foreground hover:border-amber-500/40 hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoiceMatchesBalance }) {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (siteFilter && siteFilter !== "all") params.set("site", siteFilter);
+  if (ageBucket && ageBucket !== "all") params.set("ageBucket", ageBucket);
+  if (hideInvoiceMatchesBalance) params.set("hideInvoiceMatchesBalance", "1");
+
+  const res = await fetch(`/api/top-balances?${params.toString()}`, { credentials: "include" });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     throw new Error(d.error || "Failed to load balances");
@@ -124,15 +156,36 @@ async function fetchTopBalances(page, limit) {
   const data = await res.json();
   // Handle both old servers (array) and new servers (paginated object)
   if (Array.isArray(data)) {
-    return { records: data, total: data.length, totalPages: 1 };
+    const pageTotalOutstanding = data.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+    return {
+      records: data,
+      total: data.length,
+      page,
+      totalPages: 1,
+      filteredTotalOutstanding: pageTotalOutstanding,
+      pageTotalOutstanding,
+      sites: [...new Set(data.map((row) => row.site_name).filter(Boolean))].sort(),
+      minBalanceThreshold: 0,
+    };
   }
   return data;
 }
 
 export default function CustomerBalances() {
+  const { data: creditLogicState } = useQuery({
+    queryKey: ["creditLogicCurrent"],
+    queryFn: async () => {
+      const response = await fetch("/api/credit-logic/current", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load credit logic");
+      return response.json();
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+  const creditLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
   const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
-  const [hubMode, setHubMode] = useState(false);
+  const [ageBucket, setAgeBucket] = useState("all");
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
 
   useEffect(() => {
@@ -145,15 +198,9 @@ export default function CustomerBalances() {
     }
   }, []);
 
-  useEffect(() => {
-    fetch("/api/app-info", { credentials: "include" })
-      .then((r) => r.json()).catch(() => null)
-      .then((d) => { if (d?.hub_mode) setHubMode(true); });
-  }, []);
-
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE],
-    queryFn: () => fetchTopBalances(page, PAGE_SIZE),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance }),
     staleTime: 60_000,
     keepPreviousData: true,
   });
@@ -161,37 +208,32 @@ export default function CustomerBalances() {
   const rows = data?.records ?? [];
   const totalRecords = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+  const currentPage = data?.page ?? page;
+  const filteredGrandTotal = data?.filteredTotalOutstanding ?? 0;
+  const currentPageTotal = data?.pageTotalOutstanding ?? 0;
+  const minBalanceThreshold = data?.minBalanceThreshold ?? 0;
 
   const sites = useMemo(() => {
-    const names = [...new Set(rows.map((r) => r.site_name).filter(Boolean))].sort();
-    return names;
-  }, [rows]);
+    return data?.sites ?? [];
+  }, [data?.sites]);
 
-  const filtered = useMemo(() => {
-    let result = rows;
-    if (siteFilter !== "all") result = result.filter((r) => r.site_name === siteFilter);
-    if (hideInvoiceMatchesBalance) {
-      result = result.filter((r) => {
-        const balance = parseAmount(r.outstanding_balance);
-        const invoice = parseAmount(r.last_unpaid_invoice_1_amount);
-        return Math.abs(balance - invoice) > 0.10;
-      });
-    }
-    return result;
-  }, [rows, siteFilter, hideInvoiceMatchesBalance]);
-
-  const grandTotal = filtered.reduce((s, r) => s + parseAmount(r.outstanding_balance), 0);
+  useEffect(() => {
+    if (data?.page && data.page !== page) setPage(data.page);
+  }, [data?.page, page]);
 
   const printTitle = siteFilter !== "all" ? `Customer Balances — ${siteFilter}` : "Customer Balances — All Sites";
   const printDate  = new Date().toLocaleString("en-ZA", {
     year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+  const activeAgeBucketLabel = AGE_BUCKETS.find((bucket) => bucket.value === ageBucket)?.label || "All";
 
   /* ── filter subtitle ── */
   const subtitleParts = [];
   subtitleParts.push(`${totalRecords} customer${totalRecords !== 1 ? "s" : ""}`);
   if (siteFilter && siteFilter !== "all") subtitleParts.push(siteFilter);
+  if (ageBucket !== "all") subtitleParts.push(activeAgeBucketLabel);
   if (hideInvoiceMatchesBalance) subtitleParts.push("Invoice ≠ Balance");
+  if (minBalanceThreshold > 0) subtitleParts.push(`>${formatAmount(minBalanceThreshold)}`);
 
   return (
     <>
@@ -199,11 +241,20 @@ export default function CustomerBalances() {
       <div id="customer-balances-printable" style={{ visibility: "hidden", position: "absolute" }}>
         <div className="cb-print-header">
           <h1>{printTitle}</h1>
-          <p>Printed: {printDate} · {filtered.length} customer{filtered.length !== 1 ? "s" : ""}</p>
+          <p>Printed: {printDate} · {totalRecords} customer{totalRecords !== 1 ? "s" : ""}</p>
         </div>
         <div className="cb-print-summary">
-          <span>Total outstanding ({filtered.length} customers{siteFilter !== "all" ? ` · ${siteFilter}` : ""})</span>
-          <strong>R {formatAmount(grandTotal)}</strong>
+          <div>
+            <div>
+              Total outstanding ({totalRecords} customers{siteFilter !== "all" ? ` · ${siteFilter}` : ""}
+              {ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})
+            </div>
+            <strong>R {formatAmount(filteredGrandTotal)}</strong>
+          </div>
+          <div className="td-right">
+            <div>Current page ({rows.length} customers)</div>
+            <strong>R {formatAmount(currentPageTotal)}</strong>
+          </div>
         </div>
         <table>
           <thead>
@@ -218,7 +269,7 @@ export default function CustomerBalances() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map((row, idx) => {
+            {rows.map((row, idx) => {
               const amount = parseAmount(row.outstanding_balance);
               const fc = row.flag_color && row.flag_color !== "none" ? row.flag_color : null;
               return (
@@ -260,7 +311,7 @@ export default function CustomerBalances() {
               <p className="text-sm text-muted-foreground mt-0.5">{subtitleParts.join(" · ")}</p>
             </div>
             <div className="flex items-center gap-2">
-              {filtered.length > 0 && (
+              {rows.length > 0 && (
                 <button
                   onClick={() => window.print()}
                   className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cb-no-print min-h-[44px]"
@@ -289,38 +340,71 @@ export default function CustomerBalances() {
 
           {/* Filters */}
           {!isLoading && !isError && (
-            <div className="mb-4 flex flex-wrap items-center gap-3 cb-no-print">
-              {sites.length > 1 && (
-                <>
-                  <label className="text-xs text-muted-foreground whitespace-nowrap">Site:</label>
-                  <select
-                    value={siteFilter}
-                    onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
-                    className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="all">All sites</option>
-                    {sites.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {siteFilter !== "all" && (
-                    <button onClick={() => { setSiteFilter("all"); setPage(1); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Clear</button>
+            <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 cb-no-print">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Filter className="h-4 w-4 text-amber-400" />
+                    Filters
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Age buckets</div>
+                    <div className="flex flex-wrap gap-2">
+                      {AGE_BUCKETS.map((bucket) => (
+                        <AgeBucketPill
+                          key={bucket.value}
+                          active={ageBucket === bucket.value}
+                          onClick={() => {
+                            setAgeBucket(bucket.value);
+                            setPage(1);
+                          }}
+                        >
+                          {bucket.label}
+                        </AgeBucketPill>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[260px]">
+                  {sites.length > 1 && (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Site</label>
+                      <select
+                        value={siteFilter}
+                        onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
+                        className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        <option value="all">All sites</option>
+                        {sites.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
                   )}
-                  <div className="h-4 w-px bg-border mx-1" />
-                </>
-              )}
-              <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
-                {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
-              </FilterToggle>
+
+                  <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
+                    {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
+                  </FilterToggle>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Summary */}
-          {filtered.length > 0 && (
-            <div className="mb-4 rounded-xl border border-border bg-card px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-              <span className="text-sm text-muted-foreground">
-                Total outstanding ({filtered.length} customer{filtered.length !== 1 ? "s" : ""}
-                {siteFilter !== "all" ? ` · ${siteFilter}` : ""})
-              </span>
-              <span className="text-lg font-bold text-foreground">R {formatAmount(grandTotal)}</span>
+          {rows.length > 0 && (
+            <div className="mb-4 grid gap-3 md:grid-cols-2">
+              <div className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="text-sm text-muted-foreground">
+                  Total outstanding ({totalRecords} customer{totalRecords !== 1 ? "s" : ""}
+                  {siteFilter !== "all" ? ` · ${siteFilter}` : ""}
+                  {ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})
+                </div>
+                <div className="mt-1 text-lg font-bold text-foreground">R {formatAmount(filteredGrandTotal)}</div>
+              </div>
+              <div className="rounded-xl border border-border bg-card px-4 py-3">
+                <div className="text-sm text-muted-foreground">Current page total ({rows.length} shown)</div>
+                <div className="mt-1 text-lg font-bold text-foreground">R {formatAmount(currentPageTotal)}</div>
+              </div>
             </div>
           )}
 
@@ -338,12 +422,11 @@ export default function CustomerBalances() {
             <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
               <Scale className="w-12 h-12 text-muted-foreground mb-4" />
               <h3 className="text-lg font-medium text-foreground">No balance data yet</h3>
-              <p className="text-sm text-muted-foreground mt-1">Sync your connections to see customer balances here.</p>
-            </div>
-          )}
-          {!isLoading && !isError && rows.length > 0 && filtered.length === 0 && (
-            <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-              {siteFilter !== "all" ? `No outstanding balances for "${siteFilter}".` : "No outstanding balances found."}
+              <p className="text-sm text-muted-foreground mt-1">
+                {siteFilter !== "all"
+                  ? `No outstanding balances over R ${formatAmount(minBalanceThreshold)} for "${siteFilter}"${ageBucket !== "all" ? ` in ${activeAgeBucketLabel.toLowerCase()}` : ""}.`
+                  : `No outstanding balances over R ${formatAmount(minBalanceThreshold)}${ageBucket !== "all" ? ` in ${activeAgeBucketLabel.toLowerCase()}` : ""} found.`}
+              </p>
             </div>
           )}
 
@@ -351,10 +434,10 @@ export default function CustomerBalances() {
           {false && (
             <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-400">
               <span>⚠️</span>
-              <span>Showing top {LIMIT} customers only. There may be more records not shown.</span>
+              <span>Showing top {PAGE_SIZE} customers only. There may be more records not shown.</span>
             </div>
           )}
-          {!isLoading && !isError && filtered.length > 0 && (
+          {!isLoading && !isError && rows.length > 0 && (
             <div className="rounded-xl border border-border bg-card overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
@@ -370,9 +453,9 @@ export default function CustomerBalances() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map((row, idx) => {
+                  {rows.map((row, idx) => {
                     const amount = parseAmount(row.outstanding_balance);
-                    const globalIdx = (page - 1) * PAGE_SIZE + idx;
+                    const globalIdx = (currentPage - 1) * PAGE_SIZE + idx;
                     const isTop  = globalIdx === 0;
                     return (
                       <tr
@@ -406,7 +489,7 @@ export default function CustomerBalances() {
                           </span>
                         </td>
                         <td className="px-2 py-1 text-center">
-                          <CreditBadge row={row} />
+                          <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
                         </td>
                       </tr>
                     );
@@ -421,17 +504,17 @@ export default function CustomerBalances() {
             <div className="mt-4 flex items-center justify-center gap-4">
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={page <= 1}
+                disabled={currentPage <= 1}
                 className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Previous
               </button>
               <span className="text-sm text-muted-foreground">
-                Page {page} of {totalPages}
+                Page {currentPage} of {totalPages}
               </span>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={page >= totalPages}
+                disabled={currentPage >= totalPages}
                 className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next

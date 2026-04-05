@@ -6,6 +6,7 @@ import db, { dbPath } from '../db/index.js';
 
 const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBackupAndFTP\\Db\\routines.db';
 const DEFAULT_SQLBACKUP_OBJECT_EXCLUDE_LIST = 'PPDdata';
+const SENSITIVE_ENV_KEY_PATTERN = /(SECRET|TOKEN|PASSWORD|PASS|KEY|PRIVATE|CERT|COOKIE|SESSION|AUTH)/i;
 
 function requireReportingToken(req, res, next) {
   const token = req.headers['x-reporting-token'];
@@ -47,6 +48,26 @@ function createSqlBackupUnavailableResponse(message) {
     lastJob: null,
     databases: [],
   };
+}
+
+function getBackupConfigExportMode() {
+  const raw = String(process.env.BACKUP_CONFIG_EXPORT_MODE || '').trim().toLowerCase();
+  if (['disabled', 'redacted', 'full'].includes(raw)) return raw;
+  return process.env.NODE_ENV === 'production' ? 'redacted' : 'full';
+}
+
+function redactEnvFile(envText) {
+  return String(envText || '')
+    .split(/\r?\n/)
+    .map((line) => {
+      if (!line || line.trim().startsWith('#')) return line;
+      const idx = line.indexOf('=');
+      if (idx === -1) return line;
+      const key = line.slice(0, idx).trim();
+      if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) return line;
+      return `${key}=__REDACTED__`;
+    })
+    .join('\n');
 }
 
 export function createBackupRouter() {
@@ -175,17 +196,26 @@ export function createBackupRouter() {
   // GET /api/backup/config
   // Returns the site .env file for disaster recovery. Token-protected.
   router.get('/api/backup/config', requireReportingToken, (req, res) => {
+    const exportMode = getBackupConfigExportMode();
+    if (exportMode === 'disabled') {
+      return res.status(403).json({ error: 'Backup config export is disabled on this site' });
+    }
+
     const envPath = path.resolve(process.cwd(), '.env');
     if (!fs.existsSync(envPath)) {
       return res.status(404).json({ error: '.env file not found' });
     }
 
     const filename = `cardoso-config-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0, 10)}.env`;
+    const envContent = fs.readFileSync(envPath, 'utf8');
+    const payload = exportMode === 'full' ? envContent : redactEnvFile(envContent);
+
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
     res.setHeader('X-Backup-Timestamp', new Date().toISOString());
-    fs.createReadStream(envPath).pipe(res);
+    res.setHeader('X-Backup-Config-Mode', exportMode);
+    res.send(payload);
   });
 
   // GET /api/backup/download

@@ -207,7 +207,37 @@ function initSchema(db) {
         token TEXT,
         last_seen TEXT,
         last_kpis TEXT,
-        status TEXT DEFAULT 'unknown'
+        status TEXT DEFAULT 'unknown',
+        logic_version INTEGER,
+        logic_sync_status TEXT DEFAULT 'never_synced',
+        logic_last_error TEXT,
+        logic_last_synced_at TEXT,
+        logic_status_updated_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS credit_logic_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version INTEGER NOT NULL UNIQUE,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        config_json TEXT NOT NULL,
+        notes TEXT,
+        created_by TEXT,
+        is_active INTEGER DEFAULT 0,
+        published_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS credit_logic_state (
+        scope TEXT PRIMARY KEY,
+        logic_version INTEGER,
+        payload_json TEXT,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        published_at TEXT,
+        last_synced_at TEXT,
+        sync_status TEXT DEFAULT 'never_synced',
+        last_error TEXT,
+        source TEXT DEFAULT 'default',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS hub_records (
         site_id TEXT,
@@ -216,6 +246,7 @@ function initSchema(db) {
         customer_name TEXT,
         flag_color TEXT,
         flag_reason TEXT,
+        flag_created_by TEXT,
         outstanding_balance TEXT,
         unpaid_invoices TEXT,
         receipts TEXT,

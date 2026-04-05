@@ -14,6 +14,62 @@ const execFileAsync = promisify(execFile);
 const SITE_ID = process.env.SITE_ID || 'local';
 const SITE_SLUG = process.env.SITE_SLUG || 'local';
 const SITE_NAME = process.env.SITE_NAME || 'Local';
+const CUSTOMER_BALANCES_MIN_AMOUNT = 3;
+
+function parseAmount(value) {
+  const num = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
+  return Number.isFinite(num) ? num : 0;
+}
+
+function isInvoiceBalanceMatch(record) {
+  const balance = parseAmount(record?.outstanding_balance);
+  const invoice = parseAmount(record?.last_unpaid_invoice_1_amount);
+  return Math.abs(balance - invoice) <= 0.1;
+}
+
+function parseBalanceDate(value) {
+  if (!value) return null;
+  const input = String(value).trim();
+  if (!input) return null;
+
+  if (/^\d{8}$/.test(input)) {
+    return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+  }
+
+  const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+  }
+
+  const parsed = new Date(input);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getBalanceAgeDays(record) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const ages = [1, 2, 3, 4, 5]
+    .map((index) => parseBalanceDate(record?.[`last_unpaid_invoice_${index}_date`]))
+    .filter(Boolean)
+    .map((date) => Math.floor((today - date) / 86400000))
+    .filter((days) => Number.isFinite(days) && days >= 0);
+
+  return ages.length > 0 ? Math.max(...ages) : null;
+}
+
+function matchesAgeBucket(record, ageBucket) {
+  if (!ageBucket || ageBucket === 'all') return true;
+
+  const ageDays = getBalanceAgeDays(record);
+  if (ageDays === null) return false;
+
+  if (ageBucket === '7-13') return ageDays > 7 && ageDays < 14;
+  if (ageBucket === '14-20') return ageDays >= 14 && ageDays < 21;
+  if (ageBucket === '21+') return ageDays >= 21;
+
+  return true;
+}
 
 function requireReportingToken(req, res, next) {
   const token = process.env.REPORTING_TOKEN;
@@ -230,8 +286,10 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/top-balances', requireAuth, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const offset = (page - 1) * limit;
     const isHub = process.env.HUB_MODE === 'true';
+    const siteFilter = String(req.query.site || 'all').trim();
+    const ageBucket = String(req.query.ageBucket || 'all').trim();
+    const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
 
     const balanceWhere = `outstanding_balance IS NOT NULL
             AND outstanding_balance != ''
@@ -239,9 +297,8 @@ export function createReportingRouter({ requireAuth }) {
             AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
 
     try {
-      let rows, total;
+      let rows;
       if (isHub) {
-        total = db.prepare(`SELECT COUNT(*) AS count FROM hub_records r WHERE r.${balanceWhere}`).get().count;
         const stmt = db.prepare(`
           SELECT
             r.customer_number,
@@ -258,11 +315,9 @@ export function createReportingRouter({ requireAuth }) {
           LEFT JOIN hub_sites s ON s.id = r.site_id
           WHERE r.${balanceWhere}
           ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?
         `);
-        rows = stmt.all(limit, offset).map(expandDataRecord);
+        rows = stmt.all().map(expandDataRecord);
       } else {
-        total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
         const stmt = db.prepare(`
           SELECT
             customer_number,
@@ -278,12 +333,40 @@ export function createReportingRouter({ requireAuth }) {
           FROM datarecord
           WHERE ${balanceWhere}
           ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?
         `);
-        rows = stmt.all(SITE_NAME, limit, offset).map(expandDataRecord);
+        rows = stmt.all(SITE_NAME).map(expandDataRecord);
       }
-      const totalPages = Math.ceil(total / limit);
-      res.json({ records: rows, total, page, totalPages });
+
+      const sites = [...new Set(rows.map((row) => row.site_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+      const filteredRows = rows.filter((row) => {
+        const balance = parseAmount(row.outstanding_balance);
+        if (balance <= CUSTOMER_BALANCES_MIN_AMOUNT) return false;
+        if (siteFilter !== 'all' && row.site_name !== siteFilter) return false;
+        if (!matchesAgeBucket(row, ageBucket)) return false;
+        if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
+        return true;
+      });
+
+      const total = filteredRows.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const safePage = Math.min(page, totalPages);
+      const safeOffset = (safePage - 1) * limit;
+      const records = filteredRows.slice(safeOffset, safeOffset + limit);
+      const filteredTotalOutstanding = filteredRows.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+      const pageTotalOutstanding = records.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+
+      res.json({
+        records,
+        total,
+        page: safePage,
+        totalPages,
+        filteredTotalOutstanding,
+        pageTotalOutstanding,
+        sites,
+        ageBucket,
+        minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
+      });
     } catch (err) {
       console.error('top-balances error', err);
       res.status(500).json({ error: 'Failed to fetch top balances' });
@@ -377,14 +460,14 @@ export function createReportingRouter({ requireAuth }) {
     let rows;
     if (since) {
       rows = db.prepare(
-        `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+        `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset);
     } else {
       rows = db.prepare(
-        `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+        `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
@@ -480,5 +563,3 @@ export function createReportingRouter({ requireAuth }) {
 
   return router;
 }
-
-

@@ -1,7 +1,22 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import db from './db/index.js';
-import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './services/encryption.js';
 import { defaultPermissionsForRole } from './helpers.js';
+import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './services/encryption.js';
+
+function hasStoredDatabasePasswords() {
+  const row = db.prepare(`
+    SELECT id
+    FROM databaseconnection
+    WHERE encrypted_password IS NOT NULL AND TRIM(encrypted_password) <> ''
+    LIMIT 1
+  `).get();
+  return !!row;
+}
+
+function generateBootstrapPassword() {
+  return crypto.randomBytes(18).toString('base64url');
+}
 
 export function validateSessionSecret(secret) {
   if (!secret) {
@@ -16,6 +31,18 @@ export function validateSessionSecret(secret) {
     console.error('FATAL: SESSION_SECRET must be at least 32 characters long.');
     process.exit(1);
   }
+}
+
+export function validateEncryptionKey() {
+  const key = getEncryptionKey();
+  if (key) return;
+
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!isProduction) return;
+  if (!hasStoredDatabasePasswords()) return;
+
+  console.error('FATAL: ENCRYPTION_KEY is required in production when MSSQL credentials are stored. Refusing to start insecurely.');
+  process.exit(1);
 }
 
 export function migrateUnencryptedPasswords() {
@@ -58,28 +85,37 @@ export function recoverAbandonedSyncs() {
 export async function ensureSeedUsers() {
   const admin = db.prepare(`SELECT * FROM "user" WHERE email = ?`).get('admin@example.com');
   const normal = db.prepare(`SELECT * FROM "user" WHERE email = ?`).get('user@example.com');
+  const isProduction = process.env.NODE_ENV === 'production';
 
   const adminDefaults = defaultPermissionsForRole('admin');
   const userDefaults = defaultPermissionsForRole('user');
 
   if (!admin) {
-    const hash = await bcrypt.hash('admin123', 12);
+    const bootstrapPassword = isProduction ? generateBootstrapPassword() : 'admin123';
+    const hash = await bcrypt.hash(bootstrapPassword, 12);
     db.prepare(`
       INSERT INTO "user" (
-        email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_customer_balances, can_access_inventory,
+        email, full_name, role, password_hash, is_active, must_change_password,
+        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+        can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'admin@example.com',
       'Admin User',
       'admin',
       hash,
       1,
+      1,
       adminDefaults.can_access_customer_search ? 1 : 0,
       adminDefaults.can_access_customer_balances !== false ? 1 : 0,
+      adminDefaults.can_access_collections !== false ? 1 : 0,
       adminDefaults.can_access_inventory !== false ? 1 : 0,
+      adminDefaults.can_access_hub_metrics ? 1 : 0,
+      adminDefaults.can_access_hub_backups ? 1 : 0,
+      adminDefaults.can_access_hub_trends ? 1 : 0,
+      adminDefaults.can_access_hub_audit_log ? 1 : 0,
       adminDefaults.can_access_records ? 1 : 0,
       adminDefaults.can_access_reports ? 1 : 0,
       adminDefaults.can_access_connections ? 1 : 0,
@@ -89,31 +125,51 @@ export async function ensureSeedUsers() {
       adminDefaults.can_edit_records ? 1 : 0,
       adminDefaults.can_flag_records ? 1 : 0
     );
-    console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
+    if (isProduction) {
+      console.warn(`⚠️  BOOTSTRAP ADMIN CREATED: admin@example.com / ${bootstrapPassword} — rotate immediately on first login`);
+    } else {
+      console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
+    }
   } else if (!admin.password_hash) {
-    const hash = await bcrypt.hash('admin123', 12);
+    const bootstrapPassword = isProduction ? generateBootstrapPassword() : 'admin123';
+    const hash = await bcrypt.hash(bootstrapPassword, 12);
     db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(hash, admin.id);
-    console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
+    db.prepare(`UPDATE "user" SET must_change_password = 1 WHERE id = ?`).run(admin.id);
+    if (isProduction) {
+      console.warn(`⚠️  BOOTSTRAP ADMIN RESET: admin@example.com / ${bootstrapPassword} — rotate immediately on first login`);
+    } else {
+      console.warn('⚠️  DEFAULT CREDENTIALS ACTIVE: admin@example.com / admin123 — CHANGE IMMEDIATELY');
+    }
   }
 
   if (!normal) {
+    if (isProduction) {
+      return;
+    }
     const hash = await bcrypt.hash('user123', 12);
     db.prepare(`
       INSERT INTO "user" (
-        email, full_name, role, password_hash, is_active,
-        can_access_customer_search, can_access_customer_balances, can_access_inventory,
+        email, full_name, role, password_hash, is_active, must_change_password,
+        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+        can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'user@example.com',
       'Regular User',
       'user',
       hash,
       1,
+      1,
       userDefaults.can_access_customer_search ? 1 : 0,
       userDefaults.can_access_customer_balances !== false ? 1 : 0,
+      userDefaults.can_access_collections !== false ? 1 : 0,
       userDefaults.can_access_inventory !== false ? 1 : 0,
+      userDefaults.can_access_hub_metrics ? 1 : 0,
+      userDefaults.can_access_hub_backups ? 1 : 0,
+      userDefaults.can_access_hub_trends ? 1 : 0,
+      userDefaults.can_access_hub_audit_log ? 1 : 0,
       userDefaults.can_access_records ? 1 : 0,
       userDefaults.can_access_reports ? 1 : 0,
       userDefaults.can_access_connections ? 1 : 0,
@@ -124,8 +180,12 @@ export async function ensureSeedUsers() {
       userDefaults.can_flag_records ? 1 : 0
     );
   } else if (!normal.password_hash) {
+    if (isProduction) {
+      return;
+    }
     const hash = await bcrypt.hash('user123', 12);
     db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(hash, normal.id);
+    db.prepare(`UPDATE "user" SET must_change_password = 1 WHERE id = ?`).run(normal.id);
   }
 }
 

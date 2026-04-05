@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Flag, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -13,30 +14,98 @@ const flagColors = {
   none: { bg: "bg-slate-500/15", text: "text-slate-400", border: "border-slate-500/30", label: "No Flag" },
 };
 
-export default function FlaggedCustomersModal({ flagColor, open, onClose, onCustomerClick, siteName, customers: externalCustomers }) {
-  const config = flagColors[flagColor] || flagColors.none;
+const PAGE_SIZE = 100;
 
-  // Self-fetch only when no external list is provided (hub passes its own pre-fetched records)
-  const { data: fetchedCustomers = [], isFetching } = useQuery({
-    queryKey: ['flagged-customers', flagColor],
+async function fetchHubFlaggedCustomers({ flagColor, siteId, offset }) {
+  const params = new URLSearchParams({
+    flag_color: flagColor,
+    limit: String(PAGE_SIZE),
+    offset: String(offset),
+  });
+  if (siteId) params.set('site_id', siteId);
+
+  const response = await fetch(`/api/hub/records?${params.toString()}`, {
+    credentials: 'include',
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    throw new Error(result.error || 'Failed to fetch flagged customers');
+  }
+
+  return {
+    records: Array.isArray(result.records) ? result.records : [],
+    total: typeof result.total === 'number' ? result.total : 0,
+    hasMore: Boolean(result.has_more),
+  };
+}
+
+export default function FlaggedCustomersModal({
+  flagColor,
+  open,
+  onClose,
+  onCustomerClick,
+  siteName,
+  siteId,
+  customers: externalCustomers,
+  mode = 'local',
+}) {
+  const config = flagColors[flagColor] || flagColors.none;
+  const [page, setPage] = useState(0);
+  const [pagedCustomers, setPagedCustomers] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setPage(0);
+    setPagedCustomers([]);
+    setTotalCount(0);
+    setHasMore(false);
+  }, [open, flagColor, mode, siteId]);
+
+  const { data: fetchedPage, isFetching } = useQuery({
+    queryKey: ['flagged-customers', mode, siteId || 'all-sites', flagColor, page],
     queryFn: async () => {
-      const all = await api.entities.DataRecord.list('-created_date', 2000);
-      return all.filter(r => r.flag_color === flagColor);
+      if (mode === 'hub') {
+        return fetchHubFlaggedCustomers({ flagColor, siteId, offset: page * PAGE_SIZE });
+      }
+
+      const result = await api.records.search({
+        flagColor,
+        limit: PAGE_SIZE,
+        offset: page * PAGE_SIZE,
+      });
+
+      return {
+        records: Array.isArray(result.records) ? result.records : [],
+        total: typeof result.total === 'number' ? result.total : 0,
+        hasMore: Boolean(result.has_more),
+      };
     },
     enabled: !!open && !!flagColor && !externalCustomers && !!flagColors[flagColor],
     staleTime: 30_000,
   });
 
-  const displayCustomers = externalCustomers ?? fetchedCustomers;
+  useEffect(() => {
+    if (!fetchedPage) return;
+    setPagedCustomers((current) => (page === 0 ? fetchedPage.records : [...current, ...fetchedPage.records]));
+    setTotalCount(fetchedPage.total);
+    setHasMore(fetchedPage.hasMore);
+  }, [fetchedPage, page]);
+
+  const displayCustomers = externalCustomers ?? pagedCustomers;
+  const effectiveTotal = externalCustomers ? externalCustomers.length : totalCount;
   const isFetchingDisplay = !externalCustomers && isFetching;
 
   if (!flagColor || !flagColors[flagColor]) return null;
 
-  const sortedCustomers = [...displayCustomers].sort((a, b) => {
-    const numA = a.customer_number || a.data?.customer_number || "";
-    const numB = b.customer_number || b.data?.customer_number || "";
-    return String(numA).localeCompare(String(numB));
-  });
+  const sortedCustomers = useMemo(() => (
+    [...displayCustomers].sort((a, b) => {
+      const numA = a.customer_number || a.data?.customer_number || "";
+      const numB = b.customer_number || b.data?.customer_number || "";
+      return String(numA).localeCompare(String(numB));
+    })
+  ), [displayCustomers]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -59,12 +128,14 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
             </div>
           </DialogTitle>
           <DialogDescription>
-            {isFetchingDisplay ? 'Loading...' : `${sortedCustomers.length} customer${sortedCustomers.length !== 1 ? 's' : ''}`}
+            {isFetchingDisplay && sortedCustomers.length === 0
+              ? 'Loading...'
+              : `${effectiveTotal || sortedCustomers.length} customer${(effectiveTotal || sortedCustomers.length) !== 1 ? 's' : ''}`}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-2 overflow-y-auto flex-1 min-h-0 pr-2">
-          {sortedCustomers.length === 0 ? (
+          {sortedCustomers.length === 0 && !isFetchingDisplay ? (
             <div className="text-center py-8 text-muted-foreground">
               No customers with {flagColor} flags
             </div>
@@ -76,7 +147,7 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
 
               return (
                 <div
-                  key={customer.id}
+                  key={customer.id || `${customer.site_id || 'local'}-${custNum}`}
                   onClick={() => {
                     onCustomerClick(customer);
                     onClose();
@@ -112,6 +183,24 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
             })
           )}
         </div>
+
+        {!externalCustomers && sortedCustomers.length > 0 && (
+          <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+            <p className="text-xs text-muted-foreground">
+              Showing {sortedCustomers.length} of {effectiveTotal || sortedCustomers.length}
+            </p>
+            {hasMore && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((current) => current + 1)}
+                disabled={isFetchingDisplay}
+              >
+                {isFetchingDisplay ? 'Loading…' : 'Load more'}
+              </Button>
+            )}
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

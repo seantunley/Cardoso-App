@@ -1,0 +1,41 @@
+function envFlag(name) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return null;
+  const normalized = String(raw).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return null;
+}
+
+function getTlsPolicy() {
+  const envEncrypt = envFlag('MSSQL_ENCRYPT');
+  const encrypt = envEncrypt ?? (process.env.NODE_ENV === 'production');
+
+  const envTrust = envFlag('MSSQL_TRUST_SERVER_CERTIFICATE');
+  const trustServerCertificate = envTrust ?? !encrypt;
+
+  return { encrypt, trustServerCertificate };
+}
+
+export function buildSqlServerConfig({ user, password, server, database, port }) {
+  const { encrypt, trustServerCertificate } = getTlsPolicy();
+
+  return {
+    user,
+    password,
+    server,
+    database,
+    port: Number.parseInt(port, 10),
+    options: {
+      encrypt,
+      trustServerCertificate,
+      enableArithAbort: true,
+    },
+    requestTimeout: 30000,
+    connectionTimeout: 15000,
+  };
+}
+
+export function getMssqlTlsPolicy() {
+  return getTlsPolicy();
+}

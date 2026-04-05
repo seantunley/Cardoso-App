@@ -127,6 +127,8 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
           $v = (Get-Content package.json | ConvertFrom-Json).version
           Rename-Item CardosoSetup.exe "CardosoSetup-v$v.exe"
+          $hash = (Get-FileHash "CardosoSetup-v$v.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash *CardosoSetup-v$v.exe" | Set-Content "CardosoSetup-v$v.exe.sha256" -NoNewline
         shell: powershell
 
       - name: Get version
@@ -157,7 +159,9 @@ jobs:
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: "Cardoso v${{ steps.version.outputs.version }}"
-          files: CardosoSetup-v${{ steps.version.outputs.version }}.exe
+          files: |
+            CardosoSetup-v${{ steps.version.outputs.version }}.exe
+            CardosoSetup-v${{ steps.version.outputs.version }}.exe.sha256
           generate_release_notes: true
           make_latest: true
         env:

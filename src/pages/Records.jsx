@@ -1,5 +1,4 @@
-import { useState } from "react";
-import { checkAutoFlagRules } from "@/lib/evalFlagRules";
+import { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Input } from "@/components/ui/input";
@@ -11,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Search, FileText, Download, Zap, ShieldOff, X } from "lucide-react";
+import { Search, FileText, Download, Zap, ShieldOff, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import RecordCard from "../components/records/RecordCard";
 import RecordEditModal from "../components/records/RecordEditModal";
@@ -45,6 +44,10 @@ export default function Records() {
   const [flagFilter, setFlagFilter] = useState("all");
   const [editingRecord, setEditingRecord] = useState(null);
   const [selectedRecords, setSelectedRecords] = useState(new Set());
+  const [page, setPage] = useState(0);
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+
+  const pageSize = 50;
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
@@ -56,13 +59,19 @@ export default function Records() {
   const canFlagRecords = hasPermission(currentUser, "can_flag_records");
   const canAccessRecords = hasPermission(currentUser, "can_access_records");
 
-  const { data: records = [], isLoading } = useQuery({
-    queryKey: ["records"],
-    queryFn: async () => {
-      const allRecords = await api.entities.DataRecord.list();
-      return allRecords;
-    },
+  const { data: recordResult, isLoading, isFetching } = useQuery({
+    queryKey: ["records", debouncedSearchQuery, flagFilter, page],
+    queryFn: () => api.records.search({
+      search: debouncedSearchQuery,
+      flagColor: flagFilter,
+      limit: pageSize,
+      offset: page * pageSize,
+    }),
   });
+
+  const records = recordResult?.records ?? [];
+  const totalRecords = recordResult?.total ?? 0;
+  const hasMoreRecords = Boolean(recordResult?.has_more);
 
   const { data: customFields = [] } = useQuery({
     queryKey: ["customFields"],
@@ -104,32 +113,18 @@ export default function Records() {
     updateMutation.mutate({ id, data });
   };
 
-  const filteredRecords = records.filter((record) => {
-    let parsedData = record.data;
-    if (typeof parsedData === "string") {
-      try {
-        parsedData = JSON.parse(parsedData);
-      } catch {
-        parsedData = {};
-      }
-    }
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearchQuery(searchQuery), 250);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
 
-    const customerNumber = record.customer_number || parsedData?.customer_number;
-
-    const matchesSearch =
-      !searchQuery ||
-      customerNumber?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.source_id?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      record.source_table?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      JSON.stringify(parsedData || {}).toLowerCase().includes(searchQuery.toLowerCase());
-
-    const matchesFlag = flagFilter === "all" || record.flag_color === flagFilter;
-
-    return matchesSearch && matchesFlag;
-  });
+  useEffect(() => {
+    setPage(0);
+    setSelectedRecords(new Set());
+  }, [debouncedSearchQuery, flagFilter]);
 
   const exportRecords = () => {
-    const data = filteredRecords.map((r) => ({
+    const data = records.map((r) => ({
       source_id: r.source_id,
       source_table: r.source_table,
       flag_color: r.flag_color,
@@ -146,7 +141,7 @@ export default function Records() {
       a.href = url;
       a.download = "records-export.json";
       a.click();
-      toast.success("Records exported");
+      toast.success("Current page exported");
     } finally {
       URL.revokeObjectURL(url);
     }
@@ -176,7 +171,7 @@ export default function Records() {
               Data Records
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isLoading ? "Loading…" : `${filteredRecords.length} of ${records.length} records`}
+              {isLoading ? "Loading…" : `${records.length.toLocaleString("en-US")} shown of ${totalRecords.toLocaleString("en-US")} records`}
             </p>
           </div>
         </div>
@@ -222,7 +217,7 @@ export default function Records() {
             className="h-8 text-xs border-border text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"
           >
             <Download className="w-3.5 h-3.5 mr-1.5" />
-            Export
+            Export Page
           </Button>
         </div>
 
@@ -233,19 +228,19 @@ export default function Records() {
               <SkeletonCard key={i} />
             ))}
           </div>
-        ) : filteredRecords.length === 0 ? (
+        ) : records.length === 0 ? (
           <div className="text-center py-20 bg-card rounded-xl border border-border">
             <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
             <h3 className="text-sm font-semibold text-foreground">No records found</h3>
             <p className="text-xs text-muted-foreground mt-1">
-              {records.length === 0
+              {totalRecords === 0
                 ? "Sync data from your connections to see records here"
                 : "Try adjusting your search or filter"}
             </p>
           </div>
         ) : (
           <div className="space-y-2.5">
-            {filteredRecords.map((record) => (
+            {records.map((record) => (
               <div
                 key={record.id}
                 onClick={() => {
@@ -314,6 +309,37 @@ export default function Records() {
           </div>
         </div>
       </div>
+
+      {!isLoading && totalRecords > 0 && (
+        <div className="max-w-6xl mx-auto px-6 pb-6 lg:px-8 lg:pb-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted-foreground">
+          <p>
+            Page {page + 1} · Showing {records.length} of {totalRecords.toLocaleString("en-US")}
+            {isFetching ? " · Updating…" : ""}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((current) => Math.max(current - 1, 0))}
+              disabled={page === 0 || isFetching}
+              className="h-8 text-xs"
+            >
+              <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage((current) => current + 1)}
+              disabled={!hasMoreRecords || isFetching}
+              className="h-8 text-xs"
+            >
+              Next
+              <ChevronRight className="w-3.5 h-3.5 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       <RecordEditModal
         record={editingRecord}

@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
@@ -202,14 +203,14 @@ function analyseHubCredit(record) {
         ...result,
         verdict: "hold",
         title: "Hold — Manually Flagged",
-        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        summary: buildManualFlagSummary("red", record.flag_created_by),
       };
     } else if (isManualOrangeFlag && result.verdict === "approve") {
       result = {
         ...result,
         verdict: "caution",
         title: "Proceed with Caution — Manually Flagged",
-        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        summary: buildManualFlagSummary("orange", record.flag_created_by),
       };
     }
 
@@ -261,11 +262,11 @@ function analyseHubCredit(record) {
   if (isManualRedFlag && verdict !== "hold") {
     verdict = "hold";
     title = "Hold — Manually Flagged";
-    summary = "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.";
+    summary = buildManualFlagSummary("red", record.flag_created_by);
   } else if (isManualOrangeFlag && verdict === "approve") {
     verdict = "caution";
     title = "Proceed with Caution — Manually Flagged";
-    summary = "This customer has been manually flagged orange by staff. Review before issuing an invoice.";
+    summary = buildManualFlagSummary("orange", record.flag_created_by);
   }
 
   return { verdict, title, summary, score, avgLag };
@@ -597,24 +598,17 @@ export default function HubDashboard() {
   const [dateRange, setDateRange] = useState("all");
 
   // Flag drill-down
-  const [flagModal, setFlagModal] = useState({ open: false, color: null, customers: [], siteName: "" });
+  const [flagModal, setFlagModal] = useState({ open: false, color: null, siteName: "", siteId: null });
   const [flagDetailRecord, setFlagDetailRecord] = useState(null);
   const [flagDetailOpen, setFlagDetailOpen] = useState(false);
 
-  const handleFlagClick = useCallback(async (site, flagColor) => {
-    try {
-      const params = new URLSearchParams({ site_id: site.site_id, flag_color: flagColor, limit: 5000 });
-      const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
-      if (!res.ok) return;
-      const data = await res.json();
-      setFlagModal({
-        open: true,
-        color: flagColor,
-        customers: data.records || [],
-        siteName: site.site_name || site.site_slug,
-        siteId: site.site_id,
-      });
-    } catch {}
+  const handleFlagClick = useCallback((site, flagColor) => {
+    setFlagModal({
+      open: true,
+      color: flagColor,
+      siteName: site.site_name || site.site_slug,
+      siteId: site.site_id,
+    });
   }, []);
 
   const openFlagDetail = useCallback((customer) => {
@@ -746,9 +740,10 @@ export default function HubDashboard() {
       {/* Flag drill-down modal */}
       <FlaggedCustomersModal
         flagColor={flagModal.color}
-        customers={flagModal.customers}
         open={flagModal.open}
         siteName={flagModal.siteName}
+        siteId={flagModal.siteId}
+        mode="hub"
         onClose={() => setFlagModal(m => ({ ...m, open: false }))}
         onCustomerClick={openFlagDetail}
       />
