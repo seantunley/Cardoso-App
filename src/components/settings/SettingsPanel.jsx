@@ -12,15 +12,17 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 // Icons
 import {
   Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
   RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
-  Download, Upload,
+  Download, Upload, GitBranch, Send,
 } from "lucide-react";
 
 // Sub-components
@@ -824,15 +826,288 @@ function UpdateTab() {
   );
 }
 
+function CreditLogicTab({ hubMode = false, currentUser }) {
+  const queryClient = useQueryClient();
+  const canManageRules = hasPermission(currentUser, "can_manage_rules") || currentUser?.role === "admin";
+  const [draft, setDraft] = useState(null);
+  const [notes, setNotes] = useState("");
+  const [selectedSiteIds, setSelectedSiteIds] = useState(new Set());
+
+  const query = useQuery({
+    queryKey: [hubMode ? "hub-credit-logic" : "site-credit-logic"],
+    queryFn: async () => {
+      const response = await fetch(hubMode ? "/api/hub/credit-logic" : "/api/credit-logic/current", { credentials: "include" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to load credit logic");
+      return data;
+    },
+    enabled: !!currentUser,
+  });
+
+  useEffect(() => {
+    const sourceConfig = hubMode ? query.data?.current?.config : query.data?.current?.config;
+    if (sourceConfig) setDraft(sourceConfig);
+  }, [hubMode, query.data]);
+
+  const publishMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/hub/credit-logic/publish", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ config: draft, notes }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Failed to publish credit logic");
+      return data;
+    },
+    onSuccess: () => {
+      toast.success("Credit logic published");
+      setNotes("");
+      queryClient.invalidateQueries({ queryKey: ["hub-credit-logic"] });
+      queryClient.invalidateQueries({ queryKey: ["creditLogicCurrent"] });
+    },
+    onError: (error) => toast.error(error.message || "Failed to publish credit logic"),
+  });
+
+  const pushMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/hub/credit-logic/push", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site_ids: selectedSiteIds.size > 0 ? Array.from(selectedSiteIds) : [] }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 207) throw new Error(data.error || "Failed to push credit logic");
+      return data;
+    },
+    onSuccess: (data) => {
+      toast.success(`Pushed v${data.version} to ${data.pushed} site${data.pushed === 1 ? "" : "s"}`);
+      if (data.failed) toast.error(`${data.failed} site${data.failed === 1 ? "" : "s"} failed to update`);
+      queryClient.invalidateQueries({ queryKey: ["hub-credit-logic"] });
+    },
+    onError: (error) => toast.error(error.message || "Failed to push credit logic"),
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch("/api/credit-logic/sync-from-hub", { method: "POST", credentials: "include" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && response.status !== 207) throw new Error(data.error || "Failed to sync credit logic");
+      return data;
+    },
+    onSuccess: (data) => {
+      if (data.ok) toast.success(`Synced credit logic v${data.logicVersion}`);
+      else toast.error(data.error || "Credit logic sync completed with issues");
+      queryClient.invalidateQueries({ queryKey: ["site-credit-logic"] });
+      queryClient.invalidateQueries({ queryKey: ["creditLogicCurrent"] });
+    },
+    onError: (error) => toast.error(error.message || "Failed to sync credit logic"),
+  });
+
+  const setNested = (path, value) => {
+    setDraft((current) => {
+      if (!current) return current;
+      const clone = structuredClone(current);
+      let cursor = clone;
+      for (let i = 0; i < path.length - 1; i += 1) cursor = cursor[path[i]];
+      cursor[path[path.length - 1]] = value;
+      return clone;
+    });
+  };
+
+  const toggleSite = (siteId) => {
+    setSelectedSiteIds((current) => {
+      const next = new Set(current);
+      next.has(siteId) ? next.delete(siteId) : next.add(siteId);
+      return next;
+    });
+  };
+
+  const statuses = query.data?.siteStatuses || [];
+  const current = query.data?.current;
+  const modeBadge = hubMode ? "Hub Source of Truth" : "Site Cache";
+  const driftTone = {
+    current: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+    outdated: "bg-amber-500/15 text-amber-400 border-amber-500/30",
+    error: "bg-red-500/15 text-red-400 border-red-500/30",
+    unreachable: "bg-red-500/15 text-red-400 border-red-500/30",
+    never_synced: "bg-slate-500/15 text-slate-300 border-slate-500/30",
+  };
+
+  if (query.isLoading || !draft) return <div className="h-32 animate-pulse rounded-xl bg-muted" />;
+  if (query.error) return <div className="rounded-xl border border-rose-700 bg-rose-900/20 p-4 text-sm text-rose-300">{query.error.message}</div>;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card p-4">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-sm font-semibold text-foreground">Centralised Credit Logic</h3>
+            <Badge variant="outline" className="border-border text-muted-foreground">{modeBadge}</Badge>
+          </div>
+          <p className="text-sm text-muted-foreground">
+            Active version: <span className="font-medium text-foreground">v{hubMode ? query.data?.current?.version : current?.logicVersion}</span>
+            {!hubMode && current?.syncStatus ? <span> · sync status: {current.syncStatus.replaceAll("_", " ")}</span> : null}
+          </p>
+          {!hubMode && current?.lastError ? <p className="text-xs text-rose-400">Last sync error: {current.lastError}</p> : null}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {hubMode ? (
+            <>
+              <Button size="sm" variant="outline" onClick={() => publishMutation.mutate()} disabled={!canManageRules || publishMutation.isPending} className="gap-1.5">
+                <GitBranch className="h-3.5 w-3.5" />{publishMutation.isPending ? "Publishing…" : "Publish new version"}
+              </Button>
+              <Button size="sm" onClick={() => pushMutation.mutate()} disabled={!canManageRules || pushMutation.isPending || statuses.length === 0} className="gap-1.5">
+                <Send className="h-3.5 w-3.5" />{pushMutation.isPending ? "Pushing…" : "Push to sites"}
+              </Button>
+            </>
+          ) : (
+            <Button size="sm" onClick={() => syncMutation.mutate()} disabled={!canManageRules || syncMutation.isPending || !query.data?.hubSyncConfigured} className="gap-1.5">
+              <RefreshCw className={cn("h-3.5 w-3.5", syncMutation.isPending && "animate-spin")} />{syncMutation.isPending ? "Syncing…" : "Sync from Hub"}
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card className="border-border bg-card">
+          <CardContent className="space-y-4 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">Thresholds</h4>
+              <p className="text-xs text-muted-foreground">These values drive the scoring thresholds enforced in analysis.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {[
+                ["Payment term days", ["thresholds", "paymentTermDays"]],
+                ["Breach days", ["thresholds", "breachDays"]],
+                ["Approaching breach days", ["thresholds", "approachingBreachDays"]],
+                ["Caution below score", ["thresholds", "cautionScoreBelow"]],
+                ["Hold below score", ["thresholds", "holdScoreBelow"]],
+                ["Dormant threshold days", ["thresholds", "dormantThresholdDays"]],
+              ].map(([label, path]) => (
+                <div key={path.join(".")} className="space-y-1.5">
+                  <Label>{label}</Label>
+                  <Input type="number" value={path.reduce((acc, key) => acc?.[key], draft) ?? ""} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(path, Number(e.target.value || 0))} />
+                </div>
+              ))}
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm">
+                <Checkbox checked={Boolean(draft.outstandingBalanceCap.enabled)} disabled={!hubMode || !canManageRules} onCheckedChange={(checked) => setNested(["outstandingBalanceCap", "enabled"], Boolean(checked))} />
+                Enable exposure cap deduction
+              </label>
+              <div className="space-y-1.5">
+                <Label>Exposure cap multiplier</Label>
+                <Input type="number" value={draft.outstandingBalanceCap.multiplier} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(["outstandingBalanceCap", "multiplier"], Number(e.target.value || 0))} />
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border bg-card">
+          <CardContent className="space-y-4 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">Verdict wording</h4>
+              <p className="text-xs text-muted-foreground">Admin-editable labels and summaries pushed from Hub to every site.</p>
+            </div>
+            {[
+              ["approve", "Approve"],
+              ["caution", "Caution"],
+              ["hold", "Hold"],
+              ["dormant", "Dormant"],
+            ].map(([key, label]) => (
+              <div key={key} className="space-y-2 rounded-xl border border-border p-3">
+                <Label>{label} title</Label>
+                <Input value={draft.wording.verdicts[key].title} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(["wording", "verdicts", key, "title"], e.target.value)} />
+                <Label>{label} summary</Label>
+                <Textarea value={draft.wording.verdicts[key].summary} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(["wording", "verdicts", key, "summary"], e.target.value)} rows={3} />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      {hubMode ? (
+        <Card className="border-border bg-card">
+          <CardContent className="space-y-4 p-4">
+            <div className="grid gap-3 lg:grid-cols-[1fr_auto]">
+              <div className="space-y-1.5">
+                <Label>Publish notes</Label>
+                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} placeholder="What changed in this logic version?" disabled={!canManageRules} />
+              </div>
+              <div className="space-y-1.5 min-w-[220px]">
+                <Label>Recent versions</Label>
+                <div className="rounded-xl border border-border p-3 text-sm text-muted-foreground">
+                  {(query.data?.versions || []).slice(0, 5).map((version) => (
+                    <div key={version.version} className="flex items-center justify-between gap-2 py-1 first:pt-0 last:pb-0">
+                      <span>v{version.version}</span>
+                      <span className="text-xs">{version.isActive ? "active" : "history"}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-foreground">Site sync status</h4>
+                <p className="text-xs text-muted-foreground">Select sites below to push a targeted update, or leave all unchecked to push everywhere.</p>
+              </div>
+              <div className="rounded-xl border border-border overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/40 text-xs uppercase text-muted-foreground">
+                      <th className="px-4 py-2.5 text-left">Push</th>
+                      <th className="px-4 py-2.5 text-left">Site</th>
+                      <th className="px-4 py-2.5 text-left">Version</th>
+                      <th className="px-4 py-2.5 text-left">Drift</th>
+                      <th className="px-4 py-2.5 text-left">Last synced</th>
+                      <th className="px-4 py-2.5 text-left">Error</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statuses.map((site) => (
+                      <tr key={site.siteId} className="border-b border-border last:border-0 hover:bg-muted/20">
+                        <td className="px-4 py-2.5"><Checkbox checked={selectedSiteIds.has(site.siteId)} onCheckedChange={() => toggleSite(site.siteId)} /></td>
+                        <td className="px-4 py-2.5 font-medium text-foreground">{site.siteName || site.siteSlug}</td>
+                        <td className="px-4 py-2.5 text-muted-foreground">{site.logicVersion ? `v${site.logicVersion}` : "—"}</td>
+                        <td className="px-4 py-2.5"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${driftTone[site.driftStatus] || driftTone.never_synced}`}>{site.driftStatus.replaceAll("_", " ")}</span></td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{site.lastSyncedAt ? new Date(site.lastSyncedAt).toLocaleString() : "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-rose-400 max-w-[260px] truncate">{site.lastError || "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card className="border-border bg-card">
+          <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+            <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
+            <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
+            <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPanel({ open, onClose, hubMode }) {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
   const isAdmin = currentUser?.role === "admin";
   const canManageUsers = hasPermission(currentUser, "can_manage_users") || isAdmin;
+  const canManageRules = hasPermission(currentUser, "can_manage_rules") || isAdmin;
 
   // Build tabs based on context
   const tabs = [
     canManageUsers && { id: "users", label: "Users" },
     { id: "theme", label: "Theme" },
+    canManageRules && { id: "creditlogic", label: "Credit Logic" },
     { id: "autoflag", label: "Auto-Flag Rules" },
     { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
@@ -865,6 +1140,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
               <TabsContent key={t.id} value={t.id} className="mt-0">
                 {t.id === "users"    && <UsersTabContent />}
                 {t.id === "theme"    && <ThemeTab />}
+                {t.id === "creditlogic" && <CreditLogicTab hubMode={hubMode} currentUser={currentUser} />}
                 {t.id === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
                 {t.id === "fields"   && <FieldsTab />}
                 {t.id === "audit"    && <AuditTab />}

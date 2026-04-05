@@ -2,10 +2,11 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
+import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
-function CreditBadge({ row }) {
-  const verdict = useMemo(() => analyseInvoiceCredit([row]).verdict, [row]);
+function CreditBadge({ row, creditLogicConfig }) {
+  const verdict = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG).verdict, [row, creditLogicConfig]);
   const meta = CREDIT_BADGE_META[verdict] || CREDIT_BADGE_META.caution;
 
   return (
@@ -171,6 +172,17 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoic
 }
 
 export default function CustomerBalances() {
+  const { data: creditLogicState } = useQuery({
+    queryKey: ["creditLogicCurrent"],
+    queryFn: async () => {
+      const response = await fetch("/api/credit-logic/current", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load credit logic");
+      return response.json();
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+  const creditLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
   const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
   const [ageBucket, setAgeBucket] = useState("all");
@@ -477,7 +489,7 @@ export default function CustomerBalances() {
                           </span>
                         </td>
                         <td className="px-2 py-1 text-center">
-                          <CreditBadge row={row} />
+                          <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
                         </td>
                       </tr>
                     );

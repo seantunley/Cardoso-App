@@ -65,7 +65,12 @@ function initHubTables() {
       token TEXT,
       last_seen TEXT,
       last_kpis TEXT,
-      status TEXT DEFAULT 'unknown'
+      status TEXT DEFAULT 'unknown',
+      logic_version INTEGER,
+      logic_sync_status TEXT DEFAULT 'never_synced',
+      logic_last_error TEXT,
+      logic_last_synced_at TEXT,
+      logic_status_updated_at TEXT
     );
     CREATE TABLE IF NOT EXISTS hub_records (
       site_id TEXT,

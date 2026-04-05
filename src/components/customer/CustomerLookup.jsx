@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer,
   ComposedChart, Scatter,
@@ -36,6 +37,7 @@ import {
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
+import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { buildManualFlagFactor, buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
 
@@ -488,6 +490,17 @@ export default function CustomerLookup({
     }
   };
 
+  const { data: creditLogicState } = useQuery({
+    queryKey: ["creditLogicCurrent"],
+    queryFn: async () => {
+      const response = await fetch("/api/credit-logic/current", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load credit logic");
+      return response.json();
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+
   // Memoize credit analysis so it doesn't recalculate on every render
   const creditAnalysis = useMemo(() => {
     if (!customer) return null;
@@ -503,7 +516,12 @@ export default function CustomerLookup({
         } catch {}
         return { action: 'flag_changed', new_value };
       });
-    const analysis = analyseInvoiceCredit(allAccountRecords, flagHistory);
+    const activeLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
+    const activeLogicVersion = creditLogicState?.analysis?.version || null;
+    const analysis = {
+      ...analyseInvoiceCredit(allAccountRecords, flagHistory, activeLogicConfig),
+      logicVersionUsed: activeLogicVersion,
+    };
 
     // User-set flags are hard overrides — no analysis can outrank a human decision.
     // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
@@ -557,7 +575,7 @@ export default function CustomerLookup({
     }
 
     return analysis;
-  }, [customer, subAccounts]);
+  }, [customer, subAccounts, recordHistory, creditLogicState]);
 
   const canModifyFlag = () => {
     if (!customer || !currentUser) return false;

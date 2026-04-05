@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import db from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 import { scanNetworkDevicesNow } from './services/networkDevices.js';
+import { syncCreditLogicFromHub } from './services/creditLogic.js';
 
 export async function runSpeedTestNow() {
   const { default: speedTest } = await import('speedtest-net');
@@ -104,6 +105,16 @@ export function startSchedulers() {
         console.error('[network-devices] scheduled scan failed:', error.message);
       });
     }));
+    setTimeout(() => {
+      syncCreditLogicFromHub({ triggeredBy: 'startup' }).catch((error) => {
+        console.error('[credit-logic] startup sync failed:', error.message);
+      });
+    }, 12000);
+    intervals.push(setInterval(() => {
+      syncCreditLogicFromHub({ triggeredBy: 'scheduler' }).catch((error) => {
+        console.error('[credit-logic] scheduled sync failed:', error.message);
+      });
+    }, 10 * 60 * 1000));
   }
 
   intervals.push(setInterval(async () => {
