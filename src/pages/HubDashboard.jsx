@@ -1,18 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import {
   RefreshCw, AlertCircle, ShieldCheck, Clock, Search,
-  Building2, Wifi, WifiOff, Loader2, User, Flag, Shield,
-  Trash2, History, CheckCircle, Calendar, Network,
+  Building2, Wifi, WifiOff, Loader2, Flag, CheckCircle, Calendar, Network,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+  Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
-import { buildManualFlagSummary } from "@/lib/manualFlagMessages";
+import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
+import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
@@ -37,18 +35,6 @@ function formatAmount(val) {
   if (n === 0) return "—";
   const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return n < 0 ? `-R ${abs}` : `R ${abs}`;
-}
-
-function fuzzyMatch(str, pattern) {
-  if (!str || !pattern) return { matches: false, score: 0 };
-  const s = str.toLowerCase(), p = pattern.toLowerCase();
-  if (s === p) return { matches: true, score: 1000 };
-  if (s.includes(p)) return { matches: true, score: 500 };
-  let pi = 0, score = 0, cons = 0;
-  for (let i = 0; i < s.length && pi < p.length; i++) {
-    if (s[i] === p[pi]) { score += 1 + cons; cons++; pi++; } else { cons = 0; }
-  }
-  return { matches: pi === p.length, score };
 }
 
 const KPI_RANGE_OPTIONS = [
@@ -155,136 +141,44 @@ function SiteCard({ site, onFlagClick, onResync }) {
 
 // ─── customer modal (read-only from hub) ────────────────────────────────────────────
 
-function parseDateFieldHub(val) {
-  if (!val) return null;
-  const s = String(val).trim();
-  if (/^\d{8}$/.test(s)) return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
-  const dmy = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) return new Date(`${dmy[3]}-${dmy[2].padStart(2,"0")}-${dmy[1].padStart(2,"0")}`);
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function analyseHubCredit(record) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const rawBalance = parseAmount(record.outstanding_balance);
-  const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
-  const isManualRedFlag = record.flag_color === "red" && !record.auto_flagged;
-  const isManualOrangeFlag = record.flag_color === "orange" && !record.auto_flagged;
-
-  const invoices = [1,2,3,4,5].map(i => ({
-    number: record[`last_unpaid_invoice_${i}`],
-    amount: Math.abs(parseAmount(record[`last_unpaid_invoice_${i}_amount`])),
-    date:   parseDateFieldHub(record[`last_unpaid_invoice_${i}_date`]),
-  })).filter(x => x.number || x.amount > 0);
-
-  const receipts = [1,2,3,4,5].map(i => ({
-    number: record[`last_receipt_${i}`],
-    amount: Math.abs(parseAmount(record[`last_receipt_${i}_amount`])),
-    date:   parseDateFieldHub(record[`last_receipt_${i}_date`]),
-  })).filter(x => x.number || x.amount > 0);
-
-  const allDates = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
-  const mostRecent = allDates.length > 0 ? Math.max(...allDates.map(d => +d)) : null;
-  const inactiveDays = mostRecent ? Math.floor((today - mostRecent) / 86400000) : null;
-  const inactiveYears = inactiveDays && inactiveDays > 730 ? Math.floor(inactiveDays / 365) : null;
-  const inactiveNote = inactiveYears ? ` No transactions in over ${inactiveYears} year${inactiveYears > 1 ? "s" : ""}.` : "";
-
-  if (outstandingBalance === 0) {
-    let result = {
-      verdict: "approve",
-      title: invoices.length > 0 ? "Approve Invoice" : "New Customer",
-      summary: (invoices.length > 0 ? "Balance is zero — account fully settled." : "No history — safe to issue first invoice.") + inactiveNote,
-      score: 100, avgLag: null,
-    };
-
-    if (isManualRedFlag) {
-      result = {
-        ...result,
-        verdict: "hold",
-        title: "Hold — Manually Flagged",
-        summary: buildManualFlagSummary("red", record.flag_created_by),
-      };
-    } else if (isManualOrangeFlag && result.verdict === "approve") {
-      result = {
-        ...result,
-        verdict: "caution",
-        title: "Proceed with Caution — Manually Flagged",
-        summary: buildManualFlagSummary("orange", record.flag_created_by),
-      };
-    }
-
-    return result;
-  }
-  if (invoices.length === 0 && receipts.length === 0) {
-    return { verdict: "caution", title: "Proceed with Caution",
-      summary: `Outstanding balance but no history available.${inactiveNote}`, score: 50, avgLag: null };
-  }
-
-  let deductions = 0;
-  let avgLag = null;
-  const invByDate = [...invoices].sort((a,b) => (a.date||0)-(b.date||0));
-  const recByDate = [...receipts].sort((a,b) => (a.date||0)-(b.date||0));
-  const usedRec = new Set();
-  const pairs = invByDate.map(inv => {
-    const idx = recByDate.findIndex((r,ii) => !usedRec.has(ii) && r.date && inv.date && r.date >= inv.date);
-    if (idx !== -1) {
-      usedRec.add(idx);
-      const rec = recByDate[idx];
-      return { invoice: inv, receipt: rec, lagDays: Math.floor((rec.date - inv.date) / 86400000) };
-    }
-    return { invoice: inv, receipt: null, lagDays: null };
-  });
-  const unpaid = pairs.filter(p => !p.receipt);
-  const paid   = pairs.filter(p => p.receipt);
-  const lags   = paid.map(p => p.lagDays).filter(l => l !== null);
-  if (lags.length > 0) avgLag = Math.round(lags.reduce((s,l) => s+l, 0) / lags.length);
-
-  const unpaidAges = unpaid.map(p => p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null).filter(d => d !== null);
-  const oldestUnpaid = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
-
-  if (oldestUnpaid !== null && oldestUnpaid > 21) deductions += 70;
-  else if (oldestUnpaid !== null && oldestUnpaid > 14) deductions += 25;
-  else if (unpaid.length > 0) deductions += 10;
-  if (avgLag !== null && avgLag > 28) deductions += 30;
-  else if (avgLag !== null && avgLag > 14) deductions += 15;
-  if (outstandingBalance > 0) deductions = Math.max(deductions, 20);
-
-  const score = Math.max(0, 100 - deductions);
-  let verdict = deductions >= 60 ? "hold" : deductions >= 25 ? "caution" : "approve";
-  let title = verdict === "hold" ? "Hold — Do Not Issue" : verdict === "caution" ? "Proceed with Caution" : "Approve Invoice";
-  let summary = verdict === "hold"
-    ? `Unpaid invoice is ${oldestUnpaid} days old — exceeds the 21-day limit.${inactiveNote}`
-    : verdict === "caution"
-    ? `Outstanding balance present${avgLag !== null ? `, avg payment lag ${avgLag}d` : ""}.${inactiveNote}`
-    : `Account in good standing${avgLag !== null ? ` — avg payment lag ${avgLag}d` : ""}.${inactiveNote}`;
-
-  if (isManualRedFlag && verdict !== "hold") {
-    verdict = "hold";
-    title = "Hold — Manually Flagged";
-    summary = buildManualFlagSummary("red", record.flag_created_by);
-  } else if (isManualOrangeFlag && verdict === "approve") {
-    verdict = "caution";
-    title = "Proceed with Caution — Manually Flagged";
-    summary = buildManualFlagSummary("orange", record.flag_created_by);
-  }
-
-  return { verdict, title, summary, score, avgLag };
-}
 
 const verdictBannerHub = {
   approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
   caution: "bg-amber-500/20 border-amber-500/40 text-amber-200",
   hold:    "bg-red-500/20 border-red-500/40 text-red-200",
+  dormant: "bg-purple-500/20 border-purple-500/40 text-purple-200",
 };
 const verdictScoreHub = {
   approve: "bg-emerald-800/60 text-emerald-200 ring-1 ring-emerald-600/40",
   caution: "bg-amber-800/60 text-amber-200 ring-1 ring-amber-600/40",
   hold:    "bg-red-800/60 text-red-200 ring-1 ring-red-600/40",
+  dormant: "bg-purple-800/60 text-purple-200 ring-1 ring-purple-600/40",
 };
 
 function HubCustomerModal({ record, open, onClose }) {
-  const credit = record ? analyseHubCredit(record) : null;
+  const [creditLogicConfig, setCreditLogicConfig] = useState(DEFAULT_CREDIT_LOGIC_CONFIG);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCreditLogicConfig() {
+      try {
+        const response = await fetch("/api/credit-logic/current", { credentials: "include" });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!cancelled && data?.analysis?.config) {
+          setCreditLogicConfig(data.analysis.config);
+        }
+      } catch {
+        // Keep the default config if the hub cannot fetch the live config.
+      }
+    }
+
+    if (open) loadCreditLogicConfig();
+    return () => { cancelled = true; };
+  }, [open]);
+
+  const credit = record ? analyseInvoiceCredit([record], [], creditLogicConfig) : null;
   useEffect(() => {
     if (!open) return;
     const handler = (e) => { if (e.key === "Escape") onClose(); };
@@ -326,9 +220,13 @@ function HubCustomerModal({ record, open, onClose }) {
         {credit && (
           <div className={cn("w-full px-5 py-3 border-b shrink-0", verdictBannerHub[credit.verdict])}>
             <div className="flex items-start gap-2 sm:gap-3 flex-wrap sm:flex-nowrap">
-              {credit.verdict === "approve"
-                ? <ShieldCheck className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />
-                : <AlertCircle className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+              {credit.verdict === "approve" ? (
+                <ShieldCheck className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />
+              ) : credit.verdict === "dormant" ? (
+                <Clock className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />
+              ) : (
+                <AlertCircle className="h-6 w-6 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />
+              )}
               <div className="flex-1 min-w-0">
                 <span className="text-base font-extrabold tracking-tight leading-tight">{credit.title}</span>
                 {credit.summary && (
