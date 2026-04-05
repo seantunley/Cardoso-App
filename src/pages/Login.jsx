@@ -10,7 +10,6 @@ import { Label } from "@/components/ui/label";
 
 const CardosoBriefcase = ({ size = 48 }) => (
   <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width={size} height={size}>
-    <rect width="32" height="32" rx="8" fill="#1e293b"/>
     <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#lg1)"/>
     <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
     <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>

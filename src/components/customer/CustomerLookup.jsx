@@ -255,10 +255,10 @@ function getHistoryReasonSnippet(log) {
 // ── Invoice Credit Analysis ────────────────────────────────────────────────
 
 const verdictBannerStyles = {
-  approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
-  caution: "bg-amber-500/20 border-amber-500/40 text-amber-200",
-  hold: "bg-red-500/20 border-red-500/40 text-red-200",
-  dormant: "bg-purple-500/20 border-purple-500/40 text-purple-200",
+  approve: "dark:bg-emerald-500/20 bg-emerald-50 border-emerald-500/40 dark:text-emerald-200 text-emerald-700",
+  caution: "dark:bg-amber-500/20 bg-amber-50 border-amber-500/40 dark:text-amber-200 text-amber-700",
+  hold: "dark:bg-red-500/20 bg-red-50 border-red-500/40 dark:text-red-200 text-red-700",
+  dormant: "dark:bg-purple-500/20 bg-purple-50 border-purple-500/40 dark:text-purple-200 text-purple-700",
 };
 
 const verdictIcons = {
@@ -269,10 +269,10 @@ const verdictIcons = {
 };
 
 const verdictScoreStyles = {
-  approve: "bg-emerald-800/60 text-emerald-200 ring-1 ring-emerald-600/40",
-  caution: "bg-amber-800/60 text-amber-200 ring-1 ring-amber-600/40",
-  hold: "bg-red-800/60 text-red-200 ring-1 ring-red-600/40",
-  dormant: "bg-purple-800/60 text-purple-200 ring-1 ring-purple-600/40",
+  approve: "dark:bg-emerald-800/60 bg-emerald-100 dark:text-emerald-200 text-emerald-700 ring-1 ring-emerald-600/40",
+  caution: "dark:bg-amber-800/60 bg-amber-100 dark:text-amber-200 text-amber-700 ring-1 ring-amber-600/40",
+  hold: "dark:bg-red-800/60 bg-red-100 dark:text-red-200 text-red-700 ring-1 ring-red-600/40",
+  dormant: "dark:bg-purple-800/60 bg-purple-100 dark:text-purple-200 text-purple-700 ring-1 ring-purple-600/40",
 };
 
 const flagDotColor = {
@@ -283,10 +283,10 @@ const flagDotColor = {
 };
 
 const flagPillStyles = {
-  none: { base: "border-border text-muted-foreground", active: "bg-slate-700 border-slate-400 text-white ring-2 ring-slate-400" },
-  green: { base: "border-border text-muted-foreground", active: "bg-green-900 border-green-500 text-green-200 ring-2 ring-green-500" },
-  orange: { base: "border-border text-muted-foreground", active: "bg-orange-900 border-orange-500 text-orange-200 ring-2 ring-orange-500" },
-  red: { base: "border-border text-muted-foreground", active: "bg-red-900 border-red-500 text-red-200 ring-2 ring-red-500" },
+  none: { base: "border-border text-muted-foreground", active: "dark:bg-slate-700 bg-slate-200 dark:border-slate-400 border-slate-400 dark:text-white text-slate-800 ring-2 ring-slate-400" },
+  green: { base: "border-border text-muted-foreground", active: "dark:bg-green-900 bg-green-100 border-green-500 dark:text-green-200 text-green-800 ring-2 ring-green-500" },
+  orange: { base: "border-border text-muted-foreground", active: "dark:bg-orange-900 bg-orange-100 border-orange-500 dark:text-orange-200 text-orange-800 ring-2 ring-orange-500" },
+  red: { base: "border-border text-muted-foreground", active: "dark:bg-red-900 bg-red-100 border-red-500 dark:text-red-200 text-red-800 ring-2 ring-red-500" },
 };
 
 export default function CustomerLookup({
@@ -780,7 +780,7 @@ export default function CustomerLookup({
               onChange={(e) => setCustomerNumber(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Customer number or name…"
-              className="h-11 border border-slate-600/60 bg-slate-950/70 pl-10 text-white placeholder:text-slate-500 focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
+              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
             />
             {showSuggestions && suggestions.length > 0 && (
               <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
@@ -789,10 +789,10 @@ export default function CustomerLookup({
                     key={s.record.id ?? idx}
                     onClick={() => handleSuggestionClick(s)}
                     className={cn(
-                      "w-full border-b border-slate-800/60 px-4 py-2.5 text-left last:border-0 transition-colors",
+                      "w-full border-b border-border/60 px-4 py-2.5 text-left last:border-0 transition-colors",
                       idx === selectedSuggestionIndex
-                        ? "bg-indigo-600/30 text-white"
-                        : "hover:bg-slate-800/70 text-slate-200"
+                        ? "bg-indigo-600/30 dark:text-white text-indigo-900"
+                        : "hover:bg-accent text-foreground"
                     )}
                   >
                     <div className="text-sm font-medium">{s.customerName}</div>
@@ -934,10 +934,10 @@ export default function CustomerLookup({
             {!!customer?.auto_flagged && (
               <div className={cn(
                 "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium mb-3",
-                customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
-                customer?.flag_color === "green" && "bg-green-950/70 border-green-700 text-green-300",
-                customer?.flag_color === "orange" && "bg-orange-950/70 border-orange-700 text-orange-300",
-                (!customer?.flag_color || customer?.flag_color === "none") && "bg-slate-800 border-slate-600 text-slate-300",
+                customer?.flag_color === "red" && "dark:bg-red-950/70 bg-red-50 border-red-700 dark:text-red-300 text-red-700",
+                customer?.flag_color === "green" && "dark:bg-green-950/70 bg-green-50 border-green-700 dark:text-green-300 text-green-700",
+                customer?.flag_color === "orange" && "dark:bg-orange-950/70 bg-orange-50 border-orange-700 dark:text-orange-300 text-orange-700",
+                (!customer?.flag_color || customer?.flag_color === "none") && "dark:bg-slate-800 bg-slate-100 dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-700",
               )}>
                 <Zap className="w-4 h-4 shrink-0" />
                 <span>Auto-flagged</span>
@@ -1070,7 +1070,7 @@ export default function CustomerLookup({
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-white">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <Trash2 className="h-4 w-4 text-rose-400" />
               Remove Flag — Reason Required
             </DialogTitle>
