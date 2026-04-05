@@ -69,7 +69,7 @@ async function fetchPingStatus() {
 // ── SiteSection ────────────────────────────────────────────────────────────
 function SiteSection({ slug, rows, pingInfo, onRunNow }) {
   const latest = rows[0] ?? null;
-  const tableRows = rows.slice(0, 10);
+  const tableRows = rows.slice(0, 3);
   const [running, setRunning] = useState(false);
 
   const handleRunNow = useCallback(async () => {

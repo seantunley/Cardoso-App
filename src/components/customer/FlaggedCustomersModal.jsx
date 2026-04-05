@@ -41,7 +41,7 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent
-        className="max-w-2xl max-h-[70vh] bg-card border-border"
+        className="max-w-2xl max-h-[70vh] flex flex-col overflow-hidden bg-card border-border"
         onKeyDown={(e) => { if (e.key === 'Enter') onClose(); }}
       >
         <DialogHeader>
@@ -63,7 +63,7 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2 overflow-y-auto max-h-[65vh] pr-2">
+        <div className="space-y-2 overflow-y-auto flex-1 min-h-0 pr-2">
           {sortedCustomers.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
               No customers with {flagColor} flags
