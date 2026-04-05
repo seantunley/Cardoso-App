@@ -62,7 +62,7 @@ app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShutting
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
   initHubSiteRegistry();
-  app.use(createHubRouter({ requireAuth, requireAdmin }));
+  app.use(createHubRouter({ requireAuth, requireAdmin, requirePermission }));
   startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites);
 } else {
   app.use(createNonHubFallbackRouter());

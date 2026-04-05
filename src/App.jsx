@@ -10,10 +10,24 @@ import { useAuth } from "@/lib/AuthContext";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
+import ProtectedRoute from "@/components/auth/ProtectedAuth";
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => <></>;
 const HubDashboard = Pages["HubDashboard"];
+const pagePermissions = {
+  CustomerSearch: "can_access_customer_search",
+  CustomerBalances: "can_access_customer_balances",
+  Collections: "can_access_collections",
+  Inventory: "can_access_inventory",
+  HubMetrics: "can_access_hub_metrics",
+  HubBackups: "can_access_hub_backups",
+  HubTrends: "can_access_hub_trends",
+  HubAuditLog: "can_access_hub_audit_log",
+  Records: "can_access_records",
+  Reports: "can_access_reports",
+  Connections: "can_access_connections",
+};
 
 const LayoutWrapper = ({ children, currentPageName }) =>
   Layout ? (
@@ -77,7 +91,9 @@ const AuthenticatedApp = () => {
         path="/"
         element={
           <ProtectedPage currentPageName={hubMode ? "HubDashboard" : mainPageKey}>
-            {hubMode ? <HubDashboard /> : <MainPage />}
+            <ProtectedRoute permission={hubMode ? undefined : pagePermissions[mainPageKey]}>
+              {hubMode ? <HubDashboard /> : <MainPage />}
+            </ProtectedRoute>
           </ProtectedPage>
         }
       />
@@ -88,7 +104,9 @@ const AuthenticatedApp = () => {
           path={`/${path}`}
           element={
             <ProtectedPage currentPageName={path}>
-              <Page />
+              <ProtectedRoute permission={pagePermissions[path]}>
+                <Page />
+              </ProtectedRoute>
             </ProtectedPage>
           }
         />

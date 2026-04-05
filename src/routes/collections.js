@@ -18,7 +18,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
   router.get(
     '/api/collections',
     requireAuth,
-    requirePermission('can_access_customer_balances'),
+    requirePermission('can_access_collections'),
     (req, res) => {
       try {
         const rows = db.prepare(`
@@ -55,7 +55,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
   router.put(
     '/api/collections/:customer_id',
     requireAuth,
-    requirePermission('can_access_customer_balances'),
+    requirePermission('can_access_collections'),
     (req, res) => {
       const customerId = String(req.params.customer_id || '').trim();
       const status = String(req.body?.status || 'pending').trim().toLowerCase();

@@ -395,7 +395,7 @@ export default function HubBackups() {
 
         {isError && (
           <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-            Failed to load backup status. Make sure you are logged in as an admin.
+            Failed to load backup status. Make sure you are logged in with access to Site Backups.
           </div>
         )}
 

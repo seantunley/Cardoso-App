@@ -14,7 +14,7 @@ import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
 
-export function createHubRouter({ requireAuth, requireAdmin }) {
+export function createHubRouter({ requireAuth, requireAdmin, requirePermission }) {
   const stmts = buildStatements(db);
   const router = Router();
 
@@ -108,12 +108,12 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   }
 
   // GET /api/hub/backup-settings
-  router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
+  router.get('/api/hub/backup-settings', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
     const row = stmts.getHubSetting.get('backup_sync_enabled');
     res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
   });
 
-  router.post('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
+  router.post('/api/hub/backup-settings', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
     const { backup_sync_enabled } = req.body;
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
     stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
@@ -123,7 +123,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   // GET /api/hub/proxy-backup?site_id=xxx
   // Proxies a backup download from a site through the Hub server to avoid CORS.
   // Admin-only.
-  router.get('/api/hub/proxy-backup', requireAuth, requireAdmin, async (req, res) => {
+  router.get('/api/hub/proxy-backup', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
 
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
@@ -158,7 +158,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
   // GET /api/hub/proxy-config?site_id=xxx
   // Proxies the site .env download through the hub. Admin-only.
-  router.get('/api/hub/proxy-config', requireAuth, requireAdmin, async (req, res) => {
+  router.get('/api/hub/proxy-config', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
@@ -188,7 +188,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   // GET /api/hub/backup-status
   // Polls /api/backup/status on each registered site and returns aggregated results.
   // Admin-only (session required).
-  router.get('/api/hub/backup-status', requireAuth, requireAdmin, async (req, res) => {
+  router.get('/api/hub/backup-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
 
     const sites = db.prepare('SELECT id, name, url, token FROM hub_sites').all();
 
@@ -273,7 +273,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
   // GET /api/hub/hub-backup-status
   // Returns count and latest timestamp of backups stored on the hub (database/hub-backups/<site_id>/).
-  router.get('/api/hub/hub-backup-status', requireAuth, requireAdmin, (req, res) => {
+  router.get('/api/hub/hub-backup-status', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
     try {
       const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
       // Guard: hub_sites table may not exist on some installs
@@ -396,7 +396,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/trends — weekly/monthly record count + flag rate per site
-  router.get('/api/hub/trends', requireAuth, requireAdmin, (req, res) => {
+  router.get('/api/hub/trends', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
     const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
     const sinceParam = req.query.since ? String(req.query.since) : null;
 
@@ -479,7 +479,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     res.json(rows);
   });
 
-  router.get('/api/hub/audit-log', requireAuth, requireAdmin, (req, res) => {
+  router.get('/api/hub/audit-log', requireAuth, requirePermission('can_access_hub_audit_log'), (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
       const rows = db.prepare(`
@@ -533,7 +533,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/speedtest — returns speedtest results, optional ?site=slug filter
-  router.get('/api/hub/speedtest', requireAuth, (req, res) => {
+  router.get('/api/hub/speedtest', requireAuth, requirePermission('can_access_hub_metrics'), (req, res) => {
     const { site } = req.query;
     try {
       let rows;
@@ -551,7 +551,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // POST /api/hub/speedtest/pull — admin only, triggers immediate pull from all sites
-  router.post('/api/hub/speedtest/pull', requireAuth, requireAdmin, async (req, res) => {
+  router.post('/api/hub/speedtest/pull', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
     try {
       let pulled = 0;
       await Promise.allSettled(HUB_SITES.map(async (site) => {
@@ -570,7 +570,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/ping-status — latest ping result per site
-  router.get('/api/hub/ping-status', requireAuth, (req, res) => {
+  router.get('/api/hub/ping-status', requireAuth, requirePermission('can_access_hub_metrics'), (req, res) => {
     try {
       let rows = [];
       try {
@@ -589,7 +589,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // GET /api/hub/machine-health — aggregated machine health per site
-  router.get('/api/hub/machine-health', requireAuth, requireAdmin, async (req, res) => {
+  router.get('/api/hub/machine-health', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
     const sites = db.prepare('SELECT id, slug, name, url, token FROM hub_sites').all();
 
     const results = await Promise.all(sites.map(async (site) => {
@@ -665,7 +665,7 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
   });
 
   // POST /api/hub/speedtest/run-site — trigger on-demand speedtest on a specific site
-  router.post('/api/hub/speedtest/run-site', requireAuth, requireAdmin, async (req, res) => {
+  router.post('/api/hub/speedtest/run-site', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
     const { slug } = req.body;
     const site = HUB_SITES.find(s => s.slug === slug);
     if (!site) return res.status(404).json({ error: 'Site not found' });
@@ -700,7 +700,8 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     try {
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
-               can_access_customer_search, can_access_customer_balances, can_access_inventory,
+               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
                can_access_records, can_access_reports, can_access_connections, can_access_settings,
                can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
         FROM "user" ORDER BY role DESC, full_name ASC
@@ -718,7 +719,12 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
         hub_redirect: boolFromRow(u.hub_redirect, false),
         can_access_customer_search: boolFromRow(u.can_access_customer_search, true),
         can_access_customer_balances: boolFromRow(u.can_access_customer_balances, true),
+        can_access_collections: boolFromRow(u.can_access_collections, true),
         can_access_inventory: boolFromRow(u.can_access_inventory, true),
+        can_access_hub_metrics: boolFromRow(u.can_access_hub_metrics, false),
+        can_access_hub_backups: boolFromRow(u.can_access_hub_backups, false),
+        can_access_hub_trends: boolFromRow(u.can_access_hub_trends, false),
+        can_access_hub_audit_log: boolFromRow(u.can_access_hub_audit_log, false),
         can_access_records: boolFromRow(u.can_access_records, false),
         can_access_reports: boolFromRow(u.can_access_reports, false),
         can_access_connections: boolFromRow(u.can_access_connections, false),
@@ -743,7 +749,8 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
-             can_access_customer_search, can_access_customer_balances, can_access_inventory,
+             can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+             can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
              password_hash, must_change_password
@@ -937,7 +944,8 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?,
+                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
                 password_hash = ?, must_change_password = 0
@@ -949,7 +957,12 @@ export function createReceiveUsersRouter() {
               u.hub_redirect ? 1 : 0,
               u.can_access_customer_search !== false ? 1 : 0,
               u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_hub_metrics ? 1 : 0,
+              u.can_access_hub_backups ? 1 : 0,
+              u.can_access_hub_trends ? 1 : 0,
+              u.can_access_hub_audit_log ? 1 : 0,
               u.can_access_records ? 1 : 0,
               u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
@@ -965,7 +978,8 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_inventory = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?,
+                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
               WHERE email = ?
@@ -976,7 +990,12 @@ export function createReceiveUsersRouter() {
               u.hub_redirect ? 1 : 0,
               u.can_access_customer_search !== false ? 1 : 0,
               u.can_access_customer_balances !== false ? 1 : 0,
+              u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_hub_metrics ? 1 : 0,
+              u.can_access_hub_backups ? 1 : 0,
+              u.can_access_hub_trends ? 1 : 0,
+              u.can_access_hub_audit_log ? 1 : 0,
               u.can_access_records ? 1 : 0,
               u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
@@ -1004,10 +1023,11 @@ export function createReceiveUsersRouter() {
           }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
-              can_access_customer_search, can_access_customer_balances, can_access_inventory,
+              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -1017,7 +1037,12 @@ export function createReceiveUsersRouter() {
             mustChange,
             u.can_access_customer_search !== false ? 1 : 0,
             u.can_access_customer_balances !== false ? 1 : 0,
+            u.can_access_collections !== false ? 1 : 0,
             u.can_access_inventory !== false ? 1 : 0,
+            u.can_access_hub_metrics ? 1 : 0,
+            u.can_access_hub_backups ? 1 : 0,
+            u.can_access_hub_trends ? 1 : 0,
+            u.can_access_hub_audit_log ? 1 : 0,
             u.can_access_records ? 1 : 0,
             u.can_access_reports ? 1 : 0,
             u.can_access_connections ? 1 : 0,

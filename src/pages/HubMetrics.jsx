@@ -454,7 +454,7 @@ function SpeedtestTab({ data, pingBySite, isLoading, isError, isFetching, refetc
 
       {isError && (
         <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-          Failed to load speedtest results. Make sure you are logged in as an admin.
+          Failed to load speedtest results. Make sure you are logged in with access to Site Metrics.
         </div>
       )}
 
@@ -518,7 +518,7 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
 
       {isError && (
         <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-          Failed to load machine health. Make sure you are logged in as an admin.
+          Failed to load machine health. Make sure you are logged in with access to Site Metrics.
         </div>
       )}
 
