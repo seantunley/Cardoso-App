@@ -486,19 +486,40 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
 
     try {
+      const validCols = getTableColumns(table);
+
+      // Optional exact-match filters via ?filter_column=value
+      const filterEntries = Object.entries(req.query)
+        .filter(([key, value]) => key.startsWith('filter_') && value !== undefined && value !== null && String(value) !== '')
+        .map(([key, value]) => [key.slice('filter_'.length), value]);
+
+      const whereParts = [];
+      const params = [];
+      for (const [column, value] of filterEntries) {
+        if (!validCols.has(column)) continue;
+        whereParts.push(`"${column}" = ?`);
+        params.push(String(value));
+      }
+
+      const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
       // Optional sort: ?sort=priority (asc) or ?sort=-priority (desc)
       const sortParam = req.query.sort;
       let orderClause = '';
       if (sortParam) {
         const desc = sortParam.startsWith('-');
         const col = desc ? sortParam.slice(1) : sortParam;
-        const validCols = getTableColumns(table);
         if (validCols.has(col)) {
           orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
         }
       }
-      const stmt = db.prepare(`SELECT * FROM "${table}"${orderClause}`);
-      const rows = stmt.all();
+
+      const rawLimit = parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 5000) : null;
+      const limitClause = limit ? ` LIMIT ${limit}` : '';
+
+      const stmt = db.prepare(`SELECT * FROM "${table}"${whereClause}${orderClause}${limitClause}`);
+      const rows = stmt.all(...params);
       let output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
       if (table === 'databaseconnection') output = output.map(sanitizeConnection);
       res.json(output);

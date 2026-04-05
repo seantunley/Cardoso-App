@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@/api/apiClient';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
@@ -19,10 +19,11 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
   // Self-fetch only when no external list is provided (hub passes its own pre-fetched records)
   const { data: fetchedCustomers = [], isFetching } = useQuery({
     queryKey: ['flagged-customers', flagColor],
-    queryFn: async () => {
-      const all = await api.entities.DataRecord.list('-created_date', 2000);
-      return all.filter(r => r.flag_color === flagColor);
-    },
+    queryFn: () => api.entities.DataRecord.list({
+      sort: '-created_date',
+      limit: 2000,
+      filters: { flag_color: flagColor },
+    }),
     enabled: !!open && !!flagColor && !externalCustomers && !!flagColors[flagColor],
     staleTime: 30_000,
   });
@@ -32,11 +33,13 @@ export default function FlaggedCustomersModal({ flagColor, open, onClose, onCust
 
   if (!flagColor || !flagColors[flagColor]) return null;
 
-  const sortedCustomers = [...displayCustomers].sort((a, b) => {
-    const numA = a.customer_number || a.data?.customer_number || "";
-    const numB = b.customer_number || b.data?.customer_number || "";
-    return String(numA).localeCompare(String(numB));
-  });
+  const sortedCustomers = useMemo(() => (
+    [...displayCustomers].sort((a, b) => {
+      const numA = a.customer_number || a.data?.customer_number || "";
+      const numB = b.customer_number || b.data?.customer_number || "";
+      return String(numA).localeCompare(String(numB));
+    })
+  ), [displayCustomers]);
 
   return (
     <Dialog open={open} onOpenChange={onClose}>

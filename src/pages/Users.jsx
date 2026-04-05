@@ -55,7 +55,11 @@ export default function Users({ embedded = false }) {
   });
   const deleteUserMutation = useMutation({
     mutationFn: (id) => api.users.delete(id),
-    onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["users"] }); await refetch(); toast.success("User deleted"); },
+    onSuccess: (_, deletedId) => {
+      queryClient.setQueryData(["users"], (existing = []) => existing.filter((user) => user.id !== deletedId));
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User deleted");
+    },
     onError: (e) => toast.error(e.message || "Failed"),
   });
 

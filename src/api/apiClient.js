@@ -33,10 +33,25 @@ export const api = {
         const table = entityName.toLowerCase();
 
         return {
-          list: async (sort) => {
-            const url = sort
-              ? `${API_BASE}/${table}?sort=${encodeURIComponent(sort)}`
-              : `${API_BASE}/${table}`;
+          list: async (sortOrOptions) => {
+            const params = new URLSearchParams();
+
+            if (typeof sortOrOptions === "string") {
+              params.set("sort", sortOrOptions);
+            } else if (sortOrOptions && typeof sortOrOptions === "object") {
+              const { sort, limit, filters } = sortOrOptions;
+              if (sort) params.set("sort", sort);
+              if (limit != null) params.set("limit", String(limit));
+              if (filters && typeof filters === "object") {
+                Object.entries(filters).forEach(([key, value]) => {
+                  if (value == null || value === "") return;
+                  params.set(`filter_${key}`, String(value));
+                });
+              }
+            }
+
+            const query = params.toString();
+            const url = query ? `${API_BASE}/${table}?${query}` : `${API_BASE}/${table}`;
             const res = await fetch(url, { credentials: "include" });
             return readResponse(res, `List ${entityName}`);
           },
