@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Scale } from "lucide-react";
+import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
@@ -16,6 +16,13 @@ function CreditBadge({ row }) {
 }
 
 const PAGE_SIZE = 50;
+
+const AGE_BUCKETS = [
+  { value: "all", label: "All" },
+  { value: "7-13", label: "7–13 days" },
+  { value: "14-20", label: "14–20 days" },
+  { value: "21+", label: "21+ days" },
+];
 
 /* ── print styles (injected once) ── */
 const PRINT_STYLE = `
@@ -105,7 +112,7 @@ function FilterToggle({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
-      className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+      className={`min-h-[42px] rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
         active ? "border-amber-500 bg-amber-500/15 text-amber-400"
                : "border-border bg-card text-muted-foreground hover:text-foreground"
       }`}
@@ -115,12 +122,29 @@ function FilterToggle({ active, onClick, children }) {
   );
 }
 
-async function fetchTopBalances({ page, limit, siteFilter, hideInvoiceMatchesBalance }) {
+function AgeBucketPill({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[40px] rounded-full border px-3.5 py-2 text-xs font-semibold transition-all ${
+        active
+          ? "border-amber-500 bg-amber-500 text-black shadow-[0_0_0_1px_rgba(245,158,11,0.2)]"
+          : "border-border bg-background text-muted-foreground hover:border-amber-500/40 hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoiceMatchesBalance }) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (siteFilter && siteFilter !== "all") params.set("site", siteFilter);
+  if (ageBucket && ageBucket !== "all") params.set("ageBucket", ageBucket);
   if (hideInvoiceMatchesBalance) params.set("hideInvoiceMatchesBalance", "1");
 
   const res = await fetch(`/api/top-balances?${params.toString()}`, { credentials: "include" });
@@ -149,6 +173,7 @@ async function fetchTopBalances({ page, limit, siteFilter, hideInvoiceMatchesBal
 export default function CustomerBalances() {
   const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
+  const [ageBucket, setAgeBucket] = useState("all");
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
 
   useEffect(() => {
@@ -162,8 +187,8 @@ export default function CustomerBalances() {
   }, []);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, hideInvoiceMatchesBalance],
-    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, hideInvoiceMatchesBalance }),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance }),
     staleTime: 60_000,
     keepPreviousData: true,
   });
@@ -188,11 +213,13 @@ export default function CustomerBalances() {
   const printDate  = new Date().toLocaleString("en-ZA", {
     year: "numeric", month: "long", day: "numeric", hour: "2-digit", minute: "2-digit",
   });
+  const activeAgeBucketLabel = AGE_BUCKETS.find((bucket) => bucket.value === ageBucket)?.label || "All";
 
   /* ── filter subtitle ── */
   const subtitleParts = [];
   subtitleParts.push(`${totalRecords} customer${totalRecords !== 1 ? "s" : ""}`);
   if (siteFilter && siteFilter !== "all") subtitleParts.push(siteFilter);
+  if (ageBucket !== "all") subtitleParts.push(activeAgeBucketLabel);
   if (hideInvoiceMatchesBalance) subtitleParts.push("Invoice ≠ Balance");
   if (minBalanceThreshold > 0) subtitleParts.push(`>${formatAmount(minBalanceThreshold)}`);
 
@@ -206,7 +233,10 @@ export default function CustomerBalances() {
         </div>
         <div className="cb-print-summary">
           <div>
-            <div>Total outstanding ({totalRecords} customers{siteFilter !== "all" ? ` · ${siteFilter}` : ""})</div>
+            <div>
+              Total outstanding ({totalRecords} customers{siteFilter !== "all" ? ` · ${siteFilter}` : ""}
+              {ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})
+            </div>
             <strong>R {formatAmount(filteredGrandTotal)}</strong>
           </div>
           <div className="td-right">
@@ -298,27 +328,53 @@ export default function CustomerBalances() {
 
           {/* Filters */}
           {!isLoading && !isError && (
-            <div className="mb-4 flex flex-wrap items-center gap-3 cb-no-print">
-              {sites.length > 1 && (
-                <>
-                  <label className="text-xs text-muted-foreground whitespace-nowrap">Site:</label>
-                  <select
-                    value={siteFilter}
-                    onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
-                    className="rounded-lg border border-border bg-card px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                  >
-                    <option value="all">All sites</option>
-                    {sites.map((s) => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                  {siteFilter !== "all" && (
-                    <button onClick={() => { setSiteFilter("all"); setPage(1); }} className="text-xs text-muted-foreground hover:text-foreground transition-colors">Clear</button>
+            <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 cb-no-print">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex min-w-0 flex-1 flex-col gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Filter className="h-4 w-4 text-amber-400" />
+                    Filters
+                  </div>
+
+                  <div className="flex flex-col gap-2">
+                    <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Age buckets</div>
+                    <div className="flex flex-wrap gap-2">
+                      {AGE_BUCKETS.map((bucket) => (
+                        <AgeBucketPill
+                          key={bucket.value}
+                          active={ageBucket === bucket.value}
+                          onClick={() => {
+                            setAgeBucket(bucket.value);
+                            setPage(1);
+                          }}
+                        >
+                          {bucket.label}
+                        </AgeBucketPill>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[260px]">
+                  {sites.length > 1 && (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Site</label>
+                      <select
+                        value={siteFilter}
+                        onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
+                        className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        <option value="all">All sites</option>
+                        {sites.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
                   )}
-                  <div className="h-4 w-px bg-border mx-1" />
-                </>
-              )}
-              <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
-                {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
-              </FilterToggle>
+
+                  <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
+                    {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
+                  </FilterToggle>
+                </div>
+              </div>
             </div>
           )}
 
@@ -328,7 +384,8 @@ export default function CustomerBalances() {
               <div className="rounded-xl border border-border bg-card px-4 py-3">
                 <div className="text-sm text-muted-foreground">
                   Total outstanding ({totalRecords} customer{totalRecords !== 1 ? "s" : ""}
-                  {siteFilter !== "all" ? ` · ${siteFilter}` : ""})
+                  {siteFilter !== "all" ? ` · ${siteFilter}` : ""}
+                  {ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})
                 </div>
                 <div className="mt-1 text-lg font-bold text-foreground">R {formatAmount(filteredGrandTotal)}</div>
               </div>
@@ -355,8 +412,8 @@ export default function CustomerBalances() {
               <h3 className="text-lg font-medium text-foreground">No balance data yet</h3>
               <p className="text-sm text-muted-foreground mt-1">
                 {siteFilter !== "all"
-                  ? `No outstanding balances over R ${formatAmount(minBalanceThreshold)} for "${siteFilter}".`
-                  : `No outstanding balances over R ${formatAmount(minBalanceThreshold)} found.`}
+                  ? `No outstanding balances over R ${formatAmount(minBalanceThreshold)} for "${siteFilter}"${ageBucket !== "all" ? ` in ${activeAgeBucketLabel.toLowerCase()}` : ""}.`
+                  : `No outstanding balances over R ${formatAmount(minBalanceThreshold)}${ageBucket !== "all" ? ` in ${activeAgeBucketLabel.toLowerCase()}` : ""} found.`}
               </p>
             </div>
           )}

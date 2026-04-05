@@ -27,6 +27,50 @@ function isInvoiceBalanceMatch(record) {
   return Math.abs(balance - invoice) <= 0.1;
 }
 
+function parseBalanceDate(value) {
+  if (!value) return null;
+  const input = String(value).trim();
+  if (!input) return null;
+
+  if (/^\d{8}$/.test(input)) {
+    return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+  }
+
+  const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if (dmy) {
+    return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+  }
+
+  const parsed = new Date(input);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getBalanceAgeDays(record) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const ages = [1, 2, 3, 4, 5]
+    .map((index) => parseBalanceDate(record?.[`last_unpaid_invoice_${index}_date`]))
+    .filter(Boolean)
+    .map((date) => Math.floor((today - date) / 86400000))
+    .filter((days) => Number.isFinite(days) && days >= 0);
+
+  return ages.length > 0 ? Math.max(...ages) : null;
+}
+
+function matchesAgeBucket(record, ageBucket) {
+  if (!ageBucket || ageBucket === 'all') return true;
+
+  const ageDays = getBalanceAgeDays(record);
+  if (ageDays === null) return false;
+
+  if (ageBucket === '7-13') return ageDays > 7 && ageDays < 14;
+  if (ageBucket === '14-20') return ageDays >= 14 && ageDays < 21;
+  if (ageBucket === '21+') return ageDays >= 21;
+
+  return true;
+}
+
 function requireReportingToken(req, res, next) {
   const token = process.env.REPORTING_TOKEN;
   if (!token) {
@@ -244,6 +288,7 @@ export function createReportingRouter({ requireAuth }) {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
     const isHub = process.env.HUB_MODE === 'true';
     const siteFilter = String(req.query.site || 'all').trim();
+    const ageBucket = String(req.query.ageBucket || 'all').trim();
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
 
     const balanceWhere = `outstanding_balance IS NOT NULL
@@ -298,6 +343,7 @@ export function createReportingRouter({ requireAuth }) {
         const balance = parseAmount(row.outstanding_balance);
         if (balance <= CUSTOMER_BALANCES_MIN_AMOUNT) return false;
         if (siteFilter !== 'all' && row.site_name !== siteFilter) return false;
+        if (!matchesAgeBucket(row, ageBucket)) return false;
         if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
         return true;
       });
@@ -318,6 +364,7 @@ export function createReportingRouter({ requireAuth }) {
         filteredTotalOutstanding,
         pageTotalOutstanding,
         sites,
+        ageBucket,
         minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
       });
     } catch (err) {
