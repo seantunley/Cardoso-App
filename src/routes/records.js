@@ -470,6 +470,119 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   // ==================== RECORD SEARCH / AGGREGATES ====================
 
   router.get(
+    '/api/datarecord/customer-lookup',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+
+        if (!query) {
+          return res.status(400).json({ error: 'Query is required' });
+        }
+
+        const record = db.prepare(`
+          SELECT *
+          FROM datarecord
+          WHERE customer_number = ?
+             OR lower(customer_name) = lower(?)
+          ORDER BY
+            CASE
+              WHEN customer_number = ? THEN 0
+              WHEN lower(customer_name) = lower(?) THEN 1
+              ELSE 2
+            END,
+            id DESC
+          LIMIT 1
+        `).get(query, query, query, query);
+
+        if (!record) {
+          return res.status(404).json({ error: 'Customer not found' });
+        }
+
+        const expandedRecord = expandDataRecord(record);
+        const customerNumber = String(expandedRecord.customer_number || '').trim();
+        const isParent = /^\d+$/.test(customerNumber);
+
+        let subAccounts = [];
+        if (isParent) {
+          const prefixMatches = db.prepare(`
+            SELECT *
+            FROM datarecord
+            WHERE customer_number LIKE ?
+              AND customer_number != ?
+            ORDER BY customer_number ASC, id ASC
+          `).all(`${customerNumber}%`, customerNumber);
+
+          subAccounts = prefixMatches
+            .map(expandDataRecord)
+            .filter((row) => {
+              const childNumber = String(row.customer_number || '').trim();
+              const match = childNumber.match(/^(\d+)/);
+              return match && match[1] === customerNumber;
+            });
+        }
+
+        res.json({
+          record: expandedRecord,
+          subAccounts,
+        });
+      } catch (error) {
+        console.error('Customer lookup error:', error);
+        res.status(500).json({ error: 'Failed to lookup customer' });
+      }
+    }
+  );
+
+  router.get(
+    '/api/datarecord/customer-lookup/suggestions',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 10);
+
+        if (!query) {
+          return res.json({ suggestions: [] });
+        }
+
+        const startsWith = `${query}%`;
+        const contains = `%${query}%`;
+        const rows = db.prepare(`
+          SELECT *
+          FROM datarecord
+          WHERE customer_number LIKE ?
+             OR customer_name LIKE ?
+             OR customer_number LIKE ?
+             OR customer_name LIKE ?
+          ORDER BY
+            CASE
+              WHEN customer_number = ? THEN 0
+              WHEN lower(customer_name) = lower(?) THEN 1
+              WHEN customer_number LIKE ? THEN 2
+              WHEN customer_name LIKE ? THEN 3
+              ELSE 4
+            END,
+            length(customer_number) ASC,
+            length(customer_name) ASC,
+            customer_name ASC,
+            customer_number ASC,
+            id DESC
+          LIMIT ?
+        `).all(startsWith, startsWith, contains, contains, query, query, startsWith, startsWith, limit);
+
+        res.json({
+          suggestions: rows.map((row) => expandDataRecord(row)),
+        });
+      } catch (error) {
+        console.error('Customer lookup suggestions error:', error);
+        res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
+      }
+    }
+  );
+
+  router.get(
     '/api/datarecord/search',
     requireAuth,
     requirePermission('can_access_records', 'can_access_customer_search'),

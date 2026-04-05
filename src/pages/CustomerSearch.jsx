@@ -189,6 +189,7 @@ export default function CustomerSearch() {
           {/* Customer Lookup */}
           <div className="flex-1 ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10 min-w-0">
             <CustomerLookup 
+              currentUser={currentUser}
               onRecordSelect={setSelectedRecord} 
               triggerLookup={customerNumberToLookup}
               onLookupComplete={() => setCustomerNumberToLookup("")}

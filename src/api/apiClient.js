@@ -245,6 +245,25 @@ export const api = {
       return readResponse(res, 'Search records');
     },
 
+    customerLookup: async (query) => {
+      const params = new URLSearchParams();
+      if (query?.trim()) params.set('query', query.trim());
+      const res = await fetch(`${API_BASE}/datarecord/customer-lookup?${params.toString()}`, {
+        credentials: 'include',
+      });
+      return readResponse(res, 'Customer lookup');
+    },
+
+    customerLookupSuggestions: async ({ query = '', limit = 5 } = {}) => {
+      const params = new URLSearchParams();
+      if (query?.trim()) params.set('query', query.trim());
+      params.set('limit', String(limit));
+      const res = await fetch(`${API_BASE}/datarecord/customer-lookup/suggestions?${params.toString()}`, {
+        credentials: 'include',
+      });
+      return readResponse(res, 'Customer lookup suggestions');
+    },
+
     flagCounts: async () => {
       const res = await fetch(`${API_BASE}/datarecord/flag-counts`, {
         credentials: 'include',

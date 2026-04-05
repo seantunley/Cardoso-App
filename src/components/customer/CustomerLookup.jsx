@@ -140,19 +140,21 @@ function formatAmount(val) {
   return n < 0 ? `-R ${abs}` : `R ${abs}`;
 }
 
-async function fetchLocalRecords() {
-  const response = await fetch("/api/datarecord", {
-    method: "GET",
-    credentials: "include",
-  });
+async function fetchCustomerLookup(query) {
+  const result = await api.records.customerLookup(query);
+  return {
+    record: result?.record ? flattenRecord(result.record) : null,
+    subAccounts: Array.isArray(result?.subAccounts)
+      ? result.subAccounts.map(flattenRecord)
+      : [],
+  };
+}
 
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(result.error || "Failed to fetch records");
-  }
-
-  return Array.isArray(result) ? result.map(flattenRecord) : [];
+async function fetchCustomerLookupSuggestions(query) {
+  const result = await api.records.customerLookupSuggestions({ query, limit: 5 });
+  return Array.isArray(result?.suggestions)
+    ? result.suggestions.map(flattenRecord)
+    : [];
 }
 
 async function updateLocalRecord(recordId, updateData) {
@@ -295,12 +297,13 @@ export default function CustomerLookup({
   triggerLookup,
   onLookupComplete,
   onFlagChange,
+  currentUser: currentUserProp = null,
 }) {
   const [customerNumber, setCustomerNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [customer, setCustomer] = useState(null);
   const [subAccounts, setSubAccounts] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(currentUserProp);
   const [flagReason, setFlagReason] = useState("");
   const [isUpdatingFlag, setIsUpdatingFlag] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -308,12 +311,12 @@ export default function CustomerLookup({
   const [removalReason, setRemovalReason] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [allRecords, setAllRecords] = useState([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [recordHistory, setRecordHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [pendingFlagColor, setPendingFlagColor] = useState(null);
   const searchInputRef = useRef(null);
+  const suggestionRequestIdRef = useRef(0);
 
   const closeAndReset = useCallback(() => {
     setCustomer(null);
@@ -327,18 +330,6 @@ export default function CustomerLookup({
     setRecordHistory([]);
     setPendingFlagColor(null);
     setTimeout(() => searchInputRef.current?.focus(), 50);
-  }, []);
-
-  const refreshRecords = useCallback(async () => {
-    try {
-      const records = await fetchLocalRecords();
-      setAllRecords(records);
-      return records;
-    } catch (error) {
-      console.error("Failed to fetch records:", error);
-      toast.error(error.message || "Failed to fetch records");
-      return [];
-    }
   }, []);
 
   const loadRecordHistory = useCallback(async (recordId) => {
@@ -356,10 +347,12 @@ export default function CustomerLookup({
     }
   }, []);
 
-  // currentUser is fetched by the parent via React Query (shared cache); no extra fetch needed here.
-  // We lazily load it only if not passed as a prop.
   useEffect(() => {
-    if (currentUser) return; // already set from prop or prior fetch
+    if (currentUserProp) {
+      setCurrentUser(currentUserProp);
+      return;
+    }
+    if (currentUser) return;
     const fetchUser = async () => {
       try {
         const user = await api.auth.me();
@@ -369,11 +362,7 @@ export default function CustomerLookup({
       }
     };
     fetchUser();
-  }, [currentUser]);
-
-  useEffect(() => {
-    refreshRecords();
-  }, [refreshRecords]);
+  }, [currentUser, currentUserProp]);
 
   useEffect(() => {
     if (!triggerLookup) return;
@@ -382,70 +371,40 @@ export default function CustomerLookup({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerLookup]);
 
-  const fuzzyMatch = (str, pattern) => {
-    if (!str || !pattern) return { matches: false, score: 0 };
-
-    const strLower = str.toLowerCase();
-    const patternLower = pattern.toLowerCase();
-
-    if (strLower === patternLower) return { matches: true, score: 1000 };
-    if (strLower.includes(patternLower)) return { matches: true, score: 500 };
-
-    let patternIdx = 0;
-    let score = 0;
-    let consecutiveMatches = 0;
-
-    for (let i = 0; i < strLower.length && patternIdx < patternLower.length; i++) {
-      if (strLower[i] === patternLower[patternIdx]) {
-        score += 1 + consecutiveMatches;
-        consecutiveMatches++;
-        patternIdx++;
-      } else {
-        consecutiveMatches = 0;
-      }
-    }
-
-    const matches = patternIdx === patternLower.length;
-    return { matches, score };
-  };
-
   useEffect(() => {
     if (customerNumber.trim().length === 0) {
+      suggestionRequestIdRef.current += 1;
       setSuggestions([]);
       setShowSuggestions(false);
       return;
     }
 
-    // Debounce: wait 200ms after the user stops typing before fuzzy-searching
+    const requestId = suggestionRequestIdRef.current + 1;
+    suggestionRequestIdRef.current = requestId;
+
     const timer = setTimeout(() => {
-      const searchTerm = customerNumber.trim();
-      const matches = [];
-
-      allRecords.forEach((record) => {
-        const custNum = record.customer_number || "";
-        const custName = record.customer_name || "";
-
-        const numMatch = fuzzyMatch(String(custNum), searchTerm);
-        const nameMatch = fuzzyMatch(String(custName), searchTerm);
-
-        if (numMatch.matches || nameMatch.matches) {
-          matches.push({
+      fetchCustomerLookupSuggestions(customerNumber)
+        .then((matches) => {
+          if (suggestionRequestIdRef.current !== requestId) return;
+          const nextSuggestions = matches.map((record) => ({
             record,
-            score: Math.max(numMatch.score, nameMatch.score),
-            customerNumber: String(custNum),
-            customerName: String(custName),
-          });
-        }
-      });
-
-      matches.sort((a, b) => b.score - a.score);
-      setSuggestions(matches.slice(0, 5));
-      setSelectedSuggestionIndex(-1);
-      setShowSuggestions(matches.length > 0);
+            customerNumber: String(record.customer_number || ""),
+            customerName: String(record.customer_name || ""),
+          }));
+          setSuggestions(nextSuggestions);
+          setSelectedSuggestionIndex(-1);
+          setShowSuggestions(nextSuggestions.length > 0);
+        })
+        .catch((error) => {
+          if (suggestionRequestIdRef.current !== requestId) return;
+          console.error("Failed to fetch customer lookup suggestions:", error);
+          setSuggestions([]);
+          setShowSuggestions(false);
+        });
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [customerNumber, allRecords]);
+  }, [customerNumber]);
 
   const handleLookup = async (customNumber = null) => {
     const numberToSearch = String(
@@ -463,14 +422,7 @@ export default function CustomerLookup({
     setShowSuggestions(false);
 
     try {
-      // Use cached records — only refresh if cache is empty
-      const freshRecords = allRecords.length > 0 ? allRecords : await refreshRecords();
-
-      const record = freshRecords.find(
-        (r) =>
-          String(r.customer_number || "").trim() === numberToSearch ||
-          String(r.customer_name || "").trim().toLowerCase() === numberToSearch.toLowerCase()
-      );
+      const { record, subAccounts: matchedSubAccounts } = await fetchCustomerLookup(numberToSearch);
 
       if (!record) {
         toast.error("Customer not found");
@@ -483,14 +435,12 @@ export default function CustomerLookup({
       setIsModalOpen(true);
       loadRecordHistory(record.id);
 
-      // If this is a parent account (purely numeric), find sub-accounts
       const custNum = String(record.customer_number || "").trim();
       if (isParentCustNum(custNum)) {
-        const children = freshRecords.filter((r) => {
+        setSubAccounts(matchedSubAccounts.filter((r) => {
           const cn = String(r.customer_number || "").trim();
           return cn !== custNum && getNumericPrefix(cn) === custNum;
-        });
-        setSubAccounts(children);
+        }));
       } else {
         setSubAccounts([]);
       }
@@ -638,12 +588,6 @@ export default function CustomerLookup({
       };
 
       setCustomer(updatedCustomer);
-
-      setAllRecords((prev) =>
-        prev.map((record) =>
-          record.id === customer.id ? { ...record, ...updateData } : record
-        )
-      );
 
       await loadRecordHistory(customer.id);
       setFlagReason("");
