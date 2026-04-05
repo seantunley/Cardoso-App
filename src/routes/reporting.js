@@ -14,6 +14,18 @@ const execFileAsync = promisify(execFile);
 const SITE_ID = process.env.SITE_ID || 'local';
 const SITE_SLUG = process.env.SITE_SLUG || 'local';
 const SITE_NAME = process.env.SITE_NAME || 'Local';
+const CUSTOMER_BALANCES_MIN_AMOUNT = 3;
+
+function parseAmount(value) {
+  const num = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
+  return Number.isFinite(num) ? num : 0;
+}
+
+function isInvoiceBalanceMatch(record) {
+  const balance = parseAmount(record?.outstanding_balance);
+  const invoice = parseAmount(record?.last_unpaid_invoice_1_amount);
+  return Math.abs(balance - invoice) <= 0.1;
+}
 
 function requireReportingToken(req, res, next) {
   const token = process.env.REPORTING_TOKEN;
@@ -230,8 +242,9 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/top-balances', requireAuth, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
-    const offset = (page - 1) * limit;
     const isHub = process.env.HUB_MODE === 'true';
+    const siteFilter = String(req.query.site || 'all').trim();
+    const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
 
     const balanceWhere = `outstanding_balance IS NOT NULL
             AND outstanding_balance != ''
@@ -239,9 +252,8 @@ export function createReportingRouter({ requireAuth }) {
             AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
 
     try {
-      let rows, total;
+      let rows;
       if (isHub) {
-        total = db.prepare(`SELECT COUNT(*) AS count FROM hub_records r WHERE r.${balanceWhere}`).get().count;
         const stmt = db.prepare(`
           SELECT
             r.customer_number,
@@ -258,11 +270,9 @@ export function createReportingRouter({ requireAuth }) {
           LEFT JOIN hub_sites s ON s.id = r.site_id
           WHERE r.${balanceWhere}
           ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?
         `);
-        rows = stmt.all(limit, offset).map(expandDataRecord);
+        rows = stmt.all().map(expandDataRecord);
       } else {
-        total = db.prepare(`SELECT COUNT(*) AS count FROM datarecord WHERE ${balanceWhere}`).get().count;
         const stmt = db.prepare(`
           SELECT
             customer_number,
@@ -278,12 +288,38 @@ export function createReportingRouter({ requireAuth }) {
           FROM datarecord
           WHERE ${balanceWhere}
           ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?
         `);
-        rows = stmt.all(SITE_NAME, limit, offset).map(expandDataRecord);
+        rows = stmt.all(SITE_NAME).map(expandDataRecord);
       }
-      const totalPages = Math.ceil(total / limit);
-      res.json({ records: rows, total, page, totalPages });
+
+      const sites = [...new Set(rows.map((row) => row.site_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+
+      const filteredRows = rows.filter((row) => {
+        const balance = parseAmount(row.outstanding_balance);
+        if (balance <= CUSTOMER_BALANCES_MIN_AMOUNT) return false;
+        if (siteFilter !== 'all' && row.site_name !== siteFilter) return false;
+        if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
+        return true;
+      });
+
+      const total = filteredRows.length;
+      const totalPages = Math.max(1, Math.ceil(total / limit));
+      const safePage = Math.min(page, totalPages);
+      const safeOffset = (safePage - 1) * limit;
+      const records = filteredRows.slice(safeOffset, safeOffset + limit);
+      const filteredTotalOutstanding = filteredRows.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+      const pageTotalOutstanding = records.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+
+      res.json({
+        records,
+        total,
+        page: safePage,
+        totalPages,
+        filteredTotalOutstanding,
+        pageTotalOutstanding,
+        sites,
+        minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
+      });
     } catch (err) {
       console.error('top-balances error', err);
       res.status(500).json({ error: 'Failed to fetch top balances' });
@@ -480,5 +516,3 @@ export function createReportingRouter({ requireAuth }) {
 
   return router;
 }
-
-
