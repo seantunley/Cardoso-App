@@ -86,8 +86,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
     if (!userId) return res.status(401).json({ error: 'No pending session' });
 
     const { password } = req.body;
-    if (!password || password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!password || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
     try {

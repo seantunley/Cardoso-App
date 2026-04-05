@@ -153,7 +153,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         });
       } catch (error) {
         console.error('Test query error:', error);
-        res.status(500).json({ error: error.message || 'Query failed', detail: error.originalError?.message || error.stack });
+        res.status(500).json({ error: error.message || 'Query failed' });
       } finally {
         if (pool) { try { await pool.close(); } catch {} }
       }

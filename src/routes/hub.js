@@ -123,7 +123,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // GET /api/hub/proxy-backup?site_id=xxx
   // Proxies a backup download from a site through the Hub server to avoid CORS.
   // Admin-only.
-  router.get('/api/hub/proxy-backup', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+  router.get('/api/hub/proxy-backup', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
 
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
@@ -147,7 +147,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const buf = Buffer.from(await upstream.arrayBuffer());
       logHubAudit({
         action: 'backup_pull',
-        performedBy: req.user?.email,
+        performedBy: req.currentUser?.email,
         target: site.slug || site.id,
       });
       res.send(buf);
@@ -158,7 +158,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/proxy-config?site_id=xxx
   // Proxies the site .env download through the hub. Admin-only.
-  router.get('/api/hub/proxy-config', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+  router.get('/api/hub/proxy-config', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
@@ -333,8 +333,27 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!authedByToken && !req.session?.userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+
+    if (!authedByToken) {
+      const sessionUserId = req.session?.userId;
+      const sessionUser = sessionUserId ? db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(sessionUserId) : null;
+      const canAccessBackups = sessionUser?.role === 'admin' || boolFromRow(sessionUser?.can_access_hub_backups, false);
+      if (!canAccessBackups) {
+        return res.status(403).json({ error: 'Permission denied' });
+      }
+    }
+
     const rawSites = db.prepare('SELECT * FROM hub_sites').all();
-    const mapped = rawSites.map(s => ({ ...s, last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null }));
+    const mapped = rawSites.map((s) => ({
+      site_id: s.id,
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+      url: s.url,
+      last_seen: s.last_seen,
+      status: s.status,
+      last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
+    }));
     // Returns JSON array — compatible with both the UI and hub-pull-backups.ps1
     res.json(mapped);
   });
@@ -816,7 +835,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       }
       logHubAudit({
         action: 'push_users',
-        performedBy: req.user?.email,
+        performedBy: req.currentUser?.email,
         target: res_row.slug,
         detail: JSON.stringify(usersToSync.map((user) => user.email)),
       });
@@ -837,7 +856,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       `).run();
       logHubAudit({
         action: 'clear_auto_flags',
-        performedBy: req.user?.email,
+        performedBy: req.currentUser?.email,
         target: 'all_sites',
         detail: String(result.changes),
       });
@@ -883,7 +902,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
           logHubAudit({
             action: 'push_rules',
-            performedBy: req.user?.email,
+            performedBy: req.currentUser?.email,
             target: site.slug || site.id,
             detail: String(rules.length),
           });
