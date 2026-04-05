@@ -73,6 +73,7 @@ function initHubTables() {
       customer_name TEXT,
       flag_color TEXT,
       flag_reason TEXT,
+      flag_created_by TEXT,
       outstanding_balance TEXT,
       unpaid_invoices TEXT,
       receipts TEXT,
@@ -172,11 +173,11 @@ async function syncSite(site) {
     // Records — paginate until has_more is false
     const upsertRec = db.prepare(`
       INSERT INTO hub_records (
-        site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
+        site_id, record_id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
         outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
         updated_date, synced_at
       ) VALUES (
-        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
+        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @flag_created_by,
         @outstanding_balance, @unpaid_invoices, @receipts, @auto_flagged, @terms,
         @updated_date, @synced_at
       )
@@ -185,6 +186,7 @@ async function syncSite(site) {
         customer_name=excluded.customer_name,
         flag_color=excluded.flag_color,
         flag_reason=excluded.flag_reason,
+        flag_created_by=excluded.flag_created_by,
         outstanding_balance=excluded.outstanding_balance,
         unpaid_invoices=excluded.unpaid_invoices,
         receipts=excluded.receipts,
@@ -203,6 +205,7 @@ async function syncSite(site) {
           customer_name: r.customer_name,
           flag_color: r.flag_color || 'none',
           flag_reason: r.flag_reason || null,
+          flag_created_by: r.flag_created_by || null,
           outstanding_balance: r.outstanding_balance || null,
           unpaid_invoices: r.unpaid_invoices || '[]',
           receipts: r.receipts || '[]',

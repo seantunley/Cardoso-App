@@ -216,6 +216,7 @@ function initSchema(db) {
         customer_name TEXT,
         flag_color TEXT,
         flag_reason TEXT,
+        flag_created_by TEXT,
         outstanding_balance TEXT,
         unpaid_invoices TEXT,
         receipts TEXT,

@@ -413,14 +413,14 @@ export function createReportingRouter({ requireAuth }) {
     let rows;
     if (since) {
       rows = db.prepare(
-        `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+        `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset);
     } else {
       rows = db.prepare(
-        `SELECT id, customer_number, customer_name, flag_color, flag_reason,
+        `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`

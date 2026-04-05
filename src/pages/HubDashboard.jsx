@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from "@/components/ui/dialog";
+import { buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
@@ -202,14 +203,14 @@ function analyseHubCredit(record) {
         ...result,
         verdict: "hold",
         title: "Hold — Manually Flagged",
-        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        summary: buildManualFlagSummary("red", record.flag_created_by),
       };
     } else if (isManualOrangeFlag && result.verdict === "approve") {
       result = {
         ...result,
         verdict: "caution",
         title: "Proceed with Caution — Manually Flagged",
-        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        summary: buildManualFlagSummary("orange", record.flag_created_by),
       };
     }
 
@@ -261,11 +262,11 @@ function analyseHubCredit(record) {
   if (isManualRedFlag && verdict !== "hold") {
     verdict = "hold";
     title = "Hold — Manually Flagged";
-    summary = "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.";
+    summary = buildManualFlagSummary("red", record.flag_created_by);
   } else if (isManualOrangeFlag && verdict === "approve") {
     verdict = "caution";
     title = "Proceed with Caution — Manually Flagged";
-    summary = "This customer has been manually flagged orange by staff. Review before issuing an invoice.";
+    summary = buildManualFlagSummary("orange", record.flag_created_by);
   }
 
   return { verdict, title, summary, score, avgLag };

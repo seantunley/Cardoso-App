@@ -229,6 +229,7 @@ function buildMigrations(db) {
           ensureColumn(db, 'hub_records', 'auto_flagged', 'INTEGER DEFAULT 0');
           ensureColumn(db, 'hub_records', 'flag_color', 'TEXT');
           ensureColumn(db, 'hub_records', 'flag_reason', 'TEXT');
+          ensureColumn(db, 'hub_records', 'flag_created_by', 'TEXT');
           ensureColumn(db, 'hub_records', 'terms', 'TEXT');
           ensureColumn(db, 'hub_records', 'updated_date', 'TEXT');
           ensureColumn(db, 'hub_records', 'synced_at', 'TEXT');
@@ -543,6 +544,17 @@ function buildMigrations(db) {
           WHERE can_access_collections IS NULL
              OR can_access_collections = 0
         `).run();
+      },
+    },
+
+    {
+      version: 26,
+      name: 'hub_records_flag_created_by',
+      up() {
+        const hubRecordsExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
+        if (hubRecordsExists) {
+          ensureColumn(db, 'hub_records', 'flag_created_by', 'TEXT');
+        }
       },
     },
 

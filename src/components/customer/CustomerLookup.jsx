@@ -36,6 +36,7 @@ import {
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
+import { buildManualFlagFactor, buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
 
 const flagColors = {
@@ -564,9 +565,9 @@ export default function CustomerLookup({
         ...analysis,
         verdict: "hold",
         title: "Hold — Manually Flagged",
-        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        summary: buildManualFlagSummary("red", customer.flag_created_by),
         factors: [
-          { type: "block", text: "Customer is manually flagged red — staff review required before invoicing." },
+          { type: "block", text: buildManualFlagFactor("red", customer.flag_created_by) },
           ...analysis.factors,
         ],
       };
@@ -577,9 +578,9 @@ export default function CustomerLookup({
         ...analysis,
         verdict: "caution",
         title: "Proceed with Caution — Manually Flagged",
-        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        summary: buildManualFlagSummary("orange", customer.flag_created_by),
         factors: [
-          { type: "warn", text: "Customer is manually flagged orange — staff review recommended before invoicing." },
+          { type: "warn", text: buildManualFlagFactor("orange", customer.flag_created_by) },
           ...analysis.factors,
         ],
       };
