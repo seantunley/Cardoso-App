@@ -457,6 +457,76 @@ function buildMigrations(db) {
       },
     },
 
+    {
+      version: 21,
+      name: 'ensure_hub_user_sites_table',
+      up() {
+        // Belt-and-suspenders: v16 may have been recorded without the DDL
+        // actually running on some installs. Force-create here.
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS hub_user_sites (
+              email TEXT NOT NULL,
+              site_slug TEXT NOT NULL,
+              pushed_at TEXT DEFAULT (datetime('now')),
+              PRIMARY KEY (email, site_slug)
+            );
+          `);
+        } catch (e) { /* already exists, no-op */ }
+      },
+    },
+    {
+      version: 22,
+      name: 'collections_pipeline_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id TEXT NOT NULL UNIQUE,
+            status TEXT DEFAULT 'pending',
+            contacted_at TEXT,
+            notes TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_collections_status ON collections(status);
+          CREATE INDEX IF NOT EXISTS idx_collections_customer_id ON collections(customer_id);
+        `);
+      },
+    },
+
+    {
+      version: 23,
+      name: 'hub_audit_log_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT,
+            performed_by TEXT,
+            target TEXT,
+            detail TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+
+    {
+      version: 24,
+      name: 'hub_backup_integrity_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_backup_integrity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT,
+            filename TEXT,
+            result TEXT,
+            checked_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+
   ];
 }
 

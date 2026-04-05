@@ -7,6 +7,8 @@
 
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
+import { readdirSync, statSync } from 'fs';
+import path from 'path';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
@@ -14,7 +16,20 @@ import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin }) {
   const stmts = buildStatements(db);
-const router = Router();
+  const router = Router();
+
+  const writeHubAudit = db.prepare(`
+    INSERT INTO hub_audit_log (action, performed_by, target, detail)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  function logHubAudit({ action, performedBy = null, target = null, detail = null }) {
+    try {
+      writeHubAudit.run(action, performedBy || null, target || null, detail == null ? null : String(detail));
+    } catch (err) {
+      console.warn('[hub-audit-log] failed:', err.message);
+    }
+  }
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
@@ -37,7 +52,7 @@ const router = Router();
     const { site_id } = req.query;
     if (!site_id) return res.status(400).json({ error: 'site_id required' });
 
-    const site = db.prepare('SELECT id, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
+    const site = db.prepare('SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?').get(site_id);
     if (!site || !site.url) return res.status(404).json({ error: 'Site not found or no URL' });
 
     try {
@@ -54,6 +69,11 @@ const router = Router();
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       const buf = Buffer.from(await upstream.arrayBuffer());
+      logHubAudit({
+        action: 'backup_pull',
+        performedBy: req.user?.email,
+        target: site.slug || site.id,
+      });
       res.send(buf);
     } catch (err) {
       if (!res.headersSent) res.status(500).json({ error: err.message });
@@ -131,8 +151,6 @@ const router = Router();
   // Returns count and latest timestamp of backups stored on the hub (database/hub-backups/<site_id>/).
   router.get('/api/hub/hub-backup-status', requireAuth, requireAdmin, (req, res) => {
     try {
-      const { readdirSync, statSync } = require('fs');
-      const path = require('path');
       const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
       // Guard: hub_sites table may not exist on some installs
       let sites = [];
@@ -140,14 +158,39 @@ const router = Router();
       const results = sites.map((site) => {
         const dir = path.join(baseDir, site.id);
         try {
-          const files = readdirSync(dir).filter(f => f.endsWith('.db'));
-          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+          const files = readdirSync(dir).filter((file) => file.endsWith('.db') || file.endsWith('.db.corrupt'));
+          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
           const sorted = files
-            .map(f => { const s = statSync(path.join(dir, f)); return { mtime: s.mtimeMs, size: s.size }; })
+            .map((file) => {
+              const stats = statSync(path.join(dir, file));
+              return { file, mtime: stats.mtimeMs, size: stats.size };
+            })
             .sort((a, b) => b.mtime - a.mtime);
-          return { site_id: site.id, hub_backup_count: files.length, hub_last_backup: new Date(sorted[0].mtime).toISOString(), hub_last_size: sorted[0].size };
+
+          let integrity = 'unchecked';
+          try {
+            const integrityRow = db.prepare(`
+              SELECT result
+              FROM hub_backup_integrity
+              WHERE site_id = ? AND filename = ?
+              ORDER BY id DESC
+              LIMIT 1
+            `).get(site.id, sorted[0].file);
+            if (integrityRow?.result) {
+              integrity = integrityRow.result === 'ok' ? 'ok' : 'corrupt';
+            }
+          } catch (_) { /* table not ready */ }
+
+          return {
+            site_id: site.id,
+            hub_backup_count: files.length,
+            hub_last_backup: new Date(sorted[0].mtime).toISOString(),
+            hub_last_size: sorted[0].size,
+            hub_last_filename: sorted[0].file,
+            integrity,
+          };
         } catch {
-          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null };
+          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
         }
       });
       res.json({ sites: results });
@@ -193,9 +236,14 @@ const router = Router();
 
   // GET /api/hub/kpis
   router.get('/api/hub/kpis', requireAuth, (req, res) => {
+    const since = typeof req.query.since === 'string' && req.query.since.trim() ? req.query.since.trim() : null;
     const sites = db.prepare('SELECT * FROM hub_sites').all();
-    const totals = db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
-    const totalRecords = db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
+    const totals = since
+      ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY flag_color').all(since)
+      : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
+    const totalRecords = since
+      ? db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE updated_date >= ?').get(since)
+      : db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
 
     const flagTotals = { none: 0, red: 0, orange: 0, green: 0 };
     for (const row of totals) {
@@ -218,8 +266,67 @@ const router = Router();
       total_records: totalRecords.count,
       records_by_flag: flagTotals,
       sites: perSite,
+      since,
       generated_at: new Date().toISOString(),
     });
+  });
+
+  // GET /api/hub/trends — weekly/monthly record count + flag rate per site
+  router.get('/api/hub/trends', requireAuth, requireAdmin, (req, res) => {
+    const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
+    const sinceParam = req.query.since ? String(req.query.since) : null;
+
+    if (sinceParam && !/^\d{4}-\d{2}-\d{2}$/.test(sinceParam)) {
+      return res.status(400).json({ error: 'since must be YYYY-MM-DD' });
+    }
+
+    const since = sinceParam || (() => {
+      const d = new Date();
+      if (period === 'monthly') {
+        d.setMonth(d.getMonth() - 6);
+      } else {
+        d.setDate(d.getDate() - (12 * 7));
+      }
+      return d.toISOString().slice(0, 10);
+    })();
+
+    const bucketExpr = period === 'monthly'
+      ? "strftime('%Y-%m', hr.updated_date)"
+      : "strftime('%Y-W%W', hr.updated_date)";
+
+    try {
+      const rows = db.prepare(`
+        SELECT
+          ${bucketExpr} AS period,
+          hr.site_id,
+          COALESCE(hs.name, hr.site_id) AS site_name,
+          COUNT(*) AS total_records,
+          SUM(CASE WHEN hr.flag_color IS NOT NULL AND hr.flag_color NOT IN ('', 'none') THEN 1 ELSE 0 END) AS flagged_records
+        FROM hub_records hr
+        LEFT JOIN hub_sites hs ON hs.id = hr.site_id
+        WHERE hr.updated_date >= ?
+          AND ${bucketExpr} IS NOT NULL
+        GROUP BY ${bucketExpr}, hr.site_id, hs.name
+        ORDER BY ${bucketExpr} ASC, hr.site_id ASC
+      `).all(since);
+
+      res.json({
+        period,
+        since,
+        data: rows.map((row) => ({
+          period: row.period,
+          site_id: row.site_id,
+          site_name: row.site_name,
+          total_records: row.total_records,
+          flagged_records: row.flagged_records,
+          flag_rate: row.total_records > 0
+            ? Math.round((row.flagged_records / row.total_records) * 1000) / 10
+            : 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // GET /api/hub/inventory
@@ -248,12 +355,32 @@ const router = Router();
     res.json(rows);
   });
 
+  router.get('/api/hub/audit-log', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+      const rows = db.prepare(`
+        SELECT *
+        FROM hub_audit_log
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+      `).all(limit);
+      res.json(rows);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/force-resync — clears sync history and hub_records, triggers full re-pull
   router.post('/api/hub/force-resync', requireAuth, requireAdmin, (req, res) => {
     try {
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
+      logHubAudit({
+        action: 'force_resync',
+        performedBy: req.user?.email,
+        target: 'all_sites',
+      });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
       syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
@@ -268,6 +395,12 @@ const router = Router();
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
+      const site = db.prepare('SELECT slug FROM hub_sites WHERE id = ?').get(siteId);
+      logHubAudit({
+        action: 'force_resync',
+        performedBy: req.user?.email,
+        target: site?.slug || siteId,
+      });
       syncAllSites().catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
     } catch (err) {
@@ -459,10 +592,93 @@ const router = Router();
       for (const u of usersToSync) {
         upsertSite.run(u.email, res_row.slug);
       }
+      logHubAudit({
+        action: 'push_users',
+        performedBy: req.user?.email,
+        target: res_row.slug,
+        detail: JSON.stringify(usersToSync.map((user) => user.email)),
+      });
     }
 
     const allOk = summary.every(s => s.ok);
     res.status(allOk ? 200 : 207).json({ results: summary });
+  });
+
+  router.post('/api/hub/clear-auto-flags', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const result = db.prepare(`
+        UPDATE hub_records
+        SET flag_color = NULL,
+            flag_reason = NULL,
+            auto_flagged = 0
+        WHERE auto_flagged = 1
+      `).run();
+      logHubAudit({
+        action: 'clear_auto_flags',
+        performedBy: req.user?.email,
+        target: 'all_sites',
+        detail: String(result.changes),
+      });
+      res.json({ cleared: result.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/hub/push-rules', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const rawSiteIds = Array.isArray(req.body?.site_ids) ? req.body.site_ids.filter(Boolean) : null;
+      const rules = db.prepare(`
+        SELECT rule_name, conditions, logic, flag_color, is_active, priority, created_by
+        FROM autoflagrule
+        ORDER BY priority DESC, id ASC
+      `).all();
+
+      const targetSites = rawSiteIds && rawSiteIds.length > 0
+        ? HUB_SITES.filter((site) => rawSiteIds.includes(site.id))
+        : HUB_SITES;
+
+      if (targetSites.length === 0) {
+        return res.status(400).json({ error: 'No target sites' });
+      }
+
+      const results = await Promise.all(targetSites.map(async (site) => {
+        try {
+          const response = await fetch(`${site.url}/api/hub/receive-rules`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-hub-token': site.token,
+            },
+            body: JSON.stringify({ rules }),
+            signal: AbortSignal.timeout(15000),
+          });
+
+          if (!response.ok) {
+            const body = await response.text();
+            throw new Error(body || `HTTP ${response.status}`);
+          }
+
+          logHubAudit({
+            action: 'push_rules',
+            performedBy: req.user?.email,
+            target: site.slug || site.id,
+            detail: String(rules.length),
+          });
+
+          return { site: site.name || site.slug || site.id, status: 'ok' };
+        } catch (err) {
+          return { site: site.name || site.slug || site.id, status: err.message || 'failed' };
+        }
+      }));
+
+      res.status(results.every((result) => result.status === 'ok') ? 200 : 207).json({
+        pushed: results.filter((result) => result.status === 'ok').length,
+        results,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
@@ -475,12 +691,14 @@ const router = Router();
 
 // Non-hub fallback router — empty responses for hub endpoints called by UI on non-hub installs
 export function createNonHubFallbackRouter() {
-const router = Router();
+  const router = Router();
   router.get('/api/hub/sites', (req, res) => res.json([]));
   router.get('/api/hub/records', (req, res) => res.json({ records: [], total: 0 }));
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
   router.get('/api/hub/inventory', (req, res) => res.json([]));
   router.get('/api/hub/sync-log', (req, res) => res.json([]));
+  router.get('/api/hub/audit-log', (req, res) => res.json([]));
+  router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
   return router;
 }
 
@@ -618,6 +836,46 @@ export function createReceiveUsersRouter() {
     }
 
     res.json({ created, updated, errors });
+  });
+
+  router.post('/api/hub/receive-rules', (req, res) => {
+    const token = req.headers['x-hub-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { rules } = req.body;
+    if (!Array.isArray(rules)) {
+      return res.status(400).json({ error: 'rules array required' });
+    }
+
+    try {
+      const replaceRules = db.transaction(() => {
+        db.prepare('DELETE FROM autoflagrule').run();
+        const insertRule = db.prepare(`
+          INSERT INTO autoflagrule (rule_name, conditions, logic, flag_color, is_active, priority, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const rule of rules) {
+          insertRule.run(
+            rule.rule_name || rule.name,
+            typeof rule.conditions === 'string' ? rule.conditions : JSON.stringify(rule.conditions || []),
+            rule.logic || 'AND',
+            rule.flag_color || rule.color || 'red',
+            rule.is_active ?? 1,
+            rule.priority ?? 1,
+            rule.created_by || null,
+          );
+        }
+      });
+
+      replaceRules();
+      res.json({ received: rules.length });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;

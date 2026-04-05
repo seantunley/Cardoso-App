@@ -48,6 +48,11 @@ const STATUS_META = {
   unknown:     { label: "Unknown",   icon: Clock,         cls: "bg-slate-500/10 border border-slate-500/30 text-slate-400" },
 };
 
+const INTEGRITY_META = {
+  ok: { label: "OK", cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+  corrupt: { label: "Corrupt", cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+};
+
 // ── fetch ──────────────────────────────────────────────────────────────────
 async function fetchBackupSettings() {
   const res = await fetch("/api/hub/backup-settings", { credentials: "include" });
@@ -72,6 +77,7 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
   const meta  = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon  = meta.icon;
   const lb    = site.last_backup;
+  const integrityMeta = hubData?.integrity ? INTEGRITY_META[hubData.integrity] : null;
 
   return (
     <div
@@ -98,6 +104,14 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
           {meta.label}
         </span>
       </div>
+
+      {integrityMeta && (
+        <div className="flex justify-end">
+          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
+            {integrityMeta.label}
+          </span>
+        </div>
+      )}
 
       {/* Stats */}
       {site.error ? (
