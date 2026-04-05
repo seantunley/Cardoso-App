@@ -585,8 +585,6 @@ function buildMigrations(db) {
             last_scan_at TEXT,
             active INTEGER DEFAULT 0,
             recently_seen INTEGER DEFAULT 0,
-            last_bandwidth_estimate_kbps REAL,
-            last_bandwidth_confidence TEXT,
             details_json TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
@@ -594,20 +592,6 @@ function buildMigrations(db) {
           CREATE INDEX IF NOT EXISTS idx_network_devices_last_seen ON network_devices(last_seen);
           CREATE INDEX IF NOT EXISTS idx_network_devices_active ON network_devices(active);
           CREATE INDEX IF NOT EXISTS idx_network_devices_category ON network_devices(device_category);
-
-          CREATE TABLE IF NOT EXISTS network_device_bandwidth_samples (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            mac_address TEXT NOT NULL,
-            sampled_at TEXT NOT NULL,
-            estimated_kbps REAL,
-            confidence TEXT,
-            active INTEGER DEFAULT 0,
-            interface_total_kbps REAL,
-            active_device_count INTEGER,
-            created_at TEXT DEFAULT (datetime('now')),
-            UNIQUE(mac_address, sampled_at)
-          );
-          CREATE INDEX IF NOT EXISTS idx_network_device_bandwidth_samples_mac_time ON network_device_bandwidth_samples(mac_address, sampled_at DESC);
 
           CREATE TABLE IF NOT EXISTS network_device_scan_runs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -643,29 +627,11 @@ function buildMigrations(db) {
               last_scan_at TEXT,
               active INTEGER DEFAULT 0,
               recently_seen INTEGER DEFAULT 0,
-              last_bandwidth_estimate_kbps REAL,
-              last_bandwidth_confidence TEXT,
               details_json TEXT,
               pulled_at TEXT DEFAULT (datetime('now')),
               PRIMARY KEY (site_id, mac_address)
             );
             CREATE INDEX IF NOT EXISTS idx_hub_network_devices_site ON hub_network_devices(site_id, active);
-
-            CREATE TABLE IF NOT EXISTS hub_network_device_bandwidth_samples (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              site_id TEXT NOT NULL,
-              site_slug TEXT,
-              mac_address TEXT NOT NULL,
-              sampled_at TEXT NOT NULL,
-              estimated_kbps REAL,
-              confidence TEXT,
-              active INTEGER DEFAULT 0,
-              interface_total_kbps REAL,
-              active_device_count INTEGER,
-              pulled_at TEXT DEFAULT (datetime('now')),
-              UNIQUE(site_id, mac_address, sampled_at)
-            );
-            CREATE INDEX IF NOT EXISTS idx_hub_network_device_bandwidth_site_mac_time ON hub_network_device_bandwidth_samples(site_id, mac_address, sampled_at DESC);
           `);
         }
       },
@@ -720,6 +686,19 @@ function buildMigrations(db) {
           ensureColumn(db, 'hub_sites', 'logic_last_synced_at', 'TEXT');
           ensureColumn(db, 'hub_sites', 'logic_status_updated_at', 'TEXT');
         }
+      },
+    },
+
+    {
+      version: 30,
+      name: 'drop_network_device_bandwidth_tables',
+      up() {
+        // Bandwidth estimation removed from Network Devices (inventory-only).
+        // Drop bandwidth sample tables created by v27 on existing installs.
+        db.exec(`
+          DROP TABLE IF EXISTS network_device_bandwidth_samples;
+          DROP TABLE IF EXISTS hub_network_device_bandwidth_samples;
+        `);
       },
     },
 
