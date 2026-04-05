@@ -11,7 +11,6 @@ const SITE_NAME = process.env.SITE_NAME || 'Local';
 
 const ACTIVE_STATES = new Set(['Reachable', 'Permanent', 'Probe', 'Delay']);
 const RECENT_WINDOW_HOURS = 24;
-const DEFAULT_SAMPLE_LOOKBACK_HOURS = 48;
 
 function normalizeMac(mac) {
   const cleaned = String(mac || '').replace(/[^a-fA-F0-9]/g, '').toUpperCase();
@@ -95,25 +94,6 @@ function choosePreferredDevice(current, candidate) {
   return score(candidate) >= score(current) ? candidate : current;
 }
 
-function estimateBandwidthKbps(totalKbps, state, activeDeviceCount) {
-  if (!Number.isFinite(totalKbps) || totalKbps < 0) {
-    return { estimated_kbps: null, confidence: 'unavailable' };
-  }
-
-  const peers = Math.max(1, activeDeviceCount || 1);
-  const weight = ACTIVE_STATES.has(state) ? 1 : state === 'Stale' ? 0.45 : 0.25;
-  const weightedTotal = peers > 1 ? (totalKbps * weight) / Math.max(1, peers - 1 + weight) : totalKbps;
-
-  let confidence = 'low';
-  if (peers <= 1) confidence = 'medium';
-  else if (peers >= 5) confidence = 'very_low';
-
-  return {
-    estimated_kbps: Math.round(Math.max(0, weightedTotal) * 10) / 10,
-    confidence,
-  };
-}
-
 function buildWindowsDiscoveryScript() {
   return String.raw`
 $ErrorActionPreference = 'Stop'
@@ -134,47 +114,6 @@ try {
     Where-Object { $_.Status -eq 'Up' } |
     Select-Object Name, InterfaceDescription, InterfaceIndex
 } catch {}
-
-$statsBefore = @{}
-foreach ($adapter in $adapters) {
-  try {
-    $stat = Get-NetAdapterStatistics -Name $adapter.Name -ErrorAction Stop
-    $statsBefore[[string]$adapter.InterfaceIndex] = [PSCustomObject]@{
-      sent = [double]$stat.SentBytes
-      recv = [double]$stat.ReceivedBytes
-    }
-  } catch {}
-}
-
-Start-Sleep -Seconds 2
-
-$statsAfter = @{}
-foreach ($adapter in $adapters) {
-  try {
-    $stat = Get-NetAdapterStatistics -Name $adapter.Name -ErrorAction Stop
-    $statsAfter[[string]$adapter.InterfaceIndex] = [PSCustomObject]@{
-      sent = [double]$stat.SentBytes
-      recv = [double]$stat.ReceivedBytes
-    }
-  } catch {}
-}
-
-$interfaceRates = @()
-foreach ($adapter in $adapters) {
-  $key = [string]$adapter.InterfaceIndex
-  if ($statsBefore.ContainsKey($key) -and $statsAfter.ContainsKey($key)) {
-    $delta = (($statsAfter[$key].sent + $statsAfter[$key].recv) - ($statsBefore[$key].sent + $statsBefore[$key].recv))
-    $kbps = if ($delta -ge 0) { [Math]::Round(($delta * 8 / 1000) / 2, 1) } else { $null }
-  } else {
-    $kbps = $null
-  }
-  $interfaceRates += [PSCustomObject]@{
-    interface_index = $adapter.InterfaceIndex
-    interface_alias = $adapter.Name
-    interface_description = $adapter.InterfaceDescription
-    total_kbps = $kbps
-  }
-}
 
 $neighbors = @()
 if (Get-Command Get-NetNeighbor -ErrorAction SilentlyContinue) {
@@ -214,10 +153,6 @@ foreach ($neighbor in $neighbors) {
   if ($neighbor.InterfaceIndex -ne $null) {
     $adapter = $adapters | Where-Object { $_.InterfaceIndex -eq $neighbor.InterfaceIndex } | Select-Object -First 1
   }
-  $rate = $null
-  if ($neighbor.InterfaceIndex -ne $null) {
-    $rate = $interfaceRates | Where-Object { $_.interface_index -eq $neighbor.InterfaceIndex } | Select-Object -First 1
-  }
 
   $results += [PSCustomObject]@{
     ip_address = $neighbor.IPAddress
@@ -227,7 +162,6 @@ foreach ($neighbor in $neighbors) {
     interface_index = $neighbor.InterfaceIndex
     interface_alias = if ($adapter) { $adapter.Name } else { $null }
     interface_description = if ($adapter) { $adapter.InterfaceDescription } else { $null }
-    interface_total_kbps = if ($rate) { $rate.total_kbps } else { $null }
   }
 }
 
@@ -280,8 +214,6 @@ function ensureNetworkDeviceTables() {
       last_scan_at TEXT,
       active INTEGER DEFAULT 0,
       recently_seen INTEGER DEFAULT 0,
-      last_bandwidth_estimate_kbps REAL,
-      last_bandwidth_confidence TEXT,
       details_json TEXT,
       created_at TEXT DEFAULT (datetime('now')),
       updated_at TEXT DEFAULT (datetime('now'))
@@ -289,20 +221,6 @@ function ensureNetworkDeviceTables() {
     CREATE INDEX IF NOT EXISTS idx_network_devices_last_seen ON network_devices(last_seen);
     CREATE INDEX IF NOT EXISTS idx_network_devices_active ON network_devices(active);
     CREATE INDEX IF NOT EXISTS idx_network_devices_category ON network_devices(device_category);
-
-    CREATE TABLE IF NOT EXISTS network_device_bandwidth_samples (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      mac_address TEXT NOT NULL,
-      sampled_at TEXT NOT NULL,
-      estimated_kbps REAL,
-      confidence TEXT,
-      active INTEGER DEFAULT 0,
-      interface_total_kbps REAL,
-      active_device_count INTEGER,
-      created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(mac_address, sampled_at)
-    );
-    CREATE INDEX IF NOT EXISTS idx_network_device_bandwidth_samples_mac_time ON network_device_bandwidth_samples(mac_address, sampled_at DESC);
 
     CREATE TABLE IF NOT EXISTS network_device_scan_runs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -339,29 +257,11 @@ function ensureHubNetworkDeviceTables() {
       last_scan_at TEXT,
       active INTEGER DEFAULT 0,
       recently_seen INTEGER DEFAULT 0,
-      last_bandwidth_estimate_kbps REAL,
-      last_bandwidth_confidence TEXT,
       details_json TEXT,
       pulled_at TEXT DEFAULT (datetime('now')),
       PRIMARY KEY (site_id, mac_address)
     );
     CREATE INDEX IF NOT EXISTS idx_hub_network_devices_site ON hub_network_devices(site_id, active);
-
-    CREATE TABLE IF NOT EXISTS hub_network_device_bandwidth_samples (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT NOT NULL,
-      site_slug TEXT,
-      mac_address TEXT NOT NULL,
-      sampled_at TEXT NOT NULL,
-      estimated_kbps REAL,
-      confidence TEXT,
-      active INTEGER DEFAULT 0,
-      interface_total_kbps REAL,
-      active_device_count INTEGER,
-      pulled_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(site_id, mac_address, sampled_at)
-    );
-    CREATE INDEX IF NOT EXISTS idx_hub_network_device_bandwidth_site_mac_time ON hub_network_device_bandwidth_samples(site_id, mac_address, sampled_at DESC);
   `);
 }
 
@@ -375,7 +275,9 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
   `).run(startedAt, triggerReason || 'manual');
 
   if (process.platform !== 'win32') {
-    const unavailable = createUnavailableScan(`Network discovery is only available on Windows site machines. Current platform: ${process.platform}`);
+    const unavailable = createUnavailableScan(
+      `Network discovery is only available on Windows site machines. Current platform: ${process.platform}`
+    );
     db.prepare(`
       UPDATE network_device_scan_runs
       SET completed_at = ?, status = 'unavailable', message = ?
@@ -393,12 +295,7 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
         timeout: 30000,
         maxBuffer: 1024 * 1024 * 4,
         windowsHide: true,
-        env: {
-          ...process.env,
-          SITE_ID,
-          SITE_SLUG,
-          SITE_NAME,
-        },
+        env: { ...process.env, SITE_ID, SITE_SLUG, SITE_NAME },
       }
     );
 
@@ -408,14 +305,13 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
     }
 
     const scannedAt = parsed.scanned_at || new Date().toISOString();
-    const groupedByInterface = new Map();
     const deduped = new Map();
 
     for (const raw of parsed.devices) {
       const mac = formatMac(raw.mac_address);
       if (!mac) continue;
       const hostname = parseHostname(raw.hostname);
-      const baseInference = inferVendorAndCategory({ hostname });
+      const inference = inferVendorAndCategory({ hostname });
       const device = {
         site_id: SITE_ID,
         site_slug: SITE_SLUG,
@@ -423,47 +319,26 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
         mac_address: mac,
         ip_address: raw.ip_address || null,
         hostname,
-        vendor: baseInference.vendor,
-        device_category: baseInference.category,
-        classification_label: baseInference.label,
-        classification_confidence: baseInference.confidence,
-        classification_rationale: baseInference.rationale,
+        vendor: inference.vendor,
+        device_category: inference.category,
+        classification_label: inference.label,
+        classification_confidence: inference.confidence,
+        classification_rationale: inference.rationale,
         discovery_source: 'powershell-neighbor-scan',
         interface_alias: raw.interface_alias || null,
         interface_description: raw.interface_description || null,
         neighbor_state: raw.neighbor_state || 'Unknown',
         scanned_at: scannedAt,
-        interface_total_kbps: Number.isFinite(Number(raw.interface_total_kbps)) ? Number(raw.interface_total_kbps) : null,
       };
-
-      const existing = deduped.get(mac);
-      deduped.set(mac, choosePreferredDevice(existing, device));
+      deduped.set(mac, choosePreferredDevice(deduped.get(mac), device));
     }
 
-    const finalDevices = Array.from(deduped.values());
-    for (const device of finalDevices) {
-      const key = device.interface_alias || '__unknown__';
-      if (!groupedByInterface.has(key)) groupedByInterface.set(key, []);
-      groupedByInterface.get(key).push(device);
-    }
-
-    for (const devices of groupedByInterface.values()) {
-      const activeDevices = devices.filter((device) => ACTIVE_STATES.has(device.neighbor_state));
-      const activeCount = activeDevices.length || devices.length || 1;
-      for (const device of devices) {
-        const estimate = estimateBandwidthKbps(device.interface_total_kbps, device.neighbor_state, activeCount);
-        device.last_bandwidth_estimate_kbps = estimate.estimated_kbps;
-        device.last_bandwidth_confidence = estimate.confidence;
-        device.active = ACTIVE_STATES.has(device.neighbor_state) ? 1 : 0;
-        device.recently_seen = 1;
-        device.details_json = JSON.stringify({
-          machine_hostname: parsed.machine_hostname || os.hostname(),
-          interface_total_kbps: device.interface_total_kbps,
-          active_device_count_on_interface: activeCount,
-          bandwidth_note: 'Estimated share of observed adapter throughput. Windows site installs do not have gateway-level per-device counters, so this is a best-effort approximation only.',
-        });
-      }
-    }
+    const finalDevices = Array.from(deduped.values()).map((device) => ({
+      ...device,
+      active: ACTIVE_STATES.has(device.neighbor_state) ? 1 : 0,
+      recently_seen: 1,
+      details_json: JSON.stringify({ machine_hostname: parsed.machine_hostname || os.hostname() }),
+    }));
 
     const existingRows = db.prepare(`SELECT mac_address, first_seen FROM network_devices`).all();
     const firstSeenByMac = new Map(existingRows.map((row) => [row.mac_address, row.first_seen]));
@@ -473,14 +348,12 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
         site_id, site_slug, site_name, mac_address, ip_address, hostname, vendor,
         device_category, classification_label, classification_confidence, classification_rationale,
         discovery_source, interface_alias, interface_description, neighbor_state,
-        first_seen, last_seen, last_scan_at, active, recently_seen,
-        last_bandwidth_estimate_kbps, last_bandwidth_confidence, details_json, updated_at
+        first_seen, last_seen, last_scan_at, active, recently_seen, details_json, updated_at
       ) VALUES (
         @site_id, @site_slug, @site_name, @mac_address, @ip_address, @hostname, @vendor,
         @device_category, @classification_label, @classification_confidence, @classification_rationale,
         @discovery_source, @interface_alias, @interface_description, @neighbor_state,
-        @first_seen, @last_seen, @last_scan_at, @active, @recently_seen,
-        @last_bandwidth_estimate_kbps, @last_bandwidth_confidence, @details_json, @updated_at
+        @first_seen, @last_seen, @last_scan_at, @active, @recently_seen, @details_json, @updated_at
       )
       ON CONFLICT(mac_address) DO UPDATE SET
         site_id = excluded.site_id,
@@ -501,16 +374,8 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
         last_scan_at = excluded.last_scan_at,
         active = excluded.active,
         recently_seen = excluded.recently_seen,
-        last_bandwidth_estimate_kbps = excluded.last_bandwidth_estimate_kbps,
-        last_bandwidth_confidence = excluded.last_bandwidth_confidence,
         details_json = excluded.details_json,
         updated_at = excluded.updated_at
-    `);
-
-    const insertBandwidthSample = db.prepare(`
-      INSERT OR REPLACE INTO network_device_bandwidth_samples (
-        mac_address, sampled_at, estimated_kbps, confidence, active, interface_total_kbps, active_device_count
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     const applyScan = db.transaction(() => {
@@ -522,21 +387,13 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
           last_scan_at: scannedAt,
           updated_at: scannedAt,
         });
-
-        insertBandwidthSample.run(
-          device.mac_address,
-          scannedAt,
-          device.last_bandwidth_estimate_kbps,
-          device.last_bandwidth_confidence,
-          device.active,
-          device.interface_total_kbps,
-          safeJsonParse(device.details_json, {}).active_device_count_on_interface || null,
-        );
       }
 
       if (finalDevices.length > 0) {
         const placeholders = finalDevices.map(() => '?').join(',');
-        db.prepare(`UPDATE network_devices SET active = 0 WHERE mac_address NOT IN (${placeholders})`).run(...finalDevices.map((device) => device.mac_address));
+        db.prepare(
+          `UPDATE network_devices SET active = 0 WHERE mac_address NOT IN (${placeholders})`
+        ).run(...finalDevices.map((d) => d.mac_address));
       } else {
         db.prepare(`UPDATE network_devices SET active = 0`).run();
       }
@@ -547,11 +404,6 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
           WHEN last_seen IS NOT NULL AND datetime(last_seen) >= datetime('now', '-${RECENT_WINDOW_HOURS} hours') THEN 1
           ELSE 0
         END
-      `).run();
-
-      db.prepare(`
-        DELETE FROM network_device_bandwidth_samples
-        WHERE sampled_at < datetime('now', '-${DEFAULT_SAMPLE_LOOKBACK_HOURS} hours')
       `).run();
     });
 
@@ -564,7 +416,7 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
     `).run(
       new Date().toISOString(),
       finalDevices.length,
-      finalDevices.filter((device) => device.active).length,
+      finalDevices.filter((d) => d.active).length,
       `Scanned ${finalDevices.length} device(s)`,
       scanRun.lastInsertRowid,
     );
@@ -576,7 +428,6 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
       site_name: SITE_NAME,
       scanned_at: scannedAt,
       devices: finalDevices,
-      note: 'Bandwidth is an estimated per-device share of observed Windows adapter throughput. Without gateway or firewall telemetry, it is indicative only.',
     };
   } catch (error) {
     db.prepare(`
@@ -588,7 +439,7 @@ export async function scanNetworkDevicesNow({ triggerReason = 'manual' } = {}) {
   }
 }
 
-export function getNetworkDevicesSnapshot({ sampleHours = DEFAULT_SAMPLE_LOOKBACK_HOURS } = {}) {
+export function getNetworkDevicesSnapshot() {
   ensureNetworkDeviceTables();
 
   const devices = db.prepare(`
@@ -600,16 +451,6 @@ export function getNetworkDevicesSnapshot({ sampleHours = DEFAULT_SAMPLE_LOOKBAC
     active: !!row.active,
     recently_seen: !!row.recently_seen,
     details: safeJsonParse(row.details_json, {}),
-  }));
-
-  const samples = db.prepare(`
-    SELECT mac_address, sampled_at, estimated_kbps, confidence, active, interface_total_kbps, active_device_count
-    FROM network_device_bandwidth_samples
-    WHERE sampled_at >= datetime('now', ?)
-    ORDER BY sampled_at ASC, mac_address ASC
-  `).all(`-${Math.max(1, Number(sampleHours) || DEFAULT_SAMPLE_LOOKBACK_HOURS)} hours`).map((row) => ({
-    ...row,
-    active: !!row.active,
   }));
 
   const latestScan = db.prepare(`
@@ -625,9 +466,7 @@ export function getNetworkDevicesSnapshot({ sampleHours = DEFAULT_SAMPLE_LOOKBAC
     site_name: SITE_NAME,
     generated_at: new Date().toISOString(),
     latest_scan: latestScan,
-    bandwidth_note: 'Best-effort estimate only. Windows site installs can observe local adapter throughput, but not authoritative per-device usage without gateway visibility.',
     devices,
-    samples,
   };
 }
 
@@ -649,7 +488,6 @@ export async function syncHubNetworkDevicesForSite(site) {
 
   const payload = await response.json();
   const devices = Array.isArray(payload.devices) ? payload.devices : [];
-  const samples = Array.isArray(payload.samples) ? payload.samples : [];
 
   ensureHubNetworkDeviceTables();
 
@@ -658,12 +496,12 @@ export async function syncHubNetworkDevicesForSite(site) {
       site_id, site_slug, site_name, mac_address, ip_address, hostname, vendor,
       device_category, classification_label, classification_confidence, classification_rationale,
       interface_alias, interface_description, neighbor_state, first_seen, last_seen, last_scan_at,
-      active, recently_seen, last_bandwidth_estimate_kbps, last_bandwidth_confidence, details_json, pulled_at
+      active, recently_seen, details_json, pulled_at
     ) VALUES (
       @site_id, @site_slug, @site_name, @mac_address, @ip_address, @hostname, @vendor,
       @device_category, @classification_label, @classification_confidence, @classification_rationale,
       @interface_alias, @interface_description, @neighbor_state, @first_seen, @last_seen, @last_scan_at,
-      @active, @recently_seen, @last_bandwidth_estimate_kbps, @last_bandwidth_confidence, @details_json, @pulled_at
+      @active, @recently_seen, @details_json, @pulled_at
     )
     ON CONFLICT(site_id, mac_address) DO UPDATE SET
       site_slug = excluded.site_slug,
@@ -683,16 +521,8 @@ export async function syncHubNetworkDevicesForSite(site) {
       last_scan_at = excluded.last_scan_at,
       active = excluded.active,
       recently_seen = excluded.recently_seen,
-      last_bandwidth_estimate_kbps = excluded.last_bandwidth_estimate_kbps,
-      last_bandwidth_confidence = excluded.last_bandwidth_confidence,
       details_json = excluded.details_json,
       pulled_at = excluded.pulled_at
-  `);
-
-  const insertSample = db.prepare(`
-    INSERT OR REPLACE INTO hub_network_device_bandwidth_samples (
-      site_id, site_slug, mac_address, sampled_at, estimated_kbps, confidence, active, interface_total_kbps, active_device_count, pulled_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const now = new Date().toISOString();
@@ -718,30 +548,17 @@ export async function syncHubNetworkDevicesForSite(site) {
         last_scan_at: device.last_scan_at || payload.latest_scan?.completed_at || payload.generated_at || now,
         active: device.active ? 1 : 0,
         recently_seen: device.recently_seen ? 1 : 0,
-        last_bandwidth_estimate_kbps: device.last_bandwidth_estimate_kbps ?? null,
-        last_bandwidth_confidence: device.last_bandwidth_confidence || null,
         details_json: JSON.stringify(device.details || {}),
         pulled_at: now,
       });
     }
 
-    for (const sample of samples) {
-      insertSample.run(
-        site.id,
-        payload.site_slug || site.slug || site.id,
-        sample.mac_address,
-        sample.sampled_at,
-        sample.estimated_kbps ?? null,
-        sample.confidence || null,
-        sample.active ? 1 : 0,
-        sample.interface_total_kbps ?? null,
-        sample.active_device_count ?? null,
-        now,
-      );
-    }
-
-    db.prepare(`DELETE FROM hub_network_devices WHERE site_id = ? AND mac_address NOT IN (${devices.map(() => '?').join(',') || "''"})`).run(site.id, ...devices.map((device) => device.mac_address));
-    db.prepare(`DELETE FROM hub_network_device_bandwidth_samples WHERE pulled_at < datetime('now', '-${DEFAULT_SAMPLE_LOOKBACK_HOURS} hours')`).run();
+    const macPlaceholders = devices.length
+      ? devices.map(() => '?').join(',')
+      : "''";
+    db.prepare(
+      `DELETE FROM hub_network_devices WHERE site_id = ? AND mac_address NOT IN (${macPlaceholders})`
+    ).run(site.id, ...devices.map((d) => d.mac_address));
   });
 
   apply();
@@ -751,22 +568,26 @@ export async function syncHubNetworkDevicesForSite(site) {
     site_slug: payload.site_slug || site.slug || site.id,
     ok: true,
     device_count: devices.length,
-    sample_count: samples.length,
   };
 }
 
 export async function syncHubNetworkDevicesForAllSites(sites = []) {
-  const results = await Promise.allSettled((sites || []).map((site) => syncHubNetworkDevicesForSite(site)));
+  const results = await Promise.allSettled(
+    (sites || []).map((site) => syncHubNetworkDevicesForSite(site))
+  );
   return results.map((result, index) => ({
     site_id: sites[index]?.id || null,
     site_slug: sites[index]?.slug || null,
     ok: result.status === 'fulfilled',
-    ...(result.status === 'fulfilled' ? result.value : { error: result.reason?.message || 'Unknown error' }),
+    ...(result.status === 'fulfilled'
+      ? result.value
+      : { error: result.reason?.message || 'Unknown error' }),
   }));
 }
 
-export function getHubNetworkDevicesSnapshot({ siteId = null, sampleHours = DEFAULT_SAMPLE_LOOKBACK_HOURS } = {}) {
+export function getHubNetworkDevicesSnapshot({ siteId = null } = {}) {
   ensureHubNetworkDeviceTables();
+
   const filters = [];
   const params = [];
   if (siteId) {
@@ -787,17 +608,6 @@ export function getHubNetworkDevicesSnapshot({ siteId = null, sampleHours = DEFA
     details: safeJsonParse(row.details_json, {}),
   }));
 
-  const samples = db.prepare(`
-    SELECT site_id, site_slug, mac_address, sampled_at, estimated_kbps, confidence, active, interface_total_kbps, active_device_count
-    FROM hub_network_device_bandwidth_samples
-    WHERE sampled_at >= datetime('now', ?)
-      ${siteId ? 'AND site_id = ?' : ''}
-    ORDER BY sampled_at ASC, site_id ASC, mac_address ASC
-  `).all(`-${Math.max(1, Number(sampleHours) || DEFAULT_SAMPLE_LOOKBACK_HOURS)} hours`, ...(siteId ? [siteId] : [])).map((row) => ({
-    ...row,
-    active: !!row.active,
-  }));
-
   const latestScan = db.prepare(`
     SELECT MAX(last_scan_at) AS completed_at, COUNT(*) AS device_count, SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active_count
     FROM hub_network_devices
@@ -806,9 +616,7 @@ export function getHubNetworkDevicesSnapshot({ siteId = null, sampleHours = DEFA
 
   return {
     generated_at: new Date().toISOString(),
-    bandwidth_note: 'Best-effort estimate only. Hub values are pulled from site-side Windows scans and reflect estimated adapter-share usage, not authoritative gateway telemetry.',
     latest_scan: latestScan?.completed_at ? latestScan : null,
     devices,
-    samples,
   };
 }
