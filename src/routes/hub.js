@@ -31,6 +31,82 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     }
   }
 
+  function getSqlBackupHealth(sqlBackup) {
+    if (!sqlBackup?.ok) {
+      return { status: 'unavailable', needs_attention: true, last_success_at: null };
+    }
+
+    const databases = Array.isArray(sqlBackup.databases) ? sqlBackup.databases : [];
+    if (databases.length === 0) {
+      return { status: 'unavailable', needs_attention: true, last_success_at: null };
+    }
+
+    const successTimes = databases
+      .filter((db) => db.isSuccess && db.backupAt)
+      .map((db) => new Date(db.backupAt).getTime())
+      .filter((value) => Number.isFinite(value));
+
+    const latestSuccessMs = successTimes.length > 0 ? Math.max(...successTimes) : null;
+    const latestSuccessAt = latestSuccessMs ? new Date(latestSuccessMs).toISOString() : null;
+    const anyFailed = databases.some((db) => db.isSuccess === false);
+    const stale = !latestSuccessMs || ((Date.now() - latestSuccessMs) > 24 * 3600000);
+
+    return {
+      status: anyFailed ? 'failed' : stale ? 'stale' : 'ok',
+      needs_attention: anyFailed || stale,
+      last_success_at: latestSuccessAt,
+    };
+  }
+
+  function getMachineHealthSummary(machineHealth) {
+    if (!machineHealth?.ok) {
+      return {
+        status: 'unavailable',
+        needs_attention: true,
+        reasons: [machineHealth?.message || 'Machine health unavailable'],
+      };
+    }
+
+    const reasons = [];
+    let status = 'ok';
+
+    const promote = (nextStatus, reason) => {
+      if (reason) reasons.push(reason);
+      if (status === 'critical' || nextStatus === status) return;
+      if (nextStatus === 'critical' || (nextStatus === 'warning' && status === 'ok')) {
+        status = nextStatus;
+      }
+    };
+
+    const cpuUsage = Number(machineHealth.cpu?.usage_percent);
+    if (Number.isFinite(cpuUsage) && cpuUsage >= 90) promote('critical', `CPU ${cpuUsage.toFixed(1)}%`);
+    else if (Number.isFinite(cpuUsage) && cpuUsage >= 75) promote('warning', `CPU ${cpuUsage.toFixed(1)}%`);
+
+    const memoryUsed = Number(machineHealth.memory?.used_percent);
+    if (Number.isFinite(memoryUsed) && memoryUsed >= 90) promote('critical', `RAM ${memoryUsed.toFixed(1)}% used`);
+    else if (Number.isFinite(memoryUsed) && memoryUsed >= 80) promote('warning', `RAM ${memoryUsed.toFixed(1)}% used`);
+
+    const disks = Array.isArray(machineHealth.disks) ? machineHealth.disks : [];
+    disks.forEach((disk) => {
+      const freePercent = Number(disk.free_percent);
+      if (!Number.isFinite(freePercent)) return;
+      const label = disk.drive || 'disk';
+      if (freePercent <= 10) promote('critical', `${label} low space (${freePercent.toFixed(1)}% free)`);
+      else if (freePercent <= 20) promote('warning', `${label} low space (${freePercent.toFixed(1)}% free)`);
+    });
+
+    const service = machineHealth.cardoso_service;
+    if (service?.present && service.status && service.status !== 'Running') {
+      promote('warning', `Cardoso service ${String(service.status).toLowerCase()}`);
+    }
+
+    return {
+      status,
+      needs_attention: status !== 'ok',
+      reasons,
+    };
+  }
+
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requireAdmin, (req, res) => {
     const row = stmts.getHubSetting.get('backup_sync_enabled');
@@ -118,18 +194,34 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
 
     const results = await Promise.all(sites.map(async (site) => {
       const base = { site_id: site.id, site_name: site.name, url: site.url };
-      if (!site.url) return { ...base, error: 'No API URL configured', status: 'unknown' };
+      if (!site.url) {
+        return {
+          ...base,
+          error: 'No API URL configured',
+          status: 'unknown',
+          sql_backup: {
+            ok: false,
+            message: 'No API URL configured',
+            databases: [],
+            health: { status: 'unavailable', needs_attention: true, last_success_at: null },
+          },
+        };
+      }
       try {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 8000);
-        const r = await fetch(`${site.url}/api/backup/status`, {
-          headers: { 'x-reporting-token': site.token || '' },
-          signal: controller.signal,
-        });
-        clearTimeout(timeout);
-        if (!r.ok) return { ...base, error: `HTTP ${r.status}`, status: 'error' };
-        const data = await r.json();
-        // Determine health
+        const [backupResponse, sqlResponse] = await Promise.all([
+          fetch(`${site.url}/api/backup/status`, {
+            headers: { 'x-reporting-token': site.token || '' },
+            signal: AbortSignal.timeout(8000),
+          }),
+          fetch(`${site.url}/api/backup/sql-status`, {
+            headers: { 'x-reporting-token': site.token || '' },
+            signal: AbortSignal.timeout(8000),
+          }).catch((err) => ({ ok: false, error: err })),
+        ]);
+
+        if (!backupResponse.ok) return { ...base, error: `HTTP ${backupResponse.status}`, status: 'error' };
+        const data = await backupResponse.json();
+
         let status = 'ok';
         if (!data.last_backup) {
           status = 'never';
@@ -138,13 +230,45 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
           if (hoursAgo > 48) status = 'stale';
           else if (hoursAgo > 25) status = 'warning';
         }
-        return { ...base, ...data, status };
+
+        let sqlBackup;
+        if (sqlResponse?.ok === false && sqlResponse?.error) {
+          sqlBackup = {
+            ok: false,
+            message: sqlResponse.error.name === 'Timeout' ? 'Timeout' : sqlResponse.error.message,
+            databases: [],
+          };
+        } else if (!sqlResponse.ok) {
+          sqlBackup = {
+            ok: false,
+            message: `HTTP ${sqlResponse.status}`,
+            databases: [],
+          };
+        } else {
+          sqlBackup = await sqlResponse.json();
+        }
+
+        sqlBackup.health = getSqlBackupHealth(sqlBackup);
+        return { ...base, ...data, status, sql_backup: sqlBackup };
       } catch (err) {
-        return { ...base, error: err.name === 'AbortError' ? 'Timeout' : err.message, status: 'unreachable' };
+        return {
+          ...base,
+          error: err.name === 'AbortError' ? 'Timeout' : err.message,
+          status: 'unreachable',
+          sql_backup: {
+            ok: false,
+            message: err.name === 'AbortError' ? 'Timeout' : err.message,
+            databases: [],
+            health: { status: 'unavailable', needs_attention: true, last_success_at: null },
+          },
+        };
       }
     }));
 
-    res.json({ sites: results });
+    res.json({
+      sites: results,
+      sql_attention: results.some((site) => site.sql_backup?.health?.needs_attention),
+    });
   });
 
   // GET /api/hub/hub-backup-status
@@ -462,6 +586,82 @@ export function createHubRouter({ requireAuth, requireAdmin }) {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // GET /api/hub/machine-health — aggregated machine health per site
+  router.get('/api/hub/machine-health', requireAuth, requireAdmin, async (req, res) => {
+    const sites = db.prepare('SELECT id, slug, name, url, token FROM hub_sites').all();
+
+    const results = await Promise.all(sites.map(async (site) => {
+      const base = {
+        site_id: site.id,
+        site_slug: site.slug,
+        site_name: site.name,
+        url: site.url,
+      };
+
+      if (!site.url) {
+        return {
+          ...base,
+          ok: false,
+          message: 'No API URL configured',
+          machine: { hostname: null, os_version: null, uptime_seconds: null, last_boot_at: null, local_ips: [] },
+          cpu: { usage_percent: null, sample_seconds: 3, sampled: false },
+          memory: { total_bytes: null, used_bytes: null, free_bytes: null, used_percent: null },
+          disks: [],
+          cardoso_service: { name: 'CardosoCigarettes', present: null, status: null, display_name: null, start_type: null },
+          health: { status: 'unavailable', needs_attention: true, reasons: ['No API URL configured'] },
+        };
+      }
+
+      try {
+        const response = await fetch(`${site.url}/api/reporting/machine-health`, {
+          headers: { 'x-reporting-token': site.token || '' },
+          signal: AbortSignal.timeout(15000),
+        });
+
+        let machineHealth;
+        if (!response.ok) {
+          machineHealth = {
+            ...base,
+            ok: false,
+            message: `HTTP ${response.status}`,
+            machine: { hostname: null, os_version: null, uptime_seconds: null, last_boot_at: null, local_ips: [] },
+            cpu: { usage_percent: null, sample_seconds: 3, sampled: false },
+            memory: { total_bytes: null, used_bytes: null, free_bytes: null, used_percent: null },
+            disks: [],
+            cardoso_service: { name: 'CardosoCigarettes', present: null, status: null, display_name: null, start_type: null },
+          };
+        } else {
+          machineHealth = await response.json();
+        }
+
+        machineHealth.site_id ||= site.id;
+        machineHealth.site_slug ||= site.slug;
+        machineHealth.site_name ||= site.name;
+        machineHealth.url = site.url;
+        machineHealth.health = getMachineHealthSummary(machineHealth);
+        return machineHealth;
+      } catch (err) {
+        const message = err.name === 'TimeoutError' || err.name === 'AbortError' ? 'Timeout' : err.message;
+        return {
+          ...base,
+          ok: false,
+          message,
+          machine: { hostname: null, os_version: null, uptime_seconds: null, last_boot_at: null, local_ips: [] },
+          cpu: { usage_percent: null, sample_seconds: 3, sampled: false },
+          memory: { total_bytes: null, used_bytes: null, free_bytes: null, used_percent: null },
+          disks: [],
+          cardoso_service: { name: 'CardosoCigarettes', present: null, status: null, display_name: null, start_type: null },
+          health: { status: 'unavailable', needs_attention: true, reasons: [message] },
+        };
+      }
+    }));
+
+    res.json({
+      sites: results,
+      attention: results.some((site) => site.health?.needs_attention),
+    });
   });
 
   // POST /api/hub/speedtest/run-site — trigger on-demand speedtest on a specific site

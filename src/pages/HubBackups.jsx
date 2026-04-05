@@ -10,7 +10,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
 
-// ── helpers ────────────────────────────────────────────────────────────────
 function fmtBytes(b) {
   if (b == null) return "—";
   if (b < 1024) return `${b} B`;
@@ -21,11 +20,11 @@ function fmtBytes(b) {
 function fmtRelative(iso) {
   if (!iso) return "Never";
   const diff = Date.now() - new Date(iso).getTime();
-  const mins  = Math.floor(diff / 60000);
+  const mins = Math.floor(diff / 60000);
   const hours = Math.floor(diff / 3600000);
-  const days  = Math.floor(diff / 86400000);
-  if (mins < 2)   return "Just now";
-  if (mins < 60)  return `${mins}m ago`;
+  const days = Math.floor(diff / 86400000);
+  if (mins < 2) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
 }
@@ -48,12 +47,18 @@ const STATUS_META = {
   unknown:     { label: "Unknown",   icon: Clock,         cls: "bg-slate-500/10 border border-slate-500/30 text-slate-400" },
 };
 
+const SQL_STATUS_META = {
+  ok:          { label: "SQL OK",          icon: CheckCircle2,  cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+  stale:       { label: "SQL Overdue",     icon: AlertTriangle, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
+  failed:      { label: "SQL Failed",      icon: XCircle,       cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+  unavailable: { label: "SQL Unavailable", icon: CloudOff,      cls: "bg-slate-500/10 border border-slate-500/30 text-slate-400" },
+};
+
 const INTEGRITY_META = {
   ok: { label: "OK", cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
   corrupt: { label: "Corrupt", cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
 };
 
-// ── fetch ──────────────────────────────────────────────────────────────────
 async function fetchBackupSettings() {
   const res = await fetch("/api/hub/backup-settings", { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -72,23 +77,30 @@ async function fetchHubBackupStatus() {
   return res.json();
 }
 
-// ── SiteCard ───────────────────────────────────────────────────────────────
+function Stat({ label, value, sub }) {
+  return (
+    <div>
+      <div className="text-[11px] text-slate-500 uppercase tracking-wide mb-0.5">{label}</div>
+      <div className="text-sm font-semibold text-foreground">{value ?? "—"}</div>
+      {sub && <div className="text-[11px] text-slate-500">{sub}</div>}
+    </div>
+  );
+}
+
 function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig }) {
-  const meta  = STATUS_META[site.status] || STATUS_META.unknown;
-  const Icon  = meta.icon;
-  const lb    = site.last_backup;
+  const meta = STATUS_META[site.status] || STATUS_META.unknown;
+  const Icon = meta.icon;
+  const lb = site.last_backup;
   const integrityMeta = hubData?.integrity ? INTEGRITY_META[hubData.integrity] : null;
+  const sqlHealth = site.sql_backup?.health || { status: "unavailable", last_success_at: null };
+  const sqlMeta = SQL_STATUS_META[sqlHealth.status] || SQL_STATUS_META.unavailable;
+  const SqlIcon = sqlMeta.icon;
 
   return (
-    <div
-      className={`bg-card rounded-xl p-5 flex flex-col gap-4 ${meta.cls}`}
-    >
-      {/* Header */}
+    <div className={`bg-card rounded-xl p-5 flex flex-col gap-4 ${meta.cls}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
-          <div
-            className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/15 border border-blue-500/30"
-          >
+          <div className="flex-shrink-0 w-9 h-9 rounded-lg flex items-center justify-center bg-blue-500/15 border border-blue-500/30">
             <Database className="w-4 h-4 text-blue-400" />
           </div>
           <div className="min-w-0">
@@ -96,24 +108,24 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
             <div className="text-xs text-slate-500 truncate">{site.url || "No URL"}</div>
           </div>
         </div>
-        {/* Status badge */}
-        <span
-          className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${meta.cls}`}
-        >
+        <span className={`flex-shrink-0 flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${meta.cls}`}>
           <Icon className="w-3.5 h-3.5" />
           {meta.label}
         </span>
       </div>
 
-      {integrityMeta && (
-        <div className="flex justify-end">
+      <div className="flex flex-wrap justify-end gap-2">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sqlMeta.cls}`}>
+          <SqlIcon className="w-3.5 h-3.5" />
+          {sqlMeta.label}
+        </span>
+        {integrityMeta && (
           <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
             {integrityMeta.label}
           </span>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Stats */}
       {site.error ? (
         <p className="text-xs text-red-400">{site.error}</p>
       ) : (
@@ -127,7 +139,51 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
         </div>
       )}
 
-      {/* Actions */}
+      <div className="rounded-lg border border-border/60 bg-background/60 p-3">
+        <div className="flex items-start justify-between gap-3 mb-2">
+          <div>
+            <div className="text-[11px] uppercase tracking-wide text-slate-500">SQL Full Backup</div>
+            <div className="text-sm font-semibold text-foreground">
+              {sqlHealth.last_success_at ? fmtRelative(sqlHealth.last_success_at) : "Unavailable"}
+            </div>
+            {sqlHealth.last_success_at && (
+              <div className="text-[11px] text-slate-500">{fmtDate(sqlHealth.last_success_at)}</div>
+            )}
+          </div>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
+            <SqlIcon className="w-3 h-3" />
+            {sqlMeta.label}
+          </span>
+        </div>
+
+        {!site.sql_backup?.ok ? (
+          <p className="text-xs text-slate-500">{site.sql_backup?.message || "SQL backup status unavailable."}</p>
+        ) : site.sql_backup?.databases?.length ? (
+          <div className="space-y-2">
+            {site.sql_backup.databases.map((database) => {
+              const good = database.isSuccess === true;
+              const bad = database.isSuccess === false;
+              return (
+                <div key={database.name} className="flex items-start justify-between gap-3 rounded-md border border-border/50 px-2.5 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-foreground truncate">{database.name}</div>
+                    <div className="text-[11px] text-slate-500">{database.backupAt ? fmtDate(database.backupAt) : "No timestamp"}</div>
+                    {database.objectStatus && (
+                      <div className="text-[11px] text-slate-500 truncate">{database.objectStatus}</div>
+                    )}
+                  </div>
+                  <span className={`inline-flex items-center rounded-full px-2 py-1 text-[11px] font-semibold ${good ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" : bad ? "bg-red-500/10 border border-red-500/30 text-red-400" : "bg-slate-500/10 border border-slate-500/30 text-slate-400"}`}>
+                    {good ? "Success" : bad ? "Failed" : "Unknown"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">{site.sql_backup?.message || "No DAT backup objects found."}</p>
+        )}
+      </div>
+
       <div className="flex gap-2 pt-1 border-t border-white/5 flex-wrap">
         <Button
           size="sm"
@@ -157,38 +213,26 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
   );
 }
 
-function Stat({ label, value, sub }) {
-  return (
-    <div>
-      <div className="text-[11px] text-slate-500 uppercase tracking-wide mb-0.5">{label}</div>
-      <div className="text-sm font-semibold text-foreground">{value ?? "—"}</div>
-      {sub && <div className="text-[11px] text-slate-500">{sub}</div>}
-    </div>
-  );
-}
-
-// ── Summary bar ────────────────────────────────────────────────────────────
 function SummaryBar({ sites }) {
   const counts = sites.reduce((acc, s) => {
     acc[s.status] = (acc[s.status] || 0) + 1;
     return acc;
   }, {});
-  const ok      = counts.ok || 0;
+  const sqlAttention = sites.filter((s) => s.sql_backup?.health?.needs_attention).length;
+  const ok = counts.ok || 0;
   const warning = (counts.warning || 0) + (counts.stale || 0);
   const problem = (counts.never || 0) + (counts.error || 0) + (counts.unreachable || 0);
 
   return (
     <div className="flex flex-wrap gap-3 mb-6">
       {[
-        { label: "Healthy",  count: ok,      cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
-        { label: "Overdue",  count: warning, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
+        { label: "Healthy", count: ok, cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+        { label: "Overdue", count: warning, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
         { label: "Problems", count: problem, cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+        { label: "SQL Attention", count: sqlAttention, cls: "bg-cyan-500/10 border border-cyan-500/30 text-cyan-300" },
         { label: "Total Sites", count: sites.length, cls: "bg-blue-500/10 border border-blue-500/30 text-blue-300" },
-      ].map(p => (
-        <div
-          key={p.label}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium ${p.cls}`}
-        >
+      ].map((p) => (
+        <div key={p.label} className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium ${p.cls}`}>
           <span className="text-xl font-bold leading-none">{p.count}</span>
           <span className="text-xs opacity-80">{p.label}</span>
         </div>
@@ -197,7 +241,6 @@ function SummaryBar({ sites }) {
   );
 }
 
-// ── Main page ──────────────────────────────────────────────────────────────
 export default function HubBackups() {
   const { toast } = useToast();
   const [downloading, setDownloading] = useState(null);
@@ -206,7 +249,7 @@ export default function HubBackups() {
   const [togglingSync, setTogglingSync] = useState(false);
 
   useEffect(() => {
-    fetchBackupSettings().then(d => setSyncEnabled(d.backup_sync_enabled)).catch(() => {});
+    fetchBackupSettings().then((d) => setSyncEnabled(d.backup_sync_enabled)).catch(() => {});
   }, []);
 
   const handleToggleSync = useCallback(async () => {
@@ -242,22 +285,18 @@ export default function HubBackups() {
   });
 
   const sites = data?.sites || [];
-  const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map(s => [s.site_id, s]));
+  const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
 
   const handleDownload = useCallback(async (site) => {
     setDownloading(site.site_id);
     try {
-      // Use hub proxy to avoid CORS — site token is used server-side
-      const proxyRes = await fetch(
-        `/api/hub/proxy-backup?site_id=${encodeURIComponent(site.site_id)}`,
-        { credentials: "include" }
-      );
+      const proxyRes = await fetch(`/api/hub/proxy-backup?site_id=${encodeURIComponent(site.site_id)}`, { credentials: "include" });
       if (!proxyRes.ok) throw new Error(`HTTP ${proxyRes.status}`);
       const blob = await proxyRes.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `cardoso-${site.site_id}-${new Date().toISOString().slice(0,10)}.db`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cardoso-${site.site_id}-${new Date().toISOString().slice(0, 10)}.db`;
       a.click();
       URL.revokeObjectURL(url);
       toast({ title: "Backup downloaded", description: site.site_name });
@@ -271,16 +310,13 @@ export default function HubBackups() {
   const handleDownloadConfig = useCallback(async (site) => {
     setDownloadingConfig(site.site_id);
     try {
-      const proxyRes = await fetch(
-        `/api/hub/proxy-config?site_id=${encodeURIComponent(site.site_id)}`,
-        { credentials: "include" }
-      );
+      const proxyRes = await fetch(`/api/hub/proxy-config?site_id=${encodeURIComponent(site.site_id)}`, { credentials: "include" });
       if (!proxyRes.ok) throw new Error(`HTTP ${proxyRes.status}`);
       const blob = await proxyRes.blob();
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement("a");
-      a.href     = url;
-      a.download = `cardoso-config-${site.site_id}-${new Date().toISOString().slice(0,10)}.env`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cardoso-config-${site.site_id}-${new Date().toISOString().slice(0, 10)}.env`;
       a.click();
       URL.revokeObjectURL(url);
       toast({ title: ".env downloaded", description: site.site_name });
@@ -292,16 +328,11 @@ export default function HubBackups() {
   }, [toast]);
 
   return (
-    <div
-      className="min-h-screen p-6 bg-background"
-    >
+    <div className="min-h-screen p-6 bg-background">
       <div className="max-w-5xl mx-auto">
-        {/* Page header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
           <div className="flex items-center gap-3">
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15 border border-blue-500/30"
-            >
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-500/15 border border-blue-500/30">
               <HardDrive className="w-5 h-5 text-blue-400" />
             </div>
             <div>
@@ -333,7 +364,6 @@ export default function HubBackups() {
           </div>
         </div>
 
-        {/* Loading */}
         {isLoading && (
           <div className="flex items-center gap-3 text-slate-400 py-12 justify-center">
             <RefreshCw className="w-5 h-5 animate-spin" />
@@ -341,14 +371,12 @@ export default function HubBackups() {
           </div>
         )}
 
-        {/* Error */}
         {isError && (
           <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
             Failed to load backup status. Make sure you are logged in as an admin.
           </div>
         )}
 
-        {/* Content */}
         {!isLoading && !isError && (
           <>
             {sites.length === 0 ? (
@@ -360,7 +388,7 @@ export default function HubBackups() {
               <>
                 <SummaryBar sites={sites} />
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {sites.map(site => (
+                  {sites.map((site) => (
                     <SiteCard
                       key={site.site_id}
                       site={site}
@@ -373,7 +401,7 @@ export default function HubBackups() {
                   ))}
                 </div>
                 <p className="text-xs text-slate-600 mt-6 text-center">
-                  Auto-refreshes every 60s · Backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h
+                  Auto-refreshes every 60s · File backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h · SQL attention = failed, unavailable, or no successful full DAT backup within 24h
                 </p>
               </>
             )}

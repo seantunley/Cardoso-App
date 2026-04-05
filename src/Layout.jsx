@@ -98,6 +98,7 @@ export default function Layout({ children, currentPageName }) {
   });
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+  const [backupAttention, setBackupAttention] = useState(false);
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -124,6 +125,32 @@ export default function Layout({ children, currentPageName }) {
       .catch(() => {});
     return () => { isMounted = false; };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || !hubMode || !isAdmin) {
+      setBackupAttention(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollBackupAttention = async () => {
+      try {
+        const res = await fetch("/api/hub/backup-status", { credentials: "include" });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setBackupAttention(Boolean(data?.sql_attention));
+      } catch {
+        if (!cancelled) setBackupAttention(true);
+      }
+    };
+
+    pollBackupAttention();
+    const timer = setInterval(pollBackupAttention, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [currentUser, hubMode, isAdmin]);
 
   const triggerUpdate = async () => {
     if (!isAdmin || updateInstalling) return;
@@ -206,13 +233,14 @@ export default function Layout({ children, currentPageName }) {
         <nav className={cn("flex-1 space-y-1", isCollapsed ? "p-2 flex flex-col items-center" : "p-3")}>
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
+            const showAttention = item.page === "HubBackups" && backupAttention;
             return (
               <Link
                 key={item.page}
                 to={`/${item.page}`}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
-                  "flex items-center rounded-lg text-xs font-medium transition-all duration-200",
+                  "relative flex items-center rounded-lg text-xs font-medium transition-all duration-200",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -221,9 +249,13 @@ export default function Layout({ children, currentPageName }) {
                     : "gap-2.5 px-3 py-2 w-full"
                 )}
               >
-                <item.icon
-                  className="h-5 w-5 shrink-0"
-                />
+                <item.icon className="h-5 w-5 shrink-0" />
+                {showAttention && (
+                  <span className={cn(
+                    "absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card",
+                    isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
+                  )} />
+                )}
                 <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{item.name}</span>
               </Link>
             );
@@ -327,10 +359,12 @@ export default function Layout({ children, currentPageName }) {
       <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center border-t border-border bg-card px-2 py-2 lg:hidden overflow-x-auto">
         {visibleNavItems.map((item) => {
           const isActive = currentPageName === item.page;
+          const showAttention = item.page === "HubBackups" && backupAttention;
           return (
             <Link key={item.page} to={`/${item.page}`}
-              className={cn("flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all flex-shrink-0", isActive ? "text-foreground" : "text-muted-foreground")}>
+              className={cn("relative flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all flex-shrink-0", isActive ? "text-foreground" : "text-muted-foreground")}>
               <item.icon className="h-5 w-5" style={!isActive && item.color ? { color: item.color } : undefined} />
+              {showAttention && <span className="absolute top-1.5 right-2.5 inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card" />}
               <span className="text-xs font-medium truncate max-w-[60px] text-center">{item.name}</span>
             </Link>
           );
