@@ -20,6 +20,7 @@ const permissionGroups = [
       { key: "can_access_customer_balances", label: "Customer Balances", description: "View the customer balances page" },
       { key: "can_access_collections", label: "Collections", description: "Work the collections pipeline" },
       { key: "can_access_inventory", label: "Inventory", description: "View and browse inventory records" },
+      { key: "can_access_network_devices", label: "Network Devices", description: "View discovered network devices and bandwidth estimates" },
       { key: "can_access_hub_metrics", label: "Site Metrics", description: "View hub speedtest and machine health metrics" },
       { key: "can_access_hub_backups", label: "Site Backups", description: "View and manage site backups from the hub" },
       { key: "can_access_hub_trends", label: "Trends", description: "View multi-site reporting trends in the hub" },

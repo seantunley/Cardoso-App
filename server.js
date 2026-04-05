@@ -20,6 +20,7 @@ import { createReportingRouter } from './src/routes/reporting.js';
 import { createBackupRouter } from './src/routes/backup.js';
 import { createSystemRouter } from './src/routes/system.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
+import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 
@@ -57,6 +58,7 @@ app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createBackupRouter());
 app.use(createReportingRouter({ requireAuth }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
+app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
 if (process.env.HUB_MODE === 'true') {

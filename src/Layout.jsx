@@ -6,6 +6,7 @@ import {
   ChevronRight,
   KeyRound,
   ClipboardList,
+  Network,
 } from "lucide-react";
 
 // ── Custom nav SVG icons ──────────────────────────────────────────────────────
@@ -79,6 +80,7 @@ const navItems = [
   { name: "Customer Balances",   icon: IconCustomerBalances, page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Collections",         icon: PhoneCall,            page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Network Devices",     icon: Network,              page: "NetworkDevices",   permission: "can_access_network_devices" },
   { name: "Site Metrics",        icon: BarChart2,            page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
   { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },

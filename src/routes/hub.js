@@ -714,7 +714,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     try {
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
-               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
                can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
                can_access_records, can_access_reports, can_access_connections, can_access_settings,
                can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
@@ -735,6 +735,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         can_access_customer_balances: boolFromRow(u.can_access_customer_balances, true),
         can_access_collections: boolFromRow(u.can_access_collections, true),
         can_access_inventory: boolFromRow(u.can_access_inventory, true),
+        can_access_network_devices: boolFromRow(u.can_access_network_devices, false),
         can_access_hub_metrics: boolFromRow(u.can_access_hub_metrics, false),
         can_access_hub_backups: boolFromRow(u.can_access_hub_backups, false),
         can_access_hub_trends: boolFromRow(u.can_access_hub_trends, false),
@@ -763,7 +764,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
-             can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+             can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
@@ -920,6 +921,7 @@ export function createNonHubFallbackRouter() {
   router.get('/api/hub/sync-log', (req, res) => res.json([]));
   router.get('/api/hub/audit-log', (req, res) => res.json([]));
   router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
+  router.get('/api/hub/network-devices', (req, res) => res.json({ devices: [], samples: [], sites: [] }));
   return router;
 }
 
@@ -958,7 +960,7 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
@@ -973,6 +975,7 @@ export function createReceiveUsersRouter() {
               u.can_access_customer_balances !== false ? 1 : 0,
               u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_network_devices ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -992,7 +995,7 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
@@ -1006,6 +1009,7 @@ export function createReceiveUsersRouter() {
               u.can_access_customer_balances !== false ? 1 : 0,
               u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_network_devices ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -1037,11 +1041,11 @@ export function createReceiveUsersRouter() {
           }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
-              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -1053,6 +1057,7 @@ export function createReceiveUsersRouter() {
             u.can_access_customer_balances !== false ? 1 : 0,
             u.can_access_collections !== false ? 1 : 0,
             u.can_access_inventory !== false ? 1 : 0,
+            u.can_access_network_devices ? 1 : 0,
             u.can_access_hub_metrics ? 1 : 0,
             u.can_access_hub_backups ? 1 : 0,
             u.can_access_hub_trends ? 1 : 0,

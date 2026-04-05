@@ -558,6 +558,128 @@ function buildMigrations(db) {
       },
     },
 
+    {
+      version: 27,
+      name: 'network_devices_tables',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS network_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT,
+            site_slug TEXT,
+            site_name TEXT,
+            mac_address TEXT NOT NULL UNIQUE,
+            ip_address TEXT,
+            hostname TEXT,
+            vendor TEXT,
+            device_category TEXT,
+            classification_label TEXT,
+            classification_confidence TEXT,
+            classification_rationale TEXT,
+            discovery_source TEXT,
+            interface_alias TEXT,
+            interface_description TEXT,
+            neighbor_state TEXT,
+            first_seen TEXT,
+            last_seen TEXT,
+            last_scan_at TEXT,
+            active INTEGER DEFAULT 0,
+            recently_seen INTEGER DEFAULT 0,
+            last_bandwidth_estimate_kbps REAL,
+            last_bandwidth_confidence TEXT,
+            details_json TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_network_devices_last_seen ON network_devices(last_seen);
+          CREATE INDEX IF NOT EXISTS idx_network_devices_active ON network_devices(active);
+          CREATE INDEX IF NOT EXISTS idx_network_devices_category ON network_devices(device_category);
+
+          CREATE TABLE IF NOT EXISTS network_device_bandwidth_samples (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mac_address TEXT NOT NULL,
+            sampled_at TEXT NOT NULL,
+            estimated_kbps REAL,
+            confidence TEXT,
+            active INTEGER DEFAULT 0,
+            interface_total_kbps REAL,
+            active_device_count INTEGER,
+            created_at TEXT DEFAULT (datetime('now')),
+            UNIQUE(mac_address, sampled_at)
+          );
+          CREATE INDEX IF NOT EXISTS idx_network_device_bandwidth_samples_mac_time ON network_device_bandwidth_samples(mac_address, sampled_at DESC);
+
+          CREATE TABLE IF NOT EXISTS network_device_scan_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            status TEXT,
+            trigger_reason TEXT,
+            device_count INTEGER DEFAULT 0,
+            active_count INTEGER DEFAULT 0,
+            message TEXT
+          );
+        `);
+
+        if (process.env.HUB_MODE === 'true') {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS hub_network_devices (
+              site_id TEXT NOT NULL,
+              site_slug TEXT,
+              site_name TEXT,
+              mac_address TEXT NOT NULL,
+              ip_address TEXT,
+              hostname TEXT,
+              vendor TEXT,
+              device_category TEXT,
+              classification_label TEXT,
+              classification_confidence TEXT,
+              classification_rationale TEXT,
+              interface_alias TEXT,
+              interface_description TEXT,
+              neighbor_state TEXT,
+              first_seen TEXT,
+              last_seen TEXT,
+              last_scan_at TEXT,
+              active INTEGER DEFAULT 0,
+              recently_seen INTEGER DEFAULT 0,
+              last_bandwidth_estimate_kbps REAL,
+              last_bandwidth_confidence TEXT,
+              details_json TEXT,
+              pulled_at TEXT DEFAULT (datetime('now')),
+              PRIMARY KEY (site_id, mac_address)
+            );
+            CREATE INDEX IF NOT EXISTS idx_hub_network_devices_site ON hub_network_devices(site_id, active);
+
+            CREATE TABLE IF NOT EXISTS hub_network_device_bandwidth_samples (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              site_id TEXT NOT NULL,
+              site_slug TEXT,
+              mac_address TEXT NOT NULL,
+              sampled_at TEXT NOT NULL,
+              estimated_kbps REAL,
+              confidence TEXT,
+              active INTEGER DEFAULT 0,
+              interface_total_kbps REAL,
+              active_device_count INTEGER,
+              pulled_at TEXT DEFAULT (datetime('now')),
+              UNIQUE(site_id, mac_address, sampled_at)
+            );
+            CREATE INDEX IF NOT EXISTS idx_hub_network_device_bandwidth_site_mac_time ON hub_network_device_bandwidth_samples(site_id, mac_address, sampled_at DESC);
+          `);
+        }
+      },
+    },
+
+    {
+      version: 28,
+      name: 'feature_permission_network_devices',
+      up() {
+        ensureColumn(db, 'user', 'can_access_network_devices', 'INTEGER DEFAULT 0');
+        db.prepare(`UPDATE "user" SET can_access_network_devices = 1 WHERE role = 'admin'`).run();
+      },
+    },
+
   ];
 }
 

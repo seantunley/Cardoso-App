@@ -10,6 +10,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 import { buildStatements } from '../db/statements.js';
+import { syncHubNetworkDevicesForSite } from './networkDevices.js';
 
 function checkBackupIntegrity(siteId, filePath) {
   let backupDb = null;
@@ -296,6 +297,13 @@ async function syncSite(site) {
 
     // Speedtest results
     await syncSpeedtest(site);
+
+    // Network devices snapshot
+    try {
+      await syncHubNetworkDevicesForSite(site);
+    } catch (err) {
+      console.error(`[HUB NETWORK DEVICES] ${site.slug}: ${err.message}`);
+    }
 
     // Update hub_sites
     db.prepare(`

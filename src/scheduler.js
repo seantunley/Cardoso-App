@@ -1,6 +1,7 @@
 import cron from 'node-cron';
 import db from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
+import { scanNetworkDevicesNow } from './services/networkDevices.js';
 
 export async function runSpeedTestNow() {
   const { default: speedTest } = await import('speedtest-net');
@@ -98,6 +99,11 @@ export function startSchedulers() {
   cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
   if (process.env.HUB_MODE !== 'true') {
     cronTasks.push(cron.schedule('0 7,10,13,16 * * *', runSpeedTest));
+    cronTasks.push(cron.schedule('0 7,9,11,13,15,17 * * *', () => {
+      scanNetworkDevicesNow({ triggerReason: 'scheduled' }).catch((error) => {
+        console.error('[network-devices] scheduled scan failed:', error.message);
+      });
+    }));
   }
 
   intervals.push(setInterval(async () => {
