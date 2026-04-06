@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp } from "lucide-react";
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   CartesianGrid,
   Legend,
@@ -80,10 +81,15 @@ function ChartCard({ title, subtitle, data, sites, valueSuffix = "", valueDomain
       </div>
       <div className="mt-4 flex flex-wrap gap-3">
         {sites.map((site, index) => (
-          <div key={site} className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-            {site}
-          </div>
+          <UITooltip key={site}>
+            <TooltipTrigger asChild>
+              <div className="inline-flex items-center gap-2 text-xs text-muted-foreground cursor-default">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
+                {site}
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>{title} trend line for site: {site}</TooltipContent>
+          </UITooltip>
         ))}
       </div>
     </div>

@@ -1,6 +1,32 @@
 import { useQuery } from "@tanstack/react-query";
 import { ClipboardList, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+const ACTION_TIPS = {
+  push_users:       "Users were pushed from Hub to a site",
+  resync:           "A full data resync was triggered for a site",
+  force_resync:     "A forced full resync was triggered, clearing existing hub records",
+  pull_backups:     "Backup files were pulled from site(s) to the Hub",
+  sync:             "A scheduled or manual sync was run",
+  delete_backup:    "A backup file was deleted",
+  push_flag_rules:  "Auto-flag rules were pushed to a site",
+  update_settings:  "Hub settings were updated",
+};
+
+function ActionBadge({ action }) {
+  const tip = ACTION_TIPS[action] || `Action: ${action}`;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex items-center rounded-full border border-border bg-muted/50 px-2 py-0.5 text-xs font-medium text-foreground cursor-default">
+          {action || "—"}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
+  );
+}
 
 async function fetchHubAuditLog() {
   const response = await fetch("/api/hub/audit-log?limit=100", { credentials: "include" });
@@ -70,7 +96,7 @@ export default function HubAuditLog() {
                 <tr className="border-b border-border bg-muted/40">
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Time</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Action</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">By</th>
+                  <Tooltip><TooltipTrigger asChild><th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground cursor-default">By</th></TooltipTrigger><TooltipContent>User account that performed this action</TooltipContent></Tooltip>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Target</th>
                   <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">Detail</th>
                 </tr>
@@ -79,7 +105,7 @@ export default function HubAuditLog() {
                 {data.map((row) => (
                   <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/20">
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(row.created_at)}</td>
-                    <td className="px-4 py-3 font-medium text-foreground">{row.action || "—"}</td>
+                    <td className="px-4 py-3 font-medium text-foreground"><ActionBadge action={row.action} /></td>
                     <td className="px-4 py-3 text-muted-foreground">{row.performed_by || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">{row.target || "—"}</td>
                     <td className="px-4 py-3 text-muted-foreground">{row.detail || "—"}</td>
