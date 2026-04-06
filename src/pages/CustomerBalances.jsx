@@ -4,16 +4,22 @@ import { useQuery } from "@tanstack/react-query";
 import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
 import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
 function CreditBadge({ row, creditLogicConfig }) {
-  const verdict = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG).verdict, [row, creditLogicConfig]);
-  const meta = CREDIT_BADGE_META[verdict] || CREDIT_BADGE_META.caution;
+  const result = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG), [row, creditLogicConfig]);
+  const meta = CREDIT_BADGE_META[result.verdict] || CREDIT_BADGE_META.caution;
 
   return (
-    <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold ${meta.className}`}>
-      {meta.label}
-    </span>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold cursor-default ${meta.className}`}>
+          {meta.label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Score: {result.score ?? "—"}/100 — {meta.label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -107,11 +113,18 @@ const FLAG_DOT = {
 function FlagDot({ color, reason }) {
   if (!color || color === "none") return null;
   const cls = FLAG_DOT[color] || "bg-gray-400";
-  return <span title={reason || color} className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 ${cls}`} />;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={`inline-block h-2.5 w-2.5 rounded-full flex-shrink-0 cursor-default ${cls}`} />
+      </TooltipTrigger>
+      <TooltipContent>{reason ? `${color} flag: ${reason}` : `${color} flag`}</TooltipContent>
+    </Tooltip>
+  );
 }
 
-function FilterToggle({ active, onClick, children }) {
-  return (
+function FilterToggle({ active, onClick, children, tooltip }) {
+  const btn = (
     <button
       onClick={onClick}
       className={`min-h-[42px] rounded-xl border px-3 py-2 text-xs font-medium transition-colors ${
@@ -122,10 +135,24 @@ function FilterToggle({ active, onClick, children }) {
       {children}
     </button>
   );
+  if (!tooltip) return btn;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
+  );
 }
 
-function AgeBucketPill({ active, onClick, children }) {
-  return (
+const AGE_BUCKET_TOOLTIPS = {
+  all: "Show all customers with outstanding balances",
+  "7-13": "Oldest unpaid invoice is 7–13 days old",
+  "14-20": "Oldest unpaid invoice is 14–20 days old",
+  "21+": "Oldest unpaid invoice is 21 or more days old",
+};
+
+function AgeBucketPill({ active, onClick, children, value }) {
+  const btn = (
     <button
       type="button"
       onClick={onClick}
@@ -137,6 +164,14 @@ function AgeBucketPill({ active, onClick, children }) {
     >
       {children}
     </button>
+  );
+  const tip = AGE_BUCKET_TOOLTIPS[value];
+  if (!tip) return btn;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
+      <TooltipContent>{tip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -419,6 +454,7 @@ export default function CustomerBalances() {
                       {AGE_BUCKETS.map((bucket) => (
                         <AgeBucketPill
                           key={bucket.value}
+                          value={bucket.value}
                           active={ageBucket === bucket.value}
                           onClick={() => {
                             setAgeBucket(bucket.value);
@@ -448,7 +484,11 @@ export default function CustomerBalances() {
                     </div>
                   )}
 
-                  <FilterToggle active={hideInvoiceMatchesBalance} onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}>
+                  <FilterToggle
+                    active={hideInvoiceMatchesBalance}
+                    onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}
+                    tooltip="Hide customers where the latest invoice amount equals their outstanding balance"
+                  >
                     {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
                   </FilterToggle>
                 </div>
@@ -509,13 +549,13 @@ export default function CustomerBalances() {
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-6">#</th>
-                    <th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
-                    <th onClick={() => handleSort("last_invoice_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Invoice<SortArrow field="last_invoice_date" /></th>
-                    <th onClick={() => handleSort("last_receipt_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Receipt<SortArrow field="last_receipt_date" /></th>
-                    <th onClick={() => handleSort("outstanding_balance")} className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Outstanding Balance<SortArrow field="outstanding_balance" /></th>
-                    <th onClick={() => handleSort("credit")} className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Credit<SortArrow field="credit" /></th>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_invoice_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Invoice<SortArrow field="last_invoice_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent unpaid invoice — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_receipt_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Receipt<SortArrow field="last_receipt_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent payment received — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("outstanding_balance")} className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Outstanding Balance<SortArrow field="outstanding_balance" /></th></TooltipTrigger><TooltipContent>Total amount currently owed — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("credit")} className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Credit<SortArrow field="credit" /></th></TooltipTrigger><TooltipContent>Credit verdict based on payment history and outstanding balance — click to sort</TooltipContent></Tooltip>
                   </tr>
                 </thead>
                 <tbody>

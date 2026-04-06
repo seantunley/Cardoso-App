@@ -3,6 +3,7 @@ import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Filter } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function FilterPill({ active, onClick, children }) {
   return (
@@ -20,8 +21,8 @@ function FilterPill({ active, onClick, children }) {
   );
 }
 
-function FilterToggle({ active, onClick, children }) {
-  return (
+function FilterToggle({ active, onClick, children, tooltip }) {
+  const btn = (
     <button
       onClick={onClick}
       className={`min-h-[36px] rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
@@ -31,6 +32,13 @@ function FilterToggle({ active, onClick, children }) {
     >
       {children}
     </button>
+  );
+  if (!tooltip) return btn;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{btn}</TooltipTrigger>
+      <TooltipContent>{tooltip}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -221,14 +229,19 @@ export default function Inventory() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={exportCSV}
-              disabled={rows.length === 0}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export CSV
-            </button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={exportCSV}
+                  disabled={rows.length === 0}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Export CSV
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Export current filtered view to CSV</TooltipContent>
+            </Tooltip>
             <button
               onClick={() => refetch()}
               disabled={isFetching}
@@ -311,10 +324,10 @@ export default function Inventory() {
 
               {/* Toggle filters */}
               <div className="flex flex-col gap-2">
-                <FilterToggle active={hideZeroQty} onClick={() => setHideZeroQty((v) => !v)}>
+                <FilterToggle active={hideZeroQty} onClick={() => setHideZeroQty((v) => !v)} tooltip="Hide items with no stock on hand">
                   {hideZeroQty ? "⊘ " : ""}Hide zero qty
                 </FilterToggle>
-                <FilterToggle active={highlightBelowCost} onClick={() => setHighlightBelowCost((v) => !v)}>
+                <FilterToggle active={highlightBelowCost} onClick={() => setHighlightBelowCost((v) => !v)} tooltip="Highlight rows where the selling price is at or below the last cost">
                   {highlightBelowCost ? "⊘ " : ""}Highlight price ≤ cost
                 </FilterToggle>
               </div>
@@ -399,15 +412,15 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-border bg-card">
-              <th onClick={() => onSort("item_number")} className={`${sh} text-left`}>Item Number<SA field="item_number" /></th>
-              <th onClick={() => onSort("item_description")} className={`${sh} text-left`}>Description<SA field="item_description" /></th>
-              <th onClick={() => onSort("qty_on_hand")} className={`${sh} text-right`}>Qty on Hand<SA field="qty_on_hand" /></th>
-              <th onClick={() => onSort("last_cost")} className={`${sh} text-right`}>Last Cost<SA field="last_cost" /></th>
-              <th onClick={() => onSort("price")} className={`${sh} text-right`}>Price<SA field="price" /></th>
-              <th onClick={() => onSort("price_list")} className={`${sh} text-right`}>Price List<SA field="price_list" /></th>
-              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_number")} className={`${sh} text-left`}>Item Number<SA field="item_number" /></th></TooltipTrigger><TooltipContent>Unique stock item code — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_description")} className={`${sh} text-left`}>Description<SA field="item_description" /></th></TooltipTrigger><TooltipContent>Item name or description — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("qty_on_hand")} className={`${sh} text-right`}>Qty on Hand<SA field="qty_on_hand" /></th></TooltipTrigger><TooltipContent>Current stock quantity on hand — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("last_cost")} className={`${sh} text-right`}>Last Cost<SA field="last_cost" /></th></TooltipTrigger><TooltipContent>Most recent purchase cost per unit — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price")} className={`${sh} text-right`}>Price<SA field="price" /></th></TooltipTrigger><TooltipContent>Current selling price per unit — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price_list")} className={`${sh} text-right`}>Price List<SA field="price_list" /></th></TooltipTrigger><TooltipContent>Price list this item belongs to — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th></TooltipTrigger><TooltipContent>Stocking unit of measure (e.g. Each, Box, Carton)</TooltipContent></Tooltip>
               {hubMode && (
-                <th onClick={() => onSort("site_name")} className={`${sh} text-left`}>Site<SA field="site_name" /></th>
+                <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("site_name")} className={`${sh} text-left`}>Site<SA field="site_name" /></th></TooltipTrigger><TooltipContent>Site this inventory record belongs to — click to sort</TooltipContent></Tooltip>
               )}
             </tr>
           </thead>

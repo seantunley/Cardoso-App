@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function fmtBytes(b) {
   if (b == null) return "—";
@@ -112,18 +113,46 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
           </div>
 
           <div className="flex flex-wrap gap-2 sm:justify-end">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${meta.cls}`}>
-              <Icon className="h-3.5 w-3.5" />
-              App {meta.label}
-            </span>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sqlMeta.cls}`}>
-              <SqlIcon className="h-3.5 w-3.5" />
-              {sqlMeta.label}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${meta.cls}`}>
+                  <Icon className="h-3.5 w-3.5" />
+                  App {meta.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{
+                site.status === "ok" ? "App backup is current and healthy" :
+                site.status === "warning" ? "App backup is overdue — check if scheduled task is running" :
+                site.status === "stale" ? "App backup is stale — may not have run recently" :
+                site.status === "never" ? "No app backup has been recorded for this site" :
+                site.status === "error" ? "App backup encountered an error" :
+                site.status === "unreachable" ? "Site is offline or unreachable" :
+                "App backup status unknown"
+              }</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${sqlMeta.cls}`}>
+                  <SqlIcon className="h-3.5 w-3.5" />
+                  {sqlMeta.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{
+                sqlHealth.status === "ok" ? "SQL backup is current" :
+                sqlHealth.status === "stale" ? "SQL backup is overdue" :
+                sqlHealth.status === "failed" ? "SQL backup job failed — check SQL Server agent" :
+                "SQL backup status unavailable for this site"
+              }</TooltipContent>
+            </Tooltip>
             {integrityMeta && (
-              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
-                Hub {integrityMeta.label}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${integrityMeta.cls}`}>
+                    Hub {integrityMeta.label}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{integrityMeta.label === "OK" ? "Hub backup copy is intact" : "Hub backup copy may be corrupt — re-pull recommended"}</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -417,18 +446,22 @@ export default function HubBackups() {
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePullNow}
-              disabled={pullingNow}
-              className="text-xs h-10 border-blue-500/40 text-blue-300"
-              title="Pull backups from all sites right now"
-            >
-              {pullingNow
-                ? <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />Pulling…</>
-                : <><CloudDownload className="w-3.5 h-3.5 mr-1.5" />Pull Now</>}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePullNow}
+                  disabled={pullingNow}
+                  className="text-xs h-10 border-blue-500/40 text-blue-300"
+                >
+                  {pullingNow
+                    ? <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />Pulling…</>
+                    : <><CloudDownload className="w-3.5 h-3.5 mr-1.5" />Pull Now</>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Trigger an immediate backup pull from all sites</TooltipContent>
+            </Tooltip>
             <Button
               variant="outline"
               size="sm"

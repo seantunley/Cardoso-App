@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, Edit2, Lock, Zap, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "date-fns";
 
@@ -76,7 +77,12 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
 
               {/* Notes indicator */}
               {record.notes && (
-                <MessageSquare className="w-3.5 h-3.5 text-muted-foreground shrink-0" title="Has notes" />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <MessageSquare className="w-3.5 h-3.5 text-muted-foreground shrink-0 cursor-default" />
+                  </TooltipTrigger>
+                  <TooltipContent>This record has notes</TooltipContent>
+                </Tooltip>
               )}
 
               {/* Source table — subtle */}
@@ -88,29 +94,38 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
 
               {/* Auto-flag reason pill */}
               {record.auto_flagged && record.flag_reason && (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium leading-none shrink-0",
-                    flagPillColors[color]
-                  )}
-                  title={record.flag_reason}
-                >
-                  <Zap className="w-2.5 h-2.5 shrink-0" />
-                  <span className="truncate max-w-[160px]">{record.flag_reason}</span>
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium leading-none shrink-0 cursor-default",
+                        flagPillColors[color]
+                      )}
+                    >
+                      <Zap className="w-2.5 h-2.5 shrink-0" />
+                      <span className="truncate max-w-[160px]">{record.flag_reason}</span>
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Auto-flagged by rule: {record.flag_reason}</TooltipContent>
+                </Tooltip>
               )}
 
               {/* Auto-flagged but no reason — show a minimal indicator */}
               {record.auto_flagged && !record.flag_reason && (
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium leading-none shrink-0",
-                    flagPillColors[color]
-                  )}
-                >
-                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", flagDotColors[color])} />
-                  Auto-flagged
-                </span>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-medium leading-none shrink-0 cursor-default",
+                        flagPillColors[color]
+                      )}
+                    >
+                      <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", flagDotColors[color])} />
+                      Auto-flagged
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent>Automatically flagged by a system rule</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -122,40 +137,52 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
             </span>
 
             {canEdit ? (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                onClick={(e) => { e.stopPropagation(); onEdit(record); }}
-                title="Edit record"
-              >
-                <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                    onClick={(e) => { e.stopPropagation(); onEdit(record); }}
+                  >
+                    <Edit2 className="w-3.5 h-3.5 text-muted-foreground" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Edit this record</TooltipContent>
+              </Tooltip>
             ) : (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
-                disabled
-                title="You don't have edit permission"
-              >
-                <Lock className="w-3.5 h-3.5 text-muted-foreground/40" />
-              </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
+                    disabled
+                  >
+                    <Lock className="w-3.5 h-3.5 text-muted-foreground/40" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>You don&apos;t have permission to edit records</TooltipContent>
+              </Tooltip>
             )}
 
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-9 w-9 sm:h-7 sm:w-7"
-              title={expanded ? "Hide source data" : "Show source data"}
-              onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
-            >
-              {expanded ? (
-                <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
-              ) : (
-                <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-              )}
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 sm:h-7 sm:w-7"
+                  onClick={(e) => { e.stopPropagation(); setExpanded(!expanded); }}
+                >
+                  {expanded ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                  )}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{expanded ? "Hide raw source data" : "Show raw source data fields"}</TooltipContent>
+            </Tooltip>
           </div>
         </div>
 
