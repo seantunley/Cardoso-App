@@ -1,10 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer,
-  ComposedChart, Scatter,
-} from "recharts";
-import { Card, CardContent } from "@/components/ui/card";
+
+
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,18 +18,15 @@ import {
   Search,
   Loader2,
   User,
-  Calendar,
   Flag,
   Zap,
   Shield,
   Trash2,
-  History,
   CheckCircle,
   ShieldCheck,
   AlertTriangle,
   XCircle,
   Clock,
-  ChevronDown,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";

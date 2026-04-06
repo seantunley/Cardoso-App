@@ -5,8 +5,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload,
-  Server, ShieldCheck,
+  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
