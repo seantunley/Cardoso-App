@@ -1,7 +1,7 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.3.28",
+  "version": "2026.3.29",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",

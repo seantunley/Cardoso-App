@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power,
+  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -269,6 +269,28 @@ export default function HubBackups() {
   const [downloadingConfig, setDownloadingConfig] = useState(null);
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [togglingSync, setTogglingSync] = useState(false);
+  const [pullingNow, setPullingNow] = useState(false);
+
+  const handlePullNow = useCallback(async () => {
+    setPullingNow(true);
+    try {
+      const res = await fetch("/api/hub/pull-backups-now", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      toast({ title: "Backup pull started", description: "Hub is pulling backups from all sites now. Refresh in a moment." });
+      // Refresh status after a short delay to show updated results
+      setTimeout(() => refetch(), 8000);
+    } catch (err) {
+      toast({ title: "Pull failed", description: err.message, variant: "destructive" });
+    } finally {
+      setPullingNow(false);
+    }
+  }, [toast, refetch]);
 
   useEffect(() => {
     fetchBackupSettings().then((d) => setSyncEnabled(d.backup_sync_enabled)).catch(() => {});
@@ -372,6 +394,18 @@ export default function HubBackups() {
             >
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handlePullNow}
+              disabled={pullingNow}
+              className="text-xs h-10 border-blue-500/40 text-blue-300"
+              title="Pull backups from all sites right now"
+            >
+              {pullingNow
+                ? <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />Pulling…</>
+                : <><CloudDownload className="w-3.5 h-3.5 mr-1.5" />Pull Now</>}
             </Button>
             <Button
               variant="outline"

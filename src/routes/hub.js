@@ -12,7 +12,7 @@ import path from 'path';
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, syncSpeedtest, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
 
 export function createHubRouter({ requireAuth, requireAdmin, requirePermission }) {
   const stmts = buildStatements(db);
@@ -118,6 +118,25 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
     stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
     res.json({ ok: true, backup_sync_enabled });
+  });
+
+  // POST /api/hub/pull-backups-now
+  // Immediately triggers a Hub backup pull from all sites (same as the nightly cron).
+  let backupPullInProgress = false;
+  router.post('/api/hub/pull-backups-now', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
+    if (backupPullInProgress) {
+      return res.status(409).json({ error: 'A backup pull is already in progress' });
+    }
+    backupPullInProgress = true;
+    res.json({ ok: true, message: 'Backup pull started' });
+    try {
+      await runHubBackupPull();
+      console.log('[hub] Manual backup pull completed');
+    } catch (err) {
+      console.error('[hub] Manual backup pull failed:', err.message);
+    } finally {
+      backupPullInProgress = false;
+    }
   });
 
   // GET /api/hub/proxy-backup?site_id=xxx
