@@ -981,27 +981,32 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {[
-                ["Payment term days", ["thresholds", "paymentTermDays"]],
-                ["Breach days", ["thresholds", "breachDays"]],
-                ["Approaching breach days", ["thresholds", "approachingBreachDays"]],
-                ["Caution below score", ["thresholds", "cautionScoreBelow"]],
-                ["Hold below score", ["thresholds", "holdScoreBelow"]],
-                ["Dormant threshold days", ["thresholds", "dormantThresholdDays"]],
-              ].map(([label, path]) => (
+                ["Payment term days", ["thresholds", "paymentTermDays"], "Expected payment window. Invoices paid within this many days are considered on time and score positively."],
+                ["Breach days", ["thresholds", "breachDays"], "Hard overdue limit. Any unpaid invoice older than this forces a Hold verdict, regardless of score."],
+                ["Approaching breach days", ["thresholds", "approachingBreachDays"], "Warning zone before the hard breach. Unpaid invoices in this range deduct points and trigger a caution flag."],
+                ["Caution below score", ["thresholds", "cautionScoreBelow"], "Score threshold for the Caution verdict. Customers scoring below this value are shown as Caution instead of Approve."],
+                ["Hold below score", ["thresholds", "holdScoreBelow"], "Reserved for future use. Currently Hold is triggered by breach days, not score alone."],
+                ["Dormant threshold days", ["thresholds", "dormantThresholdDays"], "Inactivity cutoff. Customers with no invoice or receipt activity beyond this many days are flagged as Dormant instead of Approve."],
+              ].map(([label, path, hint]) => (
                 <div key={path.join(".")} className="space-y-1.5">
                   <Label>{label}</Label>
                   <Input type="number" value={path.reduce((acc, key) => acc?.[key], draft) ?? ""} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(path, Number(e.target.value || 0))} />
+                  {hint && <p className="text-xs text-muted-foreground leading-snug">{hint}</p>}
                 </div>
               ))}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm">
-                <Checkbox checked={Boolean(draft.outstandingBalanceCap.enabled)} disabled={!hubMode || !canManageRules} onCheckedChange={(checked) => setNested(["outstandingBalanceCap", "enabled"], Boolean(checked))} />
-                Enable exposure cap deduction
-              </label>
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm">
+                  <Checkbox checked={Boolean(draft.outstandingBalanceCap.enabled)} disabled={!hubMode || !canManageRules} onCheckedChange={(checked) => setNested(["outstandingBalanceCap", "enabled"], Boolean(checked))} />
+                  Enable exposure cap deduction
+                </label>
+                <p className="text-xs text-muted-foreground leading-snug px-1">When enabled, a customer whose outstanding balance exceeds their average invoice multiplied by the cap multiplier below receives a score deduction.</p>
+              </div>
               <div className="space-y-1.5">
                 <Label>Exposure cap multiplier</Label>
                 <Input type="number" value={draft.outstandingBalanceCap.multiplier} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(["outstandingBalanceCap", "multiplier"], Number(e.target.value || 0))} />
+                <p className="text-xs text-muted-foreground leading-snug">e.g. a multiplier of 3 means: if the outstanding balance is more than 3× their average invoice, points are deducted. Lower = stricter.</p>
               </div>
             </div>
           </CardContent>
