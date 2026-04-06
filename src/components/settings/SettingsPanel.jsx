@@ -23,8 +23,9 @@ import { Label } from "@/components/ui/label";
 import {
   Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
   RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
-  Download, Upload, GitBranch, Send,
+  Download, Upload, GitBranch, Send, Info,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Sub-components
 import AutoFlagRuleForm from "@/components/settings/AutoFlagRuleForm";
@@ -981,27 +982,42 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               {[
-                ["Payment term days", ["thresholds", "paymentTermDays"]],
-                ["Breach days", ["thresholds", "breachDays"]],
-                ["Approaching breach days", ["thresholds", "approachingBreachDays"]],
-                ["Caution below score", ["thresholds", "cautionScoreBelow"]],
-                ["Hold below score", ["thresholds", "holdScoreBelow"]],
-                ["Dormant threshold days", ["thresholds", "dormantThresholdDays"]],
-              ].map(([label, path]) => (
+                ["Payment term days", ["thresholds", "paymentTermDays"], "Expected payment window. Invoices paid within this many days are considered on time and score positively."],
+                ["Breach days", ["thresholds", "breachDays"], "Hard overdue limit. Any unpaid invoice older than this forces a Hold verdict, regardless of score."],
+                ["Approaching breach days", ["thresholds", "approachingBreachDays"], "Warning zone before the hard breach. Unpaid invoices in this range deduct points and trigger a caution flag."],
+                ["Caution below score", ["thresholds", "cautionScoreBelow"], "Score threshold for the Caution verdict. Customers scoring below this value are shown as Caution instead of Approve."],
+                ["Hold below score", ["thresholds", "holdScoreBelow"], "Reserved for future use. Currently Hold is triggered by breach days, not score alone."],
+                ["Dormant threshold days", ["thresholds", "dormantThresholdDays"], "Inactivity cutoff. Customers with no invoice or receipt activity beyond this many days are flagged as Dormant instead of Approve."],
+              ].map(([label, path, hint]) => (
                 <div key={path.join(".")} className="space-y-1.5">
-                  <Label>{label}</Label>
+                  <div className="flex items-center gap-1">
+                    <Label>{label}</Label>
+                    {hint && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[260px]">{hint}</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
                   <Input type="number" value={path.reduce((acc, key) => acc?.[key], draft) ?? ""} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(path, Number(e.target.value || 0))} />
+                  {hint && <p className="text-xs text-muted-foreground leading-snug">{hint}</p>}
                 </div>
               ))}
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm">
-                <Checkbox checked={Boolean(draft.outstandingBalanceCap.enabled)} disabled={!hubMode || !canManageRules} onCheckedChange={(checked) => setNested(["outstandingBalanceCap", "enabled"], Boolean(checked))} />
-                Enable exposure cap deduction
-              </label>
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-2 rounded-xl border border-border p-3 text-sm">
+                  <Checkbox checked={Boolean(draft.outstandingBalanceCap.enabled)} disabled={!hubMode || !canManageRules} onCheckedChange={(checked) => setNested(["outstandingBalanceCap", "enabled"], Boolean(checked))} />
+                  Enable exposure cap deduction
+                </label>
+                <p className="text-xs text-muted-foreground leading-snug px-1">When enabled, a customer whose outstanding balance exceeds their average invoice multiplied by the cap multiplier below receives a score deduction.</p>
+              </div>
               <div className="space-y-1.5">
                 <Label>Exposure cap multiplier</Label>
                 <Input type="number" value={draft.outstandingBalanceCap.multiplier} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(["outstandingBalanceCap", "multiplier"], Number(e.target.value || 0))} />
+                <p className="text-xs text-muted-foreground leading-snug">e.g. a multiplier of 3 means: if the outstanding balance is more than 3× their average invoice, points are deducted. Lower = stricter.</p>
               </div>
             </div>
           </CardContent>
@@ -1086,13 +1102,54 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
           </CardContent>
         </Card>
       ) : (
+        <>
         <Card className="border-border bg-card">
-          <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
-            <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
-            <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
-            <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
+          <CardContent className="space-y-4 p-4">
+            <div>
+              <h4 className="text-sm font-semibold text-foreground">How scoring works</h4>
+              <p className="text-xs text-muted-foreground mt-0.5">A walk-through of the logic applied to every customer analysis.</p>
+            </div>
+            <ol className="space-y-3 text-xs text-muted-foreground list-none">
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-emerald-500/15 text-emerald-400 flex items-center justify-center font-semibold text-[10px]">1</span>
+                <div><span className="font-medium text-foreground">Zero balance → instant Approve.</span> If the outstanding balance is below R1 the customer passes immediately. Score is 100. Manual red/orange flags can still override this.</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-slate-500/15 text-slate-300 flex items-center justify-center font-semibold text-[10px]">2</span>
+                <div><span className="font-medium text-foreground">No history with a balance → Caution.</span> If there are no invoices or receipts on record but the customer has an outstanding balance, a fixed low score is applied and the verdict is Caution.</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-red-500/15 text-red-400 flex items-center justify-center font-semibold text-[10px]">3</span>
+                <div><span className="font-medium text-foreground">Hard breach gate.</span> If the oldest unpaid invoice is older than <em>Breach days</em>, the verdict is forced to Hold — no score calculation matters. This is a hard block.</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-amber-500/15 text-amber-400 flex items-center justify-center font-semibold text-[10px]">4</span>
+                <div><span className="font-medium text-foreground">Score deductions (start at 100).</span> Points are deducted for: unpaid invoices approaching breach, average payment lag above terms, outstanding balance exceeding the exposure cap, and historical red/orange flag events. Multiple deductions stack.</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-sky-500/15 text-sky-400 flex items-center justify-center font-semibold text-[10px]">5</span>
+                <div><span className="font-medium text-foreground">Verdict from score.</span> Score below <em>Caution threshold</em> → Caution. Above it → Approve. (<em>Hold below score</em> is reserved for future use; Hold is currently breach-only.)</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-purple-500/15 text-purple-400 flex items-center justify-center font-semibold text-[10px]">6</span>
+                <div><span className="font-medium text-foreground">Dormant check.</span> If the customer would Approve but has had no invoice or receipt activity for longer than <em>Dormant threshold days</em>, the verdict becomes Dormant instead — a prompt to re-evaluate before extending credit.</div>
+              </li>
+              <li className="flex gap-2.5">
+                <span className="shrink-0 w-5 h-5 rounded-full bg-slate-500/15 text-slate-300 flex items-center justify-center font-semibold text-[10px]">7</span>
+                <div><span className="font-medium text-foreground">Manual flag overrides (final pass).</span> A manually applied red flag forces Hold. A manually applied orange flag downgrades Approve to Caution. Auto-flags do not trigger these overrides — only human-set flags do.</div>
+              </li>
+            </ol>
           </CardContent>
         </Card>
+
+      <Card className="border-border bg-card">
+        <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+          <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
+          <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
+          <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
+        </CardContent>
+      </Card>
+      </>
       )}
     </div>
   );

@@ -50,6 +50,10 @@ function getBalanceAgeDays(record) {
   today.setHours(0, 0, 0, 0);
 
   const ages = [1, 2, 3, 4, 5]
+    .filter((index) => {
+      const amt = record?.[`last_unpaid_invoice_${index}_amount`];
+      return amt !== undefined && amt !== null && amt !== '' && amt !== '0' && parseAmount(amt) > 0;
+    })
     .map((index) => parseBalanceDate(record?.[`last_unpaid_invoice_${index}_date`]))
     .filter(Boolean)
     .map((date) => Math.floor((today - date) / 86400000))

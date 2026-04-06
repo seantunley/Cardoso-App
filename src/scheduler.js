@@ -1,5 +1,7 @@
 import cron from 'node-cron';
-import db from './db/index.js';
+import path from 'path';
+import { mkdirSync } from 'fs';
+import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
@@ -95,10 +97,46 @@ async function runScheduledSyncCycle() {
   }
 }
 
+// --- Local DB backup (site-side, replaces backup.ps1 dependency) ---
+export async function runLocalBackup() {
+  try {
+    const resolvedDbPath = path.resolve(dbPath);
+    const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
+    mkdirSync(backupDir, { recursive: true });
+
+    const siteId = process.env.SITE_ID || 'site';
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
+
+    // better-sqlite3 async backup — safe with live writes
+    await db.backup(destPath);
+    console.log(`[backup] Saved to ${destPath}`);
+
+    // Prune: keep last 30
+    const { readdirSync, statSync, unlinkSync } = await import('fs');
+    const files = readdirSync(backupDir)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    const keep = parseInt(process.env.BACKUP_KEEP_COUNT || '30', 10);
+    files.slice(keep).forEach((f) => {
+      try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
+    });
+    if (files.length > keep) {
+      console.log(`[backup] Pruned ${files.length - keep} old backup(s), keeping ${keep}`);
+    }
+  } catch (err) {
+    console.error('[backup] Failed:', err.message);
+  }
+}
+
 export function startSchedulers() {
   cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle));
   cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
   if (process.env.HUB_MODE !== 'true') {
+    // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
+    cronTasks.push(cron.schedule('0 2 * * *', runLocalBackup));
     cronTasks.push(cron.schedule('0 7,10,13,16 * * *', runSpeedTest));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
     setTimeout(() => {

@@ -88,10 +88,13 @@ export default function FlaggedCustomersModal({
 
   useEffect(() => {
     if (!fetchedPage) return;
+    // `open` is included so that a cache hit (fetchedPage unchanged) still
+    // re-populates the list after the reset effect clears pagedCustomers.
     setPagedCustomers((current) => (page === 0 ? fetchedPage.records : [...current, ...fetchedPage.records]));
     setTotalCount(fetchedPage.total);
     setHasMore(fetchedPage.hasMore);
-  }, [fetchedPage, page]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fetchedPage, page, open]);
 
   const displayCustomers = externalCustomers ?? pagedCustomers;
   const effectiveTotal = externalCustomers ? externalCustomers.length : totalCount;

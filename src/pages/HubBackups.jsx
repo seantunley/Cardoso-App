@@ -5,10 +5,12 @@ import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power,
+  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload,
+  Server, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function fmtBytes(b) {
   if (b == null) return "—";
@@ -111,18 +113,46 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
           </div>
 
           <div className="flex flex-wrap gap-2 sm:justify-end">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${meta.cls}`}>
-              <Icon className="h-3.5 w-3.5" />
-              App {meta.label}
-            </span>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ${sqlMeta.cls}`}>
-              <SqlIcon className="h-3.5 w-3.5" />
-              {sqlMeta.label}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${meta.cls}`}>
+                  <Icon className="h-3.5 w-3.5" />
+                  App {meta.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{
+                site.status === "ok" ? "App backup is current and healthy" :
+                site.status === "warning" ? "App backup is overdue — check if scheduled task is running" :
+                site.status === "stale" ? "App backup is stale — may not have run recently" :
+                site.status === "never" ? "No app backup has been recorded for this site" :
+                site.status === "error" ? "App backup encountered an error" :
+                site.status === "unreachable" ? "Site is offline or unreachable" :
+                "App backup status unknown"
+              }</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${sqlMeta.cls}`}>
+                  <SqlIcon className="h-3.5 w-3.5" />
+                  {sqlMeta.label}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{
+                sqlHealth.status === "ok" ? "SQL backup is current" :
+                sqlHealth.status === "stale" ? "SQL backup is overdue" :
+                sqlHealth.status === "failed" ? "SQL backup job failed — check SQL Server agent" :
+                "SQL backup status unavailable for this site"
+              }</TooltipContent>
+            </Tooltip>
             {integrityMeta && (
-              <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${integrityMeta.cls}`}>
-                Hub {integrityMeta.label}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${integrityMeta.cls}`}>
+                    Hub {integrityMeta.label}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{integrityMeta.label === "OK" ? "Hub backup copy is intact" : "Hub backup copy may be corrupt — re-pull recommended"}</TooltipContent>
+              </Tooltip>
             )}
           </div>
         </div>
@@ -134,13 +164,19 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             <div className={`rounded-xl border bg-background/80 p-4 ${meta.cls}`}>
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">App Backup</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">
-                    {lb ? fmtRelative(lb.mtime) : "Never"}
+              {/* ── App Backup header ── */}
+              <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/15 border border-blue-500/25">
+                    <Database className="h-3.5 w-3.5 text-blue-400" />
                   </div>
-                  {lb?.mtime && <div className="text-[11px] text-slate-500">{fmtDate(lb.mtime)}</div>}
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">App Backup</div>
+                    <div className="text-[11px] text-slate-500">
+                      {lb ? fmtRelative(lb.mtime) : "Never"}
+                      {lb?.mtime && <> &middot; {fmtDate(lb.mtime)}</>}
+                    </div>
+                  </div>
                 </div>
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${meta.cls}`}>
                   <Icon className="h-3 w-3" />
@@ -185,20 +221,35 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
             </div>
 
             <div className={`rounded-xl border bg-background/80 p-4 ${sqlMeta.cls}`}>
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">SQL Backup</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">
-                    {sqlHealth.last_success_at ? fmtRelative(sqlHealth.last_success_at) : "Unavailable"}
+              {/* ── SQL Backup header ── */}
+              <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/15 border border-violet-500/25">
+                    <ShieldCheck className="h-3.5 w-3.5 text-violet-400" />
                   </div>
-                  {sqlHealth.last_success_at && (
-                    <div className="text-[11px] text-slate-500">{fmtDate(sqlHealth.last_success_at)}</div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">SQL Backup</div>
+                    <div className="text-[11px] text-slate-500">
+                      {sqlHealth.last_success_at
+                        ? <>{fmtRelative(sqlHealth.last_success_at)} &middot; {fmtDate(sqlHealth.last_success_at)}</>
+                        : "Unavailable"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
+                    <SqlIcon className="h-3 w-3" />
+                    {sqlMeta.label}
+                  </span>
+                  {site.sql_backup?.lastJob?.size != null && (
+                    <span className="text-[11px] text-slate-500">
+                      Last job: {fmtBytes(site.sql_backup.lastJob.size)}
+                      {site.sql_backup.lastJob.archiveSize != null && site.sql_backup.lastJob.archiveSize !== site.sql_backup.lastJob.size
+                        ? ` · compressed ${fmtBytes(site.sql_backup.lastJob.archiveSize)}`
+                        : ""}
+                    </span>
                   )}
                 </div>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
-                  <SqlIcon className="h-3 w-3" />
-                  {sqlMeta.label}
-                </span>
               </div>
 
               {!site.sql_backup?.ok ? (
@@ -269,6 +320,28 @@ export default function HubBackups() {
   const [downloadingConfig, setDownloadingConfig] = useState(null);
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [togglingSync, setTogglingSync] = useState(false);
+  const [pullingNow, setPullingNow] = useState(false);
+
+  const handlePullNow = useCallback(async () => {
+    setPullingNow(true);
+    try {
+      const res = await fetch("/api/hub/pull-backups-now", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      toast({ title: "Backup pull started", description: "Hub is pulling backups from all sites now. Refresh in a moment." });
+      // Refresh status after a short delay to show updated results
+      setTimeout(() => refetch(), 8000);
+    } catch (err) {
+      toast({ title: "Pull failed", description: err.message, variant: "destructive" });
+    } finally {
+      setPullingNow(false);
+    }
+  }, [toast, refetch]);
 
   useEffect(() => {
     fetchBackupSettings().then((d) => setSyncEnabled(d.backup_sync_enabled)).catch(() => {});
@@ -373,6 +446,22 @@ export default function HubBackups() {
               <Power className="w-3.5 h-3.5 mr-1.5" />
               {syncEnabled ? "Sync On" : "Sync Off"}
             </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handlePullNow}
+                  disabled={pullingNow}
+                  className="text-xs h-10 border-blue-500/40 text-blue-300"
+                >
+                  {pullingNow
+                    ? <><RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" />Pulling…</>
+                    : <><CloudDownload className="w-3.5 h-3.5 mr-1.5" />Pull Now</>}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Trigger an immediate backup pull from all sites</TooltipContent>
+            </Tooltip>
             <Button
               variant="outline"
               size="sm"

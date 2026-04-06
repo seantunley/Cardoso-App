@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useColorScheme } from "@/lib/useColorScheme";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { PhoneCall, Pencil, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,7 @@ async function saveCollection({ customerId, status, notes }) {
 }
 
 export default function Collections() {
+  const colorScheme = useColorScheme();
   const [statusFilter, setStatusFilter] = useState("all");
   const [flagFilter, setFlagFilter] = useState("all");
   const [sortDirection, setSortDirection] = useState("desc");
@@ -164,6 +166,7 @@ export default function Collections() {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
+              style={{ colorScheme }}
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="all">All</option>
@@ -179,6 +182,7 @@ export default function Collections() {
             <select
               value={flagFilter}
               onChange={(e) => setFlagFilter(e.target.value)}
+              style={{ colorScheme }}
               className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
             >
               <option value="all">All</option>
@@ -289,6 +293,7 @@ export default function Collections() {
               <select
                 value={formState.status}
                 onChange={(e) => setFormState((current) => ({ ...current, status: e.target.value }))}
+                style={{ colorScheme }}
                 className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
               >
                 <option value="pending">Pending</option>

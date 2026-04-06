@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function fmtTime(iso) {
   if (!iso) return "—";
@@ -85,27 +86,32 @@ const HEALTH_META = {
 };
 
 function StatusBadge({ pingInfo }) {
-  if (!pingInfo) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-500/10 border border-slate-500/30 text-slate-400">
-        <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
-        Unknown
-      </span>
-    );
-  }
-  if (pingInfo.online) {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-        Online{pingInfo.latency_ms != null ? ` · ${pingInfo.latency_ms}ms` : ""}
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400">
+  const badge = !pingInfo ? (
+    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-slate-500/10 border border-slate-500/30 text-slate-400 cursor-default">
+      <span className="w-1.5 h-1.5 rounded-full bg-slate-400" />
+      Unknown
+    </span>
+  ) : pingInfo.online ? (
+    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 cursor-default">
+      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+      Online{pingInfo.latency_ms != null ? ` · ${pingInfo.latency_ms}ms` : ""}
+    </span>
+  ) : (
+    <span className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 cursor-default">
       <span className="w-1.5 h-1.5 rounded-full bg-red-400" />
       Offline
     </span>
+  );
+  const tipText = !pingInfo
+    ? "Ping status unknown for this site"
+    : pingInfo.online
+    ? `Site is reachable over Tailscale${pingInfo.latency_ms != null ? ` — ${pingInfo.latency_ms}ms round-trip` : ""}`
+    : "Site is not responding over Tailscale";
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{badge}</TooltipTrigger>
+      <TooltipContent>{tipText}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -151,17 +157,21 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
           <h2 className="text-sm font-semibold text-foreground">{slug}</h2>
           <StatusBadge pingInfo={pingInfo} />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRunNow}
-          disabled={running || (pingInfo && !pingInfo.online)}
-          title={pingInfo && !pingInfo.online ? "Site is offline" : "Run speed test now"}
-          className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-7"
-        >
-          {running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-          {running ? "Running…" : "Run now"}
-        </Button>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRunNow}
+              disabled={running || (pingInfo && !pingInfo.online)}
+              className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-7"
+            >
+              {running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+              {running ? "Running…" : "Run now"}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent>{pingInfo && !pingInfo.online ? "Site is offline" : "Run a speed test on this site now"}</TooltipContent>
+        </Tooltip>
       </div>
 
       {!latest ? (
@@ -174,23 +184,38 @@ function SiteSection({ slug, rows, pingInfo, onRunNow }) {
           <div className="grid grid-cols-3 gap-2 px-4 py-2.5 border-b border-border">
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-slate-500 uppercase tracking-wide">↓ Download</span>
-              <span className={`inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start ${downloadBadgeCls(latest.download_mbps)}`}>
-                <ArrowDown className="w-3 h-3" />
-                {fmt(latest.download_mbps, " Mbps")}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default ${downloadBadgeCls(latest.download_mbps)}`}>
+                    <ArrowDown className="w-3 h-3" />
+                    {fmt(latest.download_mbps, " Mbps")}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Download speed measured at last scheduled test</TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-slate-500 uppercase tracking-wide">↑ Upload</span>
-              <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start bg-blue-500/10 border border-blue-500/30 text-blue-400">
-                <ArrowUp className="w-3 h-3" />
-                {fmt(latest.upload_mbps, " Mbps")}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default bg-blue-500/10 border border-blue-500/30 text-blue-400">
+                    <ArrowUp className="w-3 h-3" />
+                    {fmt(latest.upload_mbps, " Mbps")}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Upload speed measured at last scheduled test</TooltipContent>
+              </Tooltip>
             </div>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] text-slate-500 uppercase tracking-wide">Ping</span>
-              <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start bg-purple-500/10 border border-purple-500/30 text-purple-400">
-                {fmt(latest.ping_ms, " ms")}
-              </span>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default bg-purple-500/10 border border-purple-500/30 text-purple-400">
+                    {fmt(latest.ping_ms, " ms")}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Round-trip latency to test server from this site</TooltipContent>
+              </Tooltip>
             </div>
           </div>
 
@@ -288,7 +313,12 @@ function MachineHealthCard({ site, pingInfo }) {
                 {site.machine?.os_version ? ` · ${site.machine.os_version}` : ""}
               </div>
               {site.app_version && (
-                <div className="text-[11px] text-blue-400/80 font-mono">v{site.app_version}</div>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="text-[11px] text-blue-400/80 font-mono cursor-default">v{site.app_version}</div>
+                  </TooltipTrigger>
+                  <TooltipContent>Installed Cardoso App version at this site</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
@@ -323,27 +353,27 @@ function MachineHealthCard({ site, pingInfo }) {
       ) : (
         <div className="p-4 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-            <MetricChip
+            <Tooltip><TooltipTrigger asChild><div><MetricChip
               icon={Cpu}
               label="CPU"
               value={site.cpu?.usage_percent != null ? `${Number(site.cpu.usage_percent).toFixed(1)}%` : "—"}
               sub={site.cpu?.sampled ? `Sampled over ${site.cpu.sample_seconds || 3}s` : "No sample"}
               tone={metricTone(Number(site.cpu?.usage_percent), 75, 90)}
-            />
-            <MetricChip
+            /></div></TooltipTrigger><TooltipContent>CPU usage across all processor cores at time of last check</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><div><MetricChip
               icon={MemoryStick}
               label="RAM"
               value={memory.used_percent != null ? `${Number(memory.used_percent).toFixed(1)}% used` : "—"}
               sub={memory.total_bytes != null ? `${fmtBytes(memory.used_bytes)} / ${fmtBytes(memory.total_bytes)}` : undefined}
               tone={metricTone(Number(memory.used_percent), 80, 90)}
-            />
-            <MetricChip
+            /></div></TooltipTrigger><TooltipContent>Physical memory in use vs total available</TooltipContent></Tooltip>
+            <Tooltip><TooltipTrigger asChild><div><MetricChip
               icon={Clock3}
               label="Uptime"
               value={fmtDuration(site.machine?.uptime_seconds)}
               sub={site.machine?.last_boot_at ? `Booted ${fmtTime(site.machine.last_boot_at)}` : undefined}
               tone="info"
-            />
+            /></div></TooltipTrigger><TooltipContent>How long the machine has been running without a restart</TooltipContent></Tooltip>
             <MetricChip
               icon={ServerCog}
               label="Cardoso Service"
@@ -532,7 +562,7 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
             <p>No site machine health data yet.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {sites.map((site) => (
               <MachineHealthCard key={site.site_id || site.site_slug} site={site} pingInfo={pingBySite[site.site_slug] ?? null} />
             ))}

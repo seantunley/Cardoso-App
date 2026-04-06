@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from '@/App.jsx'
 import '@/index.css'
 import { AuthProvider } from '@/lib/AuthContext'
+import { TooltipProvider } from '@/components/ui/tooltip'
 
 // Apply saved theme before first paint to avoid flash.
 // AuthContext will re-apply after login using the server-side preference.
@@ -19,7 +20,9 @@ import { AuthProvider } from '@/lib/AuthContext'
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <AuthProvider>
+      <TooltipProvider delayDuration={300}>
       <App />
+      </TooltipProvider>
     </AuthProvider>
   </React.StrictMode>
 )
