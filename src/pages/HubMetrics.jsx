@@ -532,7 +532,7 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
             <p>No site machine health data yet.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
             {sites.map((site) => (
               <MachineHealthCard key={site.site_id || site.site_slug} site={site} pingInfo={pingBySite[site.site_slug] ?? null} />
             ))}
