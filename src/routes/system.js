@@ -184,14 +184,31 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       }
       console.log('[AutoUpdate] SHA-256 verified. Launching silent installer.');
 
-      const child = spawn(tmpPath, ['/S'], {
+      // Stop the Cardoso service before launching the installer so it can
+      // overwrite locked files. The installer (NSIS) will restart the service
+      // after installation completes.
+      const psScript = [
+        `Stop-Service -Name 'Cardoso' -Force -ErrorAction SilentlyContinue`,
+        `Start-Sleep -Seconds 3`,
+        `Start-Process -FilePath '${tmpPath.replace(/'/g, "''")}' -ArgumentList '/S' -Wait`,
+        `Start-Sleep -Seconds 5`,
+        `# Installer should have restarted service; start it if not running`,
+        `$svc = Get-Service -Name 'Cardoso' -ErrorAction SilentlyContinue`,
+        `if ($svc -and $svc.Status -ne 'Running') { Start-Service -Name 'Cardoso' -ErrorAction SilentlyContinue }`,
+      ].join('\n');
+
+      const child = spawn('powershell.exe', [
+        '-NonInteractive',
+        '-WindowStyle', 'Hidden',
+        '-Command', psScript,
+      ], {
         detached: true,
         stdio: 'ignore',
         windowsHide: true,
       });
       child.unref();
 
-      console.log('[AutoUpdate] Silent installer launched. Service will restart momentarily.');
+      console.log('[AutoUpdate] PowerShell updater launched: stopping service, running installer, restarting.');
       return { ok: true };
     } catch (err) {
       console.error('[AutoUpdate] Error:', err.message);
