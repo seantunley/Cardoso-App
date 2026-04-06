@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import db from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
-import { scanNetworkDevicesNow } from './services/networkDevices.js';
+// networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
 
 export async function runSpeedTestNow() {
@@ -100,11 +100,7 @@ export function startSchedulers() {
   cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
   if (process.env.HUB_MODE !== 'true') {
     cronTasks.push(cron.schedule('0 7,10,13,16 * * *', runSpeedTest));
-    cronTasks.push(cron.schedule('0 7,9,11,13,15,17 * * *', () => {
-      scanNetworkDevicesNow({ triggerReason: 'scheduled' }).catch((error) => {
-        console.error('[network-devices] scheduled scan failed:', error.message);
-      });
-    }));
+    // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
     setTimeout(() => {
       syncCreditLogicFromHub({ triggeredBy: 'startup' }).catch((error) => {
         console.error('[credit-logic] startup sync failed:', error.message);
