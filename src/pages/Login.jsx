@@ -134,7 +134,7 @@ export default function Login() {
         <div className="lg:hidden flex flex-col items-center mb-8 gap-2">
           <CardosoBriefcase size={44} />
           <h1 className="text-xl font-bold text-white tracking-tight">Cardoso Cigarettes</h1>
-          <p className="text-sm text-slate-400">Customer Manager</p>
+          <p className="text-sm text-slate-400">Business System</p>
         </div>
 
         {/* Card */}
@@ -152,7 +152,7 @@ export default function Login() {
             <CardosoBriefcase size={28} />
             <div>
               <div className="text-sm font-semibold text-white leading-tight">Cardoso Cigarettes</div>
-              <div className="text-[11px] text-slate-500">Customer Manager</div>
+              <div className="text-[11px] text-slate-500">Business System</div>
             </div>
           </div>
 
