@@ -100,8 +100,6 @@ export default function FlaggedCustomersModal({
   const effectiveTotal = externalCustomers ? externalCustomers.length : totalCount;
   const isFetchingDisplay = !externalCustomers && isFetching;
 
-  if (!flagColor || !flagColors[flagColor]) return null;
-
   const sortedCustomers = useMemo(() => (
     [...displayCustomers].sort((a, b) => {
       const numA = a.customer_number || a.data?.customer_number || "";
@@ -109,6 +107,8 @@ export default function FlaggedCustomersModal({
       return String(numA).localeCompare(String(numB));
     })
   ), [displayCustomers]);
+
+  if (!flagColor || !flagColors[flagColor]) return null;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>

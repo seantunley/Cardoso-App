@@ -5,7 +5,6 @@ import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
-import { checkAutoFlagRules } from "@/lib/evalFlagRules";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -16,13 +15,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 
 // Icons
 import {
-  Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
-  RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
+  Sun, Moon, Zap, Plus,
+  RefreshCw, AlertCircle, CheckCircle2, Clock, LogIn, ClipboardList,
   Download, Upload, GitBranch, Send, Info,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

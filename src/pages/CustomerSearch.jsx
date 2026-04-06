@@ -2,10 +2,9 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, Database, Flag, CheckCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
-import { Button } from "@/components/ui/button";
 
 export default function CustomerSearch() {
   const queryClient = useQueryClient();

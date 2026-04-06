@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
 import ConnectionStatus from "../components/connections/ConnectionStatus";
-import { hasPermission } from "@/lib/permissions";
 
 async function fetchLocalConnections() {
   const response = await fetch("/api/databaseconnection", {
