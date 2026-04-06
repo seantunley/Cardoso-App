@@ -673,6 +673,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         machineHealth.site_id ||= site.id;
         machineHealth.site_slug ||= site.slug;
         machineHealth.site_name ||= site.name;
+        machineHealth.app_version ||= null;
         machineHealth.url = site.url;
         machineHealth.health = getMachineHealthSummary(machineHealth);
         return machineHealth;

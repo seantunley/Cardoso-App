@@ -74,6 +74,7 @@ function initSchema(db) {
       database_name TEXT NOT NULL,
       username TEXT NOT NULL,
       encrypted_password TEXT,
+      use_encryption INTEGER NOT NULL DEFAULT 0,
       table_configs TEXT,
       join_configuration TEXT,
       field_mappings TEXT,

@@ -701,6 +701,31 @@ function buildMigrations(db) {
         `);
       },
     },
+    {
+      version: 31,
+      name: 'ntopng_hub_settings',
+      up() {
+        // Add ntopng defaults to hub_settings and drop old PowerShell network tables.
+        try {
+          db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('ntopng_url', 'http://localhost:3000')`).run();
+          db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('ntopng_user', 'admin')`).run();
+        } catch { /* hub_settings may not exist on non-hub installs */ }
+        db.exec(`
+          DROP TABLE IF EXISTS network_devices;
+          DROP TABLE IF EXISTS network_device_scan_runs;
+          DROP TABLE IF EXISTS hub_network_devices;
+        `);
+      },
+    },
+    {
+      version: 32,
+      name: 'databaseconnection_use_encryption',
+      up() {
+        // Add per-connection encryption toggle. Defaults to 0 (off) so existing
+        // connections keep working without any change.
+        ensureColumn(db, 'databaseconnection', 'use_encryption', 'INTEGER NOT NULL DEFAULT 0');
+      },
+    },
 
   ];
 }
