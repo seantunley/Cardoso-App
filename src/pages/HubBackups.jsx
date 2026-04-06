@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
   AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload,
+  Server, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/use-toast";
@@ -134,13 +135,19 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
         ) : (
           <div className="grid gap-4 xl:grid-cols-2">
             <div className={`rounded-xl border bg-background/80 p-4 ${meta.cls}`}>
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">App Backup</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">
-                    {lb ? fmtRelative(lb.mtime) : "Never"}
+              {/* ── App Backup header ── */}
+              <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/15 border border-blue-500/25">
+                    <Database className="h-3.5 w-3.5 text-blue-400" />
                   </div>
-                  {lb?.mtime && <div className="text-[11px] text-slate-500">{fmtDate(lb.mtime)}</div>}
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">App Backup</div>
+                    <div className="text-[11px] text-slate-500">
+                      {lb ? fmtRelative(lb.mtime) : "Never"}
+                      {lb?.mtime && <> &middot; {fmtDate(lb.mtime)}</>}
+                    </div>
+                  </div>
                 </div>
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${meta.cls}`}>
                   <Icon className="h-3 w-3" />
@@ -185,20 +192,35 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
             </div>
 
             <div className={`rounded-xl border bg-background/80 p-4 ${sqlMeta.cls}`}>
-              <div className="mb-4 flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.18em] text-slate-500">SQL Backup</div>
-                  <div className="mt-1 text-sm font-semibold text-foreground">
-                    {sqlHealth.last_success_at ? fmtRelative(sqlHealth.last_success_at) : "Unavailable"}
+              {/* ── SQL Backup header ── */}
+              <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-violet-500/15 border border-violet-500/25">
+                    <ShieldCheck className="h-3.5 w-3.5 text-violet-400" />
                   </div>
-                  {sqlHealth.last_success_at && (
-                    <div className="text-[11px] text-slate-500">{fmtDate(sqlHealth.last_success_at)}</div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">SQL Backup</div>
+                    <div className="text-[11px] text-slate-500">
+                      {sqlHealth.last_success_at
+                        ? <>{fmtRelative(sqlHealth.last_success_at)} &middot; {fmtDate(sqlHealth.last_success_at)}</>
+                        : "Unavailable"}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex flex-col items-end gap-1">
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
+                    <SqlIcon className="h-3 w-3" />
+                    {sqlMeta.label}
+                  </span>
+                  {site.sql_backup?.lastJob?.size != null && (
+                    <span className="text-[11px] text-slate-500">
+                      Last job: {fmtBytes(site.sql_backup.lastJob.size)}
+                      {site.sql_backup.lastJob.archiveSize != null && site.sql_backup.lastJob.archiveSize !== site.sql_backup.lastJob.size
+                        ? ` · compressed ${fmtBytes(site.sql_backup.lastJob.archiveSize)}`
+                        : ""}
+                    </span>
                   )}
                 </div>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-[11px] font-medium ${sqlMeta.cls}`}>
-                  <SqlIcon className="h-3 w-3" />
-                  {sqlMeta.label}
-                </span>
               </div>
 
               {!site.sql_backup?.ok ? (
