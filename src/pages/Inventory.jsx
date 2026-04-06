@@ -114,9 +114,9 @@ export default function Inventory() {
         isHub: hubMode,
         search: debouncedSearch,
         siteId: siteFilter === "all" ? "" : siteFilter,
-
       }),
     staleTime: 60_000,
+    placeholderData: (prev) => prev,
   });
 
   const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };

@@ -731,6 +731,17 @@ function buildMigrations(db) {
         ensureColumn(db, 'databaseconnection', 'use_encryption', 'INTEGER NOT NULL DEFAULT 0');
       },
     },
+    {
+      version: 33,
+      name: 'perf_indexes_hub_inventory_and_records',
+      up() {
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+          CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+          CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
+        `);
+      },
+    },
 
   ];
 }

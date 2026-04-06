@@ -292,6 +292,9 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id);
       CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number);
       CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+      CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+      CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id);
     `);
   }

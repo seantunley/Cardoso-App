@@ -228,6 +228,18 @@ export default function CustomerBalances() {
 
   const VERDICT_ORDER = { approve: 4, caution: 3, dormant: 2, hold: 1 };
 
+  // Cache credit scores so sorting doesn't re-run analyseInvoiceCredit per comparison
+  const creditScores = useMemo(() => {
+    const raw = data?.records ?? [];
+    if (sortField !== "credit") return null;
+    const map = new Map();
+    for (const row of raw) {
+      try { map.set(row, analyseInvoiceCredit([row], [], creditLogicConfig).score ?? 0); }
+      catch { map.set(row, 0); }
+    }
+    return map;
+  }, [data?.records, sortField, creditLogicConfig]);
+
   const rows = useMemo(() => {
     const raw = data?.records ?? [];
     return [...raw].sort((a, b) => {
@@ -246,17 +258,14 @@ export default function CustomerBalances() {
         va = parseDDMMYYYY(a.last_receipt_1_date);
         vb = parseDDMMYYYY(b.last_receipt_1_date);
       } else if (sortField === "credit") {
-        const getScore = (row) => {
-          try { return analyseInvoiceCredit([row], [], creditLogicConfig).score ?? 0; } catch { return 0; }
-        };
-        va = getScore(a);
-        vb = getScore(b);
+        va = creditScores?.get(a) ?? 0;
+        vb = creditScores?.get(b) ?? 0;
       } else {
         return 0;
       }
       return sortDir === "asc" ? va - vb : vb - va;
     });
-  }, [data?.records, sortField, sortDir, creditLogicConfig]);
+  }, [data?.records, sortField, sortDir, creditScores]);
 
   const totalPages = data?.totalPages ?? 1;
   const currentPage = data?.page ?? page;
