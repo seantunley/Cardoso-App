@@ -45,6 +45,17 @@ export default function Inventory() {
   const [priceListFilter, setPriceListFilter] = useState('all');
   const [commodityFilter, setCommodityFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [sortField, setSortField] = useState("item_description");
+  const [sortDir, setSortDir] = useState("asc");
+
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(["qty_on_hand", "last_cost", "price", "inventory_value"].includes(field) ? "desc" : "asc");
+    }
+  }
 
   useEffect(() => {
     fetch("/api/app-info")
@@ -93,10 +104,25 @@ export default function Inventory() {
     }
     return [...seen].sort();
   }, [allRows]);
-  const rows = allRows
-    .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
-    .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
-    .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
+  const rows = useMemo(() => {
+    const filtered = allRows
+      .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
+      .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
+      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
+    return [...filtered].sort((a, b) => {
+      let va, vb;
+      const numFields = ["qty_on_hand", "last_cost", "price", "inventory_value"];
+      if (numFields.includes(sortField)) {
+        va = parseFloat(a[sortField]) || 0;
+        vb = parseFloat(b[sortField]) || 0;
+        return sortDir === "asc" ? va - vb : vb - va;
+      } else {
+        va = String(a[sortField] ?? "").toLowerCase();
+        vb = String(b[sortField] ?? "").toLowerCase();
+        return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      }
+    });
+  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir]);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -276,7 +302,7 @@ export default function Inventory() {
 
         {/* Table — virtualised for large datasets */}
         {!isLoading && !isError && rows.length > 0 && (
-          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} highlightBelowCost={highlightBelowCost} />
+          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} highlightBelowCost={highlightBelowCost} sortField={sortField} sortDir={sortDir} onSort={handleSort} />
         )}
       </div>
     </div>
@@ -287,7 +313,12 @@ export default function Inventory() {
 const ROW_HEIGHT = 30;
 const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
-function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost }) {
+function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
+  function SA({ field }) {
+    if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
+    return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
+  }
+  const sh = "px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors";
   const parentRef = useRef(null);
 
   const virtualizer = useVirtualizer({
@@ -317,15 +348,15 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-border bg-card">
-              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Item Number</th>
-              <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Description</th>
-              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Qty on Hand</th>
-              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Cost</th>
-              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price</th>
-              <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price List</th>
+              <th onClick={() => onSort("item_number")} className={`${sh} text-left`}>Item Number<SA field="item_number" /></th>
+              <th onClick={() => onSort("item_description")} className={`${sh} text-left`}>Description<SA field="item_description" /></th>
+              <th onClick={() => onSort("qty_on_hand")} className={`${sh} text-right`}>Qty on Hand<SA field="qty_on_hand" /></th>
+              <th onClick={() => onSort("last_cost")} className={`${sh} text-right`}>Last Cost<SA field="last_cost" /></th>
+              <th onClick={() => onSort("price")} className={`${sh} text-right`}>Price<SA field="price" /></th>
+              <th onClick={() => onSort("price_list")} className={`${sh} text-right`}>Price List<SA field="price_list" /></th>
               <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th>
               {hubMode && (
-                <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
+                <th onClick={() => onSort("site_name")} className={`${sh} text-left`}>Site<SA field="site_name" /></th>
               )}
             </tr>
           </thead>

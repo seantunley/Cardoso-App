@@ -189,6 +189,17 @@ export default function CustomerBalances() {
   const [siteFilter, setSiteFilter] = useState("all");
   const [ageBucket, setAgeBucket] = useState("all");
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
+  const [sortField, setSortField] = useState("outstanding_balance");
+  const [sortDir, setSortDir] = useState("desc");
+
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortField(field);
+      setSortDir(field === "outstanding_balance" ? "desc" : "asc");
+    }
+  }
 
   useEffect(() => {
     const id = "cb-print-style";
@@ -207,10 +218,53 @@ export default function CustomerBalances() {
     keepPreviousData: true,
   });
 
-  const rows = data?.records ?? [];
   const totalRecords = data?.total ?? 0;
+  function parseDDMMYYYY(str) {
+    if (!str || str.length < 8) return 0;
+    const clean = str.replace(/[^0-9]/g, '');
+    if (clean.length !== 8) return 0;
+    return parseInt(`${clean.slice(4, 8)}${clean.slice(2, 4)}${clean.slice(0, 2)}`, 10);
+  }
+
+  const VERDICT_ORDER = { approve: 4, caution: 3, dormant: 2, hold: 1 };
+
+  const rows = useMemo(() => {
+    const raw = data?.records ?? [];
+    return [...raw].sort((a, b) => {
+      let va, vb;
+      if (sortField === "outstanding_balance") {
+        va = parseAmount(a.outstanding_balance);
+        vb = parseAmount(b.outstanding_balance);
+      } else if (sortField === "customer_name") {
+        va = (a.customer_name || "").toLowerCase();
+        vb = (b.customer_name || "").toLowerCase();
+        return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      } else if (sortField === "last_invoice_date") {
+        va = parseDDMMYYYY(a.last_unpaid_invoice_1_date);
+        vb = parseDDMMYYYY(b.last_unpaid_invoice_1_date);
+      } else if (sortField === "last_receipt_date") {
+        va = parseDDMMYYYY(a.last_receipt_1_date);
+        vb = parseDDMMYYYY(b.last_receipt_1_date);
+      } else if (sortField === "credit") {
+        const getScore = (row) => {
+          try { return analyseInvoiceCredit([row], [], creditLogicConfig).score ?? 0; } catch { return 0; }
+        };
+        va = getScore(a);
+        vb = getScore(b);
+      } else {
+        return 0;
+      }
+      return sortDir === "asc" ? va - vb : vb - va;
+    });
+  }, [data?.records, sortField, sortDir, creditLogicConfig]);
+
   const totalPages = data?.totalPages ?? 1;
   const currentPage = data?.page ?? page;
+
+  function SortArrow({ field }) {
+    if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
+    return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
+  }
   const filteredGrandTotal = data?.filteredTotalOutstanding ?? 0;
   const currentPageTotal = data?.pageTotalOutstanding ?? 0;
   const minBalanceThreshold = data?.minBalanceThreshold ?? 0;
@@ -446,13 +500,13 @@ export default function CustomerBalances() {
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-6">#</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer Name</th>
+                    <th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Invoice</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Last Receipt</th>
-                    <th className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Outstanding Balance</th>
-                    <th className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Credit</th>
+                    <th onClick={() => handleSort("last_invoice_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Invoice<SortArrow field="last_invoice_date" /></th>
+                    <th onClick={() => handleSort("last_receipt_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Receipt<SortArrow field="last_receipt_date" /></th>
+                    <th onClick={() => handleSort("outstanding_balance")} className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Outstanding Balance<SortArrow field="outstanding_balance" /></th>
+                    <th onClick={() => handleSort("credit")} className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Credit<SortArrow field="credit" /></th>
                   </tr>
                 </thead>
                 <tbody>

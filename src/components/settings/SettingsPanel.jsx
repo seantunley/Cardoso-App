@@ -1091,6 +1091,7 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
           </CardContent>
         </Card>
       ) : (
+        <>
         <Card className="border-border bg-card">
           <CardContent className="space-y-4 p-4">
             <div>
@@ -1131,12 +1132,13 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
         </Card>
 
       <Card className="border-border bg-card">
-          <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
-            <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
-            <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
-            <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
-          </CardContent>
-        </Card>
+        <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
+          <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
+          <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
+          <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
+        </CardContent>
+      </Card>
+      </>
       )}
     </div>
   );
