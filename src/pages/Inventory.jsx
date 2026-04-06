@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download } from "lucide-react";
@@ -35,6 +36,7 @@ const formatCurrency = (val) => {
 };
 
 export default function Inventory() {
+  const colorScheme = useColorScheme();
   const [hubMode, setHubMode] = useState(false);
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
@@ -204,6 +206,7 @@ export default function Inventory() {
             {commodities.length > 0 && (
               <div className="relative">
                 <select value={commodityFilter} onChange={(e) => setCommodityFilter(e.target.value)}
+                  style={{ colorScheme }}
                   className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${commodityFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
                   <option value="all" className="bg-card text-foreground">All commodities</option>
                   {commodities.map((v) => <option key={v} value={v} className="bg-card text-foreground">{COMMODITY_LABELS[v] || v}</option>)}
@@ -214,6 +217,7 @@ export default function Inventory() {
             {priceLists.length > 0 && (
               <div className="relative">
                 <select value={priceListFilter} onChange={(e) => setPriceListFilter(e.target.value)}
+                  style={{ colorScheme }}
                   className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${priceListFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
                   <option value="all" className="bg-card text-foreground">All price lists</option>
                   {priceLists.map((pl) => <option key={pl} value={pl} className="bg-card text-foreground">{pl}</option>)}
@@ -224,6 +228,7 @@ export default function Inventory() {
             {hubMode && sites.length > 0 && (
               <div className="relative">
                 <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
+                  style={{ colorScheme }}
                   className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${siteFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
                   <option value="all">All sites</option>
                   {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}

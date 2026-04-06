@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useColorScheme } from "@/lib/useColorScheme";
 import {
   RefreshCw, AlertCircle, ShieldCheck, Clock, Search,
   Building2, Wifi, WifiOff, Loader2, Flag, CheckCircle, Calendar, Network,
@@ -416,6 +417,7 @@ function HubCustomerSearch({ sites }) {
           <div className="flex items-center gap-2">
             <select
               className="rounded-md border border-input bg-background px-2.5 py-1.5 text-sm h-10"
+              style={{ colorScheme }}
               value={selectedSiteId}
               onChange={e => setSelectedSiteId(e.target.value)}
             >
@@ -489,6 +491,7 @@ function HubCustomerSearch({ sites }) {
 // ─── main page ───────────────────────────────────────────────────────────────
 
 export default function HubDashboard() {
+  const colorScheme = useColorScheme();
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -608,6 +611,7 @@ export default function HubDashboard() {
         <select
           value={dateRange}
           onChange={(event) => setDateRange(event.target.value)}
+          style={{ colorScheme }}
           className="min-h-[40px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         >
           {KPI_RANGE_OPTIONS.map((option) => (

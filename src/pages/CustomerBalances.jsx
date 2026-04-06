@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from "react";
+import { useColorScheme } from "@/lib/useColorScheme";
 import { useQuery } from "@tanstack/react-query";
 import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
@@ -172,6 +173,7 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoic
 }
 
 export default function CustomerBalances() {
+  const colorScheme = useColorScheme();
   const { data: creditLogicState } = useQuery({
     queryKey: ["creditLogicCurrent"],
     queryFn: async () => {
@@ -374,6 +376,7 @@ export default function CustomerBalances() {
                       <select
                         value={siteFilter}
                         onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
+                        style={{ colorScheme }}
                         className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       >
                         <option value="all">All sites</option>
