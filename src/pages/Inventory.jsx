@@ -193,7 +193,7 @@ export default function Inventory() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground p-6">
+    <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-3">
@@ -394,7 +394,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <div
         ref={parentRef}
-        style={{ height: "min(600px, calc(100vh - 260px))", overflowY: "auto", overflowX: "auto" }}
+        style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
