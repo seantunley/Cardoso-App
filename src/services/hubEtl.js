@@ -10,7 +10,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 import { buildStatements } from '../db/statements.js';
-import { syncHubNetworkDevicesForSite } from './networkDevices.js';
+// ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 function checkBackupIntegrity(siteId, filePath) {
   let backupDb = null;
@@ -303,12 +303,7 @@ async function syncSite(site) {
     // Speedtest results
     await syncSpeedtest(site);
 
-    // Network devices snapshot
-    try {
-      await syncHubNetworkDevicesForSite(site);
-    } catch (err) {
-      console.error(`[HUB NETWORK DEVICES] ${site.slug}: ${err.message}`);
-    }
+    // Network devices: now served live from ntopng API — no ETL pull here.
 
     // Update hub_sites
     db.prepare(`
