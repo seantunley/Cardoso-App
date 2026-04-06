@@ -4,6 +4,7 @@ import {
   RefreshCw, AlertCircle, ShieldCheck, Clock, Search,
   Building2, Wifi, WifiOff, Loader2, Flag, CheckCircle, Calendar, Network,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -97,35 +98,50 @@ function SiteCard({ site, onFlagClick, onResync }) {
             </div>
           </div>
           {/* Red */}
-          <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 cursor-pointer">
-            <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[11px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
-            <p className="text-xl font-extrabold text-foreground leading-none">{flags.red ?? 0}</p>
-            <p className="text-[11px] text-rose-300/60 mt-1">Red Flagged</p>
-            <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
-              <div className="h-full rounded-full bg-rose-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.red ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
-            </div>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div onClick={() => onFlagClick(site, "red")} className="group relative overflow-hidden rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 cursor-pointer">
+                <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <p className="text-[11px] font-semibold text-rose-400/70 uppercase tracking-widest mb-1">Critical</p>
+                <p className="text-xl font-extrabold text-foreground leading-none">{flags.red ?? 0}</p>
+                <p className="text-[11px] text-rose-300/60 mt-1">Red Flagged</p>
+                <div className="mt-2 h-0.5 rounded-full bg-rose-500/20">
+                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.red ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>Click to view Red flagged customers at this site</TooltipContent>
+          </Tooltip>
           {/* Orange */}
-          <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 cursor-pointer">
-            <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[11px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
-            <p className="text-xl font-extrabold text-foreground leading-none">{flags.orange ?? 0}</p>
-            <p className="text-[11px] text-amber-300/60 mt-1">Orange Flagged</p>
-            <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
-              <div className="h-full rounded-full bg-amber-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.orange ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
-            </div>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div onClick={() => onFlagClick(site, "orange")} className="group relative overflow-hidden rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 cursor-pointer">
+                <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <p className="text-[11px] font-semibold text-amber-400/70 uppercase tracking-widest mb-1">Attention</p>
+                <p className="text-xl font-extrabold text-foreground leading-none">{flags.orange ?? 0}</p>
+                <p className="text-[11px] text-amber-300/60 mt-1">Orange Flagged</p>
+                <div className="mt-2 h-0.5 rounded-full bg-amber-500/20">
+                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.orange ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>Click to view Orange flagged customers at this site</TooltipContent>
+          </Tooltip>
           {/* Green */}
-          <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 cursor-pointer">
-            <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-            <p className="text-[11px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
-            <p className="text-xl font-extrabold text-foreground leading-none">{flags.green ?? 0}</p>
-            <p className="text-[11px] text-emerald-300/60 mt-1">Green Flagged</p>
-            <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
-              <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.green ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
-            </div>
-          </div>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div onClick={() => onFlagClick(site, "green")} className="group relative overflow-hidden rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 cursor-pointer">
+                <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+                <p className="text-[11px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-1">Approved</p>
+                <p className="text-xl font-extrabold text-foreground leading-none">{flags.green ?? 0}</p>
+                <p className="text-[11px] text-emerald-300/60 mt-1">Green Flagged</p>
+                <div className="mt-2 h-0.5 rounded-full bg-emerald-500/20">
+                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: (total ?? 0) > 0 ? ((flags.green ?? 0) / total * 100).toFixed(0) + "%" : "0%" }} />
+                </div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>Click to view Green flagged customers at this site</TooltipContent>
+          </Tooltip>
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No KPI data yet</p>
