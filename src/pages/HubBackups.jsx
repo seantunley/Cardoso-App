@@ -322,6 +322,18 @@ export default function HubBackups() {
   const [togglingSync, setTogglingSync] = useState(false);
   const [pullingNow, setPullingNow] = useState(false);
 
+  const { data, isLoading, isError, refetch, isFetching } = useQuery({
+    queryKey: ["hub-backup-status"],
+    queryFn: fetchBackupStatus,
+    refetchInterval: 60_000,
+  });
+
+  const { data: hubBackupData } = useQuery({
+    queryKey: ["hub-hub-backup-status"],
+    queryFn: fetchHubBackupStatus,
+    refetchInterval: 60_000,
+  });
+
   const handlePullNow = useCallback(async () => {
     setPullingNow(true);
     try {
@@ -366,18 +378,6 @@ export default function HubBackups() {
       setTogglingSync(false);
     }
   }, [syncEnabled, toast]);
-
-  const { data, isLoading, isError, refetch, isFetching } = useQuery({
-    queryKey: ["hub-backup-status"],
-    queryFn: fetchBackupStatus,
-    refetchInterval: 60_000,
-  });
-
-  const { data: hubBackupData } = useQuery({
-    queryKey: ["hub-hub-backup-status"],
-    queryFn: fetchHubBackupStatus,
-    refetchInterval: 60_000,
-  });
 
   const sites = data?.sites || [];
   const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
