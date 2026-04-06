@@ -371,6 +371,7 @@ function HubCustomerModal({ record, open, onClose }) {
 // ─── hub customer search ─────────────────────────────────────────────────────
 
 function HubCustomerSearch({ sites }) {
+  const colorScheme = useColorScheme();
   const [selectedSiteId, setSelectedSiteId] = useState("");
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
