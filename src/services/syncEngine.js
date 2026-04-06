@@ -59,12 +59,16 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       VALUES (?, ?, 'running')
     `).run(connectionId, new Date().toISOString()).lastInsertRowid;
 
+    const useEncryption = connConfig.use_encryption != null
+      ? Boolean(Number(connConfig.use_encryption))
+      : null;
     const sqlConfig = buildSqlServerConfig({
       user: connConfig.username,
       password: decryptPassword(connConfig.encrypted_password),
       server: connConfig.host,
       database: connConfig.database_name,
       port: connConfig.port,
+      useEncryption,
     });
 
     pool = await sql.connect(sqlConfig);

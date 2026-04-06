@@ -20,14 +20,18 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
     requirePermission('can_access_connections'),
     async (req, res) => {
       const { host, port = 1433, database_name, username, connectionId } = req.body;
-      let { password } = req.body;
+      let { password, use_encryption } = req.body;
       let pool;
 
       // If no password supplied but a connectionId is, decrypt the stored one
       if (!password && connectionId) {
-        const stored = db.prepare('SELECT encrypted_password FROM databaseconnection WHERE id = ?').get(connectionId);
+        const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
           try { password = decryptPassword(stored.encrypted_password); } catch {}
+        }
+        // Use saved encryption preference if not overridden in the test request
+        if (use_encryption == null && stored != null) {
+          use_encryption = stored.use_encryption;
         }
       }
 
@@ -36,12 +40,14 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       }
 
       try {
+        const useEncryptionBool = use_encryption != null ? Boolean(Number(use_encryption)) : null;
         const config = buildSqlServerConfig({
           user: username,
           password,
           server: host,
           database: database_name,
           port,
+          useEncryption: useEncryptionBool,
         });
 
         pool = await sql.connect(config);
@@ -90,15 +96,16 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
     requirePermission('can_access_connections'),
     async (req, res) => {
           const { host, port = 1433, database_name, username, query, connectionId } = req.body;
-      let { password } = req.body;
+      let { password, use_encryption } = req.body;
       let pool;
 
       // If no password supplied but a connectionId is, decrypt the stored one
       if (!password && connectionId) {
-        const stored = db.prepare('SELECT encrypted_password FROM databaseconnection WHERE id = ?').get(connectionId);
+        const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
           try { password = decryptPassword(stored.encrypted_password); } catch {}
         }
+        if (use_encryption == null && stored != null) use_encryption = stored.use_encryption;
       }
 
       if (!host || !database_name || !username || !password) {
@@ -120,12 +127,14 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       }
 
       try {
+        const useEncBool = use_encryption != null ? Boolean(Number(use_encryption)) : null;
         pool = await sql.connect(buildSqlServerConfig({
           user: username,
           password,
           server: host,
           database: database_name,
           port,
+          useEncryption: useEncBool,
         }));
 
         // Run the full query and slice — avoids any SQL modification that breaks

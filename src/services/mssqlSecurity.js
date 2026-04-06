@@ -17,8 +17,24 @@ function getTlsPolicy() {
   return { encrypt, trustServerCertificate };
 }
 
-export function buildSqlServerConfig({ user, password, server, database, port }) {
-  const { encrypt, trustServerCertificate } = getTlsPolicy();
+/**
+ * Build mssql connection config.
+ * useEncryption: explicit per-connection override (boolean | null)
+ *   - true  → encrypt on, trustServerCertificate off
+ *   - false → encrypt off, trustServerCertificate on
+ *   - null  → fall through to env/production defaults (existing behaviour)
+ */
+export function buildSqlServerConfig({ user, password, server, database, port, useEncryption = null }) {
+  let encrypt, trustServerCertificate;
+  if (useEncryption === true) {
+    encrypt = true;
+    trustServerCertificate = false;
+  } else if (useEncryption === false) {
+    encrypt = false;
+    trustServerCertificate = true;
+  } else {
+    ({ encrypt, trustServerCertificate } = getTlsPolicy());
+  }
 
   return {
     user,

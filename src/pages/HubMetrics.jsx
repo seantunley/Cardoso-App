@@ -287,6 +287,9 @@ function MachineHealthCard({ site, pingInfo }) {
                 {site.machine?.hostname || site.site_slug || "Unknown host"}
                 {site.machine?.os_version ? ` · ${site.machine.os_version}` : ""}
               </div>
+              {site.app_version && (
+                <div className="text-[11px] text-blue-400/80 font-mono">v{site.app_version}</div>
+              )}
             </div>
           </div>
           <span className={`inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full font-medium ${meta.cls}`}>
