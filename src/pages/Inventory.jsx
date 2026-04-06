@@ -2,7 +2,37 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
-import { Package, Search, RefreshCw, X, Download } from "lucide-react";
+import { Package, Search, RefreshCw, X, Download, Filter } from "lucide-react";
+
+function FilterPill({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`min-h-[36px] rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all ${
+        active
+          ? "border-amber-500 bg-amber-500 text-black shadow-[0_0_0_1px_rgba(245,158,11,0.2)]"
+          : "border-border bg-background text-muted-foreground hover:border-amber-500/40 hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FilterToggle({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`min-h-[36px] rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors ${
+        active ? "border-amber-500 bg-amber-500/15 text-amber-400"
+               : "border-border bg-card text-muted-foreground hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 async function fetchInventory({ isHub, search, siteId }) {
   const params = new URLSearchParams();
@@ -212,62 +242,83 @@ export default function Inventory() {
 
 
         {/* Filter bar */}
-        <div className="mb-4 rounded-xl border border-border bg-card px-3 py-2.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="relative min-w-0 flex-1 w-full sm:min-w-[220px]">
+        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4">
+          {/* Search row */}
+          <div className="mb-3 flex items-center gap-3">
+            <div className="relative flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search item number or description…"
-                className="w-full rounded-lg border border-border bg-background py-1.5 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+                className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
               {search && (<button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>)}
             </div>
-            <div className="h-5 w-px bg-border" />
-            <button onClick={() => setHideZeroQty((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${hideZeroQty ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-              {hideZeroQty && <span className="h-1.5 w-1.5 rounded-full bg-primary" />}Hide zero qty
-            </button>
-            <button onClick={() => setHighlightBelowCost((v) => !v)}
-              className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${highlightBelowCost ? "border-red-500/40 bg-red-500/10 text-red-400" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-              {highlightBelowCost && <span className="h-1.5 w-1.5 rounded-full bg-red-400" />}Price ≤ cost
-            </button>
-            {commodities.length > 0 && (
-              <div className="relative">
-                <select value={commodityFilter} onChange={(e) => setCommodityFilter(e.target.value)}
-                  style={{ colorScheme }}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${commodityFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-                  <option value="all" className="bg-card text-foreground">All commodities</option>
-                  {commodities.map((v) => <option key={v} value={v} className="bg-card text-foreground">{COMMODITY_LABELS[v] || v}</option>)}
-                </select>
-                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
-              </div>
-            )}
-            {priceLists.length > 0 && (
-              <div className="relative">
-                <select value={priceListFilter} onChange={(e) => setPriceListFilter(e.target.value)}
-                  style={{ colorScheme }}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${priceListFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-                  <option value="all" className="bg-card text-foreground">All price lists</option>
-                  {priceLists.map((pl) => <option key={pl} value={pl} className="bg-card text-foreground">{pl}</option>)}
-                </select>
-                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
-              </div>
-            )}
-            {hubMode && sites.length > 0 && (
-              <div className="relative">
-                <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
-                  style={{ colorScheme }}
-                  className={`appearance-none rounded-lg border px-3 py-1.5 pr-7 text-xs font-medium transition-colors cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring ${siteFilter !== "all" ? "border-primary/40 bg-primary/10 text-primary" : "border-border bg-card text-muted-foreground hover:text-foreground"}`}>
-                  <option value="all">All sites</option>
-                  {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
-                </select>
-                <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground"><svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg></span>
-              </div>
-            )}
             {(activeFilterCount > 0 || search) && (
-              <button onClick={clearAll} className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                <X className="h-3 w-3" />Clear
+              <button onClick={clearAll} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
+                <X className="h-3 w-3" />Clear all
                 {activeFilterCount > 0 && <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold text-primary">{activeFilterCount}</span>}
               </button>
             )}
+          </div>
+
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="flex min-w-0 flex-1 flex-col gap-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                <Filter className="h-4 w-4 text-amber-400" />
+                Filters
+              </div>
+
+              {/* Commodity pills */}
+              {commodities.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Commodity</div>
+                  <div className="flex flex-wrap gap-2">
+                    <FilterPill active={commodityFilter === "all"} onClick={() => setCommodityFilter("all")}>All</FilterPill>
+                    {commodities.map((v) => (
+                      <FilterPill key={v} active={commodityFilter === v} onClick={() => setCommodityFilter(v)}>
+                        {COMMODITY_LABELS[v] || v}
+                      </FilterPill>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Price list pills */}
+              {priceLists.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Price list</div>
+                  <div className="flex flex-wrap gap-2">
+                    <FilterPill active={priceListFilter === "all"} onClick={() => setPriceListFilter("all")}>All</FilterPill>
+                    {priceLists.map((pl) => (
+                      <FilterPill key={pl} active={priceListFilter === pl} onClick={() => setPriceListFilter(pl)}>{pl}</FilterPill>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[220px]">
+              {/* Site select (hub only) */}
+              {hubMode && sites.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Site</label>
+                  <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
+                    style={{ colorScheme }}
+                    className="min-h-[40px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                    <option value="all">All sites</option>
+                    {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+              )}
+
+              {/* Toggle filters */}
+              <div className="flex flex-col gap-2">
+                <FilterToggle active={hideZeroQty} onClick={() => setHideZeroQty((v) => !v)}>
+                  {hideZeroQty ? "⊘ " : ""}Hide zero qty
+                </FilterToggle>
+                <FilterToggle active={highlightBelowCost} onClick={() => setHighlightBelowCost((v) => !v)}>
+                  {highlightBelowCost ? "⊘ " : ""}Highlight price ≤ cost
+                </FilterToggle>
+              </div>
+            </div>
           </div>
         </div>
         {/* State: loading */}
