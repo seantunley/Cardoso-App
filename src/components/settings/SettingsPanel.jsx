@@ -23,8 +23,9 @@ import { Label } from "@/components/ui/label";
 import {
   Sun, Moon, Zap, Plus, Edit2, Check, X, Trash2, Lock,
   RefreshCw, AlertCircle, CheckCircle2, Clock, Shield, LogIn, ClipboardList,
-  Download, Upload, GitBranch, Send,
+  Download, Upload, GitBranch, Send, Info,
 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 // Sub-components
 import AutoFlagRuleForm from "@/components/settings/AutoFlagRuleForm";
@@ -989,7 +990,17 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
                 ["Dormant threshold days", ["thresholds", "dormantThresholdDays"], "Inactivity cutoff. Customers with no invoice or receipt activity beyond this many days are flagged as Dormant instead of Approve."],
               ].map(([label, path, hint]) => (
                 <div key={path.join(".")} className="space-y-1.5">
-                  <Label>{label}</Label>
+                  <div className="flex items-center gap-1">
+                    <Label>{label}</Label>
+                    {hint && (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-[260px]">{hint}</TooltipContent>
+                      </Tooltip>
+                    )}
+                  </div>
                   <Input type="number" value={path.reduce((acc, key) => acc?.[key], draft) ?? ""} disabled={!hubMode || !canManageRules} onChange={(e) => setNested(path, Number(e.target.value || 0))} />
                   {hint && <p className="text-xs text-muted-foreground leading-snug">{hint}</p>}
                 </div>

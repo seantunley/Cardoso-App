@@ -37,6 +37,7 @@ import {
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
 import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { buildManualFlagFactor, buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
@@ -824,16 +825,26 @@ export default function CustomerLookup({
                 </div>
                 <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-4 shrink-0 pr-10 sm:pr-14">
                   {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                    <span className={cn("hidden sm:inline-flex text-base font-bold px-4 py-1.5 rounded-full", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
-                      ⏱ {creditAnalysis.avgLag}d avg
-                    </span>
+                    <UITooltip>
+                      <TooltipTrigger asChild>
+                        <span className={cn("hidden sm:inline-flex text-base font-bold px-4 py-1.5 rounded-full cursor-default", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
+                          ⏱ {creditAnalysis.avgLag}d avg
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>Average days between invoice and receipt payment for this customer</TooltipContent>
+                    </UITooltip>
                   )}
-                  <span className={cn(
-                    "text-xs font-semibold px-3 py-1.5 rounded-full",
-                    verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
-                  )}>
-                    {creditAnalysis.score}/100
-                  </span>
+                  <UITooltip>
+                    <TooltipTrigger asChild>
+                      <span className={cn(
+                        "text-xs font-semibold px-3 py-1.5 rounded-full cursor-default",
+                        verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
+                      )}>
+                        {creditAnalysis.score}/100
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Credit score: {creditAnalysis.score}/100 — higher is better creditworthiness</TooltipContent>
+                  </UITooltip>
                 </div>
               </div>
             </div>
@@ -879,9 +890,14 @@ export default function CustomerLookup({
                   <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Outstanding</p>
                   <div className="flex gap-1.5 flex-wrap justify-end">
                     {customer?.terms && (
-                      <Badge variant="outline" className="text-xs">
-                        {customer.terms}
-                      </Badge>
+                      <UITooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="outline" className="text-xs cursor-default">
+                            {customer.terms}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent>Payment terms agreed with this customer</TooltipContent>
+                      </UITooltip>
                     )}
                     {hasSubAccounts && (
                       <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
@@ -960,22 +976,32 @@ export default function CustomerLookup({
                 const isActive = pendingFlagColor === color;
                 const isCurrent = customer?.flag_color === color || (!customer?.flag_color && color === "none");
                 const styles = flagPillStyles[color];
+                const tipMap = {
+                  none: "Clear flag — remove any existing flag from this customer",
+                  green: "Green — mark customer as approved / good standing",
+                  orange: "Orange — mark customer as requiring attention or caution",
+                  red: "Red — mark customer as blocked or high-risk",
+                };
                 return (
-                  <button
-                    key={color}
-                    onClick={() => setPendingFlagColor(color)}
-                    disabled={!canModifyFlag() || isUpdatingFlag}
-                    className={cn(
-                      "rounded-full px-4 py-2.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] min-h-[44px] justify-center",
-                      isActive ? styles.active : styles.base,
-                      isCurrent && !isActive && "ring-1 ring-white/30"
-                    )}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", flagDotColor[color])} />
-                      {flagColors[color].label}
-                    </span>
-                  </button>
+                  <UITooltip key={color}>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setPendingFlagColor(color)}
+                        disabled={!canModifyFlag() || isUpdatingFlag}
+                        className={cn(
+                          "rounded-full px-4 py-2.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] min-h-[44px] justify-center",
+                          isActive ? styles.active : styles.base,
+                          isCurrent && !isActive && "ring-1 ring-white/30"
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", flagDotColor[color])} />
+                          {flagColors[color].label}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{tipMap[color]}</TooltipContent>
+                  </UITooltip>
                 );
               })}
             </div>
