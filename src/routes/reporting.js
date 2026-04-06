@@ -88,6 +88,7 @@ function createMachineHealthUnavailableResponse(message, extra = {}) {
     site_id: SITE_ID,
     site_slug: SITE_SLUG,
     site_name: SITE_NAME,
+    app_version: APP_VERSION,
     platform: process.platform,
     checked_at: new Date().toISOString(),
     message,
@@ -251,6 +252,7 @@ $result | ConvertTo-Json -Depth 6 -Compress
   parsed.site_id ||= SITE_ID;
   parsed.site_slug ||= SITE_SLUG;
   parsed.site_name ||= SITE_NAME;
+  parsed.app_version = APP_VERSION;
   parsed.machine ||= {};
   parsed.machine.hostname ||= os.hostname();
   parsed.machine.local_ips = Array.isArray(parsed.machine.local_ips) ? parsed.machine.local_ips : [];
