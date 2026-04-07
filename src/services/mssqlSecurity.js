@@ -47,7 +47,7 @@ export function buildSqlServerConfig({ user, password, server, database, port, u
       trustServerCertificate,
       enableArithAbort: true,
     },
-    requestTimeout: 30000,
+    requestTimeout: 60000,
     connectionTimeout: 15000,
   };
 }
