@@ -484,11 +484,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         const record = db.prepare(`
           SELECT *
           FROM datarecord
-          WHERE customer_number = ?
+          WHERE TRIM(customer_number) = ?
              OR lower(customer_name) = lower(?)
           ORDER BY
             CASE
-              WHEN customer_number = ? THEN 0
+              WHEN TRIM(customer_number) = ? THEN 0
               WHEN lower(customer_name) = lower(?) THEN 1
               ELSE 2
             END,
@@ -509,8 +509,8 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           const prefixMatches = db.prepare(`
             SELECT *
             FROM datarecord
-            WHERE customer_number LIKE ?
-              AND customer_number != ?
+            WHERE TRIM(customer_number) LIKE ?
+              AND TRIM(customer_number) != ?
             ORDER BY customer_number ASC, id ASC
           `).all(`${customerNumber}%`, customerNumber);
 
@@ -552,15 +552,15 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         const rows = db.prepare(`
           SELECT *
           FROM datarecord
-          WHERE customer_number LIKE ?
+          WHERE TRIM(customer_number) LIKE ?
              OR customer_name LIKE ?
-             OR customer_number LIKE ?
+             OR TRIM(customer_number) LIKE ?
              OR customer_name LIKE ?
           ORDER BY
             CASE
-              WHEN customer_number = ? THEN 0
+              WHEN TRIM(customer_number) = ? THEN 0
               WHEN lower(customer_name) = lower(?) THEN 1
-              WHEN customer_number LIKE ? THEN 2
+              WHEN TRIM(customer_number) LIKE ? THEN 2
               WHEN customer_name LIKE ? THEN 3
               ELSE 4
             END,
