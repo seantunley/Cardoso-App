@@ -1,5 +1,7 @@
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import db from './db/index.js';
 import { defaultPermissionsForRole } from './helpers.js';
 import { encryptPassword, isEncryptedFormat, getEncryptionKey } from './services/encryption.js';
@@ -18,18 +20,51 @@ function generateBootstrapPassword() {
   return crypto.randomBytes(18).toString('base64url');
 }
 
+// Known placeholder values written by the installer — safe to auto-replace
+const SESSION_SECRET_PLACEHOLDERS = new Set([
+  'CHANGE_ME_RUN_SETUP',
+  'change-me-to-a-long-random-string',
+  '',
+]);
+
+function autoHealSessionSecret() {
+  const envPath = path.resolve(process.cwd(), '.env');
+  const generated = crypto.randomBytes(32).toString('hex');
+  try {
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf8');
+      if (/^SESSION_SECRET=/m.test(content)) {
+        content = content.replace(/^SESSION_SECRET=.*$/m, `SESSION_SECRET=${generated}`);
+      } else {
+        content += `\nSESSION_SECRET=${generated}\n`;
+      }
+    } else {
+      content = `SESSION_SECRET=${generated}\n`;
+    }
+    fs.writeFileSync(envPath, content, 'utf8');
+    process.env.SESSION_SECRET = generated;
+    console.warn('⚠️  SESSION_SECRET was a placeholder/too short — generated a secure secret and saved to .env. All active sessions have been reset.');
+    return generated;
+  } catch (e) {
+    console.error(`FATAL: SESSION_SECRET is invalid and could not auto-heal .env: ${e.message}`);
+    process.exit(1);
+  }
+}
+
 export function validateSessionSecret(secret) {
-  if (!secret) {
-    console.error('❌ SESSION_SECRET environment variable is required. Set it in your .env file.');
-    process.exit(1);
-  }
-  if (secret === 'change-me-to-a-long-random-string') {
-    console.error('FATAL: SESSION_SECRET is set to the example value. Please generate a real secret in .env');
-    process.exit(1);
-  }
-  if (secret.length < 32) {
-    console.error('FATAL: SESSION_SECRET must be at least 32 characters long.');
-    process.exit(1);
+  const isPlaceholder = !secret || SESSION_SECRET_PLACEHOLDERS.has(secret);
+  const isTooShort = secret && secret.length < 32;
+
+  if (isPlaceholder || isTooShort) {
+    // In production: auto-heal so the service keeps running (installer default is a known short placeholder)
+    // In dev: hard fail so developers notice misconfiguration
+    if (process.env.NODE_ENV === 'production') {
+      autoHealSessionSecret();
+    } else {
+      console.error('FATAL: SESSION_SECRET must be at least 32 characters long. Set a proper value in .env.');
+      process.exit(1);
+    }
   }
 }
 
