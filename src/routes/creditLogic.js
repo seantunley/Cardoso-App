@@ -34,8 +34,13 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
 
   router.post("/api/credit-logic/sync-from-hub", ...canManageCreditLogic, async (req, res) => {
     if (process.env.HUB_MODE === "true") return res.status(400).json({ error: "Hub instances already use the source-of-truth config locally." });
-    const result = await syncCreditLogicFromHub({ triggeredBy: req.currentUser?.email || "manual" });
-    res.status(result.ok ? 200 : 207).json(result);
+    try {
+      const result = await syncCreditLogicFromHub({ triggeredBy: req.currentUser?.email || "manual" });
+      res.status(result.ok ? 200 : 207).json(result);
+    } catch (err) {
+      console.error('[credit-logic] sync-from-hub error:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get("/api/hub/credit-logic", ...canManageCreditLogic, (req, res) => {
@@ -56,8 +61,13 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
 
   router.post("/api/hub/credit-logic/push", ...canManageCreditLogic, async (req, res) => {
     if (process.env.HUB_MODE !== "true") return res.status(400).json({ error: "Not running in hub mode" });
-    const result = await pushCreditLogicToSites({ siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids : null });
-    res.status(result.failed === 0 ? 200 : 207).json({ ...result, siteStatuses: getHubCreditLogicSiteStatuses() });
+    try {
+      const result = await pushCreditLogicToSites({ siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids : null });
+      res.status(result.failed === 0 ? 200 : 207).json({ ...result, siteStatuses: getHubCreditLogicSiteStatuses() });
+    } catch (err) {
+      console.error('[credit-logic] push-to-sites error:', err);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get("/api/hub/credit-logic/published", (req, res) => {

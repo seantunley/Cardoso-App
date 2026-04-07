@@ -555,7 +555,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_inventory').run();
       logHubAudit({
         action: 'force_resync',
-        performedBy: req.user?.email,
+        performedBy: req.currentUser?.email,
         target: 'all_sites',
       });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
@@ -575,7 +575,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const site = db.prepare('SELECT slug FROM hub_sites WHERE id = ?').get(siteId);
       logHubAudit({
         action: 'force_resync',
-        performedBy: req.user?.email,
+        performedBy: req.currentUser?.email,
         target: site?.slug || siteId,
       });
       syncAllSites().catch(err => console.error("force-resync error:", err));
