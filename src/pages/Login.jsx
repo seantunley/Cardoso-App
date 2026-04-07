@@ -56,7 +56,8 @@ export default function Login() {
     }
     try {
       setIsSubmitting(true);
-      await login(formData.email, formData.password);
+      const user = await login(formData.email, formData.password);
+      if (!user) return; // hub redirect or force-password-change — AuthContext handles it
       const redirectTo = location.state?.from?.pathname || "/";
       navigate(redirectTo, { replace: true });
     } catch (error) {
