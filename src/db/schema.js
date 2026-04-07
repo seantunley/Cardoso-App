@@ -143,6 +143,7 @@ function initSchema(db) {
   `);
 
   // ==================== INDEXES ====================
+  // Base indexes on columns that have always existed — safe to batch
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_datarecord_source_lookup
     ON datarecord (source_table, source_id);
@@ -156,12 +157,20 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_datarecord_flag_color
     ON datarecord (flag_color);
 
-    CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance
-    ON datarecord (outstanding_balance);
-
     CREATE INDEX IF NOT EXISTS idx_datarecord_updated_date
     ON datarecord (updated_date);
   `);
+
+  // Indexes on columns added via migrations — guard individually so old DBs don't crash
+  const optionalIndexes = [
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance ON datarecord (outstanding_balance)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_flag_source ON datarecord (flag_source)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord (auto_flagged)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_terms ON datarecord (terms)`,
+  ];
+  for (const sql of optionalIndexes) {
+    try { db.exec(sql); } catch { /* column not yet added — migration will handle it */ }
+  }
 
   // ==================== INVENTORY TABLE ====================
   db.exec(`
