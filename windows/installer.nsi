@@ -80,9 +80,12 @@ Section "Install" SecInstall
     StrCpy $SiteNameValue "Cardoso Site"
   ${EndIf}
 
-  ; Stop existing service before copying files (prevents file-lock failures on upgrade)
+  ; Stop and remove existing service before copying files (prevents file-lock failures on upgrade)
+  ; nssm install fails silently if service already exists, leaving it broken
   ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
-  Sleep 6000
+  Sleep 3000
+  ExecWait '"$INSTDIR\nssm\nssm.exe" remove ${SERVICE_NAME} confirm' $0
+  Sleep 2000
 
   SetOutPath "$INSTDIR"
 
