@@ -89,7 +89,7 @@ async function fetchReleaseMetadata() {
 
 async function downloadReleaseAsset(url, destPath) {
   assertTrustedAssetUrl(url);
-  const request = createAbortSignal(60000);
+  const request = createAbortSignal(600000); // 10 min — installer is ~100MB, allow for slow site connections
   try {
     const response = await fetch(url, { signal: request.signal });
     if (!response.ok) throw new Error(`Download failed: ${response.status}`);
