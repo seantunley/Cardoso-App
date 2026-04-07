@@ -174,6 +174,7 @@ const verdictScoreHub = {
 
 function HubCustomerModal({ record, open, onClose }) {
   const [creditLogicConfig, setCreditLogicConfig] = useState(DEFAULT_CREDIT_LOGIC_CONFIG);
+  const [subAccounts, setSubAccounts] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -191,11 +192,40 @@ function HubCustomerModal({ record, open, onClose }) {
       }
     }
 
-    if (open) loadCreditLogicConfig();
-    return () => { cancelled = true; };
-  }, [open]);
+    async function loadSubAccounts() {
+      try {
+        const siteId = record?.site_id;
+        const q = String(record?.customer_number || '').trim();
+        if (!q || !siteId) return;
+        const res = await fetch(`/api/hub/customer-lookup?query=${encodeURIComponent(q)}&site_id=${encodeURIComponent(siteId)}`, { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setSubAccounts(data.subAccounts || []);
+      } catch {
+        // Non-fatal
+      }
+    }
 
-  const credit = record ? analyseInvoiceCredit([record], [], creditLogicConfig) : null;
+    if (open && record) {
+      loadCreditLogicConfig();
+      loadSubAccounts();
+    } else {
+      setSubAccounts([]);
+    }
+    return () => { cancelled = true; };
+  }, [open, record]);
+
+  const allAccountRecords = record ? [record, ...subAccounts] : [];
+  const hasSubAccounts = subAccounts.length > 0;
+  const grandTotal = allAccountRecords.reduce((s, r) => s + parseAmount(r?.outstanding_balance), 0);
+  const allAccounts = record
+    ? [
+        { label: `${record.customer_number} (main)`, record, isMain: true },
+        ...subAccounts.map(r => ({ label: r.customer_number, record: r, isMain: false }))
+      ]
+    : [];
+
+  const credit = record ? analyseInvoiceCredit(allAccountRecords, [], creditLogicConfig) : null;
   useEffect(() => {
     if (!open) return;
     const handler = (e) => { if (e.key === "Escape") onClose(); };
@@ -270,13 +300,34 @@ function HubCustomerModal({ record, open, onClose }) {
             <div>
               <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-xl font-bold text-foreground">{record.customer_name || "—"}</span>
-                <span className={cn("text-3xl font-extrabold", balance > 0 ? "text-rose-400" : "text-foreground")}>
-                  {formatAmount(record.outstanding_balance)}
+                <span className={cn("text-3xl font-extrabold", (hasSubAccounts ? grandTotal : balance) > 0 ? "text-rose-400" : "text-foreground")}>
+                  {hasSubAccounts ? formatAmount(String(grandTotal)) : formatAmount(record.outstanding_balance)}
                 </span>
+                {hasSubAccounts && (
+                  <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
+                    {subAccounts.length} sub-account{subAccounts.length !== 1 ? 's' : ''}
+                  </Badge>
+                )}
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
                 #{record.customer_number} · {record._siteName}
               </div>
+              {hasSubAccounts && (
+                <div className="mt-2 space-y-0.5">
+                  {allAccounts.map(({ label, record: r, isMain }) => (
+                    <div key={label} className="flex justify-between text-xs">
+                      <span className={isMain ? "text-foreground font-medium" : "text-muted-foreground"}>{label}</span>
+                      <span className={parseAmount(r?.outstanding_balance) !== 0 ? "text-foreground" : "text-muted-foreground"}>
+                        {formatAmount(r?.outstanding_balance)}
+                      </span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between text-xs font-bold pt-1 border-t border-border/40">
+                    <span className="text-foreground">Total</span>
+                    <span className={grandTotal !== 0 ? "text-rose-400" : "text-muted-foreground"}>{formatAmount(String(grandTotal))}</span>
+                  </div>
+                </div>
+              )}
             </div>
             <Badge className={cn("border text-xs shrink-0", flag.bg, flag.text, flag.border)}>
               <Flag className="mr-1 h-3 w-3" />{flag.label}

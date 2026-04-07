@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
-import { Package, Search, RefreshCw, X, Download, Filter } from "lucide-react";
+import { Package, Search, RefreshCw, X, Download, Filter, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function FilterPill({ active, onClick, children }) {
@@ -82,6 +82,7 @@ export default function Inventory() {
   const [highlightBelowCost, setHighlightBelowCost] = useState(false);
   const [priceListFilter, setPriceListFilter] = useState('all');
   const [commodityFilter, setCommodityFilter] = useState('all');
+  const [salesRepFilter, setSalesRepFilter] = useState('all');
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortField, setSortField] = useState("item_description");
   const [sortDir, setSortDir] = useState("asc");
@@ -128,6 +129,7 @@ export default function Inventory() {
   });
 
   const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
+  const EXCLUDED_COMMODITIES = new Set(['10']);
   const allRows = data?.records ?? [];
   const priceLists = useMemo(() => {
     const seen = new Set();
@@ -138,15 +140,22 @@ export default function Inventory() {
     const seen = new Set();
     for (const r of allRows) {
       const v = r.commodity != null ? String(r.commodity).trim() : '';
-      if (v) seen.add(v);
+      if (v && !EXCLUDED_COMMODITIES.has(v)) seen.add(v);
     }
+    return [...seen].sort();
+  }, [allRows, EXCLUDED_COMMODITIES]);
+  const salesReps = useMemo(() => {
+    const seen = new Set();
+    for (const r of allRows) { if (r.sales_rep) seen.add(r.sales_rep); }
     return [...seen].sort();
   }, [allRows]);
   const rows = useMemo(() => {
     const filtered = allRows
       .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
+      .filter(r => !EXCLUDED_COMMODITIES.has(String(r.commodity ?? '').trim()))
       .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
-      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
+      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter)
+      .filter(r => salesRepFilter === 'all' || r.sales_rep === salesRepFilter);
     return [...filtered].sort((a, b) => {
       let va, vb;
       const numFields = ["qty_on_hand", "last_cost", "price", "inventory_value"];
@@ -160,21 +169,21 @@ export default function Inventory() {
         return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       }
     });
-  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir]);
+  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, salesRepFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
   }, [sitesData]);
 
-  const activeFilterCount = [hideZeroQty, highlightBelowCost, priceListFilter !== "all", commodityFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
-  const clearAll = () => { setSearch(""); setHideZeroQty(false); setHighlightBelowCost(false); setPriceListFilter("all"); setCommodityFilter("all"); setSiteFilter("all"); };
+  const activeFilterCount = [hideZeroQty, highlightBelowCost, priceListFilter !== "all", commodityFilter !== "all", salesRepFilter !== "all", siteFilter !== "all"].filter(Boolean).length;
+  const clearAll = () => { setSearch(""); setHideZeroQty(false); setHighlightBelowCost(false); setPriceListFilter("all"); setCommodityFilter("all"); setSalesRepFilter("all"); setSiteFilter("all"); };
 
   const exportCSV = () => {
     const escape = (v) => {
       const s = String(v ?? "");
       return s.includes(",") || s.includes('"') || s.includes("\n") ? `"${s.replace(/"/g, '""')}"` : s;
     };
-    const headers = ["Item Number", "Description", "Qty on Hand", "Last Cost", "Price", "Price List", "UOM", "Commodity"];
+    const headers = ["Item Number", "Description", "Qty on Hand", "Last Cost", "Price", "Price List", "UOM", "Commodity", "Sales Rep"];
     if (hubMode) headers.push("Site");
     const csvRows = [headers.join(",")];
     for (const row of rows) {
@@ -187,6 +196,7 @@ export default function Inventory() {
         row.price_list ?? "",
         row.stocking_uom || "",
         COMMODITY_LABELS[row.commodity] || row.commodity || "",
+        row.sales_rep || "",
       ];
       if (hubMode) vals.push(row.site_name || "");
       csvRows.push(vals.map(escape).join(","));
@@ -202,6 +212,17 @@ export default function Inventory() {
 
   return (
     <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
+      <style>{`
+        @media print {
+          body { background: white !important; color: black !important; }
+          nav, header, aside, [data-sidebar], .no-print { display: none !important; }
+          .print-table-wrap { overflow: visible !important; height: auto !important; max-height: none !important; }
+          table { font-size: 10px; width: 100%; border-collapse: collapse; }
+          th, td { padding: 2px 6px !important; border: 1px solid #ccc !important; }
+          thead { display: table-header-group; }
+          tr { page-break-inside: avoid; }
+        }
+      `}</style>
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-3">
@@ -218,6 +239,7 @@ export default function Inventory() {
                   if (debouncedSearch) subtitleParts.push(`"${debouncedSearch}"`);
                   if (commodityFilter !== "all") subtitleParts.push(COMMODITY_LABELS[commodityFilter] || commodityFilter);
                   if (priceListFilter !== "all") subtitleParts.push(priceListFilter);
+                  if (salesRepFilter !== "all") subtitleParts.push(salesRepFilter);
                   if (hubMode && siteFilter !== "all") {
                     const siteName = sites.find(s => String(s.id) === String(siteFilter))?.name || siteFilter;
                     subtitleParts.push(siteName);
@@ -228,7 +250,20 @@ export default function Inventory() {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 no-print">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => window.print()}
+                  disabled={rows.length === 0}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Print current filtered view</TooltipContent>
+            </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -255,7 +290,7 @@ export default function Inventory() {
 
 
         {/* Filter bar */}
-        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4">
+        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print">
           {/* Search row */}
           <div className="mb-3 flex items-center gap-3">
             <div className="relative flex-1">
@@ -289,6 +324,19 @@ export default function Inventory() {
                       <FilterPill key={v} active={commodityFilter === v} onClick={() => setCommodityFilter(v)}>
                         {COMMODITY_LABELS[v] || v}
                       </FilterPill>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Sales Rep pills */}
+              {salesReps.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Sales Rep</div>
+                  <div className="flex flex-wrap gap-2">
+                    <FilterPill active={salesRepFilter === "all"} onClick={() => setSalesRepFilter("all")}>All</FilterPill>
+                    {salesReps.map((v) => (
+                      <FilterPill key={v} active={salesRepFilter === v} onClick={() => setSalesRepFilter(v)}>{v}</FilterPill>
                     ))}
                   </div>
                 </div>
@@ -407,6 +455,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     <div className="rounded-xl border border-border bg-card overflow-hidden">
       <div
         ref={parentRef}
+        className="print-table-wrap"
         style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
@@ -419,13 +468,14 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
               <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price")} className={`${sh} text-right`}>Price<SA field="price" /></th></TooltipTrigger><TooltipContent>Current selling price per unit — click to sort</TooltipContent></Tooltip>
               <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price_list")} className={`${sh} text-right`}>Price List<SA field="price_list" /></th></TooltipTrigger><TooltipContent>Price list this item belongs to — click to sort</TooltipContent></Tooltip>
               <Tooltip><TooltipTrigger asChild><th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th></TooltipTrigger><TooltipContent>Stocking unit of measure (e.g. Each, Box, Carton)</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("sales_rep")} className={`${sh} text-left`}>Sales Rep<SA field="sales_rep" /></th></TooltipTrigger><TooltipContent>Sales representative — click to sort</TooltipContent></Tooltip>
               {hubMode && (
                 <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("site_name")} className={`${sh} text-left`}>Site<SA field="site_name" /></th></TooltipTrigger><TooltipContent>Site this inventory record belongs to — click to sort</TooltipContent></Tooltip>
               )}
             </tr>
           </thead>
           <tbody>
-            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 9 : 8} /></tr>}
             {items.map((vRow) => {
               const row = rows[vRow.index];
               return (
@@ -440,13 +490,14 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                   <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.price)}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
                   <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground">{row.sales_rep || "—"}</td>
                   {hubMode && (
                     <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || row.site_id || "—"}</td>
                   )}
                 </tr>
               );
             })}
-            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 9 : 8} /></tr>}
           </tbody>
         </table>
       </div>
