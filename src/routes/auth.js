@@ -57,11 +57,14 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       // Hub redirect: if user is flagged as a hub user, send them to head office
       if (user.hub_redirect) {
-        const hubUrl = process.env.HUB_REDIRECT_URL || null;
+        // Accept HUB_REDIRECT_URL or fall back to HUB_SYNC_URL (same base URL already set on sites for credit sync)
+        const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
         if (hubUrl) {
           // Don't create a session on this site — just redirect
           req.session.destroy(() => {});
           return res.json({ success: true, hub_redirect: hubUrl });
+        } else {
+          console.warn('[auth] hub_redirect=1 but neither HUB_REDIRECT_URL nor HUB_SYNC_URL is set — falling through to local login');
         }
       }
 
@@ -101,10 +104,12 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       // Hub redirect check
       if (user.hub_redirect) {
-        const hubUrl = process.env.HUB_REDIRECT_URL || null;
+        const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
         if (hubUrl) {
           req.session.destroy(() => {});
           return res.json({ success: true, hub_redirect: hubUrl });
+        } else {
+          console.warn('[auth] hub_redirect=1 but neither HUB_REDIRECT_URL nor HUB_SYNC_URL is set');
         }
       }
 
