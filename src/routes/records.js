@@ -497,7 +497,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         `).get(query, query, query, query);
 
         if (!record) {
-          return res.status(404).json({ error: 'Customer not found' });
+          return res.json({ record: null, subAccounts: [] });
         }
 
         const expandedRecord = expandDataRecord(record);
