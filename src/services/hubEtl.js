@@ -114,6 +114,7 @@ function initHubTables() {
       stocking_uom TEXT,
       commodity TEXT,
       inventory_value TEXT,
+      sales_rep TEXT,
       terms TEXT,
       synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
       UNIQUE(site_id, item_number)
@@ -243,8 +244,8 @@ async function syncSite(site) {
 
     // Inventory — full refresh
     const upsertInv = db.prepare(`
-      INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, synced_at)
-      VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @inventory_value, @synced_at)
+      INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, sales_rep, synced_at)
+      VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @inventory_value, @sales_rep, @synced_at)
       ON CONFLICT(site_id, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
@@ -254,6 +255,7 @@ async function syncSite(site) {
         stocking_uom=excluded.stocking_uom,
         commodity=excluded.commodity,
         inventory_value=excluded.inventory_value,
+        sales_rep=excluded.sales_rep,
         synced_at=excluded.synced_at
     `);
     const insertInventory = db.transaction((invRecords) => {
@@ -270,6 +272,7 @@ async function syncSite(site) {
           stocking_uom: r.stocking_uom || null,
           commodity: r.commodity || null,
           inventory_value: r.inventory_value || null,
+          sales_rep: r.sales_rep || null,
           synced_at: now,
         });
       }

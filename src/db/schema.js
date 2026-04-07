@@ -186,6 +186,7 @@ function initSchema(db) {
       stocking_uom TEXT,
       commodity TEXT,
       inventory_value TEXT,
+      sales_rep TEXT,
       terms TEXT,
       created_date TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -291,6 +292,7 @@ function initSchema(db) {
         stocking_uom TEXT,
         commodity TEXT,
         inventory_value TEXT,
+        sales_rep TEXT,
         terms TEXT,
         synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(site_id, item_number)

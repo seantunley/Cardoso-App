@@ -155,11 +155,12 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       stocking_uom:     { fallbacks: ['stocking_uom', 'StockingUnitOfMeasure', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
       commodity:        { fallbacks: ['commodity', 'CommodityNumber', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
       inventory_value:  { fallbacks: ['inventory_value', 'InventoryValue', 'TotalInventoryValueAtCost', 'TotalValue', 'inventory_value_at_cost'] },
+      sales_rep:        { fallbacks: ['sales_rep', 'SalesRep', 'Salesman', 'salesperson', 'SalesRepCode', 'SalesRepName', 'sales_representative'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, sales_rep, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_table, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
@@ -169,6 +170,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         stocking_uom=excluded.stocking_uom,
         commodity=excluded.commodity,
         inventory_value=excluded.inventory_value,
+        sales_rep=excluded.sales_rep,
         updated_date=excluded.updated_date
     `);
 
@@ -191,6 +193,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
             String(getMappedOrFallbackValue(row, mappings, 'stocking_uom', inventoryMappingConfig.stocking_uom.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'commodity', inventoryMappingConfig.commodity.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'inventory_value', inventoryMappingConfig.inventory_value.fallbacks) || ''),
+            String(getMappedOrFallbackValue(row, mappings, 'sales_rep', inventoryMappingConfig.sales_rep.fallbacks) || ''),
             syncTimestamp
           );
         }

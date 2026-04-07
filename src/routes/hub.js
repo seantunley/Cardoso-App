@@ -523,6 +523,49 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/customer-lookup — returns main record + sub-accounts from hub_records
+  router.get('/api/hub/customer-lookup', requireAuth, (req, res) => {
+    const { query, site_id } = req.query;
+    if (!query || !site_id) return res.status(400).json({ error: 'query and site_id are required' });
+    try {
+      const q = String(query).trim();
+      const record = db.prepare(`
+        SELECT * FROM hub_records
+        WHERE site_id = ? AND (TRIM(customer_number) = ? OR lower(customer_name) = lower(?))
+        ORDER BY CASE WHEN TRIM(customer_number) = ? THEN 0 ELSE 1 END, id DESC
+        LIMIT 1
+      `).get(site_id, q, q, q);
+
+      if (!record) return res.json({ record: null, subAccounts: [] });
+
+      const parseBlobs = (r) => {
+        try { r.unpaid_invoices = r.unpaid_invoices ? JSON.parse(r.unpaid_invoices) : []; } catch { r.unpaid_invoices = []; }
+        try { r.receipts = r.receipts ? JSON.parse(r.receipts) : []; } catch { r.receipts = []; }
+        return r;
+      };
+
+      const customerNumber = String(record.customer_number || '').trim();
+      const isParent = /^\d+$/.test(customerNumber);
+      let subAccounts = [];
+      if (isParent) {
+        const prefixMatches = db.prepare(`
+          SELECT * FROM hub_records
+          WHERE site_id = ? AND TRIM(customer_number) LIKE ? AND TRIM(customer_number) != ?
+          ORDER BY customer_number ASC, id ASC
+        `).all(site_id, `${customerNumber}%`, customerNumber);
+        subAccounts = prefixMatches.filter(r => {
+          const cn = String(r.customer_number || '').trim();
+          const m = cn.match(/^(\d+)/);
+          return m && m[1] === customerNumber;
+        }).map(r => expandDataRecord(parseBlobs(r)));
+      }
+
+      res.json({ record: expandDataRecord(parseBlobs(record)), subAccounts });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/sync-log
   router.get('/api/hub/sync-log', requireAuth, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -962,6 +1005,7 @@ export function createNonHubFallbackRouter() {
   router.get('/api/hub/audit-log', (req, res) => res.json([]));
   router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
   router.get('/api/hub/network-devices', (req, res) => res.json({ devices: [], samples: [], sites: [] }));
+  router.get('/api/hub/customer-lookup', (req, res) => res.json({ record: null, subAccounts: [] }));
   return router;
 }
 
