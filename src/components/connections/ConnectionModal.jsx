@@ -18,7 +18,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Loader2, Database, X, RefreshCcw, Play, Table, Eye, EyeOff } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import FieldMappingBuilder from "./FieldMappingBuilder";
 
@@ -58,6 +57,7 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_number", label: "Customer Number", type: "text", isBuiltIn: true },
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
+  { key: "sales_rep", label: "Sales Rep", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Last Invoice — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Last Invoice — Amount", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_date", label: "Invoice 1 — Date", type: "text", isBuiltIn: true },
@@ -94,6 +94,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     database_name: "",
     username: "",
     password: "",
+    use_encryption: false,
     sync_query: "",
     query_index_field: "",
     query_field_mappings: {},
@@ -159,6 +160,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         status: connection.status || "inactive",
         record_type: connection.record_type || "customer",
         sync_interval_hours: connection.sync_interval_hours != null ? String(connection.sync_interval_hours) : "",
+        use_encryption: Boolean(connection.use_encryption),
       });
       // Reset query test state when editing an existing connection
       setQueryTestStatus(null);
@@ -214,6 +216,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           port: formData.port || 1433,
           database_name: formData.database_name,
           username: formData.username,
+          use_encryption: formData.use_encryption ? 1 : 0,
           ...(formData.password ? { password: formData.password } : {}),
           ...(connection?.id ? { connectionId: connection.id } : {}),
         }),
@@ -261,6 +264,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
           port: formData.port || 1433,
           database_name: formData.database_name,
           username: formData.username,
+          use_encryption: formData.use_encryption ? 1 : 0,
           ...(formData.password ? { password: formData.password } : {}),
           ...(connection?.id ? { connectionId: connection.id } : {}),
           query: formData.sync_query,
@@ -317,6 +321,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       status: formData.status,
       record_type: formData.record_type || "customer",
       sync_interval_hours: formData.sync_interval_hours ? parseInt(formData.sync_interval_hours, 10) : null,
+      use_encryption: formData.use_encryption ? 1 : 0,
     };
 
     onSave(dataToSave, connection?.id);
@@ -367,7 +372,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className="col-span-2 space-y-2">
               <Label className="text-sm font-medium text-gray-300">Host</Label>
               <Input
@@ -392,7 +397,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-sm font-medium text-gray-300">Database</Label>
               <Input
@@ -434,6 +439,26 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             {connection && (
               <p className="text-xs text-gray-400">Leave blank to keep existing password</p>
             )}
+          </div>
+
+          {/* ── Encryption toggle ── */}
+          <div className="flex items-start gap-3 rounded-lg border border-gray-700 bg-gray-800/50 px-4 py-3">
+            <input
+              id="use_encryption"
+              type="checkbox"
+              checked={!!formData.use_encryption}
+              onChange={(e) => setFormData({ ...formData, use_encryption: e.target.checked })}
+              className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-800 accent-blue-500 cursor-pointer"
+            />
+            <div>
+              <label htmlFor="use_encryption" className="text-sm font-medium text-gray-200 cursor-pointer">
+                Enable SSL/TLS encryption
+              </label>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Turn this on only if your SQL Server is configured for encrypted connections.
+                Leave off if you get certificate or encryption errors — most local/LAN SQL Server instances do not require it.
+              </p>
+            </div>
           </div>
 
           {/* ── Test connection ── */}

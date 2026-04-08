@@ -1,7 +1,7 @@
 import express from 'express';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, sanitizeConnection } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from '../services/autoFlag.js';
-import { encryptPassword } from '../services/encryption.js';
+import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
 
 /**
  * Creates the data-record, auto-flag, and dynamic CRUD routes router.
@@ -467,6 +467,205 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
   });
 
+  // ==================== RECORD SEARCH / AGGREGATES ====================
+
+  router.get(
+    '/api/datarecord/customer-lookup',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+
+        if (!query) {
+          return res.status(400).json({ error: 'Query is required' });
+        }
+
+        const record = db.prepare(`
+          SELECT *
+          FROM datarecord
+          WHERE TRIM(customer_number) = ?
+             OR lower(customer_name) = lower(?)
+          ORDER BY
+            CASE
+              WHEN TRIM(customer_number) = ? THEN 0
+              WHEN lower(customer_name) = lower(?) THEN 1
+              ELSE 2
+            END,
+            id DESC
+          LIMIT 1
+        `).get(query, query, query, query);
+
+        if (!record) {
+          return res.json({ record: null, subAccounts: [] });
+        }
+
+        const expandedRecord = expandDataRecord(record);
+        const customerNumber = String(expandedRecord.customer_number || '').trim();
+        const isParent = /^\d+$/.test(customerNumber);
+
+        let subAccounts = [];
+        if (isParent) {
+          const prefixMatches = db.prepare(`
+            SELECT *
+            FROM datarecord
+            WHERE TRIM(customer_number) LIKE ?
+              AND TRIM(customer_number) != ?
+            ORDER BY customer_number ASC, id ASC
+          `).all(`${customerNumber}%`, customerNumber);
+
+          subAccounts = prefixMatches
+            .map(expandDataRecord)
+            .filter((row) => {
+              const childNumber = String(row.customer_number || '').trim();
+              const match = childNumber.match(/^(\d+)/);
+              return match && match[1] === customerNumber;
+            });
+        }
+
+        res.json({
+          record: expandedRecord,
+          subAccounts,
+        });
+      } catch (error) {
+        console.error('Customer lookup error:', error);
+        res.status(500).json({ error: 'Failed to lookup customer' });
+      }
+    }
+  );
+
+  router.get(
+    '/api/datarecord/customer-lookup/suggestions',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 10);
+
+        if (!query) {
+          return res.json({ suggestions: [] });
+        }
+
+        const startsWith = `${query}%`;
+        const contains = `%${query}%`;
+        const rows = db.prepare(`
+          SELECT *
+          FROM datarecord
+          WHERE TRIM(customer_number) LIKE ?
+             OR customer_name LIKE ?
+             OR TRIM(customer_number) LIKE ?
+             OR customer_name LIKE ?
+          ORDER BY
+            CASE
+              WHEN TRIM(customer_number) = ? THEN 0
+              WHEN lower(customer_name) = lower(?) THEN 1
+              WHEN TRIM(customer_number) LIKE ? THEN 2
+              WHEN customer_name LIKE ? THEN 3
+              ELSE 4
+            END,
+            length(customer_number) ASC,
+            length(customer_name) ASC,
+            customer_name ASC,
+            customer_number ASC,
+            id DESC
+          LIMIT ?
+        `).all(startsWith, startsWith, contains, contains, query, query, startsWith, startsWith, limit);
+
+        res.json({
+          suggestions: rows.map((row) => expandDataRecord(row)),
+        });
+      } catch (error) {
+        console.error('Customer lookup suggestions error:', error);
+        res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
+      }
+    }
+  );
+
+  router.get(
+    '/api/datarecord/search',
+    requireAuth,
+    requirePermission('can_access_records', 'can_access_customer_search'),
+    (req, res) => {
+      try {
+        const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim() : '';
+        const flagColor = typeof req.query.flag_color === 'string' ? req.query.flag_color.trim() : '';
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 250);
+        const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+
+        const whereParts = [];
+        const params = [];
+
+        if (flagColor && flagColor !== 'all') {
+          if (flagColor === 'none') {
+            whereParts.push(`COALESCE(flag_color, 'none') = 'none'`);
+          } else {
+            whereParts.push('flag_color = ?');
+            params.push(flagColor);
+          }
+        }
+
+        if (rawSearch) {
+          whereParts.push(`(
+            customer_number LIKE ? OR
+            customer_name LIKE ? OR
+            source_id LIKE ? OR
+            source_table LIKE ? OR
+            data LIKE ?
+          )`);
+          const like = `%${rawSearch}%`;
+          params.push(like, like, like, like, like);
+        }
+
+        const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';
+        const countRow = db.prepare(`SELECT COUNT(*) AS total FROM datarecord ${whereClause}`).get(...params);
+        const rows = db.prepare(`
+          SELECT *
+          FROM datarecord
+          ${whereClause}
+          ORDER BY datetime(updated_date) DESC, id DESC
+          LIMIT ? OFFSET ?
+        `).all(...params, limit, offset);
+
+        res.json({
+          records: rows.map(expandDataRecord),
+          total: countRow?.total ?? 0,
+          limit,
+          offset,
+          has_more: offset + rows.length < (countRow?.total ?? 0),
+        });
+      } catch (error) {
+        console.error('Search records error:', error);
+        res.status(500).json({ error: 'Failed to search records' });
+      }
+    }
+  );
+
+  router.get(
+    '/api/datarecord/flag-counts',
+    requireAuth,
+    requirePermission('can_access_customer_search'),
+    (req, res) => {
+      try {
+        const rows = db.prepare(`
+          SELECT COALESCE(flag_color, 'none') AS flag_color, COUNT(*) AS count
+          FROM datarecord
+          GROUP BY COALESCE(flag_color, 'none')
+        `).all();
+
+        const counts = { none: 0, red: 0, orange: 0, green: 0 };
+        for (const row of rows) {
+          if (row.flag_color in counts) counts[row.flag_color] = row.count;
+        }
+
+        res.json({ records_by_flag: counts, total_records: Object.values(counts).reduce((sum, value) => sum + value, 0) });
+      } catch (error) {
+        console.error('Record flag counts error:', error);
+        res.status(500).json({ error: 'Failed to load record flag counts' });
+      }
+    }
+  );
+
   // ==================== DYNAMIC CRUD ROUTES ====================
 
   router.get('/api/:table', requireAuth, (req, res) => {
@@ -486,19 +685,40 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
 
     try {
+      const validCols = getTableColumns(table);
+
+      // Optional exact-match filters via ?filter_column=value
+      const filterEntries = Object.entries(req.query)
+        .filter(([key, value]) => key.startsWith('filter_') && value !== undefined && value !== null && String(value) !== '')
+        .map(([key, value]) => [key.slice('filter_'.length), value]);
+
+      const whereParts = [];
+      const params = [];
+      for (const [column, value] of filterEntries) {
+        if (!validCols.has(column)) continue;
+        whereParts.push(`"${column}" = ?`);
+        params.push(String(value));
+      }
+
+      const whereClause = whereParts.length > 0 ? ` WHERE ${whereParts.join(' AND ')}` : '';
+
       // Optional sort: ?sort=priority (asc) or ?sort=-priority (desc)
       const sortParam = req.query.sort;
       let orderClause = '';
       if (sortParam) {
         const desc = sortParam.startsWith('-');
         const col = desc ? sortParam.slice(1) : sortParam;
-        const validCols = getTableColumns(table);
         if (validCols.has(col)) {
           orderClause = ` ORDER BY "${col}" ${desc ? 'DESC' : 'ASC'}`;
         }
       }
-      const stmt = db.prepare(`SELECT * FROM "${table}"${orderClause}`);
-      const rows = stmt.all();
+
+      const rawLimit = parseInt(req.query.limit, 10);
+      const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 5000) : null;
+      const limitClause = limit ? ` LIMIT ${limit}` : '';
+
+      const stmt = db.prepare(`SELECT * FROM "${table}"${whereClause}${orderClause}${limitClause}`);
+      const rows = stmt.all(...params);
       let output = table === 'datarecord' ? rows.map(expandDataRecord) : rows;
       if (table === 'databaseconnection') output = output.map(sanitizeConnection);
       res.json(output);
@@ -567,6 +787,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
     // Encrypt MSSQL password before storing
     if (table === 'databaseconnection' && data.encrypted_password) {
+      if (process.env.NODE_ENV === 'production' && !getEncryptionKey()) {
+        return res.status(503).json({ error: 'ENCRYPTION_KEY must be configured before storing MSSQL credentials in production' });
+      }
       data.encrypted_password = encryptPassword(data.encrypted_password);
     }
 
@@ -625,6 +848,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
     // Encrypt MSSQL password before storing
     if (table === 'databaseconnection' && data.encrypted_password) {
+      if (process.env.NODE_ENV === 'production' && !getEncryptionKey()) {
+        return res.status(503).json({ error: 'ENCRYPTION_KEY must be configured before storing MSSQL credentials in production' });
+      }
       data.encrypted_password = encryptPassword(data.encrypted_password);
     }
 

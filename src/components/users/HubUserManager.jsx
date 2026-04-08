@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Send, RefreshCw, Shield } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Loader2, Send, RefreshCw, Shield, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -11,6 +12,9 @@ import { cn } from "@/lib/utils";
 export default function HubUserManager({ sites = [] }) {
   const [selectedUsers, setSelectedUsers] = useState(new Set());
   const [selectedSites, setSelectedSites] = useState(new Set());
+  const [manageUser, setManageUser] = useState(null); // { id, email, allowed_sites }
+  const [manageSiteIds, setManageSiteIds] = useState(new Set());
+  const qc = useQueryClient();
 
   const { data: users = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["hub-users"],
@@ -40,6 +44,29 @@ export default function HubUserManager({ sites = [] }) {
     onError: (err) => toast.error(err.message || "Push failed"),
   });
 
+  const saveAllowedSitesMutation = useMutation({
+    mutationFn: async () => {
+      const site_slugs = Array.from(manageSiteIds).map(id => {
+        const s = sites.find(s2 => s2.site_id === id);
+        return s ? s.site_slug : id;
+      });
+      const resp = await fetch(`/api/hub/users/${manageUser.id}/allowed-sites`, {
+        method: "PUT",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ site_slugs }),
+      });
+      if (!resp.ok) throw new Error(await resp.text());
+      return resp.json();
+    },
+    onSuccess: () => {
+      toast.success(`Site access updated for ${manageUser.email}`);
+      setManageUser(null);
+      qc.invalidateQueries({ queryKey: ["hub-users"] });
+    },
+    onError: (err) => toast.error(err.message || "Failed to save"),
+  });
+
   const toggleUser = (id) => setSelectedUsers(prev => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -55,6 +82,22 @@ export default function HubUserManager({ sites = [] }) {
   const toggleAllUsers = () => setSelectedUsers(
     selectedUsers.size === users.length ? new Set() : new Set(users.map(u => u.id))
   );
+
+  const openManageDialog = (user) => {
+    const allowed = user.allowed_sites || [];
+    const allowedSlugSet = new Set(allowed.map(a => a.slug || a));
+    const allowedIdSet = new Set(
+      sites.filter(s => allowedSlugSet.has(s.site_slug)).map(s => s.site_id)
+    );
+    setManageUser(user);
+    setManageSiteIds(allowedIdSet);
+  };
+
+  const toggleManageSite = (id) => setManageSiteIds(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const siteLabel = selectedSites.size > 0
     ? `${selectedSites.size} site${selectedSites.size === 1 ? "" : "s"}`
@@ -147,20 +190,32 @@ export default function HubUserManager({ sites = [] }) {
                 {u.full_name && (
                   <p className="text-xs text-[var(--text-secondary)] truncate">{u.email}</p>
                 )}
-                {u.sites && u.sites.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5" onClick={e => e.stopPropagation()}>
-                    {u.sites.map(s => (
-                      <span
-                        key={s.slug}
-                        title={`Pushed ${new Date(s.pushed_at).toLocaleDateString()}`}
-                        className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800"
-                      >
-                        {s.slug}
-                      </span>
-                    ))}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-1 mt-1.5 items-center">
+                  {u.sites && u.sites.length > 0 && u.sites.map(s => (
+                    <span
+                      key={s.slug}
+                      title={`Pushed ${new Date(s.pushed_at).toLocaleDateString()}`}
+                      className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800"
+                    >
+                      {s.slug}
+                    </span>
+                  ))}
+                  {u.allowed_sites && u.allowed_sites.length > 0 && (
+                    <span className="text-[10px] text-emerald-400/70 ml-1">
+                      ↔ {u.allowed_sites.length} allowed
+                    </span>
+                  )}
+                </div>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 w-7 p-0 text-zinc-500 hover:text-indigo-400 flex-shrink-0"
+                onClick={e => { e.stopPropagation(); openManageDialog(u); }}
+                title="Manage site access"
+              >
+                <Settings className="h-3 w-3" />
+              </Button>
               <Badge
                 variant="outline"
                 className={cn(
@@ -188,6 +243,48 @@ export default function HubUserManager({ sites = [] }) {
           Push {userLabel} to {siteLabel}
         </Button>
       </div>
+
+      {/* Manage Site Access Dialog */}
+      <Dialog open={!!manageUser} onOpenChange={open => { if (!open) setManageUser(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Site Access — {manageUser?.email}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-[var(--text-secondary)] mb-3">
+            Choose which sites <strong>{manageUser?.full_name || manageUser?.email}</strong> can see on the Hub.
+            Leave all unchecked to give access to all sites.
+          </p>
+          <div className="flex flex-wrap gap-2 mb-4">
+            {sites.map(s => (
+              <button
+                key={s.site_id}
+                onClick={() => toggleManageSite(s.site_id)}
+                className={cn(
+                  "text-sm px-3 py-1.5 rounded-full border font-medium transition-all",
+                  manageSiteIds.has(s.site_id)
+                    ? "bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
+                    : "border-zinc-600 text-zinc-400 hover:border-indigo-500 hover:text-indigo-400"
+                )}
+              >
+                {s.site_name || s.site_slug || s.site_id}
+              </button>
+            ))}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setManageUser(null)} className="gap-1.5">
+              Cancel
+            </Button>
+            <Button
+              onClick={() => saveAllowedSitesMutation.mutate()}
+              disabled={saveAllowedSitesMutation.isPending}
+              className="bg-indigo-600 hover:bg-indigo-700 gap-1.5"
+            >
+              {saveAllowedSitesMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

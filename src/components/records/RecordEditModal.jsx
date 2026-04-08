@@ -4,10 +4,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useQuery } from "@tanstack/react-query";
-import { api } from "@/api/apiClient";
-import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 const flagColors = {
   none: "bg-slate-700 text-slate-300 border-slate-600",
@@ -84,7 +81,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="bg-gray-900 border-gray-700 text-white">
+      <DialogContent className="bg-card border-border text-foreground">
         <DialogHeader>
           <DialogTitle>Edit Record</DialogTitle>
           <DialogDescription>Modify the customer name and custom fields below.</DialogDescription>  {/* NEW: Add this line */}
@@ -124,17 +121,27 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
             <Input
               value={formData.customer_name || ""}
               onChange={(e) => handleChange("customer_name", e.target.value)}
-              className="bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
+              className="bg-muted border-border text-foreground placeholder:text-muted-foreground"
             />
           </div>
         </div>
         <div className="flex justify-end gap-3">
-          <Button variant="outline" onClick={onClose} className="border-gray-700 text-gray-300 hover:bg-gray-800">
-            Cancel
-          </Button>
-          <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
-            Save Changes
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" onClick={onClose} className="border-border text-muted-foreground hover:bg-muted">
+                Cancel
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Discard changes and close</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
+                Save Changes
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Save the customer name change</TooltipContent>
+          </Tooltip>
         </div>
       </DialogContent>
     </Dialog>

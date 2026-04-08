@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { CheckCircle2, XCircle, Zap, ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { api } from "@/api/apiClient";
 import { RULE_FIELDS } from "./RuleConditionBuilder";
 
 const FLAG_COLORS = {

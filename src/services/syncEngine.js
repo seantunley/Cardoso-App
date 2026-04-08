@@ -7,6 +7,7 @@
 import sql from 'mssql';
 import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
+import { buildSqlServerConfig } from './mssqlSecurity.js';
 import { buildStatements } from '../db/statements.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
@@ -58,19 +59,17 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       VALUES (?, ?, 'running')
     `).run(connectionId, new Date().toISOString()).lastInsertRowid;
 
-    const sqlConfig = {
+    const useEncryption = connConfig.use_encryption != null
+      ? Boolean(Number(connConfig.use_encryption))
+      : null;
+    const sqlConfig = buildSqlServerConfig({
       user: connConfig.username,
       password: decryptPassword(connConfig.encrypted_password),
       server: connConfig.host,
       database: connConfig.database_name,
-      port: parseInt(connConfig.port, 10),
-      options: {
-        encrypt: false,
-        trustServerCertificate: true,
-      },
-      requestTimeout: 30000,
-      connectionTimeout: 15000,
-    };
+      port: connConfig.port,
+      useEncryption,
+    });
 
     pool = await sql.connect(sqlConfig);
 
@@ -108,6 +107,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         unpaid_invoices = ?,
         receipts = ?,
         terms = ?,
+        sales_rep = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -138,12 +138,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         unpaid_invoices,
         receipts,
         terms,
+        sales_rep,
         note,
         custom_field_1,
         custom_field_2,
         custom_field_3,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -210,7 +211,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                note, local_fields, flag_color, flag_reason, flag_created_by, data,
-               outstanding_balance, terms, unpaid_invoices, receipts
+               outstanding_balance, terms, sales_rep, unpaid_invoices, receipts
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -275,6 +276,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
               baseRecordData.receipts ?? existing.receipts ?? '[]',
               String(baseRecordData.terms ?? existing.terms ?? ''),
+              String(baseRecordData.sales_rep ?? existing.sales_rep ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -332,6 +334,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.unpaid_invoices ?? '[]',
               baseRecordData.receipts ?? '[]',
               String(baseRecordData.terms ?? ''),
+              String(baseRecordData.sales_rep ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.custom_field_1 ?? null,
               baseRecordData.custom_field_2 ?? null,

@@ -5,6 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
+  ClipboardList,
+  Network,
 } from "lucide-react";
 
 // ── Custom nav SVG icons ──────────────────────────────────────────────────────
@@ -61,7 +63,7 @@ const IconInventory = ({ className, style }) => (
     <line x1="6" y1="6.5" x2="14" y2="6.5" stroke="#f97316" strokeWidth="1"/>
   </svg>
 );
-import { BarChart2 } from "lucide-react";
+import { BarChart2, PhoneCall, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
@@ -76,9 +78,13 @@ const navItems = [
   { name: "Customer Management", icon: IconCustomerSearch,   page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
   { name: "Customer Management", icon: IconHubDashboard,     page: "HubDashboard",     hubOnly: true },
   { name: "Customer Balances",   icon: IconCustomerBalances, page: "CustomerBalances", permission: "can_access_customer_balances" },
+  { name: "Collections",         icon: PhoneCall,            page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
-  { name: "Site Metrics",          icon: BarChart2,             page: "HubMetrics",       hubOnly: true, adminOnly: true },
-  { name: "Site Backups",          icon: IconSiteBackups,      page: "HubBackups",      hubOnly: true, adminOnly: true },
+  { name: "Network Devices",     icon: Network,              page: "NetworkDevices",   permission: "can_access_network_devices" },
+  { name: "Site Metrics",        icon: BarChart2,            page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
+  { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
+  { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
+  { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -94,6 +100,7 @@ export default function Layout({ children, currentPageName }) {
   });
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
+  const [backupAttention, setBackupAttention] = useState(false);
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -120,6 +127,32 @@ export default function Layout({ children, currentPageName }) {
       .catch(() => {});
     return () => { isMounted = false; };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (!currentUser || !hubMode || !isAdmin) {
+      setBackupAttention(false);
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollBackupAttention = async () => {
+      try {
+        const res = await fetch("/api/hub/backup-status", { credentials: "include" });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setBackupAttention(Boolean(data?.sql_attention));
+      } catch {
+        if (!cancelled) setBackupAttention(true);
+      }
+    };
+
+    pollBackupAttention();
+    const timer = setInterval(pollBackupAttention, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [currentUser, hubMode, isAdmin]);
 
   const triggerUpdate = async () => {
     if (!isAdmin || updateInstalling) return;
@@ -156,10 +189,10 @@ export default function Layout({ children, currentPageName }) {
 
   const canShowNavItem = (item) => {
     if (!currentUser) return false;
-    if (item.hubOnly) return hubMode;
+    if (item.hubOnly && !hubMode) return false;
     if (item.siteOnly && hubMode) return false;
-    if (item.adminOnly) return isAdmin;
-    return hasPermission(currentUser, item.permission);
+    if (item.permission) return hasPermission(currentUser, item.permission);
+    return true;
   };
 
   const visibleNavItems = navItems.filter(canShowNavItem);
@@ -201,13 +234,14 @@ export default function Layout({ children, currentPageName }) {
         <nav className={cn("flex-1 space-y-1", isCollapsed ? "p-2 flex flex-col items-center" : "p-3")}>
           {visibleNavItems.map((item) => {
             const isActive = currentPageName === item.page;
+            const showAttention = item.page === "HubBackups" && backupAttention;
             return (
               <Link
                 key={item.page}
                 to={`/${item.page}`}
                 title={isCollapsed ? item.name : undefined}
                 className={cn(
-                  "flex items-center rounded-lg text-xs font-medium transition-all duration-200",
+                  "relative flex items-center rounded-lg text-xs font-medium transition-all duration-200",
                   isActive
                     ? "bg-primary text-primary-foreground shadow-sm"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
@@ -216,9 +250,13 @@ export default function Layout({ children, currentPageName }) {
                     : "gap-2.5 px-3 py-2 w-full"
                 )}
               >
-                <item.icon
-                  className="h-5 w-5 shrink-0"
-                />
+                <item.icon className="h-5 w-5 shrink-0" />
+                {showAttention && (
+                  <span className={cn(
+                    "absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card",
+                    isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
+                  )} />
+                )}
                 <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{item.name}</span>
               </Link>
             );
@@ -307,23 +345,33 @@ export default function Layout({ children, currentPageName }) {
           <div className="rounded-lg overflow-hidden" style={{width:"28px",height:"28px"}}><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="32" height="32" rx="7" fill="#1e293b"/><rect x="4" y="13" width="24" height="15" rx="3" fill="#3b82f6"/><rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bg)"/><rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/><rect x="13" y="17" width="6" height="6" rx="1" fill="#93c5fd"/><path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round"/><defs><linearGradient id="bg" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs></svg></div>
           <span className="font-bold text-foreground">Cardoso</span>
         </div>
-        {canSeeSettings && (
-          <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
-        )}
+        <div className="flex items-center gap-1">
+          {canSeeSettings && (
+            <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
+          )}
+          <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change Password">
+            <KeyRound className="h-5 w-5 text-muted-foreground" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={() => logout(true)} title="Logout">
+            <LogOut className="h-5 w-5 text-muted-foreground" />
+          </Button>
+        </div>
       </header>
-      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center justify-around border-t border-border bg-card px-4 py-2 lg:hidden">
-        {visibleNavItems.slice(0, 4).map((item) => {
+      <nav className="fixed bottom-0 left-0 right-0 z-50 flex items-center border-t border-border bg-card px-2 py-2 lg:hidden overflow-x-auto">
+        {visibleNavItems.map((item) => {
           const isActive = currentPageName === item.page;
+          const showAttention = item.page === "HubBackups" && backupAttention;
           return (
             <Link key={item.page} to={`/${item.page}`}
-              className={cn("flex flex-col items-center gap-1 rounded-xl px-4 py-2 transition-all", isActive ? "text-foreground" : "text-muted-foreground")}>
+              className={cn("relative flex flex-col items-center gap-1 rounded-xl px-3 py-2 transition-all flex-shrink-0", isActive ? "text-foreground" : "text-muted-foreground")}>
               <item.icon className="h-5 w-5" style={!isActive && item.color ? { color: item.color } : undefined} />
-              <span className="text-xs font-medium">{item.name}</span>
+              {showAttention && <span className="absolute top-1.5 right-2.5 inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card" />}
+              <span className="text-xs font-medium truncate max-w-[60px] text-center">{item.name}</span>
             </Link>
           );
         })}
       </nav>
-      <main className={cn("bg-background pt-16 pb-20 transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
+      <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
         {children}
       </main>
       {currentUser && (

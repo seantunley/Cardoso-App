@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
 
 /**
@@ -57,11 +58,23 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       // Hub redirect: if user is flagged as a hub user, send them to head office
       if (user.hub_redirect) {
-        const hubUrl = process.env.HUB_REDIRECT_URL || null;
-        if (hubUrl) {
+        const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
+        const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
+        if (hubUrl && hubTokenSecret) {
+          // Generate a short-lived JWT for silent Hub login
+          const token = jwt.sign(
+            { email: user.email, name: user.full_name, role: user.role },
+            hubTokenSecret,
+            { expiresIn: '5m' }
+          );
+          const redirectUrl = `${hubUrl}/api/auth/hub-token-login?token=${encodeURIComponent(token)}`;
           // Don't create a session on this site — just redirect
           req.session.destroy(() => {});
-          return res.json({ success: true, hub_redirect: hubUrl });
+          return res.json({ success: true, hub_redirect: redirectUrl });
+        } else if (hubUrl) {
+          console.warn('[auth] hub_redirect=1 but HUB_TOKEN_SECRET is not set — falling through to local login');
+        } else {
+          console.warn('[auth] hub_redirect=1 but neither HUB_REDIRECT_URL nor HUB_SYNC_URL is set — falling through to local login');
         }
       }
 
@@ -72,6 +85,64 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
     } catch (error) {
       console.error('Login error:', error);
       res.status(500).json({ error: 'Login failed' });
+    }
+  });
+
+  // Hub silent login: receives a JWT from a site, validates it, auto-logs the user in
+  // This enables hub_redirect users to log in at the Hub without a second password entry
+  router.post('/api/auth/hub-token-login', async (req, res) => {
+    const { token } = req.body || {};
+    const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
+
+    if (!hubTokenSecret) {
+      return res.status(500).json({ error: 'HUB_TOKEN_SECRET not configured on this Hub' });
+    }
+    if (!token) {
+      return res.status(400).json({ error: 'Token required' });
+    }
+
+    let payload;
+    try {
+      payload = jwt.verify(token, hubTokenSecret);
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token expired — please log in at the site again' });
+      }
+      return res.status(401).json({ error: 'Invalid token' });
+    }
+
+    const { email, name, role } = payload;
+    if (!email) {
+      return res.status(400).json({ error: 'Invalid token: missing email' });
+    }
+
+    try {
+      // Find or create user on this Hub
+      let user = stmts.getUserByEmail.get(email);
+      if (!user) {
+        // Auto-provision: create user with the details from the token
+        // Default to 'user' role if not specified; Hub admin can elevate later
+        const roleToUse = role && ['admin', 'user', 'viewer'].includes(role) ? role : 'user';
+        const defaultPermissions = defaultPermissionsForRole(roleToUse);
+        db.prepare(
+          `INSERT INTO "user" (email, full_name, role, permissions, password_hash, is_active, created_at)
+           VALUES (?, ?, ?, ?, 'HUB_TOKEN_AUTO', 1, datetime('now'))`
+        ).run(email, name || email.split('@')[0], roleToUse, JSON.stringify(defaultPermissions));
+        user = stmts.getUserByEmail.get(email);
+      }
+
+      if (!user || !user.is_active) {
+        return res.status(403).json({ error: 'User account is inactive' });
+      }
+
+      // Create session
+      req.session.userId = user.id;
+
+      // Return success with sanitized user (Hub will redirect to dashboard)
+      res.json({ success: true, user: sanitizeUser(user) });
+    } catch (err) {
+      console.error('[hub-token-login] error:', err);
+      res.status(500).json({ error: 'Hub login failed' });
     }
   });
 
@@ -86,8 +157,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
     if (!userId) return res.status(401).json({ error: 'No pending session' });
 
     const { password } = req.body;
-    if (!password || password.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!password || password.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
     try {
@@ -101,10 +172,19 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       // Hub redirect check
       if (user.hub_redirect) {
-        const hubUrl = process.env.HUB_REDIRECT_URL || null;
-        if (hubUrl) {
+        const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
+        const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
+        if (hubUrl && hubTokenSecret) {
+          const token = jwt.sign(
+            { email: user.email, name: user.full_name, role: user.role },
+            hubTokenSecret,
+            { expiresIn: '5m' }
+          );
+          const redirectUrl = `${hubUrl}/api/auth/hub-token-login?token=${encodeURIComponent(token)}`;
           req.session.destroy(() => {});
-          return res.json({ success: true, hub_redirect: hubUrl });
+          return res.json({ success: true, hub_redirect: redirectUrl });
+        } else if (hubUrl) {
+          console.warn('[auth] hub_redirect=1 but HUB_TOKEN_SECRET is not set — falling through to local login');
         }
       }
 
@@ -199,10 +279,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const info = db.prepare(`
         INSERT INTO "user" (
           email, full_name, role, password_hash, is_active, must_change_password,
-          can_access_customer_search, can_access_customer_balances, can_access_inventory,
+          can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+          can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
           can_access_records, can_access_reports, can_access_connections, can_access_settings,
           can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         email.trim().toLowerCase(),
         full_name,
@@ -212,7 +293,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         mustChange,
         defaults.can_access_customer_search ? 1 : 0,
         defaults.can_access_customer_balances !== false ? 1 : 0,
+        defaults.can_access_collections !== false ? 1 : 0,
         defaults.can_access_inventory !== false ? 1 : 0,
+        defaults.can_access_network_devices ? 1 : 0,
+        defaults.can_access_hub_metrics ? 1 : 0,
+        defaults.can_access_hub_backups ? 1 : 0,
+        defaults.can_access_hub_trends ? 1 : 0,
+        defaults.can_access_hub_audit_log ? 1 : 0,
         defaults.can_access_records ? 1 : 0,
         defaults.can_access_reports ? 1 : 0,
         defaults.can_access_connections ? 1 : 0,
@@ -241,7 +328,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
     const allowed = [
       'can_access_customer_search',
       'can_access_customer_balances',
+      'can_access_collections',
       'can_access_inventory',
+      'can_access_network_devices',
+      'can_access_hub_metrics',
+      'can_access_hub_backups',
+      'can_access_hub_trends',
+      'can_access_hub_audit_log',
       'can_access_records',
       'can_access_reports',
       'can_access_connections',

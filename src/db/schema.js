@@ -63,6 +63,7 @@ function initSchema(db) {
       synced_at TEXT,
       last_checked TEXT,
       terms TEXT,
+      sales_rep TEXT,
       auto_flagged INTEGER DEFAULT 0
     );
 
@@ -74,6 +75,7 @@ function initSchema(db) {
       database_name TEXT NOT NULL,
       username TEXT NOT NULL,
       encrypted_password TEXT,
+      use_encryption INTEGER NOT NULL DEFAULT 0,
       table_configs TEXT,
       join_configuration TEXT,
       field_mappings TEXT,
@@ -142,6 +144,7 @@ function initSchema(db) {
   `);
 
   // ==================== INDEXES ====================
+  // Base indexes on columns that have always existed — safe to batch
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_datarecord_source_lookup
     ON datarecord (source_table, source_id);
@@ -155,12 +158,20 @@ function initSchema(db) {
     CREATE INDEX IF NOT EXISTS idx_datarecord_flag_color
     ON datarecord (flag_color);
 
-    CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance
-    ON datarecord (outstanding_balance);
-
     CREATE INDEX IF NOT EXISTS idx_datarecord_updated_date
     ON datarecord (updated_date);
   `);
+
+  // Indexes on columns added via migrations — guard individually so old DBs don't crash
+  const optionalIndexes = [
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_outstanding_balance ON datarecord (outstanding_balance)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_flag_source ON datarecord (flag_source)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord (auto_flagged)`,
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_terms ON datarecord (terms)`,
+  ];
+  for (const sql of optionalIndexes) {
+    try { db.exec(sql); } catch { /* column not yet added — migration will handle it */ }
+  }
 
   // ==================== INVENTORY TABLE ====================
   db.exec(`
@@ -207,7 +218,37 @@ function initSchema(db) {
         token TEXT,
         last_seen TEXT,
         last_kpis TEXT,
-        status TEXT DEFAULT 'unknown'
+        status TEXT DEFAULT 'unknown',
+        logic_version INTEGER,
+        logic_sync_status TEXT DEFAULT 'never_synced',
+        logic_last_error TEXT,
+        logic_last_synced_at TEXT,
+        logic_status_updated_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS credit_logic_versions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        version INTEGER NOT NULL UNIQUE,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        config_json TEXT NOT NULL,
+        notes TEXT,
+        created_by TEXT,
+        is_active INTEGER DEFAULT 0,
+        published_at TEXT,
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS credit_logic_state (
+        scope TEXT PRIMARY KEY,
+        logic_version INTEGER,
+        payload_json TEXT,
+        schema_version INTEGER NOT NULL DEFAULT 1,
+        published_at TEXT,
+        last_synced_at TEXT,
+        sync_status TEXT DEFAULT 'never_synced',
+        last_error TEXT,
+        source TEXT DEFAULT 'default',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       );
       CREATE TABLE IF NOT EXISTS hub_records (
         site_id TEXT,
@@ -216,6 +257,7 @@ function initSchema(db) {
         customer_name TEXT,
         flag_color TEXT,
         flag_reason TEXT,
+        flag_created_by TEXT,
         outstanding_balance TEXT,
         unpaid_invoices TEXT,
         receipts TEXT,
@@ -223,6 +265,7 @@ function initSchema(db) {
         synced_at TEXT,
         auto_flagged INTEGER DEFAULT 0,
         terms TEXT,
+        sales_rep TEXT,
         PRIMARY KEY (site_id, record_id)
       );
       CREATE TABLE IF NOT EXISTS hub_sync_log (
@@ -260,6 +303,9 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_hub_records_site_id ON hub_records(site_id);
       CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number);
       CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+      CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+      CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id);
     `);
   }

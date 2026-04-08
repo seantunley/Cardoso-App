@@ -1,9 +1,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer,
-  ComposedChart, Scatter,
 } from "recharts";
-import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -20,21 +19,22 @@ import {
   Search,
   Loader2,
   User,
-  Calendar,
   Flag,
   Zap,
   Shield,
   Trash2,
-  History,
   CheckCircle,
   ShieldCheck,
   AlertTriangle,
   XCircle,
   Clock,
-  ChevronDown,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
+import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
+import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
+import { buildManualFlagFactor, buildManualFlagSummary } from "@/lib/manualFlagMessages";
 import { cn } from "@/lib/utils";
 
 const flagColors = {
@@ -63,6 +63,38 @@ const flagColors = {
     label: "Orange",
   },
 };
+
+function PaymentHistoryCharts({ lagData, timelineData }) {
+  const barColor = (lagDays) => {
+    if (lagDays <= 7) return "#22c55e";
+    if (lagDays <= 21) return "#f59e0b";
+    return "#ef4444";
+  };
+
+  if (!lagData?.length && !timelineData?.length) return null;
+
+  return (
+    <div className="mb-4 rounded-xl border border-border bg-muted/40 p-4">
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Payment Lag History</p>
+      <ResponsiveContainer width="100%" height={120}>
+        <BarChart data={lagData} margin={{ top: 4, right: 4, left: -20, bottom: 4 }}>
+          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} unit="d" />
+          <Tooltip
+            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 6, fontSize: 11 }}
+            labelStyle={{ color: "#e2e8f0" }}
+            formatter={(val) => [`${val} days`, "Lag"]}
+          />
+          <Bar dataKey="lagDays" radius={[3, 3, 0, 0]}>
+            {lagData.map((entry, index) => (
+              <Cell key={index} fill={barColor(entry.lagDays)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 function flattenRecord(record) {
   return {
@@ -138,19 +170,21 @@ function formatAmount(val) {
   return n < 0 ? `-R ${abs}` : `R ${abs}`;
 }
 
-async function fetchLocalRecords() {
-  const response = await fetch("/api/datarecord", {
-    method: "GET",
-    credentials: "include",
-  });
+async function fetchCustomerLookup(query) {
+  const result = await api.records.customerLookup(query);
+  return {
+    record: result?.record ? flattenRecord(result.record) : null,
+    subAccounts: Array.isArray(result?.subAccounts)
+      ? result.subAccounts.map(flattenRecord)
+      : [],
+  };
+}
 
-  const result = await response.json();
-
-  if (!response.ok) {
-    throw new Error(result.error || "Failed to fetch records");
-  }
-
-  return Array.isArray(result) ? result.map(flattenRecord) : [];
+async function fetchCustomerLookupSuggestions(query) {
+  const result = await api.records.customerLookupSuggestions({ query, limit: 5 });
+  return Array.isArray(result?.suggestions)
+    ? result.suggestions.map(flattenRecord)
+    : [];
 }
 
 async function updateLocalRecord(recordId, updateData) {
@@ -252,460 +286,12 @@ function getHistoryReasonSnippet(log) {
 
 
 // ── Invoice Credit Analysis ────────────────────────────────────────────────
-function parseDateField(val) {
-  if (!val) return null;
-  const s = String(val).trim();
-  // YYYYMMDD
-  if (/^\d{8}$/.test(s)) {
-    return new Date(`${s.slice(0,4)}-${s.slice(4,6)}-${s.slice(6,8)}`);
-  }
-  // DD/MM/YYYY or DD-MM-YYYY (common SA/ERP format)
-  const dmy = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/);
-  if (dmy) {
-    return new Date(`${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`);
-  }
-  // MM/DD/YYYY
-  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) {
-    return new Date(`${mdy[3]}-${mdy[1].padStart(2,'0')}-${mdy[2].padStart(2,'0')}`);
-  }
-  const d = new Date(s);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-function analyseInvoiceCredit(records, flagHistory = []) {
-  // records = array of all accounts (main + sub-accounts like BF, CA, OC)
-  // Merge slots across all accounts, take combined outstanding balance
-  const record = records[0] || {};
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  // Collect invoice slots from all accounts, sort by date, take most recent 5
-  const allInvoices = records.flatMap(r =>
-    [1,2,3,4,5].map(i => ({
-      number: r[`last_unpaid_invoice_${i}`] || r.data?.[`last_unpaid_invoice_${i}`],
-      amount: Math.abs(parseAmount(r[`last_unpaid_invoice_${i}_amount`] || r.data?.[`last_unpaid_invoice_${i}_amount`])),
-      date:   parseDateField(r[`last_unpaid_invoice_${i}_date`] || r.data?.[`last_unpaid_invoice_${i}_date`]),
-    })).filter(x => x.number || x.amount > 0)
-  );
-  // Sort by date desc, deduplicate by number, keep most recent 5
-  const seenInvNums = new Set();
-  const invoices = allInvoices
-    .sort((a, b) => (b.date || 0) - (a.date || 0))
-    .filter(x => { if (x.number && seenInvNums.has(x.number)) return false; if (x.number) seenInvNums.add(x.number); return true; })
-    .slice(0, 5);
-
-  // Collect receipt slots from all accounts, sort by date, take most recent 5
-  const allReceipts = records.flatMap(r =>
-    [1,2,3,4,5].map(i => ({
-      number: r[`last_receipt_${i}`] || r.data?.[`last_receipt_${i}`],
-      amount: Math.abs(parseAmount(r[`last_receipt_${i}_amount`] || r.data?.[`last_receipt_${i}_amount`])),
-      date:   parseDateField(r[`last_receipt_${i}_date`] || r.data?.[`last_receipt_${i}_date`]),
-    })).filter(x => x.number || x.amount > 0)
-  );
-  const seenRecNums = new Set();
-  const receipts = allReceipts
-    .sort((a, b) => (b.date || 0) - (a.date || 0))
-    .filter(x => { if (x.number && seenRecNums.has(x.number)) return false; if (x.number) seenRecNums.add(x.number); return true; })
-    .slice(0, 5);
-
-  // Sum outstanding balance across all accounts
-  const rawBalance = records.reduce((s, r) => s + parseAmount(r.outstanding_balance || r.data?.outstanding_balance), 0);
-  const outstandingBalance = rawBalance < 1 ? 0 : rawBalance;
-
-  // ── Inactivity check (computed early so all return paths can use it) ────
-  const allDatesEarly = [...invoices, ...receipts].map(x => x.date).filter(Boolean);
-  const mostRecentEarly = allDatesEarly.length > 0 ? Math.max(...allDatesEarly.map(d => +d)) : null;
-  const inactiveDaysEarly = mostRecentEarly !== null ? Math.floor((today - mostRecentEarly) / 86400000) : null;
-  const inactiveYearsEarly = inactiveDaysEarly !== null && inactiveDaysEarly > 730 ? Math.floor(inactiveDaysEarly / 365) : null;
-  const inactiveNote = inactiveYearsEarly
-    ? ` Customer has not transacted in over ${inactiveYearsEarly} year${inactiveYearsEarly > 1 ? "s" : ""} — treat as a new account.`
-    : "";
-  const inactiveFactor = inactiveYearsEarly
-    ? [{ type: "warn", text: `No transactions in over ${inactiveYearsEarly} year${inactiveYearsEarly > 1 ? "s" : ""} — customer has been inactive for a long time.` }]
-    : [];
-
-  // ── Zero balance = instant pass ─────────────────────────────────────────
-  if (outstandingBalance === 0) {
-    const hasHistory = invoices.length > 0 || receipts.length > 0;
-    return {
-      verdict: "approve",
-      title: hasHistory ? "Approve Invoice" : "New Customer",
-      summary: (hasHistory
-        ? "Balance is zero — account fully settled. Safe to issue a new invoice."
-        : "No invoice or receipt history. Safe to issue a first invoice.") + inactiveNote,
-      factors: [{ type: "good", text: "Outstanding balance is R0.00 — all accounts cleared." }, ...inactiveFactor],
-      score: 100,
-      lagData: [],
-      timelineData: [],
-    };
-  }
-
-  // ── No slot data at all ─────────────────────────────────────────────────
-  if (invoices.length === 0 && receipts.length === 0) {
-    return {
-      verdict: "caution",
-      title: "Proceed with Caution",
-      summary: `Outstanding balance but no invoice/receipt history available to assess.${inactiveNote}`,
-      factors: [{ type: "warn", text: `Outstanding balance of R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})} with no supporting history.` }, ...inactiveFactor],
-      score: 50,
-      lagData: [],
-      timelineData: [],
-    };
-  }
-
-  const factors = [];
-  let deductions = 0;
-  let avgLag = null;
-
-  // Count manual flag events from activity log
-  const redFlags = flagHistory.filter(e =>
-    e.action === "flag_changed" && (e.new_value === "red" || e.details?.includes("red"))
-  ).length;
-  const orangeFlags = flagHistory.filter(e =>
-    e.action === "flag_changed" && (e.new_value === "orange" || e.details?.includes("orange"))
-  ).length;
-
-  // ── Match invoices → receipts (chronological pairing) ───────────────────
-  // Sort invoices oldest→newest so we pair them in order
-  const invByDate = [...invoices].sort((a, b) => (a.date || 0) - (b.date || 0));
-  const recByDate = [...receipts].sort((a, b) => (a.date || 0) - (b.date || 0));
-
-  const usedReceipts = new Set();
-  const pairs = invByDate.map(inv => {
-    // Find the earliest receipt dated on or after this invoice
-    const matchIdx = recByDate.findIndex((rec, idx) =>
-      !usedReceipts.has(idx) &&
-      rec.date && inv.date &&
-      rec.date >= inv.date
-    );
-    if (matchIdx !== -1) {
-      usedReceipts.add(matchIdx);
-      const rec = recByDate[matchIdx];
-      return { invoice: inv, receipt: rec, lagDays: Math.floor((rec.date - inv.date) / 86400000) };
-    }
-    return { invoice: inv, receipt: null, lagDays: null };
-  });
-
-  const paidPairs   = pairs.filter(p => p.receipt !== null);
-  const unpaidPairs = pairs.filter(p => p.receipt === null);
-
-  // ── RULE 1: Age of oldest unmatched invoice ─────────────────────────────
-  // An unpaid invoice >21 days old is a hard block.
-  const unpaidAges = unpaidPairs
-    .map(p => p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null)
-    .filter(d => d !== null);
-  const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
-
-  if (oldestUnpaidAge !== null && oldestUnpaidAge > 21) {
-    factors.push({ type: "block", text: `Unpaid invoice is ${oldestUnpaidAge} days old — exceeds the 21-day limit. Resolve before issuing a new invoice.` });
-    deductions += 70;
-  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > 14) {
-    factors.push({ type: "warn", text: `Unpaid invoice is ${oldestUnpaidAge} days old — approaching the 21-day limit.` });
-    deductions += 25;
-  } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
-    factors.push({ type: "warn", text: `Latest invoice is ${oldestUnpaidAge} day${oldestUnpaidAge === 1 ? "" : "s"} old and awaiting payment.` });
-    deductions += 10;
-  }
-
-  // ── RULE 1b: Last transaction recency ──────────────────────────────────
-  // (already computed as inactiveNote/inactiveFactor above — push factor here if applicable)
-  if (inactiveFactor.length > 0) factors.push(...inactiveFactor);
-
-  // ── RULE 2: Payment speed on matched pairs ──────────────────────────────
-  // A customer who pays in full but slowly is caution, not hold.
-  if (paidPairs.length > 0) {
-    const laggedPairs = paidPairs.filter(p => p.lagDays !== null);
-    avgLag = laggedPairs.length > 0
-      ? Math.round(laggedPairs.reduce((s, p) => s + p.lagDays, 0) / laggedPairs.length)
-      : null;
-
-    if (avgLag !== null) {
-      // If there are also unpaid invoices with an outstanding balance, paid history means nothing
-      if (unpaidPairs.length > 0 && outstandingBalance > 0) {
-        factors.push({ type: "bad", text: `Average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} on settled invoices, but has unpaid invoices and an outstanding balance — unreliable payer.` });
-        deductions += 35;
-      } else if (avgLag <= 14) {
-        factors.push({ type: "good", text: `Average payment lag ${avgLag} day${avgLag === 1 ? "" : "s"} — within 14-day terms.` });
-      } else if (avgLag <= 21) {
-        factors.push({ type: "warn", text: `Average payment lag ${avgLag} days — slow but within 21 days (target: 14 days).` });
-        deductions += 20;
-      } else {
-        factors.push({ type: "warn", text: `Average payment lag ${avgLag} days — very slow payer.` });
-        deductions += 30;
-      }
-    } else {
-      factors.push({ type: "good", text: `${paidPairs.length} of ${pairs.length} invoice${pairs.length > 1 ? "s" : ""} matched with a receipt.` });
-    }
-  }
-
-  // ── RULE 3: Balance exposure ────────────────────────────────────────────
-  const totalInvoiced = invoices.reduce((s, x) => s + x.amount, 0);
-  if (totalInvoiced > 0) {
-    const avgInvoice = totalInvoiced / invoices.length;
-    if (outstandingBalance > avgInvoice * 2) {
-      factors.push({ type: "bad", text: `Outstanding balance (R ${outstandingBalance.toLocaleString("en-ZA", {minimumFractionDigits:2})}) exceeds 2× the average invoice — high exposure.` });
-      deductions += 15;
-    }
-  }
-
-  // ── RULE 4: Staff flag history ──────────────────────────────────────────
-  if (redFlags >= 2) {
-    deductions += 20;
-    factors.push({ label: "Repeatedly flagged red by staff", impact: "high" });
-  } else if (redFlags === 1) {
-    deductions += 10;
-    factors.push({ label: "Previously flagged red", impact: "medium" });
-  }
-  if (orangeFlags >= 2) {
-    deductions += 10;
-    factors.push({ label: "Repeatedly flagged orange by staff", impact: "medium" });
-  }
-
-  // ── Verdict ─────────────────────────────────────────────────────────────
-  const score = Math.max(0, 100 - deductions);
-
-  let verdict, title, summary;
-  if (score <= 39) {
-    verdict = "hold";
-    title = "Hold — Do Not Invoice";
-    summary = `Outstanding debt is overdue. Resolve before issuing a new invoice.${inactiveNote}`;
-  } else if (score <= 74 || outstandingBalance > 0) {
-    // Good payment record but still carries a balance — always at least caution
-    verdict = "caution";
-    title = "Proceed with Caution";
-    summary = (outstandingBalance > 0 && score >= 75
-      ? "Payment history looks good, but an outstanding balance remains — confirm settlement before issuing."
-      : "Customer pays but slowly — consider confirming payment intent before issuing.") + inactiveNote;
-  } else {
-    verdict = "approve";
-    title = "Approve Invoice";
-    summary = `Customer is paying reliably and within terms.${inactiveNote}`;
-  }
-
-  // ── Dormant check: latest invoice >12 months after the preceding one ──────
-  // Only applies when there are ≥2 invoices to compare.
-  // Sorted invByDate is oldest→newest; compare last two entries.
-  let isDormantReactivation = false;
-  let dormantMonths = null;
-  if (invByDate.length >= 2) {
-    const latestInv = invByDate[invByDate.length - 1];
-    const prevInv   = invByDate[invByDate.length - 2];
-    if (latestInv.date && prevInv.date) {
-      const gapDays = Math.floor((latestInv.date - prevInv.date) / 86400000);
-      if (gapDays > 365) {
-        isDormantReactivation = true;
-        dormantMonths = Math.floor(gapDays / 30);
-      }
-    }
-  }
-
-  // ── Build chart data ─────────────────────────────────────────────────────
-  // lagData: one entry per invoice, with days to pay or days outstanding
-  const lagData = invByDate.map((inv, idx) => {
-    const pair = pairs.find(p => p.invoice === inv);
-    const label = inv.number ? String(inv.number) : `#${idx + 1}`;
-    if (pair && pair.receipt) {
-      return { label, days: pair.lagDays ?? 0, paid: true };
-    } else {
-      const daysSince = inv.date ? Math.floor((today - inv.date) / 86400000) : 0;
-      return { label, days: daysSince, paid: false };
-    }
-  });
-
-  // timelineData: invoices + receipts on a time axis
-  const fmtMMDD = (d) => {
-    if (!d) return "";
-    return d.toLocaleDateString("en-US", { month: "short", day: "2-digit" });
-  };
-  const timelineData = [
-    ...invoices.map(inv => ({
-      date: inv.date ? inv.date.getTime() : null,
-      dateLabel: fmtMMDD(inv.date),
-      type: "invoice",
-      amount: inv.amount,
-      label: inv.number || "Inv",
-      y: 1,
-    })),
-    ...receipts.map(rec => ({
-      date: rec.date ? rec.date.getTime() : null,
-      dateLabel: fmtMMDD(rec.date),
-      type: "receipt",
-      amount: rec.amount,
-      label: rec.number || "Rec",
-      y: 1,
-    })),
-  ].filter(x => x.date !== null).sort((a, b) => a.date - b.date);
-
-  // DEBUG: log what we have
-
-  return { verdict, title, summary, factors, score, avgLag: typeof avgLag !== "undefined" ? avgLag : null, lagData, timelineData, isDormantReactivation, dormantMonths };
-}
-// ── End Invoice Credit Analysis ────────────────────────────────────────────
-
-
-// ── Payment History Charts ─────────────────────────────────────────────────
-function getLagBarColor(days, paid) {
-  if (!paid) return "#f87171";
-  if (days <= 14) return "#4ade80";
-  if (days <= 30) return "#fb923c";
-  return "#f87171";
-}
-
-const DarkTooltip = ({ active, payload, label }) => {
-  if (!active || !payload?.length) return null;
-  const entry = payload[0]?.payload;
-  return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 shadow-xl">
-      <p className="text-slate-300 font-semibold mb-1">{entry?.label || label}</p>
-      {entry?.paid === false ? (
-        <p className="text-red-400 font-bold">Unpaid · {entry.days}d outstanding</p>
-      ) : (
-        <p className="text-slate-200">{entry?.days}d to pay</p>
-      )}
-    </div>
-  );
-};
-
-const TimelineTooltip = ({ active, payload }) => {
-  if (!active || !payload?.length) return null;
-  const entry = payload[0]?.payload;
-  return (
-    <div className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 shadow-xl">
-      <p className="text-slate-300 font-semibold">{entry?.label}</p>
-      <p className={entry?.type === "invoice" ? "text-red-400" : "text-green-400"}>
-        {entry?.type === "invoice" ? "Invoice" : "Receipt"} · {entry?.dateLabel}
-      </p>
-      {entry?.amount > 0 && (
-        <p className="text-slate-200 mt-0.5">R {entry.amount.toLocaleString("en-ZA", { minimumFractionDigits: 2 })}</p>
-      )}
-    </div>
-  );
-};
-
-function PaymentHistoryCharts({ lagData, timelineData }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const hasLagData = lagData && lagData.length > 0;
-  const hasTimelineData = timelineData && timelineData.length > 0;
-
-  if (!hasLagData && !hasTimelineData) return null;
-
-  const invoiceTimeline = timelineData.filter(x => x.type === "invoice");
-  const receiptTimeline = timelineData.filter(x => x.type === "receipt");
-
-  return (
-    <div className="mb-3">
-      <button
-        className="w-full flex items-center justify-between px-1 py-2 hover:opacity-80 transition-colors"
-        onClick={() => setExpanded(v => !v)}
-      >
-        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payment History</span>
-        <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform duration-200${expanded ? " rotate-180" : ""}`} />
-      </button>
-
-      {expanded && (
-        <div className="border-b border-border pb-2 mb-3" />
-      )}
-      {expanded && (
-        <div className="space-y-4">
-          {/* Chart 1: Payment Lag Bar Chart */}
-          {hasLagData && (
-            <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Days to Pay per Invoice</p>
-              <div className="w-full overflow-hidden">
-              <ResponsiveContainer width="100%" minWidth={0} height={140}>
-                <BarChart data={lagData} margin={{ top: 4, right: 8, bottom: 4, left: 0 }} maxBarSize={28}>
-                  <XAxis
-                    dataKey="label"
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                    allowDecimals={false}
-                  />
-                  <Tooltip content={<DarkTooltip />} wrapperStyle={{ outline: "none" }} cursor={{ fill: "rgba(99,102,241,0.08)" }} />
-                  <Bar dataKey="days" radius={[3, 3, 0, 0]} maxBarSize={28}>
-                    {lagData.map((entry, index) => (
-                      <Cell
-                        key={`cell-${index}`}
-                        fill={getLagBarColor(entry.days, entry.paid)}
-                        fillOpacity={entry.paid ? 1 : 0.35}
-                        stroke={entry.paid ? undefined : "#f87171"}
-                        strokeWidth={entry.paid ? 0 : 1.5}
-                        strokeDasharray={entry.paid ? undefined : "4 2"}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              </div>
-              <div className="flex gap-4 mt-1 text-xs text-slate-500">
-                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#4ade80]" />≤14d</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#fb923c]" />15–30d</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-sm bg-[#f87171]" />&gt;30d / Unpaid</span>
-              </div>
-            </div>
-          )}
-
-          {/* Chart 2: Payment Timeline */}
-          {hasTimelineData && (
-            <div>
-              <p className="text-xs text-slate-500 uppercase tracking-wide mb-2">Invoice &amp; Receipt Timeline</p>
-              <div className="w-full overflow-hidden">
-              <ResponsiveContainer width="100%" minWidth={0} height={100}>
-                <ComposedChart margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
-                  <XAxis
-                    dataKey="dateLabel"
-                    type="category"
-                    allowDuplicatedCategory={false}
-                    tick={{ fontSize: 10, fill: "#64748b" }}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <YAxis hide domain={[0, 2]} />
-                  <Tooltip content={<TimelineTooltip />} wrapperStyle={{ outline: "none" }} cursor={false} />
-                  {invoiceTimeline.length > 0 && (
-                    <Scatter
-                      name="Invoices"
-                      data={invoiceTimeline}
-                      fill="#f87171"
-                      r={5}
-                    />
-                  )}
-                  {receiptTimeline.length > 0 && (
-                    <Scatter
-                      name="Receipts"
-                      data={receiptTimeline}
-                      fill="#4ade80"
-                      r={5}
-                    />
-                  )}
-                </ComposedChart>
-              </ResponsiveContainer>
-              </div>
-              <div className="flex gap-4 mt-1 text-xs text-slate-500">
-                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#f87171]" />Invoice</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-2 h-2 rounded-full bg-[#4ade80]" />Receipt</span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-// ── End Payment History Charts ─────────────────────────────────────────────
 
 const verdictBannerStyles = {
-  approve: "bg-emerald-500/20 border-emerald-500/40 text-emerald-200",
-  caution: "bg-amber-500/20 border-amber-500/40 text-amber-200",
-  hold: "bg-red-500/20 border-red-500/40 text-red-200",
-  dormant: "bg-purple-500/20 border-purple-500/40 text-purple-200",
+  approve: "dark:bg-emerald-500/20 bg-emerald-50 border-emerald-500/40 dark:text-emerald-200 text-emerald-700",
+  caution: "dark:bg-amber-500/20 bg-amber-50 border-amber-500/40 dark:text-amber-200 text-amber-700",
+  hold: "dark:bg-red-500/20 bg-red-50 border-red-500/40 dark:text-red-200 text-red-700",
+  dormant: "dark:bg-purple-500/20 bg-purple-50 border-purple-500/40 dark:text-purple-200 text-purple-700",
 };
 
 const verdictIcons = {
@@ -716,10 +302,10 @@ const verdictIcons = {
 };
 
 const verdictScoreStyles = {
-  approve: "bg-emerald-800/60 text-emerald-200 ring-1 ring-emerald-600/40",
-  caution: "bg-amber-800/60 text-amber-200 ring-1 ring-amber-600/40",
-  hold: "bg-red-800/60 text-red-200 ring-1 ring-red-600/40",
-  dormant: "bg-purple-800/60 text-purple-200 ring-1 ring-purple-600/40",
+  approve: "dark:bg-emerald-800/60 bg-emerald-100 dark:text-emerald-200 text-emerald-700 ring-1 ring-emerald-600/40",
+  caution: "dark:bg-amber-800/60 bg-amber-100 dark:text-amber-200 text-amber-700 ring-1 ring-amber-600/40",
+  hold: "dark:bg-red-800/60 bg-red-100 dark:text-red-200 text-red-700 ring-1 ring-red-600/40",
+  dormant: "dark:bg-purple-800/60 bg-purple-100 dark:text-purple-200 text-purple-700 ring-1 ring-purple-600/40",
 };
 
 const flagDotColor = {
@@ -730,10 +316,10 @@ const flagDotColor = {
 };
 
 const flagPillStyles = {
-  none: { base: "border-border text-muted-foreground", active: "bg-slate-700 border-slate-400 text-white ring-2 ring-slate-400" },
-  green: { base: "border-border text-muted-foreground", active: "bg-green-900 border-green-500 text-green-200 ring-2 ring-green-500" },
-  orange: { base: "border-border text-muted-foreground", active: "bg-orange-900 border-orange-500 text-orange-200 ring-2 ring-orange-500" },
-  red: { base: "border-border text-muted-foreground", active: "bg-red-900 border-red-500 text-red-200 ring-2 ring-red-500" },
+  none: { base: "border-border text-muted-foreground", active: "dark:bg-slate-700 bg-slate-200 dark:border-slate-400 border-slate-400 dark:text-white text-slate-800 ring-2 ring-slate-400" },
+  green: { base: "border-border text-muted-foreground", active: "dark:bg-green-900 bg-green-100 border-green-500 dark:text-green-200 text-green-800 ring-2 ring-green-500" },
+  orange: { base: "border-border text-muted-foreground", active: "dark:bg-orange-900 bg-orange-100 border-orange-500 dark:text-orange-200 text-orange-800 ring-2 ring-orange-500" },
+  red: { base: "border-border text-muted-foreground", active: "dark:bg-red-900 bg-red-100 border-red-500 dark:text-red-200 text-red-800 ring-2 ring-red-500" },
 };
 
 export default function CustomerLookup({
@@ -741,12 +327,13 @@ export default function CustomerLookup({
   triggerLookup,
   onLookupComplete,
   onFlagChange,
+  currentUser: currentUserProp = null,
 }) {
   const [customerNumber, setCustomerNumber] = useState("");
   const [loading, setLoading] = useState(false);
   const [customer, setCustomer] = useState(null);
   const [subAccounts, setSubAccounts] = useState([]);
-  const [currentUser, setCurrentUser] = useState(null);
+  const [currentUser, setCurrentUser] = useState(currentUserProp);
   const [flagReason, setFlagReason] = useState("");
   const [isUpdatingFlag, setIsUpdatingFlag] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -754,12 +341,12 @@ export default function CustomerLookup({
   const [removalReason, setRemovalReason] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [allRecords, setAllRecords] = useState([]);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
   const [recordHistory, setRecordHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [pendingFlagColor, setPendingFlagColor] = useState(null);
   const searchInputRef = useRef(null);
+  const suggestionRequestIdRef = useRef(0);
 
   const closeAndReset = useCallback(() => {
     setCustomer(null);
@@ -773,18 +360,6 @@ export default function CustomerLookup({
     setRecordHistory([]);
     setPendingFlagColor(null);
     setTimeout(() => searchInputRef.current?.focus(), 50);
-  }, []);
-
-  const refreshRecords = useCallback(async () => {
-    try {
-      const records = await fetchLocalRecords();
-      setAllRecords(records);
-      return records;
-    } catch (error) {
-      console.error("Failed to fetch records:", error);
-      toast.error(error.message || "Failed to fetch records");
-      return [];
-    }
   }, []);
 
   const loadRecordHistory = useCallback(async (recordId) => {
@@ -802,10 +377,12 @@ export default function CustomerLookup({
     }
   }, []);
 
-  // currentUser is fetched by the parent via React Query (shared cache); no extra fetch needed here.
-  // We lazily load it only if not passed as a prop.
   useEffect(() => {
-    if (currentUser) return; // already set from prop or prior fetch
+    if (currentUserProp) {
+      setCurrentUser(currentUserProp);
+      return;
+    }
+    if (currentUser) return;
     const fetchUser = async () => {
       try {
         const user = await api.auth.me();
@@ -815,11 +392,7 @@ export default function CustomerLookup({
       }
     };
     fetchUser();
-  }, [currentUser]);
-
-  useEffect(() => {
-    refreshRecords();
-  }, [refreshRecords]);
+  }, [currentUser, currentUserProp]);
 
   useEffect(() => {
     if (!triggerLookup) return;
@@ -828,70 +401,40 @@ export default function CustomerLookup({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [triggerLookup]);
 
-  const fuzzyMatch = (str, pattern) => {
-    if (!str || !pattern) return { matches: false, score: 0 };
-
-    const strLower = str.toLowerCase();
-    const patternLower = pattern.toLowerCase();
-
-    if (strLower === patternLower) return { matches: true, score: 1000 };
-    if (strLower.includes(patternLower)) return { matches: true, score: 500 };
-
-    let patternIdx = 0;
-    let score = 0;
-    let consecutiveMatches = 0;
-
-    for (let i = 0; i < strLower.length && patternIdx < patternLower.length; i++) {
-      if (strLower[i] === patternLower[patternIdx]) {
-        score += 1 + consecutiveMatches;
-        consecutiveMatches++;
-        patternIdx++;
-      } else {
-        consecutiveMatches = 0;
-      }
-    }
-
-    const matches = patternIdx === patternLower.length;
-    return { matches, score };
-  };
-
   useEffect(() => {
     if (customerNumber.trim().length === 0) {
+      suggestionRequestIdRef.current += 1;
       setSuggestions([]);
       setShowSuggestions(false);
       return;
     }
 
-    // Debounce: wait 200ms after the user stops typing before fuzzy-searching
+    const requestId = suggestionRequestIdRef.current + 1;
+    suggestionRequestIdRef.current = requestId;
+
     const timer = setTimeout(() => {
-      const searchTerm = customerNumber.trim();
-      const matches = [];
-
-      allRecords.forEach((record) => {
-        const custNum = record.customer_number || "";
-        const custName = record.customer_name || "";
-
-        const numMatch = fuzzyMatch(String(custNum), searchTerm);
-        const nameMatch = fuzzyMatch(String(custName), searchTerm);
-
-        if (numMatch.matches || nameMatch.matches) {
-          matches.push({
+      fetchCustomerLookupSuggestions(customerNumber)
+        .then((matches) => {
+          if (suggestionRequestIdRef.current !== requestId) return;
+          const nextSuggestions = matches.map((record) => ({
             record,
-            score: Math.max(numMatch.score, nameMatch.score),
-            customerNumber: String(custNum),
-            customerName: String(custName),
-          });
-        }
-      });
-
-      matches.sort((a, b) => b.score - a.score);
-      setSuggestions(matches.slice(0, 5));
-      setSelectedSuggestionIndex(-1);
-      setShowSuggestions(matches.length > 0);
+            customerNumber: String(record.customer_number || ""),
+            customerName: String(record.customer_name || ""),
+          }));
+          setSuggestions(nextSuggestions);
+          setSelectedSuggestionIndex(-1);
+          setShowSuggestions(nextSuggestions.length > 0);
+        })
+        .catch((error) => {
+          if (suggestionRequestIdRef.current !== requestId) return;
+          console.error("Failed to fetch customer lookup suggestions:", error);
+          setSuggestions([]);
+          setShowSuggestions(false);
+        });
     }, 200);
 
     return () => clearTimeout(timer);
-  }, [customerNumber, allRecords]);
+  }, [customerNumber]);
 
   const handleLookup = async (customNumber = null) => {
     const numberToSearch = String(
@@ -909,14 +452,7 @@ export default function CustomerLookup({
     setShowSuggestions(false);
 
     try {
-      // Use cached records — only refresh if cache is empty
-      const freshRecords = allRecords.length > 0 ? allRecords : await refreshRecords();
-
-      const record = freshRecords.find(
-        (r) =>
-          String(r.customer_number || "").trim() === numberToSearch ||
-          String(r.customer_name || "").trim().toLowerCase() === numberToSearch.toLowerCase()
-      );
+      const { record, subAccounts: matchedSubAccounts } = await fetchCustomerLookup(numberToSearch);
 
       if (!record) {
         toast.error("Customer not found");
@@ -929,14 +465,12 @@ export default function CustomerLookup({
       setIsModalOpen(true);
       loadRecordHistory(record.id);
 
-      // If this is a parent account (purely numeric), find sub-accounts
       const custNum = String(record.customer_number || "").trim();
       if (isParentCustNum(custNum)) {
-        const children = freshRecords.filter((r) => {
+        setSubAccounts(matchedSubAccounts.filter((r) => {
           const cn = String(r.customer_number || "").trim();
           return cn !== custNum && getNumericPrefix(cn) === custNum;
-        });
-        setSubAccounts(children);
+        }));
       } else {
         setSubAccounts([]);
       }
@@ -984,6 +518,17 @@ export default function CustomerLookup({
     }
   };
 
+  const { data: creditLogicState } = useQuery({
+    queryKey: ["creditLogicCurrent"],
+    queryFn: async () => {
+      const response = await fetch("/api/credit-logic/current", { credentials: "include" });
+      if (!response.ok) throw new Error("Failed to load credit logic");
+      return response.json();
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+
   // Memoize credit analysis so it doesn't recalculate on every render
   const creditAnalysis = useMemo(() => {
     if (!customer) return null;
@@ -999,7 +544,12 @@ export default function CustomerLookup({
         } catch {}
         return { action: 'flag_changed', new_value };
       });
-    const analysis = analyseInvoiceCredit(allAccountRecords, flagHistory);
+    const activeLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
+    const activeLogicVersion = creditLogicState?.analysis?.version || null;
+    const analysis = {
+      ...analyseInvoiceCredit(allAccountRecords, flagHistory, activeLogicConfig),
+      logicVersionUsed: activeLogicVersion,
+    };
 
     // User-set flags are hard overrides — no analysis can outrank a human decision.
     // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
@@ -1011,9 +561,9 @@ export default function CustomerLookup({
         ...analysis,
         verdict: "hold",
         title: "Hold — Manually Flagged",
-        summary: "This customer has been manually flagged red by staff. Resolve the flag before issuing an invoice.",
+        summary: buildManualFlagSummary("red", customer.flag_created_by),
         factors: [
-          { type: "block", text: "Customer is manually flagged red — staff review required before invoicing." },
+          { type: "block", text: buildManualFlagFactor("red", customer.flag_created_by) },
           ...analysis.factors,
         ],
       };
@@ -1024,9 +574,9 @@ export default function CustomerLookup({
         ...analysis,
         verdict: "caution",
         title: "Proceed with Caution — Manually Flagged",
-        summary: "This customer has been manually flagged orange by staff. Review before issuing an invoice.",
+        summary: buildManualFlagSummary("orange", customer.flag_created_by),
         factors: [
-          { type: "warn", text: "Customer is manually flagged orange — staff review recommended before invoicing." },
+          { type: "warn", text: buildManualFlagFactor("orange", customer.flag_created_by) },
           ...analysis.factors,
         ],
       };
@@ -1053,7 +603,7 @@ export default function CustomerLookup({
     }
 
     return analysis;
-  }, [customer, subAccounts]);
+  }, [customer, subAccounts, recordHistory, creditLogicState]);
 
   const canModifyFlag = () => {
     if (!customer || !currentUser) return false;
@@ -1084,12 +634,6 @@ export default function CustomerLookup({
       };
 
       setCustomer(updatedCustomer);
-
-      setAllRecords((prev) =>
-        prev.map((record) =>
-          record.id === customer.id ? { ...record, ...updateData } : record
-        )
-      );
 
       await loadRecordHistory(customer.id);
       setFlagReason("");
@@ -1227,7 +771,7 @@ export default function CustomerLookup({
               onChange={(e) => setCustomerNumber(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Customer number or name…"
-              className="h-11 border border-slate-600/60 bg-slate-950/70 pl-10 text-white placeholder:text-slate-500 focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
+              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
             />
             {showSuggestions && suggestions.length > 0 && (
               <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
@@ -1236,10 +780,10 @@ export default function CustomerLookup({
                     key={s.record.id ?? idx}
                     onClick={() => handleSuggestionClick(s)}
                     className={cn(
-                      "w-full border-b border-slate-800/60 px-4 py-2.5 text-left last:border-0 transition-colors",
+                      "w-full border-b border-border/60 px-4 py-2.5 text-left last:border-0 transition-colors",
                       idx === selectedSuggestionIndex
-                        ? "bg-indigo-600/30 text-white"
-                        : "hover:bg-slate-800/70 text-slate-200"
+                        ? "bg-indigo-600/30 dark:text-white text-indigo-900"
+                        : "hover:bg-accent text-foreground"
                     )}
                   >
                     <div className="text-sm font-medium">{s.customerName}</div>
@@ -1295,29 +839,39 @@ export default function CustomerLookup({
               "w-full px-5 py-4 border-b shrink-0",
               verdictBannerStyles[creditAnalysis.verdict] || "bg-muted/30 border-border text-muted-foreground"
             )}>
-              <div className="flex items-center gap-3.5">
-                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
-                {creditAnalysis.verdict === "dormant" && <Clock className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.75} />}
+              <div className="flex items-start gap-2 sm:gap-3.5 flex-wrap sm:flex-nowrap">
+                {creditAnalysis.verdict === "approve" && <ShieldCheck className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "caution" && <AlertTriangle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "hold" && <XCircle className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
+                {creditAnalysis.verdict === "dormant" && <Clock className="h-8 w-8 shrink-0 opacity-90 mt-0.5" strokeWidth={1.75} />}
                 <div className="flex-1 min-w-0">
-                  <span className="text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
+                  <span className="text-base sm:text-lg font-extrabold tracking-tight leading-tight">{creditAnalysis.title}</span>
                   {creditAnalysis.summary && (
-                    <p className="text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
+                    <p className="text-xs sm:text-sm font-semibold mt-1 leading-snug opacity-90">{creditAnalysis.summary}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-4 shrink-0 pr-14">
+                <div className="flex flex-col sm:flex-row items-end sm:items-center gap-2 sm:gap-4 shrink-0 pr-10 sm:pr-14">
                   {creditAnalysis.avgLag !== null && creditAnalysis.avgLag !== undefined && (
-                    <span className={cn("text-base font-bold px-4 py-1.5 rounded-full", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
-                      ⏱ {creditAnalysis.avgLag}d avg
-                    </span>
+                    <UITooltip>
+                      <TooltipTrigger asChild>
+                        <span className={cn("hidden sm:inline-flex text-base font-bold px-4 py-1.5 rounded-full cursor-default", verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground")}>
+                          ⏱ {creditAnalysis.avgLag}d avg
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>Average days between invoice and receipt payment for this customer</TooltipContent>
+                    </UITooltip>
                   )}
-                  <span className={cn(
-                    "text-sm font-semibold px-3 py-1.5 rounded-full",
-                    verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
-                  )}>
-                    {creditAnalysis.score}/100
-                  </span>
+                  <UITooltip>
+                    <TooltipTrigger asChild>
+                      <span className={cn(
+                        "text-xs font-semibold px-3 py-1.5 rounded-full cursor-default",
+                        verdictScoreStyles[creditAnalysis.verdict] || "bg-muted text-muted-foreground"
+                      )}>
+                        {creditAnalysis.score}/100
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>Credit score: {creditAnalysis.score}/100 — higher is better creditworthiness</TooltipContent>
+                  </UITooltip>
                 </div>
               </div>
             </div>
@@ -1338,8 +892,8 @@ export default function CustomerLookup({
             {/* Pinned: customer header card */}
             <div className="shrink-0 px-5 pt-4 pb-0">
             <div className="bg-card border border-border rounded-xl p-4 mb-3">
-              <div className="flex items-start gap-3">
-                <User className="h-6 w-6 text-muted-foreground shrink-0 mt-1" />
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+                <User className="hidden sm:block h-6 w-6 text-muted-foreground shrink-0 mt-1" />
                 <div className="flex-1 min-w-0">
                   <div className="text-xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
                   <div className="text-sm text-muted-foreground mt-0.5">Account #{customer?.customer_number}</div>
@@ -1357,15 +911,20 @@ export default function CustomerLookup({
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-2 shrink-0">
-                  <p className={cn("text-3xl font-bold tabular-nums", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
+                  <p className={cn("text-2xl sm:text-3xl font-bold tabular-nums", grandTotal !== 0 ? "text-foreground" : "text-muted-foreground")}>
                     {formatAmount(String(hasSubAccounts ? grandTotal : (customer?.outstanding_balance ?? 0)))}
                   </p>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide mt-1">Outstanding</p>
                   <div className="flex gap-1.5 flex-wrap justify-end">
                     {customer?.terms && (
-                      <Badge variant="outline" className="text-xs">
-                        {customer.terms}
-                      </Badge>
+                      <UITooltip>
+                        <TooltipTrigger asChild>
+                          <Badge variant="outline" className="text-xs cursor-default">
+                            {customer.terms}
+                          </Badge>
+                        </TooltipTrigger>
+                        <TooltipContent>Payment terms agreed with this customer</TooltipContent>
+                      </UITooltip>
                     )}
                     {hasSubAccounts && (
                       <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
@@ -1381,10 +940,10 @@ export default function CustomerLookup({
             {!!customer?.auto_flagged && (
               <div className={cn(
                 "flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium mb-3",
-                customer?.flag_color === "red" && "bg-red-950/70 border-red-700 text-red-300",
-                customer?.flag_color === "green" && "bg-green-950/70 border-green-700 text-green-300",
-                customer?.flag_color === "orange" && "bg-orange-950/70 border-orange-700 text-orange-300",
-                (!customer?.flag_color || customer?.flag_color === "none") && "bg-slate-800 border-slate-600 text-slate-300",
+                customer?.flag_color === "red" && "dark:bg-red-950/70 bg-red-50 border-red-700 dark:text-red-300 text-red-700",
+                customer?.flag_color === "green" && "dark:bg-green-950/70 bg-green-50 border-green-700 dark:text-green-300 text-green-700",
+                customer?.flag_color === "orange" && "dark:bg-orange-950/70 bg-orange-50 border-orange-700 dark:text-orange-300 text-orange-700",
+                (!customer?.flag_color || customer?.flag_color === "none") && "dark:bg-slate-800 bg-slate-100 dark:border-slate-600 border-slate-300 dark:text-slate-300 text-slate-700",
               )}>
                 <Zap className="w-4 h-4 shrink-0" />
                 <span>Auto-flagged</span>
@@ -1411,7 +970,7 @@ export default function CustomerLookup({
             )}
 
             {/* Invoices + Receipts side by side */}
-            <div className="grid grid-cols-2 gap-3 items-start">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
               <div>{renderGroupedTable({
                 title: "Invoices",
                 icon: Flag,
@@ -1444,22 +1003,32 @@ export default function CustomerLookup({
                 const isActive = pendingFlagColor === color;
                 const isCurrent = customer?.flag_color === color || (!customer?.flag_color && color === "none");
                 const styles = flagPillStyles[color];
+                const tipMap = {
+                  none: "Clear flag — remove any existing flag from this customer",
+                  green: "Green — mark customer as approved / good standing",
+                  orange: "Orange — mark customer as requiring attention or caution",
+                  red: "Red — mark customer as blocked or high-risk",
+                };
                 return (
-                  <button
-                    key={color}
-                    onClick={() => setPendingFlagColor(color)}
-                    disabled={!canModifyFlag() || isUpdatingFlag}
-                    className={cn(
-                      "rounded-full px-4 py-1.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] justify-center",
-                      isActive ? styles.active : styles.base,
-                      isCurrent && !isActive && "ring-1 ring-white/30"
-                    )}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", flagDotColor[color])} />
-                      {flagColors[color].label}
-                    </span>
-                  </button>
+                  <UITooltip key={color}>
+                    <TooltipTrigger asChild>
+                      <button
+                        onClick={() => setPendingFlagColor(color)}
+                        disabled={!canModifyFlag() || isUpdatingFlag}
+                        className={cn(
+                          "rounded-full px-4 py-2.5 text-sm font-medium border transition-all disabled:opacity-40 disabled:cursor-not-allowed min-w-[72px] min-h-[44px] justify-center",
+                          isActive ? styles.active : styles.base,
+                          isCurrent && !isActive && "ring-1 ring-white/30"
+                        )}
+                      >
+                        <span className="flex items-center gap-1.5">
+                          <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", flagDotColor[color])} />
+                          {flagColors[color].label}
+                        </span>
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent>{tipMap[color]}</TooltipContent>
+                  </UITooltip>
                 );
               })}
             </div>
@@ -1517,7 +1086,7 @@ export default function CustomerLookup({
           onEscapeKeyDown={(e) => e.preventDefault()}
         >
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-white">
+            <DialogTitle className="flex items-center gap-2 text-foreground">
               <Trash2 className="h-4 w-4 text-rose-400" />
               Remove Flag — Reason Required
             </DialogTitle>

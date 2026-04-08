@@ -6,7 +6,53 @@
  */
 
 import db from '../db/index.js';
+import BetterSqlite3 from 'better-sqlite3';
+import { mkdirSync, writeFileSync, renameSync } from 'fs';
+import path from 'path';
 import { buildStatements } from '../db/statements.js';
+// ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
+
+function checkBackupIntegrity(siteId, filePath) {
+  let backupDb = null;
+  let finalPath = filePath;
+  let resultText = 'unchecked';
+
+  try {
+    backupDb = new BetterSqlite3(filePath, { readonly: true, fileMustExist: true });
+    const rows = backupDb.prepare('PRAGMA integrity_check').all();
+    const values = rows.map((row) => String(Object.values(row)[0] ?? '').trim()).filter(Boolean);
+    const ok = values.length > 0 && values.every((value) => value.toLowerCase() === 'ok');
+    resultText = ok ? 'ok' : JSON.stringify(values);
+
+    if (!ok) {
+      finalPath = `${filePath}.corrupt`;
+      renameSync(filePath, finalPath);
+      console.warn(`[HUB BACKUP] ${siteId}: integrity check failed, renamed to ${path.basename(finalPath)}`);
+    }
+  } catch (err) {
+    resultText = err.message || 'integrity_check_failed';
+    try {
+      finalPath = `${filePath}.corrupt`;
+      renameSync(filePath, finalPath);
+    } catch (_) {
+      finalPath = filePath;
+    }
+    console.warn(`[HUB BACKUP] ${siteId}: integrity check error: ${resultText}`);
+  } finally {
+    try { backupDb?.close(); } catch (_) {}
+  }
+
+  try {
+    db.prepare(`
+      INSERT INTO hub_backup_integrity (site_id, filename, result)
+      VALUES (?, ?, ?)
+    `).run(siteId, path.basename(finalPath), resultText);
+  } catch (err) {
+    console.warn(`[HUB BACKUP] ${siteId}: failed to record integrity result: ${err.message}`);
+  }
+
+  return { finalPath, integrity: resultText === 'ok' ? 'ok' : 'corrupt' };
+}
 
 // --- Hub table creation (only called when HUB_MODE === 'true') ---
 function initHubTables() {
@@ -19,7 +65,12 @@ function initHubTables() {
       token TEXT,
       last_seen TEXT,
       last_kpis TEXT,
-      status TEXT DEFAULT 'unknown'
+      status TEXT DEFAULT 'unknown',
+      logic_version INTEGER,
+      logic_sync_status TEXT DEFAULT 'never_synced',
+      logic_last_error TEXT,
+      logic_last_synced_at TEXT,
+      logic_status_updated_at TEXT
     );
     CREATE TABLE IF NOT EXISTS hub_records (
       site_id TEXT,
@@ -28,6 +79,7 @@ function initHubTables() {
       customer_name TEXT,
       flag_color TEXT,
       flag_reason TEXT,
+      flag_created_by TEXT,
       outstanding_balance TEXT,
       unpaid_invoices TEXT,
       receipts TEXT,
@@ -127,26 +179,28 @@ async function syncSite(site) {
     // Records — paginate until has_more is false
     const upsertRec = db.prepare(`
       INSERT INTO hub_records (
-        site_id, record_id, customer_number, customer_name, flag_color, flag_reason,
+        site_id, record_id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
         outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-        updated_date, synced_at
+        updated_date, synced_at, sales_rep
       ) VALUES (
-        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason,
+        @site_id, @record_id, @customer_number, @customer_name, @flag_color, @flag_reason, @flag_created_by,
         @outstanding_balance, @unpaid_invoices, @receipts, @auto_flagged, @terms,
-        @updated_date, @synced_at
+        @updated_date, @synced_at, @sales_rep
       )
       ON CONFLICT(site_id, record_id) DO UPDATE SET
         customer_number=excluded.customer_number,
         customer_name=excluded.customer_name,
         flag_color=excluded.flag_color,
         flag_reason=excluded.flag_reason,
+        flag_created_by=excluded.flag_created_by,
         outstanding_balance=excluded.outstanding_balance,
         unpaid_invoices=excluded.unpaid_invoices,
         receipts=excluded.receipts,
         auto_flagged=excluded.auto_flagged,
         terms=excluded.terms,
         updated_date=excluded.updated_date,
-        synced_at=excluded.synced_at
+        synced_at=excluded.synced_at,
+        sales_rep=excluded.sales_rep
     `);
     const insertMany = db.transaction((records) => {
       const now = new Date().toISOString();
@@ -158,6 +212,7 @@ async function syncSite(site) {
           customer_name: r.customer_name,
           flag_color: r.flag_color || 'none',
           flag_reason: r.flag_reason || null,
+          flag_created_by: r.flag_created_by || null,
           outstanding_balance: r.outstanding_balance || null,
           unpaid_invoices: r.unpaid_invoices || '[]',
           receipts: r.receipts || '[]',
@@ -165,6 +220,7 @@ async function syncSite(site) {
           terms: r.terms || null,
           updated_date: r.updated_date,
           synced_at: now,
+          sales_rep: r.sales_rep || null,
         });
       }
     });
@@ -248,6 +304,8 @@ async function syncSite(site) {
 
     // Speedtest results
     await syncSpeedtest(site);
+
+    // Network devices: now served live from ntopng API — no ETL pull here.
 
     // Update hub_sites
     db.prepare(`
@@ -333,8 +391,6 @@ async function runHubBackupPull() {
   }
   const sites = stmts.hubSitesForBackup.all();
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
-  const { mkdirSync, writeFileSync } = await import('fs');
-  const pathMod = await import('path');
   await Promise.allSettled(sites.map(async (site) => {
     try {
       const controller = new AbortController();
@@ -346,12 +402,13 @@ async function runHubBackupPull() {
       clearTimeout(hardTimeout);
       if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
       const buf = Buffer.from(await upstream.arrayBuffer());
-      const dir = pathMod.join(process.cwd(), 'database', 'hub-backups', site.id);
+      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
       mkdirSync(dir, { recursive: true });
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const file = pathMod.join(dir, `cardoso-${site.id}-${ts}.db`);
+      const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
       writeFileSync(file, buf);
-      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${file}`);
+      const integrity = checkBackupIntegrity(site.id, file);
+      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
     } catch (err) {
       console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
     }

@@ -11,6 +11,12 @@ function ensureColumn(db, tableName, columnName, definition) {
   }
 }
 
+function ensureTable(db, tableName, definition) {
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (${definition})`);
+  } catch {}
+}
+
 function buildMigrations(db) {
   return [
     {
@@ -229,6 +235,7 @@ function buildMigrations(db) {
           ensureColumn(db, 'hub_records', 'auto_flagged', 'INTEGER DEFAULT 0');
           ensureColumn(db, 'hub_records', 'flag_color', 'TEXT');
           ensureColumn(db, 'hub_records', 'flag_reason', 'TEXT');
+          ensureColumn(db, 'hub_records', 'flag_created_by', 'TEXT');
           ensureColumn(db, 'hub_records', 'terms', 'TEXT');
           ensureColumn(db, 'hub_records', 'updated_date', 'TEXT');
           ensureColumn(db, 'hub_records', 'synced_at', 'TEXT');
@@ -457,6 +464,463 @@ function buildMigrations(db) {
       },
     },
 
+    {
+      version: 21,
+      name: 'ensure_hub_user_sites_table',
+      up() {
+        // Belt-and-suspenders: v16 may have been recorded without the DDL
+        // actually running on some installs. Force-create here.
+        try {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS hub_user_sites (
+              email TEXT NOT NULL,
+              site_slug TEXT NOT NULL,
+              pushed_at TEXT DEFAULT (datetime('now')),
+              PRIMARY KEY (email, site_slug)
+            );
+          `);
+        } catch (e) { /* already exists, no-op */ }
+      },
+    },
+    {
+      version: 22,
+      name: 'collections_pipeline_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS collections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id TEXT NOT NULL UNIQUE,
+            status TEXT DEFAULT 'pending',
+            contacted_at TEXT,
+            notes TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_collections_status ON collections(status);
+          CREATE INDEX IF NOT EXISTS idx_collections_customer_id ON collections(customer_id);
+        `);
+      },
+    },
+
+    {
+      version: 23,
+      name: 'hub_audit_log_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            action TEXT,
+            performed_by TEXT,
+            target TEXT,
+            detail TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+
+    {
+      version: 24,
+      name: 'hub_backup_integrity_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_backup_integrity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT,
+            filename TEXT,
+            result TEXT,
+            checked_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+
+    {
+      version: 25,
+      name: 'feature_permissions_sidebar_expansion',
+      up() {
+        ensureColumn(db, 'user', 'can_access_collections', 'INTEGER DEFAULT 1');
+        ensureColumn(db, 'user', 'can_access_hub_metrics', 'INTEGER DEFAULT 0');
+        ensureColumn(db, 'user', 'can_access_hub_backups', 'INTEGER DEFAULT 0');
+        ensureColumn(db, 'user', 'can_access_hub_trends', 'INTEGER DEFAULT 0');
+        ensureColumn(db, 'user', 'can_access_hub_audit_log', 'INTEGER DEFAULT 0');
+
+        db.prepare(`
+          UPDATE "user"
+          SET can_access_collections = COALESCE(can_access_customer_balances, 1)
+          WHERE can_access_collections IS NULL
+             OR can_access_collections = 0
+        `).run();
+      },
+    },
+
+    {
+      version: 26,
+      name: 'hub_records_flag_created_by',
+      up() {
+        const hubRecordsExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
+        if (hubRecordsExists) {
+          ensureColumn(db, 'hub_records', 'flag_created_by', 'TEXT');
+        }
+      },
+    },
+
+    {
+      version: 27,
+      name: 'network_devices_tables',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS network_devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT,
+            site_slug TEXT,
+            site_name TEXT,
+            mac_address TEXT NOT NULL UNIQUE,
+            ip_address TEXT,
+            hostname TEXT,
+            vendor TEXT,
+            device_category TEXT,
+            classification_label TEXT,
+            classification_confidence TEXT,
+            classification_rationale TEXT,
+            discovery_source TEXT,
+            interface_alias TEXT,
+            interface_description TEXT,
+            neighbor_state TEXT,
+            first_seen TEXT,
+            last_seen TEXT,
+            last_scan_at TEXT,
+            active INTEGER DEFAULT 0,
+            recently_seen INTEGER DEFAULT 0,
+            details_json TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now'))
+          );
+          CREATE INDEX IF NOT EXISTS idx_network_devices_last_seen ON network_devices(last_seen);
+          CREATE INDEX IF NOT EXISTS idx_network_devices_active ON network_devices(active);
+          CREATE INDEX IF NOT EXISTS idx_network_devices_category ON network_devices(device_category);
+
+          CREATE TABLE IF NOT EXISTS network_device_scan_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            started_at TEXT NOT NULL,
+            completed_at TEXT,
+            status TEXT,
+            trigger_reason TEXT,
+            device_count INTEGER DEFAULT 0,
+            active_count INTEGER DEFAULT 0,
+            message TEXT
+          );
+        `);
+
+        if (process.env.HUB_MODE === 'true') {
+          db.exec(`
+            CREATE TABLE IF NOT EXISTS hub_network_devices (
+              site_id TEXT NOT NULL,
+              site_slug TEXT,
+              site_name TEXT,
+              mac_address TEXT NOT NULL,
+              ip_address TEXT,
+              hostname TEXT,
+              vendor TEXT,
+              device_category TEXT,
+              classification_label TEXT,
+              classification_confidence TEXT,
+              classification_rationale TEXT,
+              interface_alias TEXT,
+              interface_description TEXT,
+              neighbor_state TEXT,
+              first_seen TEXT,
+              last_seen TEXT,
+              last_scan_at TEXT,
+              active INTEGER DEFAULT 0,
+              recently_seen INTEGER DEFAULT 0,
+              details_json TEXT,
+              pulled_at TEXT DEFAULT (datetime('now')),
+              PRIMARY KEY (site_id, mac_address)
+            );
+            CREATE INDEX IF NOT EXISTS idx_hub_network_devices_site ON hub_network_devices(site_id, active);
+          `);
+        }
+      },
+    },
+
+    {
+      version: 28,
+      name: 'feature_permission_network_devices',
+      up() {
+        ensureColumn(db, 'user', 'can_access_network_devices', 'INTEGER DEFAULT 0');
+        db.prepare(`UPDATE "user" SET can_access_network_devices = 1 WHERE role = 'admin'`).run();
+      },
+    },
+
+    {
+      version: 29,
+      name: 'credit_logic_centralisation',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS credit_logic_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            version INTEGER NOT NULL UNIQUE,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            config_json TEXT NOT NULL,
+            notes TEXT,
+            created_by TEXT,
+            is_active INTEGER DEFAULT 0,
+            published_at TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX IF NOT EXISTS idx_credit_logic_versions_active ON credit_logic_versions(is_active, version DESC);
+
+          CREATE TABLE IF NOT EXISTS credit_logic_state (
+            scope TEXT PRIMARY KEY,
+            logic_version INTEGER,
+            payload_json TEXT,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            published_at TEXT,
+            last_synced_at TEXT,
+            sync_status TEXT DEFAULT 'never_synced',
+            last_error TEXT,
+            source TEXT DEFAULT 'default',
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+        `);
+
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          ensureColumn(db, 'hub_sites', 'logic_version', 'INTEGER');
+          ensureColumn(db, 'hub_sites', 'logic_sync_status', `TEXT DEFAULT 'never_synced'`);
+          ensureColumn(db, 'hub_sites', 'logic_last_error', 'TEXT');
+          ensureColumn(db, 'hub_sites', 'logic_last_synced_at', 'TEXT');
+          ensureColumn(db, 'hub_sites', 'logic_status_updated_at', 'TEXT');
+        }
+      },
+    },
+
+    {
+      version: 30,
+      name: 'drop_network_device_bandwidth_tables',
+      up() {
+        // Bandwidth estimation removed from Network Devices (inventory-only).
+        // Drop bandwidth sample tables created by v27 on existing installs.
+        db.exec(`
+          DROP TABLE IF EXISTS network_device_bandwidth_samples;
+          DROP TABLE IF EXISTS hub_network_device_bandwidth_samples;
+        `);
+      },
+    },
+    {
+      version: 31,
+      name: 'ntopng_hub_settings',
+      up() {
+        // Add ntopng connection settings to hub_settings (Hub only).
+        // Also drop old PowerShell-based network device tables — replaced by ntopng.
+        const hubSettingsExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_settings'`).get();
+        if (hubSettingsExists) {
+          const upsert = db.prepare(
+            `INSERT OR IGNORE INTO hub_settings (key, value) VALUES (?, ?)`
+          );
+          upsert.run('ntopng_url', 'http://localhost:3000');
+          upsert.run('ntopng_user', 'admin');
+        }
+        // Drop PowerShell-era tables (no longer used)
+        db.exec(`
+          DROP TABLE IF EXISTS network_devices;
+          DROP TABLE IF EXISTS network_device_scan_runs;
+          DROP TABLE IF EXISTS hub_network_devices;
+        `);
+      },
+    },
+
+    {
+      version: 32,
+      name: 'databaseconnection_use_encryption',
+      up() {
+        ensureColumn(db, 'databaseconnection', 'use_encryption', 'INTEGER NOT NULL DEFAULT 0');
+      },
+    },
+    {
+      version: 33,
+      name: 'perf_indexes_hub_inventory_and_records',
+      up() {
+        // hub_records and hub_inventory only exist on hub-mode machines — skip on sites
+        const hubRecordsExists = db.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_records'"
+        ).get();
+        const hubInventoryExists = db.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_inventory'"
+        ).get();
+
+        if (hubRecordsExists) {
+          db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+          `);
+        }
+        if (hubInventoryExists) {
+          db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
+          `);
+        }
+      },
+    },
+    {
+      version: 34,
+      name: 'perf_index_autoflagrule_active_priority',
+      up() {
+        // activeAutoFlagRules runs on every sync and auto-flag check:
+        //   SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC
+        // Without an index this is a full table scan on every run.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_autoflagrule_active_priority
+          ON autoflagrule (is_active, priority DESC);
+        `);
+      },
+    },
+
+    {
+      version: 35,
+      name: 'inventory_sales_rep_column',
+      up() {
+        // Historical migration kept for compatibility. A later cleanup migration
+        // removes sales_rep from inventory ownership entirely.
+        try { db.prepare('ALTER TABLE inventoryrecord ADD COLUMN sales_rep TEXT').run(); } catch {}
+        try { db.prepare('ALTER TABLE hub_inventory ADD COLUMN sales_rep TEXT').run(); } catch {}
+      },
+    },
+
+    {
+      version: 36,
+      name: 'datarecord_sales_rep_and_backfill',
+      up() {
+        // Add sales_rep to datarecord (site customer table)
+        try { db.prepare('ALTER TABLE datarecord ADD COLUMN sales_rep TEXT').run(); } catch {}
+
+        // Backfill datarecord.sales_rep from inventoryrecord.sales_rep (by customer_number)
+        // This copies the first non-null sales_rep from inventory to the customer record
+        try {
+          db.exec(`
+            UPDATE datarecord
+            SET sales_rep = (
+              SELECT MIN(i.sales_rep)
+              FROM inventoryrecord i
+              WHERE i.customer_number = datarecord.customer_number
+                AND i.sales_rep IS NOT NULL
+                AND i.customer_number IS NOT NULL
+            )
+            WHERE datarecord.sales_rep IS NULL
+              AND datarecord.customer_number IS NOT NULL
+              AND EXISTS (
+                SELECT 1 FROM inventoryrecord i2
+                WHERE i2.customer_number = datarecord.customer_number
+                  AND i2.sales_rep IS NOT NULL
+              )
+          `);
+        } catch {}
+
+        // Add sales_rep to hub_records (Hub aggregated customer table)
+        // Guard: only runs on Hub machines (hub_records only exists on Hub)
+        if (process.env.HUB_MODE === 'true') {
+          try { db.prepare('ALTER TABLE hub_records ADD COLUMN sales_rep TEXT').run(); } catch {}
+        }
+      },
+    },
+
+    {
+      version: 37,
+      name: 'hub_user_allowed_sites',
+      up() {
+        // Only create this table on the Hub — sites don't need it
+        if (process.env.HUB_MODE === 'true') {
+          ensureTable(db, 'hub_user_allowed_sites',
+            `email TEXT NOT NULL,
+             site_slug TEXT NOT NULL,
+             assigned_at TEXT DEFAULT (datetime('now')),
+             PRIMARY KEY (email, site_slug)`
+          );
+        }
+      },
+    },
+    {
+      version: 38,
+      name: 'remove_sales_rep_from_inventory_tables',
+      up() {
+        const hasColumn = (tableName, columnName) => {
+          try {
+            return db.prepare(`PRAGMA table_info("${tableName}")`).all().some((c) => c.name === columnName);
+          } catch {
+            return false;
+          }
+        };
+
+        if (hasColumn('inventoryrecord', 'sales_rep')) {
+          db.exec(`
+            CREATE TABLE inventoryrecord_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source_table TEXT NOT NULL,
+              item_number TEXT NOT NULL,
+              item_description TEXT,
+              qty_on_hand TEXT,
+              last_cost TEXT,
+              price_list TEXT,
+              price TEXT,
+              stocking_uom TEXT,
+              commodity TEXT,
+              inventory_value TEXT,
+              terms TEXT,
+              created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+              updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(source_table, item_number)
+            );
+            INSERT INTO inventoryrecord_new (
+              id, source_table, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms,
+              created_date, updated_date
+            )
+            SELECT
+              id, source_table, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms,
+              created_date, updated_date
+            FROM inventoryrecord;
+            DROP TABLE inventoryrecord;
+            ALTER TABLE inventoryrecord_new RENAME TO inventoryrecord;
+            CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
+          `);
+        }
+
+        const hubInventoryExists = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
+        if (hubInventoryExists && hasColumn('hub_inventory', 'sales_rep')) {
+          db.exec(`
+            CREATE TABLE hub_inventory_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              site_id TEXT NOT NULL,
+              item_number TEXT NOT NULL,
+              item_description TEXT,
+              qty_on_hand TEXT,
+              last_cost TEXT,
+              price_list TEXT,
+              price TEXT,
+              stocking_uom TEXT,
+              commodity TEXT,
+              inventory_value TEXT,
+              terms TEXT,
+              synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(site_id, item_number)
+            );
+            INSERT INTO hub_inventory_new (
+              id, site_id, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms, synced_at
+            )
+            SELECT
+              id, site_id, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms, synced_at
+            FROM hub_inventory;
+            DROP TABLE hub_inventory;
+            ALTER TABLE hub_inventory_new RENAME TO hub_inventory;
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
+          `);
+        }
+      },
+    },
   ];
 }
 

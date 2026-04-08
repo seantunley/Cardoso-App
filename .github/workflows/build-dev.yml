@@ -103,6 +103,8 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" windows/installer.nsi
           $v = (Get-Content package.json | ConvertFrom-Json).version
           Rename-Item CardosoSetup.exe "CardosoSetup-v$v-dev.exe"
+          $hash = (Get-FileHash "CardosoSetup-v$v-dev.exe" -Algorithm SHA256).Hash.ToLower()
+          "$hash *CardosoSetup-v$v-dev.exe" | Set-Content "CardosoSetup-v$v-dev.exe.sha256" -NoNewline
         shell: powershell
 
       - name: Get version
@@ -116,5 +118,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CardosoSetup-v${{ steps.version.outputs.version }}-dev
-          path: CardosoSetup-v${{ steps.version.outputs.version }}-dev.exe
+          path: |
+            CardosoSetup-v${{ steps.version.outputs.version }}-dev.exe
+            CardosoSetup-v${{ steps.version.outputs.version }}-dev.exe.sha256
           retention-days: 7

@@ -19,12 +19,16 @@ import { createHubRouter, createNonHubFallbackRouter, createReceiveUsersRouter }
 import { createReportingRouter } from './src/routes/reporting.js';
 import { createBackupRouter } from './src/routes/backup.js';
 import { createSystemRouter } from './src/routes/system.js';
-import { validateSessionSecret, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
+import { createCreditLogicRouter } from './src/routes/creditLogic.js';
+import { createCollectionsRouter } from './src/routes/collections.js';
+import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
+import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
 validateSessionSecret(process.env.SESSION_SECRET);
+validateHubTokenSecret(process.env.HUB_TOKEN_SECRET);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,6 +50,7 @@ app.use(session({
 
 initSchema(db);
 runMigrations(db);
+validateEncryptionKey();
 migrateUnencryptedPasswords();
 const stmts = buildStatements(db);
 const getUserById = createGetUserById(stmts);
@@ -53,14 +58,17 @@ const { requireAuth, requireAdmin, requirePermission, requireSelfOrAdmin, checkT
 
 app.use(createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }));
 app.use(createSystemRouter({ requireAuth, requireAdmin }));
+app.use(createCreditLogicRouter({ requireAuth, requirePermission }));
 app.use(createBackupRouter());
 app.use(createReportingRouter({ requireAuth }));
+app.use(createCollectionsRouter({ requireAuth, requirePermission }));
+app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
   initHubSiteRegistry();
-  app.use(createHubRouter({ requireAuth, requireAdmin }));
+  app.use(createHubRouter({ requireAuth, requireAdmin, requirePermission }));
   startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites);
 } else {
   app.use(createNonHubFallbackRouter());
