@@ -1,4 +1,5 @@
 import express from 'express';
+import helmet from 'helmet';
 import cors from 'cors';
 import session from 'express-session';
 import dotenv from 'dotenv';
@@ -33,6 +34,14 @@ validateHubTokenSecret(process.env.HUB_TOKEN_SECRET);
 const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// Security headers — applies to all responses in both prod and dev
+app.use(helmet());
+
+// Trust proxy so X-Forwarded-For is used correctly (rate limiting, login logging)
+// On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
+app.set('trust proxy', 1);
+
 if (IS_PRODUCTION) {
   app.use(express.static(path.join(process.cwd(), 'dist')));
   app.use(cors({ origin: false, credentials: true }));
