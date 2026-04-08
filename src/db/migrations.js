@@ -11,6 +11,12 @@ function ensureColumn(db, tableName, columnName, definition) {
   }
 }
 
+function ensureTable(db, tableName, definition) {
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS "${tableName}" (${definition})`);
+  } catch {}
+}
+
 function buildMigrations(db) {
   return [
     {
@@ -812,6 +818,22 @@ function buildMigrations(db) {
         // Guard: only runs on Hub machines (hub_records only exists on Hub)
         if (process.env.HUB_MODE === 'true') {
           try { db.prepare('ALTER TABLE hub_records ADD COLUMN sales_rep TEXT').run(); } catch {}
+        }
+      },
+    },
+
+    {
+      version: 37,
+      name: 'hub_user_allowed_sites',
+      up() {
+        // Only create this table on the Hub — sites don't need it
+        if (process.env.HUB_MODE === 'true') {
+          ensureTable(db, 'hub_user_allowed_sites',
+            `email TEXT NOT NULL,
+             site_slug TEXT NOT NULL,
+             assigned_at TEXT DEFAULT (datetime('now')),
+             PRIMARY KEY (email, site_slug)`
+          );
         }
       },
     },
