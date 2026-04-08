@@ -207,8 +207,8 @@ function HubCustomerModal({ record, open, onClose }) {
     }
 
     if (open && record) {
-      loadCreditLogicConfig();
-      loadSubAccounts();
+      // Run both in parallel — they are independent
+      await Promise.all([loadCreditLogicConfig(), loadSubAccounts()]);
     } else {
       setSubAccounts([]);
     }
@@ -602,7 +602,7 @@ export default function HubDashboard() {
     }
   }, [dateRange]);
 
-  useEffect(() => { fetchAll(); }, [fetchAll]);
+  useEffect(() => { fetchAll(); }, [dateRange]);
 
   const triggerSync = async () => {
     setSyncing(true);
