@@ -365,7 +365,7 @@ function SyncLogTab() {
                   <td className="px-4 py-2.5 font-medium">{row.site_slug}</td>
                   <td className="px-4 py-2.5">{row.status==="success"?<CheckCircle2 className="h-4 w-4 text-green-500"/>:row.status==="error"?<AlertCircle className="h-4 w-4 text-red-500"/>:<Clock className="h-4 w-4 text-muted-foreground"/>}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{row.records_fetched ?? "—"}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap text-xs">{row.started_at ? new Date(row.started_at).toLocaleString() : "—"}</td>
+                  <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap text-xs">{row.started_at ? new Date(row.started_at).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground text-xs max-w-[200px] truncate">{row.error_message || "—"}</td>
                 </tr>
               ))}
@@ -400,7 +400,7 @@ function AuditTab() {
     },
   });
 
-  const fmt = (dt) => dt ? new Date(dt).toLocaleString() : "—";
+  const fmt = (dt) => dt ? new Date(dt).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—";
 
   return (
     <Tabs value={tab} onValueChange={setTab}>
@@ -709,6 +709,106 @@ function AutoFlagTab({ hubMode = false }) {
 
 
 // ─── Update Tab ─────────────────────────────────────────────────────────────
+function MaintenanceTab() {
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const handlePreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const r = await fetch('/api/maintenance/dedupe-customers', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Dry-run failed');
+      setPreview(d);
+      toast.success(`Dry-run complete. ${d.groups || 0} duplicate group${d.groups === 1 ? '' : 's'} found.`);
+    } catch (e) {
+      toast.error(e.message || 'Dry-run failed');
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleApply = async () => {
+    setApplying(true);
+    try {
+      const r = await fetch('/api/maintenance/dedupe-customers', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Dedupe failed');
+      setPreview(d);
+      toast.success(`Dedupe complete. Removed ${d.totalRemoved || 0} duplicate record${d.totalRemoved === 1 ? '' : 's'}.`);
+    } catch (e) {
+      toast.error(e.message || 'Dedupe failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Maintenance</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Site-only admin tools. Customer dedupe keeps the newest record per trimmed customer number, and removes older duplicates.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handlePreview} disabled={loadingPreview || applying}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingPreview ? 'animate-spin' : ''}`} />
+            {loadingPreview ? 'Running dry-run...' : 'Dry-run dedupe'}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={handleApply} disabled={applying || loadingPreview || !preview}>
+            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+            {applying ? 'Applying...' : 'Apply dedupe'}
+          </Button>
+        </div>
+      </div>
+
+      {preview && (
+        <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+          <div className="flex flex-wrap gap-4 text-sm">
+            <div><span className="text-muted-foreground">Mode:</span> <span className="font-medium text-foreground">{preview.dryRun ? 'Dry-run' : 'Applied'}</span></div>
+            <div><span className="text-muted-foreground">Duplicate groups:</span> <span className="font-medium text-foreground">{preview.groups ?? 0}</span></div>
+            <div><span className="text-muted-foreground">Rows to remove:</span> <span className="font-medium text-foreground">{preview.totalRemoved ?? 0}</span></div>
+          </div>
+          <div className="max-h-80 overflow-auto rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Customer #</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Keep ID</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Remove</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(preview.report || []).slice(0, 100).map((group) => (
+                  <tr key={group.customer_number} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2 font-mono text-xs text-foreground">{group.customer_number}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{group.kept_id}</td>
+                    <td className="px-3 py-2 text-muted-foreground">{group.removed_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {preview.groups > 100 && (
+            <p className="text-xs text-muted-foreground">Showing first 100 duplicate groups.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UpdateTab() {
   const [status, setStatus] = useState(null);
   const [info, setInfo] = useState(null);
@@ -1089,7 +1189,7 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
                         <td className="px-4 py-2.5 font-medium text-foreground">{site.siteName || site.siteSlug}</td>
                         <td className="px-4 py-2.5 text-muted-foreground">{site.logicVersion ? `v${site.logicVersion}` : "—"}</td>
                         <td className="px-4 py-2.5"><span className={`inline-flex rounded-full border px-2 py-0.5 text-xs ${driftTone[site.driftStatus] || driftTone.never_synced}`}>{site.driftStatus.replaceAll("_", " ")}</span></td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{site.lastSyncedAt ? new Date(site.lastSyncedAt).toLocaleString() : "—"}</td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">{site.lastSyncedAt ? new Date(site.lastSyncedAt).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—"}</td>
                         <td className="px-4 py-2.5 text-xs text-rose-400 max-w-[260px] truncate">{site.lastError || "—"}</td>
                       </tr>
                     ))}
@@ -1144,7 +1244,7 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
         <CardContent className="space-y-2 p-4 text-sm text-muted-foreground">
           <p>Sites analyse credit using the locally cached config, so the last good version keeps working if Hub is unreachable.</p>
           <p>Current source: <span className="font-medium text-foreground">{current?.source || "default"}</span></p>
-          <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString() : "Never"}</span></p>
+          <p>Last synced: <span className="font-medium text-foreground">{current?.lastSyncedAt ? new Date(current.lastSyncedAt).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "Never"}</span></p>
         </CardContent>
       </Card>
       </>
@@ -1308,6 +1408,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     { id: "fields", label: "Fields" },
     !hubMode && { id: "connections", label: "Connections" },
     !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
+    !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
     isAdmin && { id: "update", label: "Updates" },
     hubMode && { id: "synclog", label: "Sync Log" },
     hubMode && isAdmin && { id: "network", label: "Network" },
@@ -1343,6 +1444,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "audit"    && <AuditTab />}
                 {t.id === "synclog"       && <SyncLogTab />}
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
+                {t.id === "maintenance"  && <MaintenanceTab />}
                 {t.id === "update"       && <UpdateTab />}
                 {t.id === "network"      && <NtopngTab />}
               </TabsContent>

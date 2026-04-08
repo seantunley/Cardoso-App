@@ -6,6 +6,7 @@ import fs from 'fs';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { createRequire } from 'module';
+import db from '../db/index.js';
 import { getVersionStatus } from '../services/versionCheck.js';
 
 const require = createRequire(import.meta.url);
@@ -124,6 +125,73 @@ async function sha256File(filePath) {
   });
 }
 
+function dedupeCustomers({ dryRun = true } = {}) {
+  const dupGroups = db.prepare(`
+    SELECT TRIM(customer_number) AS customer_number, COUNT(*) AS cnt
+    FROM datarecord
+    WHERE TRIM(COALESCE(customer_number, '')) != ''
+    GROUP BY TRIM(customer_number)
+    HAVING COUNT(*) > 1
+    ORDER BY cnt DESC, customer_number ASC
+  `).all();
+
+  const keepers = db.prepare(`
+    SELECT id
+    FROM datarecord
+    WHERE TRIM(customer_number) = ?
+    ORDER BY
+      CASE WHEN updated_date IS NULL THEN 1 ELSE 0 END,
+      COALESCE(updated_date, created_date, synced_at, '') DESC,
+      id DESC
+    LIMIT 1
+  `);
+
+  const deleteDupes = db.prepare(`DELETE FROM datarecord WHERE id = ?`);
+
+  const tx = db.transaction(() => {
+    const report = [];
+    for (const group of dupGroups) {
+      const keeper = keepers.get(group.customer_number)?.id;
+      const rows = db.prepare(`
+        SELECT id, customer_name, updated_date, created_date, synced_at, flag_color, flag_reason
+        FROM datarecord
+        WHERE TRIM(customer_number) = ?
+        ORDER BY
+          CASE WHEN updated_date IS NULL THEN 1 ELSE 0 END,
+          COALESCE(updated_date, created_date, synced_at, '') DESC,
+          id DESC
+      `).all(group.customer_number);
+
+      const removed = [];
+      for (const row of rows) {
+        if (row.id === keeper) continue;
+        removed.push({
+          id: row.id,
+          name: row.customer_name,
+          updated_date: row.updated_date,
+          created_date: row.created_date,
+          synced_at: row.synced_at,
+          flag_color: row.flag_color,
+          flag_reason: row.flag_reason,
+        });
+        if (!dryRun) deleteDupes.run(row.id);
+      }
+
+      report.push({ customer_number: group.customer_number, kept_id: keeper, removed_count: removed.length, removed });
+    }
+    return report;
+  });
+
+  const report = tx();
+  return {
+    ok: true,
+    dryRun,
+    groups: report.length,
+    totalRemoved: report.reduce((sum, group) => sum + group.removed_count, 0),
+    report,
+  };
+}
+
 export function createSystemRouter({ requireAuth, requireAdmin }) {
   const router = express.Router();
 
@@ -231,6 +299,20 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       res.json({ ok: true, message: 'Update started. Service will restart automatically.' });
     } else {
       res.status(500).json({ ok: false, error: result.reason });
+    }
+  });
+
+  router.post('/api/maintenance/dedupe-customers', requireAuth, requireAdmin, (req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(400).json({ error: 'Customer dedupe is site-only and cannot be run from the Hub.' });
+      }
+      const dryRun = req.body?.dryRun !== false;
+      const result = dedupeCustomers({ dryRun });
+      res.json(result);
+    } catch (error) {
+      console.error('[maintenance] dedupe customers failed:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to dedupe customers' });
     }
   });
 
