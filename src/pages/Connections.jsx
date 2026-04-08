@@ -8,7 +8,6 @@ import { toast } from "sonner";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
 import ConnectionStatus from "../components/connections/ConnectionStatus";
-import { hasPermission } from "@/lib/permissions";
 
 async function fetchLocalConnections() {
   const response = await fetch("/api/databaseconnection", {
@@ -254,7 +253,7 @@ export default function Connections() {
               onClick={handleSyncAll}
               disabled={isSyncingAll}
               variant="outline"
-              className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+              className="border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground h-10"
             >
               <RefreshCw className={`w-4 h-4 mr-2 ${isSyncingAll ? "animate-spin" : ""}`} />
               {isSyncingAll ? "Syncing..." : "Sync Now"}
@@ -267,6 +266,7 @@ export default function Connections() {
                   setModalOpen(true);
                 }}
                 variant="default"
+                className="h-10"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 New Connection

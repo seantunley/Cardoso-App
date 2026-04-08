@@ -4,13 +4,11 @@ import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, Lock, User, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const CardosoBriefcase = ({ size = 48 }) => (
   <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width={size} height={size}>
-    <rect width="32" height="32" rx="8" fill="#1e293b"/>
     <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#lg1)"/>
     <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
     <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
@@ -58,7 +56,8 @@ export default function Login() {
     }
     try {
       setIsSubmitting(true);
-      await login(formData.email, formData.password);
+      const user = await login(formData.email, formData.password);
+      if (!user) return; // hub redirect or force-password-change — AuthContext handles it
       const redirectTo = location.state?.from?.pathname || "/";
       navigate(redirectTo, { replace: true });
     } catch (error) {
@@ -130,17 +129,17 @@ export default function Login() {
       </div>
 
       {/* ── Right panel (login form) ── */}
-      <div className="w-full lg:w-[420px] flex flex-col items-center justify-center p-8 lg:p-12">
+      <div className="w-full lg:w-[420px] flex flex-col items-center justify-center p-4 sm:p-8 lg:p-12">
         {/* Mobile brand header */}
         <div className="lg:hidden flex flex-col items-center mb-8 gap-2">
           <CardosoBriefcase size={44} />
           <h1 className="text-xl font-bold text-white tracking-tight">Cardoso Cigarettes</h1>
-          <p className="text-sm text-slate-400">Customer Manager</p>
+          <p className="text-sm text-slate-400">Business System</p>
         </div>
 
         {/* Card */}
         <div
-          className="w-full rounded-2xl p-8"
+          className="w-full rounded-2xl p-5 sm:p-8"
           style={{
             background: "rgba(15,23,42,0.85)",
             border: "1px solid rgba(99,102,241,0.2)",
@@ -153,7 +152,7 @@ export default function Login() {
             <CardosoBriefcase size={28} />
             <div>
               <div className="text-sm font-semibold text-white leading-tight">Cardoso Cigarettes</div>
-              <div className="text-[11px] text-slate-500">Customer Manager</div>
+              <div className="text-[11px] text-slate-500">Business System</div>
             </div>
           </div>
 
@@ -205,7 +204,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-slate-300 transition-colors"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -228,7 +227,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 rounded-lg py-2.5 text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center gap-2 rounded-lg py-3 text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px]"
               style={{
                 background: isSubmitting
                   ? "rgba(99,102,241,0.6)"

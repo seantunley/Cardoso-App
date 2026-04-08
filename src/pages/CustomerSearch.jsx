@@ -2,10 +2,9 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Database, Flag, CheckCircle, XCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, Database, Flag, CheckCircle, RefreshCw } from "lucide-react";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
-import { Button } from "@/components/ui/button";
 
 export default function CustomerSearch() {
   const queryClient = useQueryClient();
@@ -48,10 +47,11 @@ export default function CustomerSearch() {
     staleTime: 30_000,
   });
 
-  // Fallback: if /api/kpis not available (older server), count from full record list
-  const { data: allRecords = [] } = useQuery({
-    queryKey: ["records"],
-    queryFn: () => api.entities.DataRecord.list(),
+  const { data: fallbackFlagCounts = null } = useQuery({
+    queryKey: ["record-flag-counts"],
+    queryFn: async () => {
+      try { return await api.records.flagCounts(); } catch { return null; }
+    },
     enabled: kpis === null,
     staleTime: 30_000,
   });
@@ -76,10 +76,10 @@ export default function CustomerSearch() {
   const activeConnections = connections.filter(c => c.status === "active");
   const selectedConnection = connections.find(c => c.id === selectedConnectionId);
   
-  // Flag counts from KPI endpoint, with fallback to full record list for older servers
-  const redCount = kpis?.records_by_flag?.red ?? allRecords.filter(r => r.flag_color === 'red').length;
-  const greenCount = kpis?.records_by_flag?.green ?? allRecords.filter(r => r.flag_color === 'green').length;
-  const orangeCount = kpis?.records_by_flag?.orange ?? allRecords.filter(r => r.flag_color === 'orange').length;
+  // Prefer KPI endpoint, then lightweight grouped counts; never fall back to full-record fetches here.
+  const redCount = kpis?.records_by_flag?.red ?? fallbackFlagCounts?.records_by_flag?.red ?? 0;
+  const greenCount = kpis?.records_by_flag?.green ?? fallbackFlagCounts?.records_by_flag?.green ?? 0;
+  const orangeCount = kpis?.records_by_flag?.orange ?? fallbackFlagCounts?.records_by_flag?.orange ?? 0;
 
   const handleFlagClick = (flagColor) => {
     setSelectedFlagColor(flagColor);
@@ -184,10 +184,11 @@ export default function CustomerSearch() {
 
 
         {/* Customer Lookup + Last Sync side by side */}
-        <div className="flex gap-3 items-stretch">
+        <div className="flex flex-col sm:flex-row gap-3 items-stretch">
           {/* Customer Lookup */}
           <div className="flex-1 ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10 min-w-0">
             <CustomerLookup 
+              currentUser={currentUser}
               onRecordSelect={setSelectedRecord} 
               triggerLookup={customerNumberToLookup}
               onLookupComplete={() => setCustomerNumberToLookup("")}
@@ -198,7 +199,7 @@ export default function CustomerSearch() {
 
           {/* Last Sync Info */}
           {selectedConnection && (
-            <div className="flex-shrink-0 w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
+            <div className="w-full sm:flex-shrink-0 sm:w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
               <div className="flex items-center gap-2 mb-1.5">
                 <div className="p-1.5 rounded-md bg-indigo-500/20">
                   <RefreshCw className="w-3 h-3 text-indigo-400" />
