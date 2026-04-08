@@ -207,8 +207,15 @@ export default function Inventory() {
       <style>{`
         @media print {
           body { background: white !important; color: black !important; }
-          nav, header, aside, [data-sidebar], .no-print { display: none !important; }
+          nav, header, aside, [data-sidebar], .no-print, .inv-filter-bar { display: none !important; }
+
+          /* Print header */
+          .inv-print-header { display: block !important; }
+
+          /* IMPORTANT: Inventory uses a virtualised table; printing the virtual DOM can result in blank output.
+             We switch to an un-virtualised table when printing (see JSX below). */
           .print-table-wrap { overflow: visible !important; height: auto !important; max-height: none !important; }
+
           table { font-size: 10px; width: 100%; border-collapse: collapse; }
           th, td { padding: 2px 6px !important; border: 1px solid #ccc !important; }
           thead { display: table-header-group; }
@@ -281,7 +288,7 @@ export default function Inventory() {
 
 
         {/* Filter bar */}
-        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print">
+        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print inv-filter-bar">
           {/* Search row */}
           <div className="mb-3 flex items-center gap-3">
             <div className="relative flex-1">
@@ -389,9 +396,25 @@ export default function Inventory() {
           </div>
         )}
 
-        {/* Table — virtualised for large datasets */}
+        {/* Print-only header */}
+        <div className="inv-print-header hidden border-b border-border mb-3 pb-2">
+          <h1 className="text-lg font-bold">Inventory</h1>
+          <p className="text-xs text-gray-600">Printed: {new Date().toLocaleString("en-ZA")} · {rows.length} item{rows.length !== 1 ? "s" : ""}</p>
+        </div>
+
+        {/* Table (virtualised on screen, non-virtualised for printing to avoid blank print output) */}
         {!isLoading && !isError && rows.length > 0 && (
-          <InventoryTable rows={rows} hubMode={hubMode} formatNum={formatNum} formatCurrency={formatCurrency} COMMODITY_LABELS={COMMODITY_LABELS} highlightBelowCost={highlightBelowCost} sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+          <InventoryTable
+            rows={rows}
+            hubMode={hubMode}
+            formatNum={formatNum}
+            formatCurrency={formatCurrency}
+            COMMODITY_LABELS={COMMODITY_LABELS}
+            highlightBelowCost={highlightBelowCost}
+            sortField={sortField}
+            sortDir={sortDir}
+            onSort={handleSort}
+          />
         )}
       </div>
     </div>
@@ -403,6 +426,8 @@ const ROW_HEIGHT = 30;
 const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
 function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
+  const isPrinting = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("print").matches : false;
+
   function SA({ field }) {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
@@ -419,8 +444,8 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
 
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
-  const paddingTop = items.length > 0 ? items[0].start : 0;
-  const paddingBottom = items.length > 0 ? totalHeight - items[items.length - 1].end : 0;
+  const paddingTop = items.length === 0 ? 0 : items[0].start;
+  const paddingBottom = items.length === 0 ? 0 : totalHeight - items[items.length - 1].end;
 
   const isBelowCost = (row) => {
     const price = parseFloat(String(row.price || '').replace(/[^0-9.-]/g, ''));
@@ -433,7 +458,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
       <div
         ref={parentRef}
         className="print-table-wrap"
-        style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
+        style={isPrinting ? { height: "auto", overflow: "visible" } : { height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
@@ -451,12 +476,11 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
             </tr>
           </thead>
           <tbody>
-            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
-            {items.map((vRow) => {
-              const row = rows[vRow.index];
+            {paddingTop > 0 && !isPrinting && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {(isPrinting ? rows.map((row, idx) => ({ index: idx, key: `all-${idx}`, row })) : items.map((vRow) => ({ index: vRow.index, key: vRow.key, row: rows[vRow.index] }))).map(({ key, row }) => {
               return (
                 <tr
-                  key={vRow.key}
+                  key={key}
                   className={`border-b border-border transition-colors ${highlightBelowCost && isBelowCost(row) ? "bg-red-500/10 hover:bg-red-500/15" : "hover:bg-muted/30"}`}
                 >
                   <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap">{row.item_number || "—"}</td>
@@ -472,7 +496,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                 </tr>
               );
             })}
-            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {!isPrinting && paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
           </tbody>
         </table>
       </div>
