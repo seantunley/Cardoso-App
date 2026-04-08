@@ -188,13 +188,13 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       // overwrite locked files. The installer (NSIS) will restart the service
       // after installation completes.
       const psScript = [
-        `Stop-Service -Name 'Cardoso' -Force -ErrorAction SilentlyContinue`,
+        `Stop-Service -Name 'CardosoCigarettes' -Force -ErrorAction SilentlyContinue`,
         `Start-Sleep -Seconds 3`,
         `Start-Process -FilePath '${tmpPath.replace(/'/g, "''")}' -ArgumentList '/S' -Wait`,
         `Start-Sleep -Seconds 5`,
         `# Installer should have restarted service; start it if not running`,
-        `$svc = Get-Service -Name 'Cardoso' -ErrorAction SilentlyContinue`,
-        `if ($svc -and $svc.Status -ne 'Running') { Start-Service -Name 'Cardoso' -ErrorAction SilentlyContinue }`,
+        `$svc = Get-Service -Name 'CardosoCigarettes' -ErrorAction SilentlyContinue`,
+        `if ($svc -and $svc.Status -ne 'Running') { Start-Service -Name 'CardosoCigarettes' -ErrorAction SilentlyContinue }`,
       ].join('\n');
 
       const child = spawn('powershell.exe', [
