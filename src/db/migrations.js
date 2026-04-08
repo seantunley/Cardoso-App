@@ -789,12 +789,6 @@ function buildMigrations(db) {
 
     {
       version: 36,
-<<<<<<< dev
-      name: 'datarecord_sales_rep',
-      up() {
-        try { db.prepare('ALTER TABLE datarecord ADD COLUMN sales_rep TEXT').run(); } catch {}
-
-=======
       name: 'datarecord_sales_rep_and_backfill',
       up() {
         // Add sales_rep to datarecord (site customer table)
@@ -824,7 +818,6 @@ function buildMigrations(db) {
 
         // Add sales_rep to hub_records (Hub aggregated customer table)
         // Guard: only runs on Hub machines (hub_records only exists on Hub)
->>>>>>> main
         if (process.env.HUB_MODE === 'true') {
           try { db.prepare('ALTER TABLE hub_records ADD COLUMN sales_rep TEXT').run(); } catch {}
         }
@@ -846,7 +839,6 @@ function buildMigrations(db) {
         }
       },
     },
-<<<<<<< dev
     {
       version: 38,
       name: 'remove_sales_rep_from_inventory_tables',
@@ -929,8 +921,6 @@ function buildMigrations(db) {
         }
       },
     },
-=======
->>>>>>> main
   ];
 }
 
