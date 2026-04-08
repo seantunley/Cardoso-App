@@ -207,7 +207,8 @@ export default function Inventory() {
       <style>{`
         @media print {
           body { background: white !important; color: black !important; }
-          nav, header, aside, [data-sidebar], .no-print { display: none !important; }
+          nav, header, aside, [data-sidebar], .no-print, .inv-filter-bar { display: none !important; }
+          .inv-print-header { display: block !important; }
           .print-table-wrap { overflow: visible !important; height: auto !important; max-height: none !important; }
           table { font-size: 10px; width: 100%; border-collapse: collapse; }
           th, td { padding: 2px 6px !important; border: 1px solid #ccc !important; }
@@ -281,7 +282,7 @@ export default function Inventory() {
 
 
         {/* Filter bar */}
-        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print">
+        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print inv-filter-bar">
           {/* Search row */}
           <div className="mb-3 flex items-center gap-3">
             <div className="relative flex-1">
@@ -388,6 +389,12 @@ export default function Inventory() {
             {debouncedSearch ? `No inventory items matching "${debouncedSearch}".` : "No inventory records found."}
           </div>
         )}
+
+        {/* Print-only header */}
+        <div className="inv-print-header hidden border-b border-border mb-3 pb-2">
+          <h1 className="text-lg font-bold">Inventory</h1>
+          <p className="text-xs text-gray-600">Printed: {new Date().toLocaleString("en-ZA")} · {rows.length} item{rows.length !== 1 ? "s" : ""}</p>
+        </div>
 
         {/* Table — virtualised for large datasets */}
         {!isLoading && !isError && rows.length > 0 && (
