@@ -57,7 +57,7 @@ async function fetchInventory({ isHub, search, siteId }) {
 }
 
 async function fetchHubSites() {
-  const res = await fetch("/api/hub/sites", { credentials: "include" });
+  const res = await fetch("/api/hub/my-sites", { credentials: "include" });
   if (!res.ok) return [];
   return res.json();
 }

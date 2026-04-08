@@ -378,6 +378,53 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     res.json(mapped);
   });
 
+  // GET /api/hub/my-sites — returns only sites this Hub user is allowed to see
+  router.get('/api/hub/my-sites', requireAuth, (req, res) => {
+    const userEmail = req.currentUser?.email;
+    if (!userEmail) return res.status(401).json({ error: 'Not authenticated' });
+
+    // Admins see all sites (unless they have explicit restrictions set)
+    const isAdmin = req.currentUser?.role === 'admin';
+
+    let allowedSlugs = null;
+    if (!isAdmin) {
+      // Check if this user has any explicit site restrictions
+      try {
+        const rows = db.prepare(`SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`).all(userEmail);
+        if (rows.length > 0) {
+          allowedSlugs = rows.map(r => r.site_slug);
+        }
+        // If no rows returned, allowedSlugs stays null → no restrictions (show all)
+      } catch { /* table may not exist */ }
+    }
+
+    let sites;
+    try {
+      const allSites = db.prepare('SELECT * FROM hub_sites').all();
+      if (allowedSlugs === null) {
+        // No restrictions — user sees all sites
+        sites = allSites;
+      } else {
+        sites = allSites.filter(s => allowedSlugs.includes(s.slug));
+      }
+    } catch {
+      return res.status(500).json({ error: 'Failed to load sites' });
+    }
+
+    const mapped = sites.map((s) => ({
+      site_id: s.id,
+      id: s.id,
+      slug: s.slug,
+      name: s.name,
+      url: s.url,
+      last_seen: s.last_seen,
+      status: s.status,
+      last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
+    }));
+
+    res.json(mapped);
+  });
+
   // GET /api/hub/records
   router.get('/api/hub/records', requireAuth, (req, res) => {
     const { site_id, flag_color, search } = req.query;
@@ -414,7 +461,25 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // GET /api/hub/kpis
   router.get('/api/hub/kpis', requireAuth, (req, res) => {
     const since = typeof req.query.since === 'string' && req.query.since.trim() ? req.query.since.trim() : null;
-    const sites = db.prepare('SELECT * FROM hub_sites').all();
+
+    // Filter sites by user permissions (same logic as /api/hub/my-sites)
+    const userEmail = req.currentUser?.email;
+    const isAdmin = req.currentUser?.role === 'admin';
+    let allowedSlugs = null;
+    if (!isAdmin && userEmail) {
+      try {
+        const rows = db.prepare(`SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`).all(userEmail);
+        if (rows.length > 0) {
+          allowedSlugs = rows.map(r => r.site_slug);
+        }
+      } catch {}
+    }
+
+    let allSites = [];
+    try { allSites = db.prepare('SELECT * FROM hub_sites').all(); } catch {}
+    const sites = allowedSlugs === null
+      ? allSites
+      : allSites.filter(s => allowedSlugs.includes(s.slug));
     const totals = since
       ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY flag_color').all(since)
       : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
@@ -810,6 +875,16 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           if (!sitesByEmail[row.email]) sitesByEmail[row.email] = [];
           sitesByEmail[row.email].push({ slug: row.site_slug, pushed_at: row.pushed_at });
         });
+
+      // hub_user_allowed_sites: which sites on the Hub this user is allowed to see
+      const allowedByEmail = {};
+      let allowedSiteRows = [];
+      try { allowedSiteRows = db.prepare(`SELECT email, site_slug, assigned_at FROM hub_user_allowed_sites`).all(); } catch (_) { /* table may not exist yet */ }
+      allowedSiteRows.forEach(row => {
+          if (!allowedByEmail[row.email]) allowedByEmail[row.email] = [];
+          allowedByEmail[row.email].push({ slug: row.site_slug, assigned_at: row.assigned_at });
+        });
+
       res.json(users.map(u => ({
         ...u,
         is_active: boolFromRow(u.is_active, true),
@@ -832,8 +907,45 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         can_edit_records: boolFromRow(u.can_edit_records, true),
         can_flag_records: boolFromRow(u.can_flag_records, true),
         sites: sitesByEmail[u.email] || [],
+        allowed_sites: allowedByEmail[u.email] || [],  // Hub-side restrictions: which sites this user can access on the Hub
       })));
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/hub/users/:id/allowed-sites — set which sites this Hub user can access on the Hub
+  router.put('/api/hub/users/:id/allowed-sites', requireAuth, requireAdmin, (req, res) => {
+    const userId = parseInt(req.params.id);
+    const { site_slugs } = req.body; // array of site slugs this user is allowed to see
+    if (!Array.isArray(site_slugs)) {
+      return res.status(400).json({ error: 'site_slugs must be an array' });
+    }
+
+    const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    try {
+      const deleteStmt = db.prepare(`DELETE FROM hub_user_allowed_sites WHERE email = ?`);
+      const insertStmt = db.prepare(`INSERT INTO hub_user_allowed_sites (email, site_slug, assigned_at) VALUES (?, ?, datetime('now'))`);
+      const txn = db.transaction(() => {
+        deleteStmt.run(user.email);
+        for (const slug of site_slugs) {
+          insertStmt.run(user.email, slug);
+        }
+      });
+      txn();
+
+      logHubAudit({
+        action: 'update_user_allowed_sites',
+        performedBy: req.currentUser?.email,
+        target: user.email,
+        detail: JSON.stringify({ allowed_sites: site_slugs }),
+      });
+
+      res.json({ ok: true, allowed_sites: site_slugs });
+    } catch (err) {
+      console.error('[hub] update allowed_sites error:', err);
       res.status(500).json({ error: err.message });
     }
   });

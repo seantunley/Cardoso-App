@@ -22,12 +22,13 @@ import { createSystemRouter } from './src/routes/system.js';
 import { createCreditLogicRouter } from './src/routes/creditLogic.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
-import { validateSessionSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
+import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
 validateSessionSecret(process.env.SESSION_SECRET);
+validateHubTokenSecret(process.env.HUB_TOKEN_SECRET);
 
 const app = express();
 const PORT = process.env.PORT || 3001;

@@ -63,6 +63,7 @@ function initSchema(db) {
       synced_at TEXT,
       last_checked TEXT,
       terms TEXT,
+      sales_rep TEXT,
       auto_flagged INTEGER DEFAULT 0
     );
 
@@ -265,6 +266,7 @@ function initSchema(db) {
         synced_at TEXT,
         auto_flagged INTEGER DEFAULT 0,
         terms TEXT,
+        sales_rep TEXT,
         PRIMARY KEY (site_id, record_id)
       );
       CREATE TABLE IF NOT EXISTS hub_sync_log (

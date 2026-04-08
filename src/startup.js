@@ -68,6 +68,18 @@ export function validateSessionSecret(secret) {
   }
 }
 
+export function validateHubTokenSecret(secret) {
+  // HUB_TOKEN_SECRET is optional — only required if hub_redirect silent login is used
+  if (!secret) {
+    console.warn('[startup] HUB_TOKEN_SECRET not set — hub_redirect silent login disabled');
+    return;
+  }
+  if (secret.length < 32) {
+    console.warn('[startup] HUB_TOKEN_SECRET is too short (< 32 chars) — hub_redirect silent login disabled');
+    return;
+  }
+}
+
 export function validateEncryptionKey() {
   const key = getEncryptionKey();
   if (key) return;
