@@ -208,7 +208,8 @@ function HubCustomerModal({ record, open, onClose }) {
 
     if (open && record) {
       // Run both in parallel — they are independent
-      await Promise.all([loadCreditLogicConfig(), loadSubAccounts()]);
+      loadCreditLogicConfig();
+      loadSubAccounts();
     } else {
       setSubAccounts([]);
     }
