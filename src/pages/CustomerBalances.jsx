@@ -552,6 +552,7 @@ export default function CustomerBalances() {
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
+                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Sales Rep</th>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_invoice_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Invoice<SortArrow field="last_invoice_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent unpaid invoice — click to sort</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_receipt_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Receipt<SortArrow field="last_receipt_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent payment received — click to sort</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("outstanding_balance")} className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Outstanding Balance<SortArrow field="outstanding_balance" /></th></TooltipTrigger><TooltipContent>Total amount currently owed — click to sort</TooltipContent></Tooltip>
@@ -579,6 +580,7 @@ export default function CustomerBalances() {
                         </td>
                         <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>
                         <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || "—"}</td>
+                        <td className="px-2 py-1 text-xs text-muted-foreground">{row.sales_rep || "—"}</td>
                         <td className="px-2 py-1 text-xs">
                           <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
                           {row.last_unpaid_invoice_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}

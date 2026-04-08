@@ -309,6 +309,7 @@ export function createReportingRouter({ requireAuth }) {
           SELECT
             r.customer_number,
             r.customer_name,
+            r.sales_rep,
             r.outstanding_balance,
             r.unpaid_invoices,
             r.receipts,
@@ -328,6 +329,7 @@ export function createReportingRouter({ requireAuth }) {
           SELECT
             customer_number,
             customer_name,
+            sales_rep,
             outstanding_balance,
             unpaid_invoices,
             receipts,
@@ -553,7 +555,7 @@ export function createReportingRouter({ requireAuth }) {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;
     const rows = db.prepare(
-      `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, sales_rep, terms, updated_date
+      `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, terms, updated_date
        FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);
     res.json({

@@ -107,6 +107,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         unpaid_invoices = ?,
         receipts = ?,
         terms = ?,
+        sales_rep = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -137,12 +138,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         unpaid_invoices,
         receipts,
         terms,
+        sales_rep,
         note,
         custom_field_1,
         custom_field_2,
         custom_field_3,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -155,12 +157,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       stocking_uom:     { fallbacks: ['stocking_uom', 'StockingUnitOfMeasure', 'Stocking Unit of measure', 'Stocking Unit', 'StockingUOM', 'UOM', 'STOCKUNIT', 'stk_uom'] },
       commodity:        { fallbacks: ['commodity', 'CommodityNumber', 'Commodity', 'COMMODITY', 'Category', 'ItemCategory'] },
       inventory_value:  { fallbacks: ['inventory_value', 'InventoryValue', 'TotalInventoryValueAtCost', 'TotalValue', 'inventory_value_at_cost'] },
-      sales_rep:        { fallbacks: ['sales_rep', 'SalesRep', 'Salesman', 'salesperson', 'SalesRepCode', 'SalesRepName', 'sales_representative'] },
     };
 
     const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, sales_rep, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(source_table, item_number) DO UPDATE SET
         item_description=excluded.item_description,
         qty_on_hand=excluded.qty_on_hand,
@@ -170,7 +171,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         stocking_uom=excluded.stocking_uom,
         commodity=excluded.commodity,
         inventory_value=excluded.inventory_value,
-        sales_rep=excluded.sales_rep,
         updated_date=excluded.updated_date
     `);
 
@@ -193,7 +193,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
             String(getMappedOrFallbackValue(row, mappings, 'stocking_uom', inventoryMappingConfig.stocking_uom.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'commodity', inventoryMappingConfig.commodity.fallbacks) || ''),
             String(getMappedOrFallbackValue(row, mappings, 'inventory_value', inventoryMappingConfig.inventory_value.fallbacks) || ''),
-            String(getMappedOrFallbackValue(row, mappings, 'sales_rep', inventoryMappingConfig.sales_rep.fallbacks) || ''),
             syncTimestamp
           );
         }
@@ -212,7 +211,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                note, local_fields, flag_color, flag_reason, flag_created_by, data,
-               outstanding_balance, terms, unpaid_invoices, receipts
+               outstanding_balance, terms, sales_rep, unpaid_invoices, receipts
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -277,6 +276,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
               baseRecordData.receipts ?? existing.receipts ?? '[]',
               String(baseRecordData.terms ?? existing.terms ?? ''),
+              String(baseRecordData.sales_rep ?? existing.sales_rep ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -334,6 +334,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.unpaid_invoices ?? '[]',
               baseRecordData.receipts ?? '[]',
               String(baseRecordData.terms ?? ''),
+              String(baseRecordData.sales_rep ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.custom_field_1 ?? null,
               baseRecordData.custom_field_2 ?? null,

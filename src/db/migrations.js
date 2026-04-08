@@ -780,6 +780,8 @@ function buildMigrations(db) {
       version: 35,
       name: 'inventory_sales_rep_column',
       up() {
+        // Historical migration kept for compatibility. A later cleanup migration
+        // removes sales_rep from inventory ownership entirely.
         try { db.prepare('ALTER TABLE inventoryrecord ADD COLUMN sales_rep TEXT').run(); } catch {}
         try { db.prepare('ALTER TABLE hub_inventory ADD COLUMN sales_rep TEXT').run(); } catch {}
       },
@@ -787,35 +789,10 @@ function buildMigrations(db) {
 
     {
       version: 36,
-      name: 'datarecord_sales_rep_and_backfill',
+      name: 'datarecord_sales_rep',
       up() {
-        // Add sales_rep to datarecord (site customer table)
         try { db.prepare('ALTER TABLE datarecord ADD COLUMN sales_rep TEXT').run(); } catch {}
 
-        // Backfill datarecord.sales_rep from inventoryrecord.sales_rep (by customer_number)
-        // This copies the first non-null sales_rep from inventory to the customer record
-        try {
-          db.exec(`
-            UPDATE datarecord
-            SET sales_rep = (
-              SELECT MIN(i.sales_rep)
-              FROM inventoryrecord i
-              WHERE i.customer_number = datarecord.customer_number
-                AND i.sales_rep IS NOT NULL
-                AND i.customer_number IS NOT NULL
-            )
-            WHERE datarecord.sales_rep IS NULL
-              AND datarecord.customer_number IS NOT NULL
-              AND EXISTS (
-                SELECT 1 FROM inventoryrecord i2
-                WHERE i2.customer_number = datarecord.customer_number
-                  AND i2.sales_rep IS NOT NULL
-              )
-          `);
-        } catch {}
-
-        // Add sales_rep to hub_records (Hub aggregated customer table)
-        // Guard: only runs on Hub machines (hub_records only exists on Hub)
         if (process.env.HUB_MODE === 'true') {
           try { db.prepare('ALTER TABLE hub_records ADD COLUMN sales_rep TEXT').run(); } catch {}
         }
@@ -834,6 +811,88 @@ function buildMigrations(db) {
              assigned_at TEXT DEFAULT (datetime('now')),
              PRIMARY KEY (email, site_slug)`
           );
+        }
+      },
+    },
+    {
+      version: 38,
+      name: 'remove_sales_rep_from_inventory_tables',
+      up() {
+        const hasColumn = (tableName, columnName) => {
+          try {
+            return db.prepare(`PRAGMA table_info("${tableName}")`).all().some((c) => c.name === columnName);
+          } catch {
+            return false;
+          }
+        };
+
+        if (hasColumn('inventoryrecord', 'sales_rep')) {
+          db.exec(`
+            CREATE TABLE inventoryrecord_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              source_table TEXT NOT NULL,
+              item_number TEXT NOT NULL,
+              item_description TEXT,
+              qty_on_hand TEXT,
+              last_cost TEXT,
+              price_list TEXT,
+              price TEXT,
+              stocking_uom TEXT,
+              commodity TEXT,
+              inventory_value TEXT,
+              terms TEXT,
+              created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+              updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(source_table, item_number)
+            );
+            INSERT INTO inventoryrecord_new (
+              id, source_table, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms,
+              created_date, updated_date
+            )
+            SELECT
+              id, source_table, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms,
+              created_date, updated_date
+            FROM inventoryrecord;
+            DROP TABLE inventoryrecord;
+            ALTER TABLE inventoryrecord_new RENAME TO inventoryrecord;
+            CREATE INDEX IF NOT EXISTS idx_inventoryrecord_source ON inventoryrecord (source_table, item_number);
+          `);
+        }
+
+        const hubInventoryExists = db.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name='hub_inventory'`).get();
+        if (hubInventoryExists && hasColumn('hub_inventory', 'sales_rep')) {
+          db.exec(`
+            CREATE TABLE hub_inventory_new (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              site_id TEXT NOT NULL,
+              item_number TEXT NOT NULL,
+              item_description TEXT,
+              qty_on_hand TEXT,
+              last_cost TEXT,
+              price_list TEXT,
+              price TEXT,
+              stocking_uom TEXT,
+              commodity TEXT,
+              inventory_value TEXT,
+              terms TEXT,
+              synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE(site_id, item_number)
+            );
+            INSERT INTO hub_inventory_new (
+              id, site_id, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms, synced_at
+            )
+            SELECT
+              id, site_id, item_number, item_description, qty_on_hand, last_cost,
+              price_list, price, stocking_uom, commodity, inventory_value, terms, synced_at
+            FROM hub_inventory;
+            DROP TABLE hub_inventory;
+            ALTER TABLE hub_inventory_new RENAME TO hub_inventory;
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
+            CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
+          `);
         }
       },
     },
