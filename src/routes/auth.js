@@ -1,5 +1,6 @@
 import express from 'express';
 import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
 
 /**
@@ -60,9 +61,35 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         // Accept HUB_REDIRECT_URL or fall back to HUB_SYNC_URL (same base URL already set on sites for credit sync)
         const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
         if (hubUrl) {
-          // Don't create a session on this site — just redirect
-          req.session.destroy(() => {});
-          return res.json({ success: true, hub_redirect: hubUrl });
+          // Generate short-lived signed JWT for silent login on the hub
+          const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
+          if (!hubTokenSecret) {
+            console.error('[auth] hub_redirect=1 but HUB_TOKEN_SECRET is not set');
+            return res.status(500).json({ error: 'Hub token secret not configured' });
+          }
+
+          try {
+            const token = jwt.sign(
+              {
+                email: user.email,
+                hub_redirect_url: hubUrl + '/dashboard',
+              },
+              hubTokenSecret,
+              { expiresIn: '5m' }
+            );
+
+            // Don't create a session on this site — just redirect to hub token endpoint
+            req.session.destroy(() => {});
+            return res.json({
+              success: true,
+              hub_redirect: hubUrl,
+              hub_token: token,
+              hub_token_endpoint: `${hubUrl}/api/auth/hub-token-login`,
+            });
+          } catch (tokenErr) {
+            console.error('[auth] Failed to generate hub token:', tokenErr);
+            return res.status(500).json({ error: 'Failed to generate hub token' });
+          }
         } else {
           console.warn('[auth] hub_redirect=1 but neither HUB_REDIRECT_URL nor HUB_SYNC_URL is set — falling through to local login');
         }
@@ -117,6 +144,75 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
     } catch (err) {
       console.error('set-initial-password error:', err);
       res.status(500).json({ error: 'Failed to set password' });
+    }
+  });
+
+  // ==================== HUB TOKEN LOGIN ====================
+  // POST /api/auth/hub-token-login - No auth required, validates JWT token
+  // Accepts token in query param or request body
+  router.post('/api/auth/hub-token-login', async (req, res) => {
+    const tokenFromBody = req.body?.token || req.body?.hubToken;
+    const tokenFromQuery = req.query?.token || req.query?.hubToken;
+    const token = tokenFromBody || tokenFromQuery;
+
+    if (!token) {
+      return res.status(400).json({ error: 'Token is required' });
+    }
+
+    const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
+    if (!hubTokenSecret) {
+      console.error('[hub-token-login] HUB_TOKEN_SECRET not configured');
+      return res.status(500).json({ error: 'Hub token secret not configured' });
+    }
+
+    try {
+      // Verify and decode the JWT
+      const decoded = jwt.verify(token, hubTokenSecret);
+      const { email, hub_redirect_url } = decoded;
+
+      if (!email) {
+        return res.status(401).json({ error: 'Invalid token: no email claim' });
+      }
+
+      // Look up user in local Hub database
+      const user = stmts.getUserByEmail.get(email);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found on Hub' });
+      }
+
+      if (!user.is_active) {
+        return res.status(403).json({ error: 'User is inactive' });
+      }
+
+      // Create session on Hub
+      req.session.userId = user.id;
+
+      try {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
+        db.prepare(`INSERT INTO login_log (user_email, user_name, ip_address, logged_in_at) VALUES (?, ?, ?, datetime('now'))`).run(
+          user.email,
+          user.full_name || null,
+          ip
+        );
+      } catch (logErr) {
+        console.warn('[hub-token-login] Failed to write login log:', logErr);
+      }
+
+      // Return success with redirect URL from token
+      res.json({
+        success: true,
+        redirect_url: hub_redirect_url || '/dashboard',
+        user: sanitizeUser(user),
+      });
+    } catch (err) {
+      if (err.name === 'TokenExpiredError') {
+        return res.status(401).json({ error: 'Token has expired' });
+      }
+      if (err.name === 'JsonWebTokenError') {
+        return res.status(401).json({ error: 'Invalid token' });
+      }
+      console.error('[hub-token-login] Token verification failed:', err);
+      return res.status(500).json({ error: 'Token verification failed' });
     }
   });
 
