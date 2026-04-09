@@ -228,6 +228,39 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoic
   return data;
 }
 
+async function fetchAllTopBalances({ siteFilter, ageBucket, hideInvoiceMatchesBalance }) {
+  const firstPage = await fetchTopBalances({
+    page: 1,
+    limit: 200,
+    siteFilter,
+    ageBucket,
+    hideInvoiceMatchesBalance,
+  });
+
+  if ((firstPage?.totalPages ?? 1) <= 1) return firstPage;
+
+  const allRecords = [...(firstPage.records ?? [])];
+  for (let nextPage = 2; nextPage <= firstPage.totalPages; nextPage += 1) {
+    const pageData = await fetchTopBalances({
+      page: nextPage,
+      limit: 200,
+      siteFilter,
+      ageBucket,
+      hideInvoiceMatchesBalance,
+    });
+    allRecords.push(...(pageData.records ?? []));
+  }
+
+  return {
+    ...firstPage,
+    records: allRecords,
+    page: 1,
+    pageTotalOutstanding:
+      firstPage.filteredTotalOutstanding ??
+      allRecords.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0),
+  };
+}
+
 export default function CustomerBalances() {
   const colorScheme = useColorScheme();
   const { data: creditLogicState } = useQuery({
@@ -275,6 +308,15 @@ export default function CustomerBalances() {
   });
 
   const totalRecords = data?.total ?? 0;
+
+  const { data: printData } = useQuery({
+    queryKey: ["top-balances-print", siteFilter, ageBucket, hideInvoiceMatchesBalance],
+    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, hideInvoiceMatchesBalance }),
+    staleTime: 60_000,
+    keepPreviousData: true,
+    enabled: totalRecords > PAGE_SIZE,
+  });
+
   function parseDDMMYYYY(str) {
     if (!str || str.length < 8) return 0;
     const clean = str.replace(/[^0-9]/g, '');
@@ -296,8 +338,7 @@ export default function CustomerBalances() {
     return map;
   }, [data?.records, sortField, creditLogicConfig]);
 
-  const rows = useMemo(() => {
-    const raw = data?.records ?? [];
+  const sortRows = (raw) => {
     return [...raw].sort((a, b) => {
       let va, vb;
       if (sortField === "outstanding_balance") {
@@ -321,7 +362,17 @@ export default function CustomerBalances() {
       }
       return sortDir === "asc" ? va - vb : vb - va;
     });
+  };
+
+  const rows = useMemo(() => {
+    const raw = data?.records ?? [];
+    return sortRows(raw);
   }, [data?.records, sortField, sortDir, creditScores]);
+
+  const printRows = useMemo(() => {
+    const raw = printData?.records ?? data?.records ?? [];
+    return sortRows(raw);
+  }, [printData?.records, data?.records, sortField, sortDir, creditScores]);
 
   const totalPages = data?.totalPages ?? 1;
   const currentPage = data?.page ?? page;
@@ -373,8 +424,8 @@ export default function CustomerBalances() {
             <strong>R {formatAmount(filteredGrandTotal)}</strong>
           </div>
           <div className="td-right">
-            <div>Current page ({rows.length} customers)</div>
-            <strong>R {formatAmount(currentPageTotal)}</strong>
+              <div>Printed rows ({printRows.length} customers)</div>
+              <strong>R {formatAmount(printData?.filteredTotalOutstanding ?? filteredGrandTotal)}</strong>
           </div>
         </div>
         <table>
@@ -390,7 +441,7 @@ export default function CustomerBalances() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, idx) => {
+            {printRows.map((row, idx) => {
               const amount = parseAmount(row.outstanding_balance);
               const fc = row.flag_color && row.flag_color !== "none" ? row.flag_color : null;
               return (
