@@ -39,6 +39,12 @@ function formatAmount(val) {
   return n < 0 ? `-R ${abs}` : `R ${abs}`;
 }
 
+function getVisibleAccountType(accountType) {
+  const value = String(accountType || "").trim().toUpperCase();
+  if (!value || value === "SUB_ACCOUNT") return null;
+  return value;
+}
+
 const KPI_RANGE_OPTIONS = [
   { value: "all", label: "All time", days: null },
   { value: "7", label: "Last 7 days", days: 7 },
@@ -300,7 +306,17 @@ function HubCustomerModal({ record, open, onClose }) {
           <div className="flex items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-3 flex-wrap">
-                <span className="text-xl font-bold text-foreground">{record.customer_name || "—"}</span>
+                <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                  <span className="text-xl font-bold text-foreground">{record.customer_name || "—"}</span>
+                  {getVisibleAccountType(record.account_type) && (
+                    <Badge
+                      variant="outline"
+                      className="text-xs border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200"
+                    >
+                      {getVisibleAccountType(record.account_type)}
+                    </Badge>
+                  )}
+                </div>
                 <span className={cn("text-3xl font-extrabold", (hasSubAccounts ? grandTotal : balance) > 0 ? "text-rose-400" : "text-foreground")}>
                   {hasSubAccounts ? formatAmount(String(grandTotal)) : formatAmount(record.outstanding_balance)}
                 </span>
@@ -533,7 +549,17 @@ function HubCustomerSearch({ sites }) {
                       )}
                     >
                       <div className="min-w-0">
-                        <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="text-sm font-medium truncate">{r.customer_name || "—"}</div>
+                          {getVisibleAccountType(r.account_type) && (
+                            <Badge
+                              variant="outline"
+                              className="shrink-0 text-[10px] border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-600 dark:bg-slate-900/40 dark:text-slate-200"
+                            >
+                              {getVisibleAccountType(r.account_type)}
+                            </Badge>
+                          )}
+                        </div>
                         <div className="text-[11px] text-muted-foreground mt-0.5">
                           #{r.customer_number} · {site?.site_name || site?.site_slug || r.site_id}
                         </div>
