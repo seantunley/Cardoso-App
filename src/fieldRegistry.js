@@ -2,7 +2,7 @@
 // Defines all MSSQL→SQLite field mappings. buildFieldPatch iterates this.
 // This file must NOT import from any route or service file.
 
-import { parseJsonSafely, getFirstNonEmptyObjectValue } from './helpers.js';
+import { parseJsonSafely, getFirstNonEmptyObjectValue, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from './helpers.js';
 
 export const FIELD_REGISTRY = [
   { key: 'customer_number',    sources: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER'],                                                                       defaultMode: 'sync' },
@@ -14,8 +14,8 @@ export const FIELD_REGISTRY = [
   { key: 'age_14_days',        sources: ['age_14_days', 'Age14Days', 'AGE_14_DAYS', 'Age14', 'AMTDUE14'],                                                               defaultMode: 'sync' },
   { key: 'age_21_days',        sources: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],                                                               defaultMode: 'sync' },
   { key: 'terms',              sources: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],                                                  defaultMode: 'sync' },
-  { key: 'sales_rep',          sources: ['sales_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'SalesPerson', 'SalesPersonCode', 'Sales Rep', 'Sales Rep Code', 'SalesRepName', 'SalesPersonName', 'Salesman', 'SalesmanCode', 'SalesmanName', 'Rep', 'RepCode', 'RepName', 'sales_rep_name', 'salesperson_name', 'salesman_name'], defaultMode: 'sync' },
-  { key: 'account_type',       sources: ['account_type', 'AccountType', 'ACCOUNT_TYPE', 'accounttype', 'Type', 'CUSTOMER_TYPE', 'CustomerType', 'customer_type', 'Class', 'CustomerClass', 'Account Type'], defaultMode: 'sync' },
+  { key: 'sales_rep',          sources: SALES_REP_ALIASES, defaultMode: 'sync' },
+  { key: 'account_type',       sources: ACCOUNT_TYPE_ALIASES, defaultMode: 'sync' },
   { key: 'note',               sources: ['note', 'Note', 'notes', 'Notes'],                                                                                             defaultMode: 'local-only' },
   { key: 'custom_field_1',     sources: ['custom_field_1', 'CustomField1', 'CUSTOM_FIELD_1'],                                                                            defaultMode: 'sync-if-empty' },
   { key: 'custom_field_2',     sources: ['custom_field_2', 'CustomField2', 'CUSTOM_FIELD_2'],                                                                            defaultMode: 'sync-if-empty' },
