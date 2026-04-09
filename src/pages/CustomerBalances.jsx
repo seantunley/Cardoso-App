@@ -549,10 +549,13 @@ export default function CustomerBalances() {
             </div>
           )}
           {!isLoading && !isError && rows.length > 0 && (
-            <div className="rounded-xl border border-border bg-card overflow-x-auto">
+            <div
+              className="rounded-xl border border-border bg-card overflow-hidden"
+              style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
+            >
               <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50">
+                <thead className="sticky top-0 z-20">
+                  <tr className="border-b border-border bg-card">
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-6">#</th>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
                     <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
@@ -581,6 +584,11 @@ export default function CustomerBalances() {
                             <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
                               {row.customer_name || "—"}
                             </span>
+                            {row.account_type && (
+                              <span className="ml-1.5 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
+                                {row.account_type}
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>
