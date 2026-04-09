@@ -249,6 +249,8 @@ const CUSTOMER_FIELDS = [
   { key: "last_receipt_5",               label: "Receipt 5 Number",        fallbacks: "last_receipt_5, LastReceipt5",                                    mode: "sync" },
   { key: "last_receipt_5_amount",        label: "Receipt 5 Amount",        fallbacks: "last_receipt_5_amount, LastReceipt5Amount",                       mode: "sync" },
   { key: "last_receipt_5_date",          label: "Receipt 5 Date",          fallbacks: "last_receipt_5_date, LastReceipt5Date",                           mode: "sync" },
+  { key: "sales_rep",                    label: "Sales Rep",               fallbacks: "sales_rep, SalesRep, SALEREP, SalesRepCode, salesrep, SalesPerson, SalesPersonCode, Sales Rep, Sales Rep Code, SalesRepName, SalesPersonName, Salesman, SalesmanCode, SalesmanName, Rep, RepCode, RepName", mode: "sync" },
+  { key: "account_type",                 label: "Account Type",            fallbacks: "account_type, AccountType, ACCOUNT_TYPE, accounttype, Type, CUSTOMER_TYPE, CustomerType, customer_type, Class, CustomerClass, Account Type", mode: "sync" },
   { key: "terms",               label: "Payment Terms",       fallbacks: "terms, Terms, PaymentTerms",                  mode: "sync" },
   { key: "note",                label: "Note",                fallbacks: "note, Note, notes",                           mode: "local-only" },
 ];

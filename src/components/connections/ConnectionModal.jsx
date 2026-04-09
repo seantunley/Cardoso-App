@@ -58,6 +58,7 @@ const BUILT_IN_LOCAL_FIELDS = [
   { key: "customer_name", label: "Customer Name", type: "text", isBuiltIn: true },
   { key: "outstanding_balance", label: "Outstanding Balance", type: "text", isBuiltIn: true },
   { key: "sales_rep", label: "Sales Rep", type: "text", isBuiltIn: true },
+  { key: "account_type", label: "Account Type", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1", label: "Last Invoice — Number", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_amount", label: "Last Invoice — Amount", type: "text", isBuiltIn: true },
   { key: "last_unpaid_invoice_1_date", label: "Invoice 1 — Date", type: "text", isBuiltIn: true },
