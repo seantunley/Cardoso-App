@@ -45,16 +45,36 @@ function hydrateSalesRepAndAccountType(row) {
   if (hasSalesRep && hasAccountType) return row;
 
   let parsedData = null;
+  let parsedLocalFields = null;
   try {
     parsedData = row.data ? JSON.parse(row.data) : null;
   } catch {
     parsedData = null;
   }
+  try {
+    parsedLocalFields = row.local_fields ? JSON.parse(row.local_fields) : null;
+  } catch {
+    parsedLocalFields = null;
+  }
 
   return {
     ...row,
-    sales_rep: hasSalesRep ? row.sales_rep : (getFirstNonEmptyValue(parsedData, SALES_REP_ALIASES) ?? row.sales_rep ?? null),
-    account_type: hasAccountType ? row.account_type : (getFirstNonEmptyValue(parsedData, ACCOUNT_TYPE_ALIASES) ?? row.account_type ?? null),
+    sales_rep: hasSalesRep
+      ? row.sales_rep
+      : (
+          getFirstNonEmptyValue(parsedData, SALES_REP_ALIASES)
+          ?? getFirstNonEmptyValue(parsedLocalFields, SALES_REP_ALIASES)
+          ?? row.sales_rep
+          ?? null
+        ),
+    account_type: hasAccountType
+      ? row.account_type
+      : (
+          getFirstNonEmptyValue(parsedData, ACCOUNT_TYPE_ALIASES)
+          ?? getFirstNonEmptyValue(parsedLocalFields, ACCOUNT_TYPE_ALIASES)
+          ?? row.account_type
+          ?? null
+        ),
   };
 }
 
@@ -377,6 +397,7 @@ export function createReportingRouter({ requireAuth }) {
             auto_flagged,
             terms,
             data,
+            local_fields,
             ? AS site_name
           FROM datarecord
           WHERE ${balanceWhere}
@@ -510,14 +531,14 @@ export function createReportingRouter({ requireAuth }) {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     } else {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     }
