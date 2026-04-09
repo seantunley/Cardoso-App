@@ -25,6 +25,12 @@ function CreditBadge({ row, creditLogicConfig }) {
 
 const PAGE_SIZE = 50;
 
+function getVisibleAccountType(accountType) {
+  const value = String(accountType || "").trim().toUpperCase();
+  if (!value || value === "SUB_ACCOUNT") return null;
+  return value;
+}
+
 const AGE_BUCKETS = [
   { value: "all", label: "All" },
   { value: "7-13", label: "7–13 days" },
@@ -378,9 +384,9 @@ export default function CustomerBalances() {
                   <td>
                     {fc && <span className={`flag-dot flag-${fc}`} title={row.flag_reason || fc} />}
                     <strong>{row.customer_name || "—"}</strong>
-                    {row.account_type && (
+                    {getVisibleAccountType(row.account_type) && (
                       <span className="ml-2 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
-                        {row.account_type}
+                        {getVisibleAccountType(row.account_type)}
                       </span>
                     )}
                   </td>
@@ -584,9 +590,9 @@ export default function CustomerBalances() {
                             <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
                               {row.customer_name || "—"}
                             </span>
-                            {row.account_type && (
+                            {getVisibleAccountType(row.account_type) && (
                               <span className="ml-1.5 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
-                                {row.account_type}
+                                {getVisibleAccountType(row.account_type)}
                               </span>
                             )}
                           </div>
