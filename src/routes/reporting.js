@@ -21,6 +21,49 @@ function parseAmount(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+const SALES_REP_ALIASES = [
+  'sales_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'SalesPerson', 'SalesPersonCode',
+  'Sales Rep', 'Sales Rep Code', 'SalesRepName', 'SalesPersonName', 'Salesman', 'SalesmanCode',
+  'SalesmanName', 'Rep', 'RepCode', 'RepName', 'sales_rep_name', 'salesperson_name', 'salesman_name'
+];
+
+const ACCOUNT_TYPE_ALIASES = [
+  'account_type', 'AccountType', 'ACCOUNT_TYPE', 'accounttype', 'Type', 'CUSTOMER_TYPE',
+  'CustomerType', 'customer_type', 'Class', 'CustomerClass', 'Account Type'
+];
+
+function getFirstNonEmptyValue(source, aliases) {
+  if (!source || typeof source !== 'object') return null;
+  for (const key of aliases) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return String(value);
+    }
+  }
+  return null;
+}
+
+function hydrateSalesRepAndAccountType(row) {
+  if (!row || typeof row !== 'object') return row;
+
+  const hasSalesRep = row.sales_rep !== undefined && row.sales_rep !== null && String(row.sales_rep).trim() !== '';
+  const hasAccountType = row.account_type !== undefined && row.account_type !== null && String(row.account_type).trim() !== '';
+  if (hasSalesRep && hasAccountType) return row;
+
+  let parsedData = null;
+  try {
+    parsedData = row.data ? JSON.parse(row.data) : null;
+  } catch {
+    parsedData = null;
+  }
+
+  return {
+    ...row,
+    sales_rep: hasSalesRep ? row.sales_rep : (getFirstNonEmptyValue(parsedData, SALES_REP_ALIASES) ?? row.sales_rep ?? null),
+    account_type: hasAccountType ? row.account_type : (getFirstNonEmptyValue(parsedData, ACCOUNT_TYPE_ALIASES) ?? row.account_type ?? null),
+  };
+}
+
 function isInvoiceBalanceMatch(record) {
   const balance = parseAmount(record?.outstanding_balance);
   const invoice = parseAmount(record?.last_unpaid_invoice_1_amount);
@@ -339,12 +382,13 @@ export function createReportingRouter({ requireAuth }) {
             flag_reason,
             auto_flagged,
             terms,
+            data,
             ? AS site_name
           FROM datarecord
           WHERE ${balanceWhere}
           ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
         `);
-        rows = stmt.all(SITE_NAME).map(expandDataRecord);
+        rows = stmt.all(SITE_NAME).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
       }
 
       const sites = [...new Set(rows.map((row) => row.site_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
@@ -472,16 +516,16 @@ export function createReportingRouter({ requireAuth }) {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep, account_type
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
-      ).all(since, limit, offset);
+      ).all(since, limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     } else {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep, account_type
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type, data
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
-      ).all(limit, offset);
+      ).all(limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     }
     res.json({
       site_id: SITE_ID,
