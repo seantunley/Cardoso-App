@@ -96,6 +96,35 @@ export const ACCOUNT_TYPE_ALIASES = [
   'Class', 'CustomerClass', 'customer_class', 'Account Type', 'Account Class', 'account_class'
 ];
 
+function isLikelySalesRepKey(key) {
+  const normalized = normalizeLooseFieldKey(key);
+  if (!normalized) return false;
+  return (
+    normalized.includes('salesrep') ||
+    normalized.includes('salerep') ||
+    normalized.includes('salesperson') ||
+    normalized.includes('salesman') ||
+    normalized.includes('slsrep') ||
+    normalized.includes('slsman') ||
+    (normalized.includes('rep') && normalized.includes('sales'))
+  );
+}
+
+function isLikelyAccountTypeKey(key) {
+  const normalized = normalizeLooseFieldKey(key);
+  if (!normalized) return false;
+  return (
+    normalized.includes('accounttype') ||
+    normalized.includes('customertype') ||
+    normalized.includes('customerclass') ||
+    normalized.includes('accountclass') ||
+    normalized.includes('accttype') ||
+    normalized.includes('acctype') ||
+    (normalized.includes('type') && (normalized.includes('account') || normalized.includes('customer') || normalized.includes('acct'))) ||
+    (normalized.includes('class') && (normalized.includes('account') || normalized.includes('customer')))
+  );
+}
+
 export function getFirstNonEmptyObjectValue(source, aliases = []) {
   if (!source || typeof source !== 'object') return '';
 
@@ -106,14 +135,35 @@ export function getFirstNonEmptyObjectValue(source, aliases = []) {
     }
   }
 
+  const entries = Object.entries(source);
   const normalizedSourceEntries = new Map(
-    Object.entries(source).map(([key, value]) => [normalizeLooseFieldKey(key), value])
+    entries.map(([key, value]) => [normalizeLooseFieldKey(key), value])
   );
 
   for (const key of aliases) {
     const value = normalizedSourceEntries.get(normalizeLooseFieldKey(key));
     if (value !== undefined && value !== null && String(value).trim() !== '') {
       return value;
+    }
+  }
+
+  const aliasSet = new Set(aliases.map(normalizeLooseFieldKey));
+  const useSalesRepHeuristic = SALES_REP_ALIASES.some((key) => aliasSet.has(normalizeLooseFieldKey(key)));
+  const useAccountTypeHeuristic = ACCOUNT_TYPE_ALIASES.some((key) => aliasSet.has(normalizeLooseFieldKey(key)));
+
+  if (useSalesRepHeuristic) {
+    for (const [key, value] of entries) {
+      if (isLikelySalesRepKey(key) && value !== undefined && value !== null && String(value).trim() !== '') {
+        return value;
+      }
+    }
+  }
+
+  if (useAccountTypeHeuristic) {
+    for (const [key, value] of entries) {
+      if (isLikelyAccountTypeKey(key) && value !== undefined && value !== null && String(value).trim() !== '') {
+        return value;
+      }
     }
   }
 
