@@ -325,6 +325,11 @@ function HubCustomerModal({ record, open, onClose }) {
                     {subAccounts.length} sub-account{subAccounts.length !== 1 ? 's' : ''}
                   </Badge>
                 )}
+                {record.account_type && (
+                  <Badge variant="outline" className="text-xs border-slate-500 text-slate-300">
+                    {record.account_type}
+                  </Badge>
+                )}
               </div>
               <div className="text-xs text-muted-foreground mt-0.5">
                 #{record.customer_number} · {record._siteName}
