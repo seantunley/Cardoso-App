@@ -249,6 +249,7 @@ export default function Inventory() {
           table { font-size: 10px; width: 100%; border-collapse: collapse; }
           th, td { padding: 2px 5px !important; border: 1px solid #ccc !important; }
           thead { display: table-header-group; }
+          thead.sticky { position: static !important; }
           tr { page-break-inside: avoid; }
         }
       `}</style>
@@ -456,7 +457,43 @@ const ROW_HEIGHT = 30;
 const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
 function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
-  const isPrinting = typeof window !== "undefined" && typeof window.matchMedia === "function" ? window.matchMedia("print").matches : false;
+  const [isPrinting, setIsPrinting] = useState(() => (
+    typeof window !== "undefined" && typeof window.matchMedia === "function"
+      ? window.matchMedia("print").matches
+      : false
+  ));
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+
+    const mediaQuery = typeof window.matchMedia === "function" ? window.matchMedia("print") : null;
+    const handleBeforePrint = () => setIsPrinting(true);
+    const handleAfterPrint = () => setIsPrinting(false);
+    const handleMediaChange = (event) => setIsPrinting(event.matches);
+
+    window.addEventListener("beforeprint", handleBeforePrint);
+    window.addEventListener("afterprint", handleAfterPrint);
+
+    if (mediaQuery) {
+      if (typeof mediaQuery.addEventListener === "function") {
+        mediaQuery.addEventListener("change", handleMediaChange);
+      } else if (typeof mediaQuery.addListener === "function") {
+        mediaQuery.addListener(handleMediaChange);
+      }
+    }
+
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint);
+      window.removeEventListener("afterprint", handleAfterPrint);
+      if (mediaQuery) {
+        if (typeof mediaQuery.removeEventListener === "function") {
+          mediaQuery.removeEventListener("change", handleMediaChange);
+        } else if (typeof mediaQuery.removeListener === "function") {
+          mediaQuery.removeListener(handleMediaChange);
+        }
+      }
+    };
+  }, []);
 
   function SA({ field }) {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
