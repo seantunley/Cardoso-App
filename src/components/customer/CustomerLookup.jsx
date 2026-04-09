@@ -141,8 +141,16 @@ function flattenRecord(record) {
     last_receipt_5_date: record.last_receipt_5_date || record.data?.last_receipt_5_date,
     outstanding_balance:
       record.outstanding_balance ?? record.data?.outstanding_balance,
+    sales_rep: record.sales_rep || record.data?.sales_rep || null,
+    account_type: record.account_type || record.data?.account_type || null,
     terms: record.terms || record.data?.terms || null,
   };
+}
+
+function getVisibleAccountType(accountType) {
+  const value = String(accountType || "").trim().toUpperCase();
+  if (!value || value === "SUB_ACCOUNT") return null;
+  return value;
 }
 
 // Returns the numeric prefix of a customer number (e.g. "157OC" → "157", "157" → "157")
@@ -897,6 +905,18 @@ export default function CustomerLookup({
                 <div className="flex-1 min-w-0">
                   <div className="text-xl font-bold text-foreground leading-tight">{customer?.customer_name}</div>
                   <div className="text-sm text-muted-foreground mt-0.5">Account #{customer?.customer_number}</div>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {customer?.sales_rep && (
+                      <Badge variant="outline" className="text-xs cursor-default">
+                        Sales Rep: {customer.sales_rep}
+                      </Badge>
+                    )}
+                    {getVisibleAccountType(customer?.account_type) && (
+                      <Badge variant="outline" className="text-xs cursor-default">
+                        Account Type: {getVisibleAccountType(customer.account_type)}
+                      </Badge>
+                    )}
+                  </div>
                   {hasSubAccounts && (
                     <div className="mt-3 space-y-1">
                       {allAccounts.map(({ label, record: r, isMain }) => (
