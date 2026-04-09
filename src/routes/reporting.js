@@ -310,6 +310,7 @@ export function createReportingRouter({ requireAuth }) {
             r.customer_number,
             r.customer_name,
             r.sales_rep,
+            r.account_type,
             r.outstanding_balance,
             r.unpaid_invoices,
             r.receipts,
@@ -330,6 +331,7 @@ export function createReportingRouter({ requireAuth }) {
             customer_number,
             customer_name,
             sales_rep,
+            account_type,
             outstanding_balance,
             unpaid_invoices,
             receipts,
@@ -470,14 +472,14 @@ export function createReportingRouter({ requireAuth }) {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset);
     } else {
       rows = db.prepare(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
-                updated_date, synced_at, source_table, source_id, sales_rep
+                updated_date, synced_at, source_table, source_id, sales_rep, account_type
          FROM datarecord ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(limit, offset);
     }

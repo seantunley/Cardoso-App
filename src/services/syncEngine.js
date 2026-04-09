@@ -108,6 +108,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         receipts = ?,
         terms = ?,
         sales_rep = ?,
+        account_type = ?,
         flag_color = ?,
         flag_reason = ?,
         flag_created_by = ?,
@@ -139,12 +140,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         receipts,
         terms,
         sales_rep,
+        account_type,
         note,
         custom_field_1,
         custom_field_2,
         custom_field_3,
         synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const inventoryMappingConfig = {
@@ -277,6 +279,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.receipts ?? existing.receipts ?? '[]',
               String(baseRecordData.terms ?? existing.terms ?? ''),
               String(baseRecordData.sales_rep ?? existing.sales_rep ?? ''),
+              String(baseRecordData.account_type ?? existing.account_type ?? ''),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
@@ -335,6 +338,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.receipts ?? '[]',
               String(baseRecordData.terms ?? ''),
               String(baseRecordData.sales_rep ?? ''),
+              String(baseRecordData.account_type ?? ''),
               String(baseRecordData.note ?? ''),
               baseRecordData.custom_field_1 ?? null,
               baseRecordData.custom_field_2 ?? null,
