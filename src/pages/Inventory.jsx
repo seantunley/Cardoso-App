@@ -236,8 +236,9 @@ export default function Inventory() {
             color: #000 !important;
           }
 
-          nav, header, aside, [data-sidebar], .no-print, .inv-filter-bar { display: none !important; }
-          .inv-print-header { display: block !important; margin-bottom: 4mm !important; padding-bottom: 2mm !important; border-bottom: 1.5px solid #000 !important; }
+          nav, header, aside, [data-sidebar], .no-print, .inv-filter-bar, .inv-screen-only { display: none !important; }
+          .inv-print-header, .inv-print-only { display: block !important; }
+          .inv-print-header { margin-bottom: 4mm !important; padding-bottom: 2mm !important; border-bottom: 1.5px solid #000 !important; }
           .print-table-wrap { overflow: visible !important; height: auto !important; max-height: none !important; }
           .print-table-shell {
             border: 0 !important;
@@ -433,7 +434,18 @@ export default function Inventory() {
           <p className="text-xs text-gray-600">Printed: {new Date().toLocaleString("en-ZA")} · {rows.length} item{rows.length !== 1 ? "s" : ""}</p>
         </div>
 
-        {/* Table (virtualised on screen, non-virtualised for printing to avoid blank print output) */}
+        {/* Print-only full table */}
+        {!isLoading && !isError && rows.length > 0 && (
+          <InventoryPrintTable
+            rows={rows}
+            hubMode={hubMode}
+            formatNum={formatNum}
+            formatCurrency={formatCurrency}
+            highlightBelowCost={highlightBelowCost}
+          />
+        )}
+
+        {/* Screen table */}
         {!isLoading && !isError && rows.length > 0 && (
           <InventoryTable
             rows={rows}
@@ -452,49 +464,57 @@ export default function Inventory() {
   );
 }
 
-// ─── Virtualised table ────────────────────────────────────────────────────────
+// ─── Tables ───────────────────────────────────────────────────────────────────
 const ROW_HEIGHT = 30;
 const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
+function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlightBelowCost }) {
+  const isBelowCost = (row) => {
+    const price = parseFloat(String(row.price || '').replace(/[^0-9.-]/g, ''));
+    const cost = parseFloat(String(row.last_cost || '').replace(/[^0-9.-]/g, ''));
+    return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+  };
+
+  return (
+    <div className="inv-print-only hidden print-table-shell rounded-xl border border-border bg-card overflow-hidden">
+      <div className="print-table-wrap">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border bg-card">
+              <th className="px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide">Item Number</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide">Description</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium uppercase tracking-wide">Qty on Hand</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium uppercase tracking-wide">Last Cost</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium uppercase tracking-wide">Price</th>
+              <th className="px-2 py-1.5 text-right text-xs font-medium uppercase tracking-wide">Price List</th>
+              <th className="px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide">UOM</th>
+              {hubMode && <th className="px-2 py-1.5 text-left text-xs font-medium uppercase tracking-wide">Site</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row, idx) => (
+              <tr
+                key={`print-${row.site_id || 'site'}-${row.item_number || idx}-${idx}`}
+                className={`border-b border-border ${highlightBelowCost && isBelowCost(row) ? 'bg-red-500/10' : ''}`}
+              >
+                <td className="px-2 py-1 text-xs font-mono whitespace-nowrap">{row.item_number || '—'}</td>
+                <td className="px-2 py-1 text-xs">{row.item_description || '—'}</td>
+                <td className="px-2 py-1 text-xs text-right tabular-nums">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
+                <td className="px-2 py-1 text-xs text-right tabular-nums">{formatCurrency(row.last_cost)}</td>
+                <td className="px-2 py-1 text-xs text-right tabular-nums">{formatCurrency(row.price)}</td>
+                <td className="px-2 py-1 text-xs text-right tabular-nums">{formatNum(row.price_list)}</td>
+                <td className="px-2 py-1 text-xs">{row.stocking_uom || '—'}</td>
+                {hubMode && <td className="px-2 py-1 text-xs">{row.site_name || row.site_id || '—'}</td>}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
-  const [isPrinting, setIsPrinting] = useState(() => (
-    typeof window !== "undefined" && typeof window.matchMedia === "function"
-      ? window.matchMedia("print").matches
-      : false
-  ));
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-
-    const mediaQuery = typeof window.matchMedia === "function" ? window.matchMedia("print") : null;
-    const handleBeforePrint = () => setIsPrinting(true);
-    const handleAfterPrint = () => setIsPrinting(false);
-    const handleMediaChange = (event) => setIsPrinting(event.matches);
-
-    window.addEventListener("beforeprint", handleBeforePrint);
-    window.addEventListener("afterprint", handleAfterPrint);
-
-    if (mediaQuery) {
-      if (typeof mediaQuery.addEventListener === "function") {
-        mediaQuery.addEventListener("change", handleMediaChange);
-      } else if (typeof mediaQuery.addListener === "function") {
-        mediaQuery.addListener(handleMediaChange);
-      }
-    }
-
-    return () => {
-      window.removeEventListener("beforeprint", handleBeforePrint);
-      window.removeEventListener("afterprint", handleAfterPrint);
-      if (mediaQuery) {
-        if (typeof mediaQuery.removeEventListener === "function") {
-          mediaQuery.removeEventListener("change", handleMediaChange);
-        } else if (typeof mediaQuery.removeListener === "function") {
-          mediaQuery.removeListener(handleMediaChange);
-        }
-      }
-    };
-  }, []);
-
   function SA({ field }) {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
@@ -521,11 +541,11 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
   };
 
   return (
-    <div className="print-table-shell rounded-xl border border-border bg-card overflow-hidden">
+    <div className="inv-screen-only print-table-shell rounded-xl border border-border bg-card overflow-hidden">
       <div
         ref={parentRef}
         className="print-table-wrap"
-        style={isPrinting ? { height: "auto", overflow: "visible" } : { height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
+        style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
       >
         <table className="w-full text-sm">
           <thead className="sticky top-0 z-20">
@@ -543,8 +563,8 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
             </tr>
           </thead>
           <tbody>
-            {paddingTop > 0 && !isPrinting && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
-            {(isPrinting ? rows.map((row, idx) => ({ index: idx, key: `all-${idx}`, row })) : items.map((vRow) => ({ index: vRow.index, key: vRow.key, row: rows[vRow.index] }))).map(({ key, row }) => {
+            {paddingTop > 0 && <tr><td style={{ height: paddingTop }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {items.map((vRow) => ({ index: vRow.index, key: vRow.key, row: rows[vRow.index] })).map(({ key, row }) => {
               return (
                 <tr
                   key={key}
@@ -563,7 +583,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                 </tr>
               );
             })}
-            {!isPrinting && paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
+            {paddingBottom > 0 && <tr><td style={{ height: paddingBottom }} colSpan={hubMode ? 8 : 7} /></tr>}
           </tbody>
         </table>
       </div>
