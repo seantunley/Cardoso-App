@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
-import { expandDataRecord } from '../helpers.js';
+import { expandDataRecord, getFirstNonEmptyObjectValue } from '../helpers.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -33,14 +33,8 @@ const ACCOUNT_TYPE_ALIASES = [
 ];
 
 function getFirstNonEmptyValue(source, aliases) {
-  if (!source || typeof source !== 'object') return null;
-  for (const key of aliases) {
-    const value = source[key];
-    if (value !== undefined && value !== null && String(value).trim() !== '') {
-      return String(value);
-    }
-  }
-  return null;
+  const value = getFirstNonEmptyObjectValue(source, aliases);
+  return value === '' ? null : String(value);
 }
 
 function hydrateSalesRepAndAccountType(row) {

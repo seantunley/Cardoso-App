@@ -2,7 +2,7 @@
 // Defines all MSSQL→SQLite field mappings. buildFieldPatch iterates this.
 // This file must NOT import from any route or service file.
 
-import { parseJsonSafely } from './helpers.js';
+import { parseJsonSafely, getFirstNonEmptyObjectValue } from './helpers.js';
 
 export const FIELD_REGISTRY = [
   { key: 'customer_number',    sources: ['customer_number', 'CustomerNumber', 'CUSTOMER_NUMBER'],                                                                       defaultMode: 'sync' },
@@ -76,20 +76,8 @@ export function firstDefined(...values) {
 
 export function getMappedOrFallbackValue(row, fieldMappings, localKey, fallbacks = []) {
   const mapping = getMappingForKey(fieldMappings, localKey);
-  const mappedValue = getRowValue(row, mapping?.sourceField);
-
-  if (mappedValue !== undefined && mappedValue !== null && mappedValue !== '') {
-    return mappedValue;
-  }
-
-  for (const key of fallbacks) {
-    const fallbackValue = getRowValue(row, key);
-    if (fallbackValue !== undefined && fallbackValue !== null && fallbackValue !== '') {
-      return fallbackValue;
-    }
-  }
-
-  return '';
+  const candidateKeys = [mapping?.sourceField, ...fallbacks].filter(Boolean);
+  return getFirstNonEmptyObjectValue(row, candidateKeys);
 }
 
 export function shouldApplyMappedValue(mode, existingValue, incomingValue) {

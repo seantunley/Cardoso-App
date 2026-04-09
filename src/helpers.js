@@ -35,7 +35,9 @@ export function stringifyJsonSafely(value, fallback = '{}') {
 export function expandDataRecord(row) {
   if (!row || typeof row !== 'object') return row;
   const localFields = parseJsonSafely(row.local_fields, {});
-  const expanded = { ...row, ...localFields };
+  // Let real DB columns win over local_fields so stale custom-field keys
+  // cannot blank out built-in columns like sales_rep/account_type.
+  const expanded = { ...localFields, ...row };
 
   // Expand unpaid_invoices JSON array back to flat numbered fields for API compat
   const invoices = parseJsonSafely(row.unpaid_invoices, []);
@@ -70,6 +72,37 @@ export function normalizeFieldKey(input) {
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+export function normalizeLooseFieldKey(input) {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+export function getFirstNonEmptyObjectValue(source, aliases = []) {
+  if (!source || typeof source !== 'object') return '';
+
+  for (const key of aliases) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+
+  const normalizedSourceEntries = new Map(
+    Object.entries(source).map(([key, value]) => [normalizeLooseFieldKey(key), value])
+  );
+
+  for (const key of aliases) {
+    const value = normalizedSourceEntries.get(normalizeLooseFieldKey(key));
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+
+  return '';
 }
 
 export function validateCustomFieldKey(key) {
