@@ -181,7 +181,7 @@ async function fetchCustomerLookup(query) {
 }
 
 async function fetchCustomerLookupSuggestions(query) {
-  const result = await api.records.customerLookupSuggestions({ query, limit: 5 });
+  const result = await api.records.customerLookupSuggestions({ query, limit: 50 });
   return Array.isArray(result?.suggestions)
     ? result.suggestions.map(flattenRecord)
     : [];

@@ -541,7 +541,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     (req, res) => {
       try {
         const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
-        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 5, 1), 10);
+        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
 
         if (!query) {
           return res.json({ suggestions: [] });

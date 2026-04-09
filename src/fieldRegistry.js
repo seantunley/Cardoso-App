@@ -15,6 +15,7 @@ export const FIELD_REGISTRY = [
   { key: 'age_21_days',        sources: ['age_21_days', 'Age21Days', 'AGE_21_DAYS', 'Age21', 'AMTDUE21'],                                                               defaultMode: 'sync' },
   { key: 'terms',              sources: ['terms', 'Terms', 'TERMS', 'PaymentTerms', 'payment_terms', 'PAYMENT_TERMS'],                                                  defaultMode: 'sync' },
   { key: 'sales_rep',          sources: ['sales_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'SalesPerson', 'SalesPersonCode'],                                 defaultMode: 'sync' },
+  { key: 'account_type',       sources: ['account_type', 'AccountType', 'ACCOUNT_TYPE', 'accounttype', 'Type', 'CUSTOMER_TYPE', 'CustomerType', 'customer_type', 'Class', 'CustomerClass'], defaultMode: 'sync' },
   { key: 'note',               sources: ['note', 'Note', 'notes', 'Notes'],                                                                                             defaultMode: 'local-only' },
   { key: 'custom_field_1',     sources: ['custom_field_1', 'CustomField1', 'CUSTOM_FIELD_1'],                                                                            defaultMode: 'sync-if-empty' },
   { key: 'custom_field_2',     sources: ['custom_field_2', 'CustomField2', 'CUSTOM_FIELD_2'],                                                                            defaultMode: 'sync-if-empty' },

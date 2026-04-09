@@ -378,6 +378,11 @@ export default function CustomerBalances() {
                   <td>
                     {fc && <span className={`flag-dot flag-${fc}`} title={row.flag_reason || fc} />}
                     <strong>{row.customer_name || "—"}</strong>
+                    {row.account_type && (
+                      <span className="ml-2 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
+                        {row.account_type}
+                      </span>
+                    )}
                   </td>
                   <td className="td-mono td-muted">{row.customer_number || "—"}</td>
                   {sites.length > 1 && <td className="td-muted">{row.site_name || "—"}</td>}
