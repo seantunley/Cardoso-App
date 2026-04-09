@@ -7,7 +7,7 @@ const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
 import { buildStatements } from '../db/statements.js';
-import { expandDataRecord, getFirstNonEmptyObjectValue } from '../helpers.js';
+import { expandDataRecord, getFirstNonEmptyObjectValue, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -20,17 +20,6 @@ function parseAmount(value) {
   const num = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
   return Number.isFinite(num) ? num : 0;
 }
-
-const SALES_REP_ALIASES = [
-  'sales_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'SalesPerson', 'SalesPersonCode',
-  'Sales Rep', 'Sales Rep Code', 'SalesRepName', 'SalesPersonName', 'Salesman', 'SalesmanCode',
-  'SalesmanName', 'Rep', 'RepCode', 'RepName', 'sales_rep_name', 'salesperson_name', 'salesman_name'
-];
-
-const ACCOUNT_TYPE_ALIASES = [
-  'account_type', 'AccountType', 'ACCOUNT_TYPE', 'accounttype', 'Type', 'CUSTOMER_TYPE',
-  'CustomerType', 'customer_type', 'Class', 'CustomerClass', 'Account Type'
-];
 
 function getFirstNonEmptyValue(source, aliases) {
   const value = getFirstNonEmptyObjectValue(source, aliases);

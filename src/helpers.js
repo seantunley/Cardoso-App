@@ -81,6 +81,21 @@ export function normalizeLooseFieldKey(input) {
     .replace(/[^a-z0-9]/g, '');
 }
 
+export const SALES_REP_ALIASES = [
+  'sales_rep', 'sale_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'sales_rep_code',
+  'SalesPerson', 'SalesPersonCode', 'salespersoncode', 'Sales Rep', 'Sales Rep Code',
+  'SalesRepName', 'SalesPersonName', 'salesperson_name', 'sales_rep_name',
+  'Salesman', 'SalesmanCode', 'SalesmanName', 'salesman_code', 'salesman_name',
+  'Rep', 'RepCode', 'RepName', 'rep_code', 'rep_name', 'SLSREP', 'SLSMAN'
+];
+
+export const ACCOUNT_TYPE_ALIASES = [
+  'account_type', 'AccountType', 'ACCOUNT_TYPE', 'accounttype', 'account_type_code',
+  'acct_type', 'accttype', 'acc_type', 'Type', 'TypeCode',
+  'CUSTOMER_TYPE', 'CustomerType', 'customer_type', 'Customer Type',
+  'Class', 'CustomerClass', 'customer_class', 'Account Type', 'Account Class', 'account_class'
+];
+
 export function getFirstNonEmptyObjectValue(source, aliases = []) {
   if (!source || typeof source !== 'object') return '';
 
