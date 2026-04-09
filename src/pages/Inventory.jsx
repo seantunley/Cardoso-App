@@ -203,26 +203,56 @@ export default function Inventory() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
+    <div className="inventory-page min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
       <style>{`
+        @page {
+          size: auto;
+          margin: 8mm;
+        }
+
         @media print {
-          body { background: white !important; color: black !important; }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #fff !important;
+            color: #000 !important;
+          }
+
+          body * { visibility: hidden; }
+          .inventory-print-scope, .inventory-print-scope * { visibility: visible; }
+          .inventory-print-scope {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .inventory-page {
+            min-height: auto !important;
+            padding: 0 !important;
+            background: #fff !important;
+            color: #000 !important;
+          }
+
           nav, header, aside, [data-sidebar], .no-print, .inv-filter-bar { display: none !important; }
-
-          /* Print header */
-          .inv-print-header { display: block !important; }
-
-          /* IMPORTANT: Inventory uses a virtualised table; printing the virtual DOM can result in blank output.
-             We switch to an un-virtualised table when printing (see JSX below). */
+          .inv-print-header { display: block !important; margin-bottom: 4mm !important; padding-bottom: 2mm !important; border-bottom: 1.5px solid #000 !important; }
           .print-table-wrap { overflow: visible !important; height: auto !important; max-height: none !important; }
+          .print-table-shell {
+            border: 0 !important;
+            border-radius: 0 !important;
+            box-shadow: none !important;
+            background: #fff !important;
+          }
 
           table { font-size: 10px; width: 100%; border-collapse: collapse; }
-          th, td { padding: 2px 6px !important; border: 1px solid #ccc !important; }
+          th, td { padding: 2px 5px !important; border: 1px solid #ccc !important; }
           thead { display: table-header-group; }
           tr { page-break-inside: avoid; }
         }
       `}</style>
-      <div className="max-w-7xl mx-auto">
+      <div className="inventory-print-scope max-w-7xl mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-3">
           <div className="flex items-center gap-3">
@@ -454,7 +484,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
+    <div className="print-table-shell rounded-xl border border-border bg-card overflow-hidden">
       <div
         ref={parentRef}
         className="print-table-wrap"
