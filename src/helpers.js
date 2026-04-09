@@ -72,6 +72,37 @@ export function normalizeFieldKey(input) {
     .replace(/^_+|_+$/g, '');
 }
 
+export function normalizeLooseFieldKey(input) {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
+}
+
+export function getFirstNonEmptyObjectValue(source, aliases = []) {
+  if (!source || typeof source !== 'object') return '';
+
+  for (const key of aliases) {
+    const value = source[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+
+  const normalizedSourceEntries = new Map(
+    Object.entries(source).map(([key, value]) => [normalizeLooseFieldKey(key), value])
+  );
+
+  for (const key of aliases) {
+    const value = normalizedSourceEntries.get(normalizeLooseFieldKey(key));
+    if (value !== undefined && value !== null && String(value).trim() !== '') {
+      return value;
+    }
+  }
+
+  return '';
+}
+
 export function validateCustomFieldKey(key) {
   return /^[a-z][a-z0-9_]*$/.test(key);
 }
