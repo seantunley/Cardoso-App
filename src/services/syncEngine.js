@@ -213,7 +213,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         SELECT id, source_id, source_table, customer_number, customer_name,
                age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                note, local_fields, flag_color, flag_reason, flag_created_by, data,
-               outstanding_balance, terms, sales_rep, unpaid_invoices, receipts
+               outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
         FROM datarecord
         WHERE source_table = ?
       `).all(sourceName);
@@ -261,6 +261,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
 
           if (existing) {
+            const keepExistingIfIncomingBlank = (incomingValue, existingValue) => {
+              if (incomingValue !== undefined && incomingValue !== null && String(incomingValue).trim() !== '') {
+                return String(incomingValue);
+              }
+              return String(existingValue ?? '');
+            };
+
             updateExistingRecord.run(
               baseRecordData.created_by,
               String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
@@ -278,8 +285,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
               baseRecordData.receipts ?? existing.receipts ?? '[]',
               String(baseRecordData.terms ?? existing.terms ?? ''),
-              String(baseRecordData.sales_rep ?? existing.sales_rep ?? ''),
-              String(baseRecordData.account_type ?? existing.account_type ?? ''),
+              keepExistingIfIncomingBlank(baseRecordData.sales_rep, existing.sales_rep),
+              keepExistingIfIncomingBlank(baseRecordData.account_type, existing.account_type),
               existing.flag_color,
               existing.flag_reason,
               existing.flag_created_by,
