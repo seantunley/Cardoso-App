@@ -31,6 +31,18 @@ function getVisibleAccountType(accountType) {
   return value;
 }
 
+function getAccountTypePillClasses(accountType) {
+  const value = getVisibleAccountType(accountType);
+  if (!value) return "";
+  if (value.includes("STANDARD")) {
+    return "border-emerald-500/40 bg-emerald-500/12 text-emerald-700 dark:border-emerald-500/50 dark:bg-emerald-500/15 dark:text-emerald-300";
+  }
+  if (value.includes("NATIONAL")) {
+    return "border-sky-500/40 bg-sky-500/12 text-sky-700 dark:border-sky-500/50 dark:bg-sky-500/15 dark:text-sky-300";
+  }
+  return "border-slate-400 bg-slate-500/10 text-slate-700 dark:border-slate-500 dark:bg-slate-500/10 dark:text-slate-300";
+}
+
 const AGE_BUCKETS = [
   { value: "all", label: "All" },
   { value: "7-13", label: "7–13 days" },
@@ -451,7 +463,7 @@ export default function CustomerBalances() {
                     {fc && <span className={`flag-dot flag-${fc}`} title={row.flag_reason || fc} />}
                     <strong>{row.customer_name || "—"}</strong>
                     {getVisibleAccountType(row.account_type) && (
-                      <span className="ml-2 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
+                      <span className={`ml-2 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
                         {getVisibleAccountType(row.account_type)}
                       </span>
                     )}
@@ -657,7 +669,7 @@ export default function CustomerBalances() {
                               {row.customer_name || "—"}
                             </span>
                             {getVisibleAccountType(row.account_type) && (
-                              <span className="ml-1.5 inline-flex items-center rounded border border-slate-400 px-1.5 py-0.5 text-xs text-slate-600 dark:border-slate-500 dark:text-slate-300">
+                              <span className={`ml-1.5 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
                                 {getVisibleAccountType(row.account_type)}
                               </span>
                             )}
