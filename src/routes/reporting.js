@@ -343,81 +343,152 @@ export function createReportingRouter({ requireAuth }) {
     const ageBucket = String(req.query.ageBucket || 'all').trim();
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
 
-    const balanceWhere = `outstanding_balance IS NOT NULL
-            AND outstanding_balance != ''
-            AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > 0`;
+    // Filters that CAN be pushed to SQL
+    const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
+    const siteWhere = (siteFilter !== 'all' && !isHub)
+      ? `AND site_name = ?`
+      : (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
 
     try {
-      let rows;
+      // Two-query strategy: one for sites list, one for paginated data + total
+      let sites = [];
+      let total = 0;
+      let filteredTotalOutstanding = 0;
+      let pageTotalOutstanding = 0;
+      let records = [];
+
       if (isHub) {
-        const stmt = db.prepare(`
+        // Sites list from hub — lightweight
+        sites = db.prepare(`
+          SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
+          FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+            AND r.outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+          ORDER BY site_name`
+          ).all(balanceAmountGt)
+          .map(r => r.site_name)
+          .filter(Boolean)
+          .sort((a, b) => a.localeCompare(b));
+
+        // Count total
+        const countStmt = db.prepare(`
+          SELECT COUNT(*) as count FROM hub_records r
+          LEFT JOIN hub_sites s ON s.id = r.site_id
+          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+            AND r.outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
+        const countParams = siteFilter !== 'all'
+          ? [balanceAmountGt, siteFilter]
+          : [balanceAmountGt];
+        total = (countStmt.get(...countParams) || { count: 0 }).count;
+
+        // Paginated data with offset
+        const safeOffset = (page - 1) * limit;
+        const dataStmt = db.prepare(`
           SELECT
-            r.customer_number,
-            r.customer_name,
-            r.sales_rep,
-            r.account_type,
-            r.outstanding_balance,
-            r.unpaid_invoices,
-            r.receipts,
-            r.flag_color,
-            r.flag_reason,
-            r.auto_flagged,
-            r.terms,
+            r.customer_number, r.customer_name, r.sales_rep, r.account_type,
+            r.outstanding_balance, r.unpaid_invoices, r.receipts,
+            r.flag_color, r.flag_reason, r.auto_flagged, r.terms,
             COALESCE(s.name, r.site_id) AS site_name
           FROM hub_records r
           LEFT JOIN hub_sites s ON s.id = r.site_id
-          WHERE r.${balanceWhere}
+          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+            AND r.outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}
           ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        `);
-        rows = stmt.all().map(expandDataRecord);
+          LIMIT ? OFFSET ?`.replace(/\s+/g, ' ').trim());
+        const dataParams = siteFilter !== 'all'
+          ? [balanceAmountGt, siteFilter, limit, safeOffset]
+          : [balanceAmountGt, limit, safeOffset];
+        records = dataStmt.all(...dataParams).map(expandDataRecord);
+
+        // Sum over same WHERE (no pagination) for totals
+        const sumStmt = db.prepare(`
+          SELECT COALESCE(SUM(CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL)), 0) as total
+          FROM hub_records r
+          LEFT JOIN hub_sites s ON s.id = r.site_id
+          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+            AND r.outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
+        const sumParams = siteFilter !== 'all'
+          ? [balanceAmountGt, siteFilter]
+          : [balanceAmountGt];
+        filteredTotalOutstanding = parseFloat(sumStmt.get(...sumParams).total || 0);
+
       } else {
-        const stmt = db.prepare(`
+        // Sites list — lightweight
+        sites = db.prepare(`
+          SELECT DISTINCT ? AS site_name FROM datarecord
+          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+            AND outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+          ORDER BY site_name`.trim()
+        ).all(SITE_NAME, balanceAmountGt).map(r => r.site_name).filter(Boolean);
+
+        // Count total
+        const countStmt = db.prepare(`
+          SELECT COUNT(*) as count FROM datarecord
+          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+            AND outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
+        const countParams = siteFilter !== 'all' ? [balanceAmountGt, SITE_NAME] : [balanceAmountGt];
+        total = (countStmt.get(...countParams) || { count: 0 }).count;
+
+        // Paginated data
+        const safeOffset = (page - 1) * limit;
+        const dataStmt = db.prepare(`
           SELECT
-            customer_number,
-            customer_name,
-            sales_rep,
-            account_type,
-            outstanding_balance,
-            unpaid_invoices,
-            receipts,
-            flag_color,
-            flag_reason,
-            auto_flagged,
-            terms,
-            data,
-            local_fields,
+            customer_number, customer_name, sales_rep, account_type,
+            outstanding_balance, unpaid_invoices, receipts,
+            flag_color, flag_reason, auto_flagged, terms,
+            data, local_fields,
             ? AS site_name
           FROM datarecord
-          WHERE ${balanceWhere}
+          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+            AND outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}
           ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-        `);
-        rows = stmt.all(SITE_NAME).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
+          LIMIT ? OFFSET ?`.replace(/\s+/g, ' ').trim());
+        const dataParams = siteFilter !== 'all'
+          ? [SITE_NAME, balanceAmountGt, limit, safeOffset]
+          : [SITE_NAME, balanceAmountGt, limit, safeOffset];
+        records = dataStmt.all(...dataParams)
+          .map(hydrateSalesRepAndAccountType)
+          .map(expandDataRecord);
+
+        // Sum for totals (same WHERE, no pagination)
+        const sumStmt = db.prepare(`
+          SELECT COALESCE(SUM(CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL)), 0) as total
+          FROM datarecord
+          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+            AND outstanding_balance != '0'
+            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
+        const sumParams = siteFilter !== 'all' ? [balanceAmountGt, SITE_NAME] : [balanceAmountGt];
+        filteredTotalOutstanding = parseFloat(sumStmt.get(...sumParams).total || 0);
       }
 
-      const sites = [...new Set(rows.map((row) => row.site_name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      // pageTotalOutstanding: sum of returned page records
+      pageTotalOutstanding = records.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
 
-      const filteredRows = rows.filter((row) => {
-        const balance = parseAmount(row.outstanding_balance);
-        if (balance <= CUSTOMER_BALANCES_MIN_AMOUNT) return false;
-        if (siteFilter !== 'all' && row.site_name !== siteFilter) return false;
+      // Remaining filters that require parsed fields (age bucket, invoice-match) — in-memory
+      const filtered = records.filter((row) => {
         if (!matchesAgeBucket(row, ageBucket)) return false;
         if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
         return true;
       });
 
-      const total = filteredRows.length;
       const totalPages = Math.max(1, Math.ceil(total / limit));
-      const safePage = Math.min(page, totalPages);
-      const safeOffset = (safePage - 1) * limit;
-      const records = filteredRows.slice(safeOffset, safeOffset + limit);
-      const filteredTotalOutstanding = filteredRows.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
-      const pageTotalOutstanding = records.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
-
       res.json({
-        records,
+        records: filtered,
         total,
-        page: safePage,
+        page,
         totalPages,
         filteredTotalOutstanding,
         pageTotalOutstanding,
@@ -435,7 +506,7 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/inventory', requireAuth, (req, res) => {
     const search = (req.query.search || '').trim();
     const commodity = (req.query.commodity || '').trim();
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100000, 100000);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 1000, 1), 5000);
     const isHub = process.env.HUB_MODE === 'true';
     try {
       const conditions = [];
