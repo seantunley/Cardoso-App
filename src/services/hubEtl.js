@@ -5,12 +5,13 @@
  * and scheduled backup pull logic.
  */
 
-import db from '../db/index.js';
 import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
-import { buildStatements } from '../db/statements.js';
+import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
+
+const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
 function checkBackupIntegrity(siteId, filePath) {
   let backupDb = null;
@@ -56,72 +57,7 @@ function checkBackupIntegrity(siteId, filePath) {
 
 // --- Hub table creation (only called when HUB_MODE === 'true') ---
 function initHubTables() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS hub_sites (
-      id TEXT PRIMARY KEY,
-      slug TEXT,
-      name TEXT,
-      url TEXT,
-      token TEXT,
-      last_seen TEXT,
-      last_kpis TEXT,
-      status TEXT DEFAULT 'unknown',
-      logic_version INTEGER,
-      logic_sync_status TEXT DEFAULT 'never_synced',
-      logic_last_error TEXT,
-      logic_last_synced_at TEXT,
-      logic_status_updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_records (
-      site_id TEXT,
-      record_id TEXT,
-      customer_number TEXT,
-      customer_name TEXT,
-      flag_color TEXT,
-      flag_reason TEXT,
-      flag_created_by TEXT,
-      outstanding_balance TEXT,
-      unpaid_invoices TEXT,
-      receipts TEXT,
-      updated_date TEXT,
-      synced_at TEXT,
-      auto_flagged INTEGER DEFAULT 0,
-      terms TEXT,
-      PRIMARY KEY (site_id, record_id)
-    );
-    CREATE TABLE IF NOT EXISTS hub_sync_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT,
-      started_at TEXT,
-      completed_at TEXT,
-      records_fetched INTEGER,
-      status TEXT,
-      error TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_inventory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT NOT NULL,
-      item_number TEXT NOT NULL,
-      item_description TEXT,
-      qty_on_hand TEXT,
-      last_cost TEXT,
-      price_list TEXT,
-      price TEXT,
-      stocking_uom TEXT,
-      commodity TEXT,
-      inventory_value TEXT,
-      terms TEXT,
-      synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(site_id, item_number)
-    );
-  `);
-
-  // Seed default hub settings
-  db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
+  hubRepository.ensureHubTables();
 }
 
 // --- Site registry from env ---
@@ -137,14 +73,7 @@ function initHubSiteRegistry() {
     HUB_SITES = [];
   }
 
-  const upsertSite = db.prepare(`
-    INSERT INTO hub_sites (id, slug, name, url, token, status)
-    VALUES (@id, @slug, @name, @url, @token, 'unknown')
-    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url, token=excluded.token
-  `);
-  for (const site of HUB_SITES) {
-    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url, token: site.token || null });
-  }
+  hubRepository.upsertSites(HUB_SITES);
 }
 
 // --- ETL function ---
@@ -384,14 +313,12 @@ async function syncAllSites() {
 
 async function runHubBackupPull() {
   if (process.env.HUB_MODE !== 'true') return;
-  const stmts = buildStatements(db);
-  const row = stmts.getHubSetting.get('backup_sync_enabled');
-  const enabled = row ? row.value === 'true' : true;
+  const enabled = hubRepository.getBackupSyncEnabled();
   if (!enabled) {
     console.log('[HUB BACKUP] Skipping scheduled pull — backup sync disabled.');
     return;
   }
-  const sites = stmts.hubSitesForBackup.all();
+  const sites = hubRepository.listSitesForBackup();
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   await Promise.allSettled(sites.map(async (site) => {
     try {

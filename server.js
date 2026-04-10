@@ -25,11 +25,15 @@ import { createCollectionsRouter } from './src/routes/collections.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
+import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
+import { validateHubPostgresConfig } from './src/config/hubPostgres.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
 validateSessionSecret(process.env.SESSION_SECRET);
 validateHubTokenSecret(process.env.HUB_TOKEN_SECRET);
+validateHubPostgresConfig(process.env);
+initHubStorageRuntime();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
