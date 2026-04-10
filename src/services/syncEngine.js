@@ -398,11 +398,34 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       if (!syncQueryStripped.startsWith('SELECT') && !syncQueryStripped.startsWith('WITH')) {
         throw new Error('sync_query must be a SELECT or CTE (WITH ...) statement');
       }
+
+      // Denylist: dangerous patterns that even a SELECT can weaponise
+      const FORBIDDEN = [
+        /\bDROP\b/i, /\bDELETE\b/i, /\bUPDATE\b/i, /\bINSERT\b/i,
+        /\bTRUNCATE\b/i, /\bALTER\b/i, /\bCREATE\b/i, /\bEXEC\b/i,
+        /\bEXECUTE\b/i, /\bXP_/i, /\bSP_/i, /\bINTO\s+OUTFILE\b/i,
+        /\bLOAD_FILE\b/i, /\bBENCHMARK\b/i, /\bSLEEP\b/i,
+        /\bINFORMATION_SCHEMA\b/i, /\bMYSQL\./i,
+      ];
+      for (const pat of FORBIDDEN) {
+        if (pat.test(syncQueryStripped)) {
+          throw new Error('sync_query contains a forbidden SQL pattern');
+        }
+      }
+
+      // Require WHERE or LIMIT to prevent trivially expensive queries
+      const hasWhere = /\bWHERE\b/i.test(syncQueryStripped);
+      const hasLimit = /\bLIMIT\b/i.test(syncQueryStripped);
+      if (!hasWhere && !hasLimit) {
+        throw new Error('sync_query must include a WHERE clause or LIMIT');
+      }
+
       if (!queryIndexField) {
         throw new Error('query_index_field is required for query mode');
       }
 
-      const result = await pool.request().query(syncQuery);
+      // 30-second timeout on MSSQL queries
+      const result = await pool.request().query(syncQuery).timeout(30000);
       const rows = result.recordset || [];
 
       // Use the connection name as the logical source_table so existing records

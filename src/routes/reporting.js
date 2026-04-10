@@ -6,6 +6,7 @@ import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
+import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
@@ -330,7 +331,7 @@ export function createReportingRouter({ requireAuth }) {
         last_sync_at: lastSync?.completed_at || null,
       });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[reporting] error:', err.message); res.status(500).json({ error: 'Request failed' });
     }
   });
 
@@ -547,7 +548,7 @@ export function createReportingRouter({ requireAuth }) {
   // ==================== MULTI-SITE REPORTING API ====================
 
   // GET /api/reporting/site-info
-  router.get('/api/reporting/site-info', requireReportingToken, (req, res) => {
+  router.get('/api/reporting/site-info', reportingRateLimiter, requireReportingToken, (req, res) => {
     res.json({
       site_id: SITE_ID,
       site_slug: SITE_SLUG,
@@ -559,7 +560,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reporting/kpis
-  router.get('/api/reporting/kpis', requireReportingToken, (req, res) => {
+  router.get('/api/reporting/kpis', reportingRateLimiter, requireReportingToken, (req, res) => {
     const total = stmts.kpiTotalRecords.get();
     const byFlag = stmts.kpiFlagCounts.all();
     const lastSync = stmts.kpiLastSync.get();
@@ -582,7 +583,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reporting/records?since=ISO_DATE&offset=0&limit=1000
-  router.get('/api/reporting/records', requireReportingToken, (req, res) => {
+  router.get('/api/reporting/records', reportingRateLimiter, requireReportingToken, (req, res) => {
     const since = req.query.since;
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;
@@ -615,7 +616,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reporting/health
-  router.get('/api/reporting/health', requireReportingToken, (req, res) => {
+  router.get('/api/reporting/health', reportingRateLimiter, requireReportingToken, (req, res) => {
     const total = stmts.kpiTotalRecords.get();
     const lastRun = stmts.kpiLastRun.get();
     res.json({
@@ -659,7 +660,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/speedtest/results — last 30 speed test results
-  router.get('/api/speedtest/results', requireReportingToken, (req, res) => {
+  router.get('/api/speedtest/results', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       const results = db.prepare(
         `SELECT id, timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location, created_at
@@ -667,12 +668,12 @@ export function createReportingRouter({ requireAuth }) {
       ).all();
       res.json({ results });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      console.error('[reporting] error:', err.message); res.status(500).json({ error: 'Request failed' });
     }
   });
 
   // GET /api/reporting/inventory?offset=0&limit=1000
-  router.get('/api/reporting/inventory', requireReportingToken, (req, res) => {
+  router.get('/api/reporting/inventory', reportingRateLimiter, requireReportingToken, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;
     const rows = db.prepare(
