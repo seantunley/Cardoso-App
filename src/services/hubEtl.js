@@ -70,10 +70,10 @@ function isAllowedSiteUrl(url) {
     const u = new URL(url);
     // Only allow HTTP(S) to private/internal Tailscale IP ranges or localhost
     const host = u.hostname;
-    const isPrivate = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\168\.)/.test(host);
+    const isPrivate = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/.test(host);
     const isTailscale = host.endsWith('.ts.net') || /^(100\.([0-9]{1,3}\.){2})/.test(host);
     const isLocalhost = /^(localhost|127\.|::1)$/.test(host);
-    return u.protocol === 'http:' && (isPrivate || isTailscale || isLocalhost);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && (isPrivate || isTailscale || isLocalhost);
   } catch (_) {
     return false;
   }

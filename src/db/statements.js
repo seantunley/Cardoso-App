@@ -16,6 +16,7 @@ function buildStatements(db) {
   stmts.kpiLastRun       = db.prepare('SELECT status, completed_at FROM syncrun ORDER BY completed_at DESC LIMIT 1');
   stmts.kpiActiveConns   = db.prepare("SELECT COUNT(*) as count FROM databaseconnection WHERE status = 'active'");
 
+  stmts.autoRecordsForFlags  = db.prepare('SELECT * FROM datarecord WHERE flag_color IS NOT NULL OR auto_flagged = 1 OR outstanding_balance IS NOT NULL');
   stmts.activeAutoFlagRules  = db.prepare('SELECT * FROM autoflagrule WHERE is_active = 1 ORDER BY priority DESC');
   stmts.updateAutoFlag       = db.prepare("UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = 1, flag_source = 'auto' WHERE id = ?");
   stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ? AND auto_flagged = 1");

@@ -320,19 +320,20 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
-            // Derive snapshot from in-memory record — no extra SELECT round-trip
+            // Snapshot the post-update state — merge base data over existing to reflect what was written
             try {
+              const postUpdateRecord = { ...existing, ...baseRecordData, id: existing.id, updated_date: syncTimestamp };
               insertSnapshot.run(
                 String(connectionId),
                 String(existing.customer_number || ''),
-                JSON.stringify(existing),
+                JSON.stringify(postUpdateRecord),
                 syncTimestamp
               );
             } catch (snapshotErr) {
               console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
             }
           } else {
-            insertNewRecord.run(
+            const insertResult = insertNewRecord.run(
               baseRecordData.created_by,
               String(baseRecordData.customer_number ?? ''),
               String(baseRecordData.customer_name ?? ''),
@@ -357,12 +358,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.custom_field_3 ?? null,
               baseRecordData.synced_at
             );
-            // Fetch inserted record via last_insert_rowid() — avoids full-table SELECT
+            // Use the rowid from the insert result — safe across concurrent writes
             let newRecord = null;
             try {
-              newRecord = db.prepare(
-                `SELECT * FROM datarecord WHERE id = last_insert_rowid()`
-              ).get();
+              const newId = insertResult.lastInsertRowid;
+              newRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(newId);
             } catch (_) {}
 
             if (activeAutoFlagRules.length > 0 && newRecord) {
@@ -413,19 +413,21 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         }
       }
 
-      // Require WHERE or LIMIT to prevent trivially expensive queries
+      // Warn if query has no WHERE or LIMIT — may be very expensive
       const hasWhere = /\bWHERE\b/i.test(syncQueryStripped);
       const hasLimit = /\bLIMIT\b/i.test(syncQueryStripped);
       if (!hasWhere && !hasLimit) {
-        throw new Error('sync_query must include a WHERE clause or LIMIT');
+        console.warn(`[sync] Connection ${connectionId}: sync_query has no WHERE or LIMIT clause — this may be slow on large tables`);
       }
 
       if (!queryIndexField) {
         throw new Error('query_index_field is required for query mode');
       }
 
-      // 30-second timeout on MSSQL queries
-      const result = await pool.request().query(syncQuery).timeout(30000);
+      // 60-second timeout on MSSQL queries (set on request object, not chained)
+      const req = pool.request();
+      req.timeout = 60000;
+      const result = await req.query(syncQuery);
       const rows = result.recordset || [];
 
       // Use the connection name as the logical source_table so existing records
