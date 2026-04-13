@@ -393,7 +393,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         throw new Error('query_index_field is required for query mode');
       }
 
-      const result = await pool.request().query(syncQuery);
+      const req = pool.request();
+      req.timeout = 60000;
+      const result = await req.query(syncQuery);
       const rows = result.recordset || [];
 
       // Use the connection name as the logical source_table so existing records

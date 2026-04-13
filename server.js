@@ -35,10 +35,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Security headers — applies to all responses in both prod and dev
-// Disable HSTS (strictTransportSecurity) so HTTP works on LAN without SSL certs
+// Security headers — disable policies that break HTTP on LAN
 app.use(helmet({
   hsts: false,
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+  originAgentCluster: false,
 }));
 
 // Trust proxy so X-Forwarded-For is used correctly (rate limiting, login logging)
