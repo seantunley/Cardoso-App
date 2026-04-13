@@ -14,6 +14,7 @@ import {
   syncCreditLogicFromHub,
   updateHubSiteCreditLogicStatus,
 } from "../services/creditLogic.js";
+import { debugCreditForCustomer } from "../services/creditDebug.js";
 
 export function createCreditLogicRouter({ requireAuth, requirePermission }) {
   const router = express.Router();
@@ -103,6 +104,18 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
       res.json({ ok: true, logicVersion: state.logicVersion, syncStatus: state.syncStatus, lastSyncedAt: state.lastSyncedAt });
     } catch (error) {
       res.status(error.statusCode || 500).json({ error: error.message, details: error.details || null });
+    }
+  });
+
+  router.get("/api/credit-logic/debug", requireAuth, (req, res) => {
+    const customerNumber = typeof req.query.customer === "string" ? req.query.customer.trim() : "";
+    if (!customerNumber) return res.status(400).json({ error: "customer query parameter is required" });
+    try {
+      const result = debugCreditForCustomer(customerNumber);
+      res.json(result);
+    } catch (err) {
+      console.error("[credit-debug] error:", err);
+      res.status(500).json({ error: err.message });
     }
   });
 
