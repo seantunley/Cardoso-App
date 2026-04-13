@@ -13,6 +13,9 @@ import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLo
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
 
+// ── Statements prepared once at module level (not per-sync) ────────────────
+const stmts = buildStatements(db);
+
 const activeSyncs = new Set();
 
 function acquireSyncLock(connectionId) {
@@ -27,7 +30,6 @@ function releaseSyncLock(connectionId) {
 }
 
 async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
-  const stmts = buildStatements(db);
   let pool;
   let syncRunId = null;
 
@@ -209,18 +211,24 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
 
     // Shared write-rows helper used by both query mode and legacy table mode
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
-      const existingRows = db.prepare(`
-        SELECT id, source_id, source_table, customer_number, customer_name,
-               age_analysis, age_current, age_7_days, age_14_days, age_21_days,
-               note, local_fields, flag_color, flag_reason, flag_created_by, data,
-               outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
-        FROM datarecord
-        WHERE source_table = ?
-      `).all(sourceName);
+      // Keyed lookup — load only source_ids from incoming rows, not full table
+      const incomingIds = rows
+        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')))
+        .filter(Boolean);
 
-      const existingMap = new Map(
-        existingRows.map((r) => [`${r.source_table}::${r.source_id}`, r])
-      );
+      const existingMap = new Map();
+      if (incomingIds.length > 0) {
+        const placeholders = incomingIds.map(() => '?').join(',');
+        const keyedRows = db.prepare(`
+          SELECT id, source_id, source_table, customer_number, customer_name,
+                 age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                 note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                 outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+          FROM datarecord
+          WHERE source_table = ? AND source_id IN (${placeholders})
+        `).all(sourceName, ...incomingIds);
+        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id}`, r);
+      }
 
       const syncTimestamp = new Date().toISOString();
 
@@ -312,17 +320,14 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
-            // Append-only snapshot for audit trail
+            // Derive snapshot from in-memory record — no extra SELECT round-trip
             try {
-              const updatedRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(existing.id);
-              if (updatedRecord) {
-                insertSnapshot.run(
-                  String(connectionId),
-                  String(updatedRecord.customer_number || ''),
-                  JSON.stringify(updatedRecord),
-                  syncTimestamp
-                );
-              }
+              insertSnapshot.run(
+                String(connectionId),
+                String(existing.customer_number || ''),
+                JSON.stringify(existing),
+                syncTimestamp
+              );
             } catch (snapshotErr) {
               console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
             }
@@ -352,24 +357,28 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.custom_field_3 ?? null,
               baseRecordData.synced_at
             );
-            // Apply auto-flag rules to new records (user hasn't touched them yet)
-            const newRecord = db.prepare(`SELECT * FROM datarecord WHERE source_table = ? AND source_id = ?`).get(sourceName, String(sourceId || ''));
+            // Fetch inserted record via last_insert_rowid() — avoids full-table SELECT
+            let newRecord = null;
+            try {
+              newRecord = db.prepare(
+                `SELECT * FROM datarecord WHERE id = last_insert_rowid()`
+              ).get();
+            } catch (_) {}
+
             if (activeAutoFlagRules.length > 0 && newRecord) {
               const autoFlag = applyAutoFlagRulesToRecord(expandDataRecord(newRecord), activeAutoFlagRules);
               if (autoFlag) {
                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
               }
             }
-            // Append-only snapshot for audit trail
+            // Snapshot from in-memory newRecord already in scope — no extra SELECT
             try {
-              if (newRecord) {
-                insertSnapshot.run(
-                  String(connectionId),
-                  String(newRecord.customer_number || ''),
-                  JSON.stringify(newRecord),
-                  syncTimestamp
-                );
-              }
+              insertSnapshot.run(
+                String(connectionId),
+                String(baseRecordData.customer_number || ''),
+                JSON.stringify(newRecord),
+                syncTimestamp
+              );
             } catch (snapshotErr) {
               console.error('[snapshot] Failed to insert snapshot for new record:', snapshotErr.message);
             }
@@ -389,6 +398,28 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       if (!syncQueryStripped.startsWith('SELECT') && !syncQueryStripped.startsWith('WITH')) {
         throw new Error('sync_query must be a SELECT or CTE (WITH ...) statement');
       }
+
+      // Denylist: dangerous patterns that even a SELECT can weaponise
+      const FORBIDDEN = [
+        /\bDROP\b/i, /\bDELETE\b/i, /\bUPDATE\b/i, /\bINSERT\b/i,
+        /\bTRUNCATE\b/i, /\bALTER\b/i, /\bCREATE\b/i, /\bEXEC\b/i,
+        /\bEXECUTE\b/i, /\bXP_/i, /\bSP_/i, /\bINTO\s+OUTFILE\b/i,
+        /\bLOAD_FILE\b/i, /\bBENCHMARK\b/i, /\bSLEEP\b/i,
+        /\bINFORMATION_SCHEMA\b/i, /\bMYSQL\./i,
+      ];
+      for (const pat of FORBIDDEN) {
+        if (pat.test(syncQueryStripped)) {
+          throw new Error('sync_query contains a forbidden SQL pattern');
+        }
+      }
+
+      // Require WHERE or LIMIT to prevent trivially expensive queries
+      const hasWhere = /\bWHERE\b/i.test(syncQueryStripped);
+      const hasLimit = /\bLIMIT\b/i.test(syncQueryStripped);
+      if (!hasWhere && !hasLimit) {
+        throw new Error('sync_query must include a WHERE clause or LIMIT');
+      }
+
       if (!queryIndexField) {
         throw new Error('query_index_field is required for query mode');
       }

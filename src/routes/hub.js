@@ -9,13 +9,13 @@ import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import { readdirSync, statSync } from 'fs';
 import path from 'path';
-import db from '../db/index.js';
-import { buildStatements } from '../db/statements.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { getHubStorageRuntime } from '../hub/storage/runtime.js';
+
+const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
 export function createHubRouter({ requireAuth, requireAdmin, requirePermission }) {
-  const stmts = buildStatements(db);
   const router = Router();
 
   const writeHubAudit = db.prepare(`
@@ -109,14 +109,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
-    const row = stmts.getHubSetting.get('backup_sync_enabled');
-    res.json({ backup_sync_enabled: row ? row.value === 'true' : true });
+    res.json({ backup_sync_enabled: hubRepository.getBackupSyncEnabled() });
   });
 
   router.post('/api/hub/backup-settings', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
     const { backup_sync_enabled } = req.body;
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
-    stmts.setHubSetting.run('backup_sync_enabled', backup_sync_enabled ? 'true' : 'false');
+    hubRepository.setBackupSyncEnabled(backup_sync_enabled);
     res.json({ ok: true, backup_sync_enabled });
   });
 
