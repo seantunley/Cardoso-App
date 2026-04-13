@@ -7,6 +7,7 @@ import {
   KeyRound,
   ClipboardList,
   Network,
+  Bug,
 } from "lucide-react";
 
 // ── Custom nav SVG icons ──────────────────────────────────────────────────────
@@ -85,6 +86,7 @@ const navItems = [
   { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
+  { name: "Credit Debug",        icon: Bug,                  page: "CreditDebug",      adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -191,6 +193,7 @@ export default function Layout({ children, currentPageName }) {
     if (!currentUser) return false;
     if (item.hubOnly && !hubMode) return false;
     if (item.siteOnly && hubMode) return false;
+    if (item.adminOnly && !isAdmin) return false;
     if (item.permission) return hasPermission(currentUser, item.permission);
     return true;
   };
