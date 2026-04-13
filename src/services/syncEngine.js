@@ -424,8 +424,10 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         throw new Error('query_index_field is required for query mode');
       }
 
-      // 30-second timeout on MSSQL queries
-      const result = await pool.request().query(syncQuery).timeout(30000);
+      // 60-second timeout on MSSQL queries
+      const req = pool.request();
+      req.timeout = 60000;
+      const result = await req.query(syncQuery);
       const rows = result.recordset || [];
 
       // Use the connection name as the logical source_table so existing records
