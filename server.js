@@ -39,8 +39,13 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Security headers — disable HSTS so HTTP works on LAN without SSL certs
-app.use(helmet({ hsts: false }));
+// Security headers — disable HSTS and upgrade-insecure-requests so HTTP works on LAN
+app.use(helmet({
+  hsts: false,
+  contentSecurityPolicy: false,
+  crossOriginOpenerPolicy: false,
+  originAgentCluster: false,
+}));
 
 // Trust proxy so X-Forwarded-For is used correctly (rate limiting, login logging)
 // On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
