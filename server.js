@@ -39,7 +39,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Security headers — disable HSTS and upgrade-insecure-requests so HTTP works on LAN
+// Security headers — disable policies that break HTTP on LAN
 app.use(helmet({
   hsts: false,
   contentSecurityPolicy: false,
