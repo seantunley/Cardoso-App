@@ -44,7 +44,16 @@ app.set('trust proxy', 1);
 
 if (IS_PRODUCTION) {
   app.use(express.static(path.join(process.cwd(), 'dist')));
-  app.use(cors({ origin: false, credentials: true }));
+  // Allow same-origin requests from any hostname/IP that reaches this server
+  app.use(cors({
+    origin: (origin, callback) => {
+      // No origin = same-origin request (e.g. browser navigating directly) — allow
+      if (!origin) return callback(null, true);
+      // Allow requests from any host on the same port (frontend served by this server)
+      callback(null, true);
+    },
+    credentials: true,
+  }));
 } else {
   app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173', credentials: true }));
 }
