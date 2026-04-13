@@ -239,6 +239,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
       `);
 
+      let diagLogged = false;
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
@@ -253,6 +254,16 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           const existing = existingMap.get(`${sourceName}::${String(sourceId || '')}`);
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
+
+          // Log field-mapping diagnostics for the first row of each sync
+          if (!diagLogged) {
+            diagLogged = true;
+            const rowKeys = Object.keys(row);
+            console.log(`[sync-diag] First row keys (${rowKeys.length}):`, rowKeys.join(', '));
+            console.log(`[sync-diag] row.account_type =`, JSON.stringify(row.account_type), '| row.sales_rep =', JSON.stringify(row.sales_rep), '| row.salesperson_code =', JSON.stringify(row.salesperson_code));
+            console.log(`[sync-diag] mappedPatch.account_type =`, JSON.stringify(mappedPatch.account_type), '| mappedPatch.sales_rep =', JSON.stringify(mappedPatch.sales_rep));
+            console.log(`[sync-diag] mappings keys:`, Object.keys(mappings || {}).join(', ') || '(none)');
+          }
           const dataJson = JSON.stringify(row);
 
           const existingLocalFields = parseJsonSafely(existing?.local_fields, {});

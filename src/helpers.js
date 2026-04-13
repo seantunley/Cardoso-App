@@ -83,7 +83,7 @@ export function normalizeLooseFieldKey(input) {
 
 export const SALES_REP_ALIASES = [
   'sales_rep', 'sale_rep', 'SalesRep', 'SALEREP', 'SalesRepCode', 'salesrep', 'sales_rep_code',
-  'SalesPerson', 'SalesPersonCode', 'salespersoncode', 'Sales Rep', 'Sales Rep Code',
+  'SalesPerson', 'SalesPersonCode', 'salespersoncode', 'salesperson_code', 'Sales Rep', 'Sales Rep Code',
   'SalesRepName', 'SalesPersonName', 'salesperson_name', 'sales_rep_name',
   'Salesman', 'SalesmanCode', 'SalesmanName', 'salesman_code', 'salesman_name',
   'Rep', 'RepCode', 'RepName', 'rep_code', 'rep_name', 'SLSREP', 'SLSMAN'
