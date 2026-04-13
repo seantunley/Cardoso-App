@@ -36,7 +36,10 @@ const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 // Security headers — applies to all responses in both prod and dev
-app.use(helmet());
+// Disable HSTS (strictTransportSecurity) so HTTP works on LAN without SSL certs
+app.use(helmet({
+  hsts: false,
+}));
 
 // Trust proxy so X-Forwarded-For is used correctly (rate limiting, login logging)
 // On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
