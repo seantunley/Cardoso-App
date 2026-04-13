@@ -191,6 +191,12 @@ async function syncSite(site) {
       if (!recRes.ok) break;
       const recData = await recRes.json();
       if (recData.records && recData.records.length > 0) {
+        // Log first record diagnostics for account_type/sales_rep tracing
+        if (offset === 0) {
+          const sample = recData.records[0];
+          console.log(`[hub-etl-diag] Site ${site.name}: first record keys:`, Object.keys(sample).join(', '));
+          console.log(`[hub-etl-diag] Site ${site.name}: account_type=${JSON.stringify(sample.account_type)}, sales_rep=${JSON.stringify(sample.sales_rep)}`);
+        }
         insertMany(recData.records);
         recordsFetched += recData.records.length;
         offset += recData.records.length;
