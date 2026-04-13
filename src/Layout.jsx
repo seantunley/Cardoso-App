@@ -9,6 +9,7 @@ import {
   Network,
   Sun,
   Moon,
+  FlaskConical,
 } from "lucide-react";
 import { applyTheme } from "@/lib/AuthContext";
 
@@ -88,7 +89,7 @@ const navItems = [
   { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
-  { name: "Credit Debug",        icon: Bug,                  page: "CreditDebug",      adminOnly: true },
+  { name: "Credit Debug",        icon: FlaskConical,         page: "CreditDebug",      adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
