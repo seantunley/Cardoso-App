@@ -715,6 +715,8 @@ function MaintenanceTab() {
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [clearImportedOpen, setClearImportedOpen] = useState(false);
+  const [clearingImported, setClearingImported] = useState(false);
 
   const handlePreview = async () => {
     setLoadingPreview(true);
@@ -756,6 +758,25 @@ function MaintenanceTab() {
     }
   };
 
+  const handleClearImportedData = async () => {
+    setClearingImported(true);
+    try {
+      const r = await fetch('/api/maintenance/clear-imported-data', {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Clear imported data failed');
+      setPreview(null);
+      setClearImportedOpen(false);
+      toast.success(`Imported data cleared. Removed ${d.totalRemoved || 0} row${d.totalRemoved === 1 ? '' : 's'}.`);
+    } catch (e) {
+      toast.error(e.message || 'Clear imported data failed');
+    } finally {
+      setClearingImported(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-3xl">
       <div>
@@ -764,16 +785,57 @@ function MaintenanceTab() {
           Site-only admin tools. Customer dedupe keeps the newest record per trimmed customer number, and removes older duplicates.
         </p>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handlePreview} disabled={loadingPreview || applying}>
+          <Button variant="outline" size="sm" onClick={handlePreview} disabled={loadingPreview || applying || clearingImported}>
             <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingPreview ? 'animate-spin' : ''}`} />
             {loadingPreview ? 'Running dry-run...' : 'Dry-run dedupe'}
           </Button>
-          <Button size="sm" variant="destructive" onClick={handleApply} disabled={applying || loadingPreview || !preview}>
+          <Button size="sm" variant="destructive" onClick={handleApply} disabled={applying || loadingPreview || clearingImported || !preview}>
             <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
             {applying ? 'Applying...' : 'Apply dedupe'}
           </Button>
         </div>
       </div>
+
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Clear imported SQL data</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Permanently removes imported customer records, imported inventory, and sync history from this site. Users and SQL connections stay intact.
+          </p>
+        </div>
+        <Button
+          size="sm"
+          variant="destructive"
+          onClick={() => setClearImportedOpen(true)}
+          disabled={loadingPreview || applying || clearingImported}
+        >
+          <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+          {clearingImported ? 'Clearing...' : 'Clear imported data'}
+        </Button>
+      </div>
+
+      <Dialog open={clearImportedOpen} onOpenChange={setClearImportedOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Clear imported SQL data?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-destructive">
+              Warning: this permanently removes imported customer records, inventory records, and sync history from this site database.
+            </div>
+            <p className="text-muted-foreground">
+              Users and SQL connections will be kept. This cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setClearImportedOpen(false)} disabled={clearingImported}>Cancel</Button>
+              <Button variant="destructive" onClick={handleClearImportedData} disabled={clearingImported}>
+                <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+                {clearingImported ? 'Clearing...' : 'Yes, clear it permanently'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {preview && (
         <div className="rounded-xl border border-border bg-card p-4 space-y-3">
