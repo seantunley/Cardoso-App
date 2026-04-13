@@ -192,6 +192,35 @@ function dedupeCustomers({ dryRun = true } = {}) {
   };
 }
 
+function clearImportedSqlData() {
+  const counts = {
+    datarecord: db.prepare(`SELECT COUNT(*) AS count FROM datarecord`).get()?.count || 0,
+    inventoryrecord: db.prepare(`SELECT COUNT(*) AS count FROM inventoryrecord`).get()?.count || 0,
+    syncrun: db.prepare(`SELECT COUNT(*) AS count FROM syncrun`).get()?.count || 0,
+  };
+
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM datarecord`).run();
+    db.prepare(`DELETE FROM inventoryrecord`).run();
+    db.prepare(`DELETE FROM syncrun`).run();
+    db.prepare(`
+      UPDATE databaseconnection
+      SET record_count = 0,
+          last_sync = NULL,
+          last_error = NULL,
+          updated_date = CURRENT_TIMESTAMP
+    `).run();
+  });
+
+  tx();
+
+  return {
+    ok: true,
+    removed: counts,
+    totalRemoved: counts.datarecord + counts.inventoryrecord + counts.syncrun,
+  };
+}
+
 export function createSystemRouter({ requireAuth, requireAdmin }) {
   const router = express.Router();
 
@@ -313,6 +342,19 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     } catch (error) {
       console.error('[maintenance] dedupe customers failed:', error.message);
       res.status(500).json({ error: error.message || 'Failed to dedupe customers' });
+    }
+  });
+
+  router.post('/api/maintenance/clear-imported-data', requireAuth, requireAdmin, (req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(400).json({ error: 'Clear imported data is site-only and cannot be run from the Hub.' });
+      }
+      const result = clearImportedSqlData();
+      res.json(result);
+    } catch (error) {
+      console.error('[maintenance] clear imported data failed:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to clear imported data' });
     }
   });
 
