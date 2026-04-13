@@ -5,12 +5,13 @@
  * and scheduled backup pull logic.
  */
 
-import db from '../db/index.js';
 import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
-import { buildStatements } from '../db/statements.js';
+import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
+
+const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
 function checkBackupIntegrity(siteId, filePath) {
   let backupDb = null;
@@ -56,78 +57,27 @@ function checkBackupIntegrity(siteId, filePath) {
 
 // --- Hub table creation (only called when HUB_MODE === 'true') ---
 function initHubTables() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS hub_sites (
-      id TEXT PRIMARY KEY,
-      slug TEXT,
-      name TEXT,
-      url TEXT,
-      token TEXT,
-      last_seen TEXT,
-      last_kpis TEXT,
-      status TEXT DEFAULT 'unknown',
-      logic_version INTEGER,
-      logic_sync_status TEXT DEFAULT 'never_synced',
-      logic_last_error TEXT,
-      logic_last_synced_at TEXT,
-      logic_status_updated_at TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_records (
-      site_id TEXT,
-      record_id TEXT,
-      customer_number TEXT,
-      customer_name TEXT,
-      flag_color TEXT,
-      flag_reason TEXT,
-      flag_created_by TEXT,
-      outstanding_balance TEXT,
-      unpaid_invoices TEXT,
-      receipts TEXT,
-      updated_date TEXT,
-      synced_at TEXT,
-      auto_flagged INTEGER DEFAULT 0,
-      terms TEXT,
-      PRIMARY KEY (site_id, record_id)
-    );
-    CREATE TABLE IF NOT EXISTS hub_sync_log (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT,
-      started_at TEXT,
-      completed_at TEXT,
-      records_fetched INTEGER,
-      status TEXT,
-      error TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_settings (
-      key TEXT PRIMARY KEY,
-      value TEXT
-    );
-    CREATE TABLE IF NOT EXISTS hub_inventory (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT NOT NULL,
-      item_number TEXT NOT NULL,
-      item_description TEXT,
-      qty_on_hand TEXT,
-      last_cost TEXT,
-      price_list TEXT,
-      price TEXT,
-      stocking_uom TEXT,
-      commodity TEXT,
-      inventory_value TEXT,
-      terms TEXT,
-      synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(site_id, item_number)
-    );
-  `);
-
-  // Seed default hub settings
-  db.prepare(`INSERT OR IGNORE INTO hub_settings (key, value) VALUES ('backup_sync_enabled', 'true')`).run();
+  hubRepository.ensureHubTables();
 }
 
 // --- Site registry from env ---
 // HUB_SITES is parsed lazily inside initHubSiteRegistry() to avoid ES module
 // import-hoisting race where dotenv hasn't run yet at module load time.
 let HUB_SITES = [];
+
+function isAllowedSiteUrl(url) {
+  try {
+    const u = new URL(url);
+    // Only allow HTTP(S) to private/internal Tailscale IP ranges or localhost
+    const host = u.hostname;
+    const isPrivate = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\168\.)/.test(host);
+    const isTailscale = host.endsWith('.ts.net') || /^(100\.([0-9]{1,3}\.){2})/.test(host);
+    const isLocalhost = /^(localhost|127\.|::1)$/.test(host);
+    return u.protocol === 'http:' && (isPrivate || isTailscale || isLocalhost);
+  } catch (_) {
+    return false;
+  }
+}
 
 function initHubSiteRegistry() {
   try {
@@ -137,14 +87,17 @@ function initHubSiteRegistry() {
     HUB_SITES = [];
   }
 
-  const upsertSite = db.prepare(`
-    INSERT INTO hub_sites (id, slug, name, url, token, status)
-    VALUES (@id, @slug, @name, @url, @token, 'unknown')
-    ON CONFLICT(id) DO UPDATE SET slug=excluded.slug, name=excluded.name, url=excluded.url, token=excluded.token
-  `);
+  // Validate every site URL before upserting — reject any site pointing outside allowed range
+  const allowed = [];
   for (const site of HUB_SITES) {
-    upsertSite.run({ id: site.id, slug: site.slug, name: site.name, url: site.url, token: site.token || null });
+    if (site.url && !isAllowedSiteUrl(site.url)) {
+      console.warn(`[HUB] Site "${site.slug}" blocked: URL "${site.url}" is not in an allowed private range`);
+      continue;
+    }
+    allowed.push(site);
   }
+  HUB_SITES = allowed;
+  hubRepository.upsertSites(HUB_SITES);
 }
 
 // --- ETL function ---
@@ -372,7 +325,14 @@ async function syncSpeedtest(site) {
 
 async function syncAllSites() {
   console.log(`[HUB] Syncing ${HUB_SITES.length} site(s)...`);
-  const results = await Promise.allSettled(HUB_SITES.map(syncSite));
+  // Bounded concurrency: sync sites in batches of 3 to avoid DB connection exhaustion
+  const CONCURRENCY = 3;
+  const results = [];
+  for (let i = 0; i < HUB_SITES.length; i += CONCURRENCY) {
+    const batch = HUB_SITES.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.allSettled(batch.map(syncSite));
+    results.push(...batchResults);
+  }
   results.forEach(r => {
     if (r.status === 'fulfilled') {
       console.log(`[HUB] ${r.value.site_slug}: ${r.value.records_fetched} records, error=${r.value.error || 'none'}`);
@@ -384,37 +344,40 @@ async function syncAllSites() {
 
 async function runHubBackupPull() {
   if (process.env.HUB_MODE !== 'true') return;
-  const stmts = buildStatements(db);
-  const row = stmts.getHubSetting.get('backup_sync_enabled');
-  const enabled = row ? row.value === 'true' : true;
+  const enabled = hubRepository.getBackupSyncEnabled();
   if (!enabled) {
     console.log('[HUB BACKUP] Skipping scheduled pull — backup sync disabled.');
     return;
   }
-  const sites = stmts.hubSitesForBackup.all();
+  const sites = hubRepository.listSitesForBackup();
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
-  await Promise.allSettled(sites.map(async (site) => {
-    try {
-      const controller = new AbortController();
-      const hardTimeout = setTimeout(() => controller.abort(), 30000);
-      const upstream = await fetch(`${site.url}/api/backup/download`, {
-        headers: { 'x-reporting-token': site.token || '' },
-        signal: controller.signal,
-      });
-      clearTimeout(hardTimeout);
-      if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
-      const buf = Buffer.from(await upstream.arrayBuffer());
-      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
-      mkdirSync(dir, { recursive: true });
-      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
-      writeFileSync(file, buf);
-      const integrity = checkBackupIntegrity(site.id, file);
-      console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
-    } catch (err) {
-      console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
-    }
-  }));
+  // Bounded concurrency: pull backups in batches of 2
+  const CONCURRENCY = 2;
+  for (let i = 0; i < sites.length; i += CONCURRENCY) {
+    const batch = sites.slice(i, i + CONCURRENCY);
+    await Promise.allSettled(batch.map(async (site) => {
+      try {
+        const controller = new AbortController();
+        const hardTimeout = setTimeout(() => controller.abort(), 60000);
+        const upstream = await fetch(`${site.url}/api/backup/download`, {
+          headers: { 'x-reporting-token': site.token || '' },
+          signal: controller.signal,
+        });
+        clearTimeout(hardTimeout);
+        if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
+        const buf = Buffer.from(await upstream.arrayBuffer());
+        const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+        mkdirSync(dir, { recursive: true });
+        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+        const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
+        writeFileSync(file, buf);
+        const integrity = checkBackupIntegrity(site.id, file);
+        console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
+      } catch (err) {
+        console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
+      }
+    }));
+  }
 }
 
 // --- Site ping ---

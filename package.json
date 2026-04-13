@@ -12,7 +12,9 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "hub:postgres:bootstrap": "node scripts/hub-postgres-bootstrap.mjs",
+    "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^17.0.0",
@@ -75,6 +77,7 @@
     "mssql": "^12.2.0",
     "next-themes": "^0.4.4",
     "node-cron": "^4.2.1",
+    "pg": "^8.20.0",
     "react": "^18.2.0",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.2.0",

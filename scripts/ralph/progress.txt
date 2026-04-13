@@ -243,3 +243,22 @@ Started: Fri Apr  3 09:46:13 AM SAST 2026
   - better-sqlite3 native bindings may not be built in all environments — smoke test health check will fail if native module is missing (npm rebuild needed)
   - Frontend files (src/lib/, src/api/, src/pages.config.js) are Vite/React — excluded from node --check since they use JSX/browser APIs
 ---
+
+## 2026-04-10 - Day 2 Hub Postgres foundation
+- Added an explicit, opt-in Hub Postgres bootstrap path under src/hubPostgres/.
+- Created migration runner with per-schema migration tracking and advisory lock protection.
+- Added initial Postgres schema migration for: sites, customers, customer_balances, flag_events, sync_runs.
+- Kept the design isolated from existing SQLite site and Hub runtime code. No server startup rewiring, no route cutover, no ETL cutover.
+- Added operator scripts and docs:
+  - scripts/hub-postgres-bootstrap.mjs
+  - scripts/hub-postgres-verify.mjs
+  - scripts/hub-postgres-bootstrap-notes.md
+  - docs/hub-postgres-schema.md
+- Added npm scripts: hub:postgres:bootstrap, hub:postgres:verify
+- Added pg dependency for the isolated migration/verification toolchain.
+- Schema decisions:
+  - `customers` is the identity table, unique on `(site_id, source_record_id)` to preserve current Hub record identity.
+  - `customer_balances` stores current-state balance/flag JSON separately from customer identity.
+  - `flag_events` is append-friendly for future audit/history work.
+  - balance values stay text in foundation phase to avoid unsafe coercion during cutover-free setup.
+---
