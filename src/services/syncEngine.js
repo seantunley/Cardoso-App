@@ -213,21 +213,23 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
       // Keyed lookup — load only source_ids from incoming rows, not full table
       const incomingIds = rows
-        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')))
+        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')).trim())
         .filter(Boolean);
 
       const existingMap = new Map();
       if (incomingIds.length > 0) {
-        const placeholders = incomingIds.map(() => '?').join(',');
+        // Deduplicate incoming IDs to avoid excessive SQL placeholders
+        const uniqueIds = [...new Set(incomingIds)];
+        const placeholders = uniqueIds.map(() => '?').join(',');
         const keyedRows = db.prepare(`
           SELECT id, source_id, source_table, customer_number, customer_name,
                  age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                  note, local_fields, flag_color, flag_reason, flag_created_by, data,
                  outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
           FROM datarecord
-          WHERE source_table = ? AND source_id IN (${placeholders})
-        `).all(sourceName, ...incomingIds);
-        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id}`, r);
+          WHERE source_table = ? AND TRIM(source_id) IN (${placeholders})
+        `).all(sourceName, ...uniqueIds);
+        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id.trim()}`, r);
       }
 
       const syncTimestamp = new Date().toISOString();
@@ -259,9 +261,20 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               row.id,
               ''
             )
-          );
+          ).trim();
 
-          const existing = existingMap.get(`${sourceName}::${String(sourceId || '')}`);
+          let existing = existingMap.get(`${sourceName}::${sourceId}`);
+          // Fallback: if source_id lookup missed (e.g. whitespace mismatch from older data),
+          // try to find by customer_number + source_table directly
+          if (!existing && sourceId) {
+            existing = db.prepare(
+              `SELECT id, source_id, source_table, customer_number, customer_name,
+                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+               FROM datarecord WHERE source_table = ? AND TRIM(source_id) = ? LIMIT 1`
+            ).get(sourceName, sourceId) || null;
+          }
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
 
