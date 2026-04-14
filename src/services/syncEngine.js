@@ -252,6 +252,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       const deleteFlagSnapshot = db.prepare(`DELETE FROM flag_snapshots WHERE customer_number = ?`);
 
       let diagLogged = false;
+      let syncUpdated = 0;
+      let syncInserted = 0;
+      const seenSourceIds = new Set();
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
@@ -263,6 +266,13 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
             )
           ).trim();
 
+          // Skip duplicate rows from the same MSSQL result set
+          if (seenSourceIds.has(sourceId)) {
+            if (!diagLogged) console.log(`[sync-dedup] Skipping duplicate source_id in result set: ${sourceId}`);
+            continue;
+          }
+          seenSourceIds.add(sourceId);
+
           let existing = existingMap.get(`${sourceName}::${sourceId}`);
           // Fallback: if source_id lookup missed (e.g. whitespace mismatch from older data),
           // try to find by customer_number + source_table directly
@@ -273,6 +283,16 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                       note, local_fields, flag_color, flag_reason, flag_created_by, data,
                       outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
                FROM datarecord WHERE source_table = ? AND TRIM(source_id) = ? LIMIT 1`
+            ).get(sourceName, sourceId) || null;
+          }
+          // Last resort: match by customer_number column directly
+          if (!existing && sourceId) {
+            existing = db.prepare(
+              `SELECT id, source_id, source_table, customer_number, customer_name,
+                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+               FROM datarecord WHERE source_table = ? AND TRIM(customer_number) = ? LIMIT 1`
             ).get(sourceName, sourceId) || null;
           }
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
@@ -303,6 +323,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
 
           if (existing) {
+            syncUpdated++;
             const keepExistingIfIncomingBlank = (incomingValue, existingValue) => {
               if (incomingValue !== undefined && incomingValue !== null && String(incomingValue).trim() !== '') {
                 return String(incomingValue);
@@ -367,6 +388,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
             }
           } else {
+            syncInserted++;
             const insertResult = insertNewRecord.run(
               baseRecordData.created_by,
               String(baseRecordData.customer_number ?? ''),
@@ -432,6 +454,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       });
 
       writeRowsTransaction(rows);
+      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${rows.length - seenSourceIds.size} duplicate rows skipped`);
     };
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
