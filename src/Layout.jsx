@@ -7,7 +7,11 @@ import {
   KeyRound,
   ClipboardList,
   Network,
+  Sun,
+  Moon,
+  FlaskConical,
 } from "lucide-react";
+import { applyTheme } from "@/lib/AuthContext";
 
 // ── Custom nav SVG icons ──────────────────────────────────────────────────────
 const IconCustomerSearch = ({ className, style }) => (
@@ -85,10 +89,12 @@ const navItems = [
   { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
+  { name: "Credit Debug",        icon: FlaskConical,         page: "CreditDebug",      adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed]       = useState(true);
+  const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const [hubMode, setHubMode]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
@@ -191,6 +197,7 @@ export default function Layout({ children, currentPageName }) {
     if (!currentUser) return false;
     if (item.hubOnly && !hubMode) return false;
     if (item.siteOnly && hubMode) return false;
+    if (item.adminOnly && !isAdmin) return false;
     if (item.permission) return hasPermission(currentUser, item.permission);
     return true;
   };
@@ -273,6 +280,19 @@ export default function Layout({ children, currentPageName }) {
           )}
 
           <button
+            onClick={() => {
+              const next = theme === 'dark' ? 'light' : 'dark';
+              setTheme(next);
+              applyTheme(next);
+              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {});
+            }}
+            title={isCollapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
+            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
+            {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
+            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
+          </button>
+
+          <button
             onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}
             className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
             <KeyRound className="h-4 w-4 shrink-0" />
@@ -349,6 +369,9 @@ export default function Layout({ children, currentPageName }) {
           {canSeeSettings && (
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
           )}
+          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {}); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+            {theme === 'dark' ? <Sun className="h-5 w-5 text-amber-400" /> : <Moon className="h-5 w-5 text-blue-400" />}
+          </Button>
           <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change Password">
             <KeyRound className="h-5 w-5 text-muted-foreground" />
           </Button>
