@@ -717,6 +717,8 @@ function MaintenanceTab() {
   const [applying, setApplying] = useState(false);
   const [clearImportedOpen, setClearImportedOpen] = useState(false);
   const [clearingImported, setClearingImported] = useState(false);
+  const [clearPassword, setClearPassword] = useState('');
+  const [clearPasswordError, setClearPasswordError] = useState('');
 
   const handlePreview = async () => {
     setLoadingPreview(true);
@@ -759,17 +761,32 @@ function MaintenanceTab() {
   };
 
   const handleClearImportedData = async () => {
+    if (!clearPassword) {
+      setClearPasswordError('Password is required');
+      return;
+    }
+    setClearPasswordError('');
     setClearingImported(true);
     try {
       const r = await fetch('/api/maintenance/clear-imported-data', {
         method: 'POST',
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: clearPassword }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Clear imported data failed');
+      if (!r.ok) {
+        if (r.status === 401) {
+          setClearPasswordError(d.error || 'Incorrect password');
+          return;
+        }
+        throw new Error(d.error || 'Clear imported data failed');
+      }
       setPreview(null);
       setClearImportedOpen(false);
-      toast.success(`Imported data cleared. Removed ${d.totalRemoved || 0} row${d.totalRemoved === 1 ? '' : 's'}.`);
+      setClearPassword('');
+      const flagMsg = d.flagsPreserved ? ` ${d.flagsPreserved} flag${d.flagsPreserved === 1 ? '' : 's'} preserved for reimport.` : '';
+      toast.success(`Imported data cleared. Removed ${d.totalRemoved || 0} row${d.totalRemoved === 1 ? '' : 's'}.${flagMsg}`);
     } catch (e) {
       toast.error(e.message || 'Clear imported data failed');
     } finally {
@@ -814,7 +831,7 @@ function MaintenanceTab() {
         </Button>
       </div>
 
-      <Dialog open={clearImportedOpen} onOpenChange={setClearImportedOpen}>
+      <Dialog open={clearImportedOpen} onOpenChange={(open) => { setClearImportedOpen(open); if (!open) { setClearPassword(''); setClearPasswordError(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Clear imported SQL data?</DialogTitle>
@@ -823,12 +840,30 @@ function MaintenanceTab() {
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-destructive">
               Warning: this permanently removes imported customer records, inventory records, and sync history from this site database.
             </div>
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-700 dark:text-amber-300">
+              Customer flags and notes will be preserved and automatically restored when data is reimported.
+            </div>
             <p className="text-muted-foreground">
-              Users and SQL connections will be kept. This cannot be undone.
+              Users and SQL connections will be kept.
             </p>
+            <div className="space-y-1.5">
+              <label htmlFor="clear-password" className="text-xs font-medium text-foreground">Confirm your password</label>
+              <input
+                id="clear-password"
+                type="password"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Enter your password"
+                value={clearPassword}
+                onChange={(e) => { setClearPassword(e.target.value); setClearPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && clearPassword) handleClearImportedData(); }}
+                disabled={clearingImported}
+                autoComplete="current-password"
+              />
+              {clearPasswordError && <p className="text-xs text-destructive">{clearPasswordError}</p>}
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setClearImportedOpen(false)} disabled={clearingImported}>Cancel</Button>
-              <Button variant="destructive" onClick={handleClearImportedData} disabled={clearingImported}>
+              <Button variant="destructive" onClick={handleClearImportedData} disabled={clearingImported || !clearPassword}>
                 <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
                 {clearingImported ? 'Clearing...' : 'Yes, clear it permanently'}
               </Button>

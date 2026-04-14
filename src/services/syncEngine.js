@@ -239,6 +239,16 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
       `);
 
+      // Restore preserved flags from clear-data snapshots
+      const findFlagSnapshot = db.prepare(`
+        SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
+        FROM flag_snapshots WHERE customer_number = ? LIMIT 1
+      `);
+      const restoreFlag = db.prepare(`
+        UPDATE datarecord SET flag_color = ?, flag_reason = ?, flag_created_by = ?, flag_source = ?, auto_flagged = ?, note = ? WHERE id = ?
+      `);
+      const deleteFlagSnapshot = db.prepare(`DELETE FROM flag_snapshots WHERE customer_number = ?`);
+
       let diagLogged = false;
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
@@ -376,7 +386,18 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               newRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(newId);
             } catch (_) {}
 
-            if (activeAutoFlagRules.length > 0 && newRecord) {
+            // Restore preserved flags from a previous clear-data operation
+            const customerNum = String(baseRecordData.customer_number ?? '');
+            const savedFlag = customerNum ? findFlagSnapshot.get(customerNum) : null;
+            if (savedFlag && newRecord) {
+              restoreFlag.run(
+                savedFlag.flag_color, savedFlag.flag_reason, savedFlag.flag_created_by,
+                savedFlag.flag_source, savedFlag.auto_flagged || 0, savedFlag.note,
+                newRecord.id
+              );
+              deleteFlagSnapshot.run(customerNum);
+            } else if (activeAutoFlagRules.length > 0 && newRecord) {
+              // Only apply auto-flag rules if no preserved flag was restored
               const autoFlag = applyAutoFlagRulesToRecord(expandDataRecord(newRecord), activeAutoFlagRules);
               if (autoFlag) {
                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
