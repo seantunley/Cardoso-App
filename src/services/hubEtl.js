@@ -70,10 +70,10 @@ function isAllowedSiteUrl(url) {
     const u = new URL(url);
     // Only allow HTTP(S) to private/internal Tailscale IP ranges or localhost
     const host = u.hostname;
-    const isPrivate = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\168\.)/.test(host);
+    const isPrivate = /^(127\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|192\.168\.)/.test(host);
     const isTailscale = host.endsWith('.ts.net') || /^(100\.([0-9]{1,3}\.){2})/.test(host);
     const isLocalhost = /^(localhost|127\.|::1)$/.test(host);
-    return u.protocol === 'http:' && (isPrivate || isTailscale || isLocalhost);
+    return (u.protocol === 'http:' || u.protocol === 'https:') && (isPrivate || isTailscale || isLocalhost);
   } catch (_) {
     return false;
   }
@@ -191,6 +191,12 @@ async function syncSite(site) {
       if (!recRes.ok) break;
       const recData = await recRes.json();
       if (recData.records && recData.records.length > 0) {
+        // Log first record diagnostics for account_type/sales_rep tracing
+        if (offset === 0) {
+          const sample = recData.records[0];
+          console.log(`[hub-etl-diag] Site ${site.name}: first record keys:`, Object.keys(sample).join(', '));
+          console.log(`[hub-etl-diag] Site ${site.name}: account_type=${JSON.stringify(sample.account_type)}, sales_rep=${JSON.stringify(sample.sales_rep)}`);
+        }
         insertMany(recData.records);
         recordsFetched += recData.records.length;
         offset += recData.records.length;

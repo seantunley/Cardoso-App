@@ -346,9 +346,8 @@ export function createReportingRouter({ requireAuth }) {
 
     // Filters that CAN be pushed to SQL
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
-    const siteWhere = (siteFilter !== 'all' && !isHub)
-      ? `AND site_name = ?`
-      : (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
+    // Non-hub instances have no site_name column — site filter only applies in hub mode
+    const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
 
     try {
       // Two-query strategy: one for sites list, one for paginated data + total
@@ -437,8 +436,7 @@ export function createReportingRouter({ requireAuth }) {
             AND outstanding_balance != '0'
             AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
             ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
-        const countParams = siteFilter !== 'all' ? [balanceAmountGt, SITE_NAME] : [balanceAmountGt];
-        total = (countStmt.get(...countParams) || { count: 0 }).count;
+        total = (countStmt.get(balanceAmountGt) || { count: 0 }).count;
 
         // Paginated data
         const safeOffset = (page - 1) * limit;
@@ -453,13 +451,9 @@ export function createReportingRouter({ requireAuth }) {
           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
             AND outstanding_balance != '0'
             AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}
           ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
           LIMIT ? OFFSET ?`.replace(/\s+/g, ' ').trim());
-        const dataParams = siteFilter !== 'all'
-          ? [SITE_NAME, balanceAmountGt, limit, safeOffset]
-          : [SITE_NAME, balanceAmountGt, limit, safeOffset];
-        records = dataStmt.all(...dataParams)
+        records = dataStmt.all(SITE_NAME, balanceAmountGt, limit, safeOffset)
           .map(hydrateSalesRepAndAccountType)
           .map(expandDataRecord);
 
@@ -469,10 +463,8 @@ export function createReportingRouter({ requireAuth }) {
           FROM datarecord
           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
             AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
-        const sumParams = siteFilter !== 'all' ? [balanceAmountGt, SITE_NAME] : [balanceAmountGt];
-        filteredTotalOutstanding = parseFloat(sumStmt.get(...sumParams).total || 0);
+            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?`.trim().replace(/\s+/g, ' ').trim());
+        filteredTotalOutstanding = parseFloat(sumStmt.get(balanceAmountGt).total || 0);
       }
 
       // pageTotalOutstanding: sum of returned page records
@@ -485,13 +477,21 @@ export function createReportingRouter({ requireAuth }) {
         return true;
       });
 
-      const totalPages = Math.max(1, Math.ceil(total / limit));
+      // When in-memory filters (ageBucket, hideInvoiceMatchesBalance) are active,
+      // the SQL total/sum don't reflect them. Adjust the response accordingly.
+      const hasInMemoryFilters = ageBucket !== 'all' || hideInvoiceMatchesBalance;
+      const effectiveTotal = hasInMemoryFilters ? filtered.length : total;
+      const totalPages = hasInMemoryFilters ? 1 : Math.max(1, Math.ceil(total / limit));
+      const effectiveFilteredOutstanding = hasInMemoryFilters
+        ? filtered.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0)
+        : filteredTotalOutstanding;
+
       res.json({
         records: filtered,
-        total,
-        page,
+        total: hasInMemoryFilters ? effectiveTotal : total,
+        page: hasInMemoryFilters ? 1 : page,
         totalPages,
-        filteredTotalOutstanding,
+        filteredTotalOutstanding: effectiveFilteredOutstanding,
         pageTotalOutstanding,
         sites,
         ageBucket,

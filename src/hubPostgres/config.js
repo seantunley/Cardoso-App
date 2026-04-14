@@ -1,4 +1,5 @@
-const DEFAULT_SCHEMA = 'hub';
+// Default schema must match src/config/hubPostgres.js (both default to 'public')
+const DEFAULT_SCHEMA = 'public';
 
 function boolFromEnv(value, defaultValue = false) {
   if (value == null || value === '') return defaultValue;
