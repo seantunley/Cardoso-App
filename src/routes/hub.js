@@ -692,6 +692,71 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // POST /api/hub/dedupe — remove duplicate hub_records (same site_id + customer_number)
+  router.post('/api/hub/dedupe', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const dryRun = req.body?.dryRun !== false;
+
+      const dupGroups = db.prepare(`
+        SELECT site_id, TRIM(customer_number) AS customer_number, COUNT(*) AS cnt
+        FROM hub_records
+        WHERE TRIM(COALESCE(customer_number, '')) != ''
+        GROUP BY site_id, TRIM(customer_number)
+        HAVING COUNT(*) > 1
+        ORDER BY cnt DESC
+      `).all();
+
+      const report = [];
+      let totalRemoved = 0;
+
+      const tx = db.transaction(() => {
+        for (const group of dupGroups) {
+          const rows = db.prepare(`
+            SELECT site_id, record_id, customer_number, customer_name, flag_color, flag_reason, synced_at, updated_date
+            FROM hub_records
+            WHERE site_id = ? AND TRIM(customer_number) = ?
+            ORDER BY
+              CASE WHEN flag_color IS NOT NULL AND flag_color != 'none' AND flag_color != '' THEN 0 ELSE 1 END,
+              CASE WHEN synced_at IS NULL THEN 1 ELSE 0 END,
+              COALESCE(synced_at, updated_date, '') DESC,
+              record_id DESC
+          `).all(group.site_id, group.customer_number);
+
+          const keeper = rows[0];
+          const dupes = rows.slice(1);
+
+          for (const dupe of dupes) {
+            if (!dryRun) {
+              db.prepare('DELETE FROM hub_records WHERE site_id = ? AND record_id = ?').run(dupe.site_id, dupe.record_id);
+            }
+          }
+
+          totalRemoved += dupes.length;
+          report.push({
+            site_id: group.site_id,
+            customer_number: group.customer_number,
+            customer_name: keeper.customer_name,
+            kept_record_id: keeper.record_id,
+            removed_count: dupes.length,
+          });
+        }
+      });
+
+      tx();
+
+      logHubAudit({
+        action: 'dedupe_hub_records',
+        performedBy: req.currentUser?.email,
+        target: `${dupGroups.length} groups, ${totalRemoved} duplicates ${dryRun ? '(dry run)' : 'removed'}`,
+      });
+
+      res.json({ ok: true, dryRun, groups: report.length, totalRemoved, report });
+    } catch (err) {
+      console.error('[hub] dedupe failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/speedtest — returns speedtest results, optional ?site=slug filter
   router.get('/api/hub/speedtest', requireAuth, requirePermission('can_access_hub_metrics'), (req, res) => {
     const { site } = req.query;

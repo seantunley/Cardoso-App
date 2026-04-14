@@ -908,6 +908,101 @@ function MaintenanceTab() {
   );
 }
 
+function HubMaintenanceTab() {
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const handlePreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const r = await fetch('/api/hub/dedupe', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setPreview(data);
+      toast.success(`Dry run: ${data.totalRemoved} duplicates found across ${data.groups} groups`);
+    } catch (e) {
+      toast.error(e.message || 'Dry run failed');
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleApply = async () => {
+    setApplying(true);
+    try {
+      const r = await fetch('/api/hub/dedupe', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setPreview(data);
+      toast.success(`Removed ${data.totalRemoved} duplicates across ${data.groups} groups`);
+    } catch (e) {
+      toast.error(e.message || 'Dedupe failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Hub Maintenance</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Remove duplicate hub records. Keeps the newest record per customer number (per site), preserving flagged records.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handlePreview} disabled={loadingPreview || applying}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingPreview ? 'animate-spin' : ''}`} />
+            {loadingPreview ? 'Running dry-run...' : 'Dry-run dedupe'}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={handleApply} disabled={applying || loadingPreview || !preview}>
+            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+            {applying ? 'Applying...' : 'Apply dedupe'}
+          </Button>
+        </div>
+      </div>
+
+      {preview && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium">
+            {preview.dryRun ? 'Preview' : 'Result'}: {preview.groups} duplicate groups, {preview.totalRemoved} records to remove
+          </p>
+          <div className="max-h-64 overflow-y-auto rounded border text-xs">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-muted">
+                <tr>
+                  <th className="text-left px-2 py-1">Site</th>
+                  <th className="text-left px-2 py-1">Customer #</th>
+                  <th className="text-left px-2 py-1">Name</th>
+                  <th className="text-right px-2 py-1">Dupes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.report.slice(0, 100).map((g, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1 text-muted-foreground">{g.site_id?.substring(0, 8)}</td>
+                    <td className="px-2 py-1">{g.customer_number}</td>
+                    <td className="px-2 py-1">{g.customer_name}</td>
+                    <td className="px-2 py-1 text-right">{g.removed_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UpdateTab() {
   const [status, setStatus] = useState(null);
   const [info, setInfo] = useState(null);
@@ -1510,6 +1605,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
     isAdmin && { id: "update", label: "Updates" },
     hubMode && { id: "synclog", label: "Sync Log" },
+    hubMode && isAdmin && { id: "hubmaintenance", label: "Maintenance" },
     hubMode && isAdmin && { id: "network", label: "Network" },
   ].filter(Boolean);
 
@@ -1545,6 +1641,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
                 {t.id === "maintenance"  && <MaintenanceTab />}
                 {t.id === "update"       && <UpdateTab />}
+                {t.id === "hubmaintenance" && <HubMaintenanceTab />}
                 {t.id === "network"      && <NtopngTab />}
               </TabsContent>
             ))}
