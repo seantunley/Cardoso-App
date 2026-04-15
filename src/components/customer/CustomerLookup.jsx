@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   XCircle,
   Clock,
+  ChevronDown,
 } from "lucide-react";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
@@ -347,6 +348,7 @@ export default function CustomerLookup({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [showRemovalModal, setShowRemovalModal] = useState(false);
   const [removalReason, setRemovalReason] = useState("");
+  const [showPaymentLag, setShowPaymentLag] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState(-1);
@@ -981,14 +983,6 @@ export default function CustomerLookup({
             {/* Scrollable: invoices + receipts */}
             <div className="flex-1 overflow-y-auto px-5 pt-1 pb-3">
 
-            {/* Payment History Charts */}
-            {creditAnalysis && (creditAnalysis.lagData?.length > 0 || creditAnalysis.timelineData?.length > 0) && (
-              <PaymentHistoryCharts
-                lagData={creditAnalysis.lagData || []}
-                timelineData={creditAnalysis.timelineData || []}
-              />
-            )}
-
             {/* Invoices + Receipts side by side */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
               <div>{renderGroupedTable({
@@ -1006,6 +1000,26 @@ export default function CustomerLookup({
                 slots: receiptSlots,
               })}</div>
             </div>
+
+            {/* Payment History Charts — collapsible */}
+            {creditAnalysis && (creditAnalysis.lagData?.length > 0 || creditAnalysis.timelineData?.length > 0) && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPaymentLag(prev => !prev)}
+                  className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors mb-2"
+                >
+                  <ChevronDown className={cn("w-4 h-4 transition-transform", !showPaymentLag && "-rotate-90")} />
+                  Payment History
+                </button>
+                {showPaymentLag && (
+                  <PaymentHistoryCharts
+                    lagData={creditAnalysis.lagData || []}
+                    timelineData={creditAnalysis.timelineData || []}
+                  />
+                )}
+              </div>
+            )}
 
             </div>{/* end scrollable invoices/receipts */}
           </div>{/* end pinned+scroll wrapper */}
