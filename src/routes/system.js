@@ -6,6 +6,7 @@ import fs from 'fs';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { createRequire } from 'module';
+import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { getVersionStatus } from '../services/versionCheck.js';
 
@@ -199,7 +200,30 @@ function clearImportedSqlData() {
     syncrun: db.prepare(`SELECT COUNT(*) AS count FROM syncrun`).get()?.count || 0,
   };
 
+  // Snapshot all flagged records so flags survive reimport
+  const flaggedRecords = db.prepare(`
+    SELECT customer_number, source_table, flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
+    FROM datarecord
+    WHERE (flag_color IS NOT NULL AND flag_color != '' AND flag_color != 'none')
+       OR (note IS NOT NULL AND note != '')
+  `).all();
+
   const tx = db.transaction(() => {
+    // Clear old snapshots and save current flags
+    db.prepare(`DELETE FROM flag_snapshots`).run();
+    if (flaggedRecords.length > 0) {
+      const insertSnapshot = db.prepare(`
+        INSERT INTO flag_snapshots (customer_number, source_table, flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const r of flaggedRecords) {
+        insertSnapshot.run(
+          r.customer_number, r.source_table,
+          r.flag_color, r.flag_reason, r.flag_created_by, r.flag_source, r.auto_flagged || 0, r.note
+        );
+      }
+    }
+
     db.prepare(`DELETE FROM datarecord`).run();
     db.prepare(`DELETE FROM inventoryrecord`).run();
     db.prepare(`DELETE FROM syncrun`).run();
@@ -218,6 +242,7 @@ function clearImportedSqlData() {
     ok: true,
     removed: counts,
     totalRemoved: counts.datarecord + counts.inventoryrecord + counts.syncrun,
+    flagsPreserved: flaggedRecords.length,
   };
 }
 
@@ -345,11 +370,26 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
-  router.post('/api/maintenance/clear-imported-data', requireAuth, requireAdmin, (req, res) => {
+  router.post('/api/maintenance/clear-imported-data', requireAuth, requireAdmin, async (req, res) => {
     try {
       if (process.env.HUB_MODE === 'true') {
         return res.status(400).json({ error: 'Clear imported data is site-only and cannot be run from the Hub.' });
       }
+
+      // Require password confirmation
+      const { password } = req.body || {};
+      if (!password) {
+        return res.status(400).json({ error: 'Password is required to clear imported data.' });
+      }
+      const user = db.prepare('SELECT * FROM "user" WHERE id = ?').get(req.currentUser.id);
+      if (!user || !user.password_hash) {
+        return res.status(401).json({ error: 'Unable to verify user.' });
+      }
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Incorrect password.' });
+      }
+
       const result = clearImportedSqlData();
       res.json(result);
     } catch (error) {

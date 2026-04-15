@@ -717,6 +717,8 @@ function MaintenanceTab() {
   const [applying, setApplying] = useState(false);
   const [clearImportedOpen, setClearImportedOpen] = useState(false);
   const [clearingImported, setClearingImported] = useState(false);
+  const [clearPassword, setClearPassword] = useState('');
+  const [clearPasswordError, setClearPasswordError] = useState('');
 
   const handlePreview = async () => {
     setLoadingPreview(true);
@@ -759,17 +761,32 @@ function MaintenanceTab() {
   };
 
   const handleClearImportedData = async () => {
+    if (!clearPassword) {
+      setClearPasswordError('Password is required');
+      return;
+    }
+    setClearPasswordError('');
     setClearingImported(true);
     try {
       const r = await fetch('/api/maintenance/clear-imported-data', {
         method: 'POST',
         credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: clearPassword }),
       });
       const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Clear imported data failed');
+      if (!r.ok) {
+        if (r.status === 401) {
+          setClearPasswordError(d.error || 'Incorrect password');
+          return;
+        }
+        throw new Error(d.error || 'Clear imported data failed');
+      }
       setPreview(null);
       setClearImportedOpen(false);
-      toast.success(`Imported data cleared. Removed ${d.totalRemoved || 0} row${d.totalRemoved === 1 ? '' : 's'}.`);
+      setClearPassword('');
+      const flagMsg = d.flagsPreserved ? ` ${d.flagsPreserved} flag${d.flagsPreserved === 1 ? '' : 's'} preserved for reimport.` : '';
+      toast.success(`Imported data cleared. Removed ${d.totalRemoved || 0} row${d.totalRemoved === 1 ? '' : 's'}.${flagMsg}`);
     } catch (e) {
       toast.error(e.message || 'Clear imported data failed');
     } finally {
@@ -814,7 +831,7 @@ function MaintenanceTab() {
         </Button>
       </div>
 
-      <Dialog open={clearImportedOpen} onOpenChange={setClearImportedOpen}>
+      <Dialog open={clearImportedOpen} onOpenChange={(open) => { setClearImportedOpen(open); if (!open) { setClearPassword(''); setClearPasswordError(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Clear imported SQL data?</DialogTitle>
@@ -823,12 +840,30 @@ function MaintenanceTab() {
             <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-destructive">
               Warning: this permanently removes imported customer records, inventory records, and sync history from this site database.
             </div>
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-700 dark:text-amber-300">
+              Customer flags and notes will be preserved and automatically restored when data is reimported.
+            </div>
             <p className="text-muted-foreground">
-              Users and SQL connections will be kept. This cannot be undone.
+              Users and SQL connections will be kept.
             </p>
+            <div className="space-y-1.5">
+              <label htmlFor="clear-password" className="text-xs font-medium text-foreground">Confirm your password</label>
+              <input
+                id="clear-password"
+                type="password"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Enter your password"
+                value={clearPassword}
+                onChange={(e) => { setClearPassword(e.target.value); setClearPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && clearPassword) handleClearImportedData(); }}
+                disabled={clearingImported}
+                autoComplete="current-password"
+              />
+              {clearPasswordError && <p className="text-xs text-destructive">{clearPasswordError}</p>}
+            </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => setClearImportedOpen(false)} disabled={clearingImported}>Cancel</Button>
-              <Button variant="destructive" onClick={handleClearImportedData} disabled={clearingImported}>
+              <Button variant="destructive" onClick={handleClearImportedData} disabled={clearingImported || !clearPassword}>
                 <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
                 {clearingImported ? 'Clearing...' : 'Yes, clear it permanently'}
               </Button>
@@ -867,6 +902,101 @@ function MaintenanceTab() {
           {preview.groups > 100 && (
             <p className="text-xs text-muted-foreground">Showing first 100 duplicate groups.</p>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HubMaintenanceTab() {
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(false);
+  const [applying, setApplying] = useState(false);
+
+  const handlePreview = async () => {
+    setLoadingPreview(true);
+    try {
+      const r = await fetch('/api/hub/dedupe', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setPreview(data);
+      toast.success(`Dry run: ${data.totalRemoved} duplicates found across ${data.groups} groups`);
+    } catch (e) {
+      toast.error(e.message || 'Dry run failed');
+    } finally {
+      setLoadingPreview(false);
+    }
+  };
+
+  const handleApply = async () => {
+    setApplying(true);
+    try {
+      const r = await fetch('/api/hub/dedupe', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      setPreview(data);
+      toast.success(`Removed ${data.totalRemoved} duplicates across ${data.groups} groups`);
+    } catch (e) {
+      toast.error(e.message || 'Dedupe failed');
+    } finally {
+      setApplying(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Hub Maintenance</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Remove duplicate hub records. Keeps the newest record per customer number (per site), preserving flagged records.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={handlePreview} disabled={loadingPreview || applying}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${loadingPreview ? 'animate-spin' : ''}`} />
+            {loadingPreview ? 'Running dry-run...' : 'Dry-run dedupe'}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={handleApply} disabled={applying || loadingPreview || !preview}>
+            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+            {applying ? 'Applying...' : 'Apply dedupe'}
+          </Button>
+        </div>
+      </div>
+
+      {preview && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium">
+            {preview.dryRun ? 'Preview' : 'Result'}: {preview.groups} duplicate groups, {preview.totalRemoved} records to remove
+          </p>
+          <div className="max-h-64 overflow-y-auto rounded border text-xs">
+            <table className="w-full">
+              <thead className="sticky top-0 bg-muted">
+                <tr>
+                  <th className="text-left px-2 py-1">Site</th>
+                  <th className="text-left px-2 py-1">Customer #</th>
+                  <th className="text-left px-2 py-1">Name</th>
+                  <th className="text-right px-2 py-1">Dupes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {preview.report.slice(0, 100).map((g, i) => (
+                  <tr key={i} className="border-t">
+                    <td className="px-2 py-1 text-muted-foreground">{g.site_id?.substring(0, 8)}</td>
+                    <td className="px-2 py-1">{g.customer_number}</td>
+                    <td className="px-2 py-1">{g.customer_name}</td>
+                    <td className="px-2 py-1 text-right">{g.removed_count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -1475,6 +1605,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
     isAdmin && { id: "update", label: "Updates" },
     hubMode && { id: "synclog", label: "Sync Log" },
+    hubMode && isAdmin && { id: "hubmaintenance", label: "Maintenance" },
     hubMode && isAdmin && { id: "network", label: "Network" },
   ].filter(Boolean);
 
@@ -1510,6 +1641,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
                 {t.id === "maintenance"  && <MaintenanceTab />}
                 {t.id === "update"       && <UpdateTab />}
+                {t.id === "hubmaintenance" && <HubMaintenanceTab />}
                 {t.id === "network"      && <NtopngTab />}
               </TabsContent>
             ))}

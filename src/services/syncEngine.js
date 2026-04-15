@@ -149,6 +149,23 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         custom_field_3,
         synced_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(source_table, source_id) DO UPDATE SET
+        customer_number = excluded.customer_number,
+        customer_name = excluded.customer_name,
+        age_analysis = excluded.age_analysis,
+        age_current = excluded.age_current,
+        age_7_days = excluded.age_7_days,
+        age_14_days = excluded.age_14_days,
+        age_21_days = excluded.age_21_days,
+        outstanding_balance = excluded.outstanding_balance,
+        data = excluded.data,
+        local_fields = excluded.local_fields,
+        unpaid_invoices = excluded.unpaid_invoices,
+        receipts = excluded.receipts,
+        terms = excluded.terms,
+        sales_rep = excluded.sales_rep,
+        account_type = excluded.account_type,
+        synced_at = excluded.synced_at
     `);
 
     const inventoryMappingConfig = {
@@ -213,21 +230,23 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
       // Keyed lookup — load only source_ids from incoming rows, not full table
       const incomingIds = rows
-        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')))
+        .map((row) => String(firstDefined(getMappedOrFallbackValue(row, mappings, 'customer_number', [indexField, 'id']), row[indexField], row.id, '')).trim())
         .filter(Boolean);
 
       const existingMap = new Map();
       if (incomingIds.length > 0) {
-        const placeholders = incomingIds.map(() => '?').join(',');
+        // Deduplicate incoming IDs to avoid excessive SQL placeholders
+        const uniqueIds = [...new Set(incomingIds)];
+        const placeholders = uniqueIds.map(() => '?').join(',');
         const keyedRows = db.prepare(`
           SELECT id, source_id, source_table, customer_number, customer_name,
                  age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                  note, local_fields, flag_color, flag_reason, flag_created_by, data,
                  outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
           FROM datarecord
-          WHERE source_table = ? AND source_id IN (${placeholders})
-        `).all(sourceName, ...incomingIds);
-        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id}`, r);
+          WHERE source_table = ? AND TRIM(source_id) IN (${placeholders})
+        `).all(sourceName, ...uniqueIds);
+        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id.trim()}`, r);
       }
 
       const syncTimestamp = new Date().toISOString();
@@ -239,6 +258,20 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
       `);
 
+      // Restore preserved flags from clear-data snapshots
+      const findFlagSnapshot = db.prepare(`
+        SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
+        FROM flag_snapshots WHERE customer_number = ? LIMIT 1
+      `);
+      const restoreFlag = db.prepare(`
+        UPDATE datarecord SET flag_color = ?, flag_reason = ?, flag_created_by = ?, flag_source = ?, auto_flagged = ?, note = ? WHERE id = ?
+      `);
+      const deleteFlagSnapshot = db.prepare(`DELETE FROM flag_snapshots WHERE customer_number = ?`);
+
+      let diagLogged = false;
+      let syncUpdated = 0;
+      let syncInserted = 0;
+      const seenSourceIds = new Set();
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
           const sourceId = String(
@@ -248,11 +281,49 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               row.id,
               ''
             )
-          );
+          ).trim();
 
-          const existing = existingMap.get(`${sourceName}::${String(sourceId || '')}`);
+          // Skip duplicate rows from the same MSSQL result set
+          if (seenSourceIds.has(sourceId)) {
+            if (!diagLogged) console.log(`[sync-dedup] Skipping duplicate source_id in result set: ${sourceId}`);
+            continue;
+          }
+          seenSourceIds.add(sourceId);
+
+          let existing = existingMap.get(`${sourceName}::${sourceId}`);
+          // Fallback: if source_id lookup missed (e.g. whitespace mismatch from older data),
+          // try to find by customer_number + source_table directly
+          if (!existing && sourceId) {
+            existing = db.prepare(
+              `SELECT id, source_id, source_table, customer_number, customer_name,
+                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+               FROM datarecord WHERE source_table = ? AND TRIM(source_id) = ? LIMIT 1`
+            ).get(sourceName, sourceId) || null;
+          }
+          // Last resort: match by customer_number column directly
+          if (!existing && sourceId) {
+            existing = db.prepare(
+              `SELECT id, source_id, source_table, customer_number, customer_name,
+                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
+                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
+                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
+               FROM datarecord WHERE source_table = ? AND TRIM(customer_number) = ? LIMIT 1`
+            ).get(sourceName, sourceId) || null;
+          }
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
+
+          // Log field-mapping diagnostics for the first row of each sync
+          if (!diagLogged) {
+            diagLogged = true;
+            const rowKeys = Object.keys(row);
+            console.log(`[sync-diag] First row keys (${rowKeys.length}):`, rowKeys.join(', '));
+            console.log(`[sync-diag] row.account_type =`, JSON.stringify(row.account_type), '| row.sales_rep =', JSON.stringify(row.sales_rep), '| row.salesperson_code =', JSON.stringify(row.salesperson_code));
+            console.log(`[sync-diag] mappedPatch.account_type =`, JSON.stringify(mappedPatch.account_type), '| mappedPatch.sales_rep =', JSON.stringify(mappedPatch.sales_rep));
+            console.log(`[sync-diag] mappings keys:`, Object.keys(mappings || {}).join(', ') || '(none)');
+          }
           const dataJson = JSON.stringify(row);
 
           const existingLocalFields = parseJsonSafely(existing?.local_fields, {});
@@ -269,6 +340,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
 
           if (existing) {
+            syncUpdated++;
             const keepExistingIfIncomingBlank = (incomingValue, existingValue) => {
               if (incomingValue !== undefined && incomingValue !== null && String(incomingValue).trim() !== '') {
                 return String(incomingValue);
@@ -320,19 +392,21 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
-            // Derive snapshot from in-memory record — no extra SELECT round-trip
+            // Snapshot the post-update state — merge base data over existing to reflect what was written
             try {
+              const postUpdateRecord = { ...existing, ...baseRecordData, id: existing.id, updated_date: syncTimestamp };
               insertSnapshot.run(
                 String(connectionId),
                 String(existing.customer_number || ''),
-                JSON.stringify(existing),
+                JSON.stringify(postUpdateRecord),
                 syncTimestamp
               );
             } catch (snapshotErr) {
               console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
             }
           } else {
-            insertNewRecord.run(
+            syncInserted++;
+            const insertResult = insertNewRecord.run(
               baseRecordData.created_by,
               String(baseRecordData.customer_number ?? ''),
               String(baseRecordData.customer_name ?? ''),
@@ -357,15 +431,25 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.custom_field_3 ?? null,
               baseRecordData.synced_at
             );
-            // Fetch inserted record via last_insert_rowid() — avoids full-table SELECT
+            // Use the rowid from the insert result — safe across concurrent writes
             let newRecord = null;
             try {
-              newRecord = db.prepare(
-                `SELECT * FROM datarecord WHERE id = last_insert_rowid()`
-              ).get();
+              const newId = insertResult.lastInsertRowid;
+              newRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(newId);
             } catch (_) {}
 
-            if (activeAutoFlagRules.length > 0 && newRecord) {
+            // Restore preserved flags from a previous clear-data operation
+            const customerNum = String(baseRecordData.customer_number ?? '');
+            const savedFlag = customerNum ? findFlagSnapshot.get(customerNum) : null;
+            if (savedFlag && newRecord) {
+              restoreFlag.run(
+                savedFlag.flag_color, savedFlag.flag_reason, savedFlag.flag_created_by,
+                savedFlag.flag_source, savedFlag.auto_flagged || 0, savedFlag.note,
+                newRecord.id
+              );
+              deleteFlagSnapshot.run(customerNum);
+            } else if (activeAutoFlagRules.length > 0 && newRecord) {
+              // Only apply auto-flag rules if no preserved flag was restored
               const autoFlag = applyAutoFlagRulesToRecord(expandDataRecord(newRecord), activeAutoFlagRules);
               if (autoFlag) {
                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
@@ -387,6 +471,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       });
 
       writeRowsTransaction(rows);
+      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${rows.length - seenSourceIds.size} duplicate rows skipped`);
     };
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
@@ -413,17 +498,18 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         }
       }
 
-      // Require WHERE or LIMIT to prevent trivially expensive queries
+      // Warn if query has no WHERE or LIMIT — may be very expensive
       const hasWhere = /\bWHERE\b/i.test(syncQueryStripped);
       const hasLimit = /\bLIMIT\b/i.test(syncQueryStripped);
       if (!hasWhere && !hasLimit) {
-        throw new Error('sync_query must include a WHERE clause or LIMIT');
+        console.warn(`[sync] Connection ${connectionId}: sync_query has no WHERE or LIMIT clause — this may be slow on large tables`);
       }
 
       if (!queryIndexField) {
         throw new Error('query_index_field is required for query mode');
       }
 
+      // 60-second timeout on MSSQL queries (set on request object, not chained)
       const req = pool.request();
       req.timeout = 60000;
       const result = await req.query(syncQuery);
