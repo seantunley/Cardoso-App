@@ -912,6 +912,31 @@ function HubMaintenanceTab() {
   const [preview, setPreview] = useState(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [applying, setApplying] = useState(false);
+  const [sites, setSites] = useState([]);
+  const [deletingSite, setDeletingSite] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/hub/sites', { credentials: 'include' })
+      .then(r => r.json())
+      .then(data => setSites(Array.isArray(data) ? data : data.sites || []))
+      .catch(() => {});
+  }, []);
+
+  const handleDeleteSite = async (siteId, siteName) => {
+    if (!confirm(`Delete site "${siteName}" and ALL its hub data? This cannot be undone.`)) return;
+    setDeletingSite(siteId);
+    try {
+      const r = await fetch(`/api/hub/site/${siteId}`, { method: 'DELETE', credentials: 'include' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error);
+      toast.success(data.message);
+      setSites(prev => prev.filter(s => s.id !== siteId));
+    } catch (e) {
+      toast.error(e.message || 'Failed to delete site');
+    } finally {
+      setDeletingSite(null);
+    }
+  };
 
   const handlePreview = async () => {
     setLoadingPreview(true);
@@ -999,6 +1024,57 @@ function HubMaintenanceTab() {
           </div>
         </div>
       )}
+
+      <div className="border-t pt-4">
+        <h3 className="text-sm font-semibold mb-1">Registered Sites</h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Remove old or duplicate site registrations. Deleting a site removes all its synced records, inventory, and sync logs from the hub.
+        </p>
+        {sites.length === 0 ? (
+          <p className="text-xs text-muted-foreground">No sites registered.</p>
+        ) : (
+          <div className="rounded border text-xs">
+            <table className="w-full">
+              <thead className="bg-muted">
+                <tr>
+                  <th className="text-left px-2 py-1.5">ID</th>
+                  <th className="text-left px-2 py-1.5">Name</th>
+                  <th className="text-left px-2 py-1.5">Slug</th>
+                  <th className="text-left px-2 py-1.5">Status</th>
+                  <th className="text-right px-2 py-1.5"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sites.map(s => (
+                  <tr key={s.id} className="border-t">
+                    <td className="px-2 py-1.5 font-mono text-muted-foreground">{s.id}</td>
+                    <td className="px-2 py-1.5">{s.name}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{s.slug}</td>
+                    <td className="px-2 py-1.5">
+                      <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
+                        s.status === 'ok' ? 'bg-emerald-500/10 text-emerald-500' :
+                        s.status === 'error' ? 'bg-red-500/10 text-red-500' :
+                        'bg-muted text-muted-foreground'
+                      }`}>{s.status || 'unknown'}</span>
+                    </td>
+                    <td className="px-2 py-1.5 text-right">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs text-destructive hover:text-destructive"
+                        onClick={() => handleDeleteSite(s.id, s.name)}
+                        disabled={deletingSite === s.id}
+                      >
+                        {deletingSite === s.id ? 'Deleting...' : 'Delete'}
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
