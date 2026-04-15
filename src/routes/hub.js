@@ -705,6 +705,31 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // DELETE /api/hub/site/:siteId — remove a site and all its data
+  router.delete('/api/hub/site/:siteId', requireAuth, requireAdmin, (req, res) => {
+    const { siteId } = req.params;
+    try {
+      const site = db.prepare('SELECT id, name, slug FROM hub_sites WHERE id = ?').get(siteId);
+      if (!site) return res.status(404).json({ error: 'Site not found' });
+
+      db.prepare('DELETE FROM hub_records WHERE site_id = ?').run(siteId);
+      db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(siteId);
+      db.prepare('DELETE FROM hub_sync_log WHERE site_id = ?').run(siteId);
+      db.prepare('DELETE FROM hub_sites WHERE id = ?').run(siteId);
+
+      logHubAudit({
+        action: 'delete_site',
+        performedBy: req.currentUser?.email,
+        target: site.slug || siteId,
+        detail: `Removed site "${site.name}" (${siteId}) and all associated data`,
+      });
+
+      res.json({ ok: true, message: `Deleted site "${site.name}" and all its data` });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/hub/dedupe — remove duplicate hub_records (same site_id + customer_number)
   router.post('/api/hub/dedupe', requireAuth, requireAdmin, (req, res) => {
     try {
