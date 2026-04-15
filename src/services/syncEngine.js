@@ -149,23 +149,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         custom_field_3,
         synced_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(source_table, source_id) DO UPDATE SET
-        customer_number = excluded.customer_number,
-        customer_name = excluded.customer_name,
-        age_analysis = excluded.age_analysis,
-        age_current = excluded.age_current,
-        age_7_days = excluded.age_7_days,
-        age_14_days = excluded.age_14_days,
-        age_21_days = excluded.age_21_days,
-        outstanding_balance = excluded.outstanding_balance,
-        data = excluded.data,
-        local_fields = excluded.local_fields,
-        unpaid_invoices = excluded.unpaid_invoices,
-        receipts = excluded.receipts,
-        terms = excluded.terms,
-        sales_rep = excluded.sales_rep,
-        account_type = excluded.account_type,
-        synced_at = excluded.synced_at
     `);
 
     const inventoryMappingConfig = {
