@@ -492,14 +492,27 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
 
     const perSite = sites.map(s => {
-      const kpis = s.last_kpis ? JSON.parse(s.last_kpis) : null;
+      // Live count from hub_records instead of stale last_kpis cache
+      const siteTotal = since
+        ? db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE site_id = ? AND updated_date >= ?').get(s.id, since)
+        : db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE site_id = ?').get(s.id);
+      const siteFlagRows = since
+        ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE site_id = ? AND updated_date >= ? GROUP BY flag_color').all(s.id, since)
+        : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE site_id = ? GROUP BY flag_color').all(s.id);
+      const siteFlags = { none: 0, red: 0, orange: 0, green: 0 };
+      for (const row of siteFlagRows) {
+        if (row.flag_color in siteFlags) siteFlags[row.flag_color] = row.count;
+      }
       return {
         site_id: s.id,
         site_slug: s.slug,
         site_name: s.name,
         status: s.status,
         last_seen: s.last_seen,
-        kpis,
+        kpis: {
+          total_records: siteTotal?.count || 0,
+          records_by_flag: siteFlags,
+        },
       };
     });
 
