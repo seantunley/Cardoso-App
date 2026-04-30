@@ -75,6 +75,11 @@ app.use(session({
   cookie: { httpOnly: true, secure: process.env.HTTPS === 'true', sameSite: 'strict', maxAge: 1000 * 60 * 60 * 12 },
 }));
 
+// initBatSchema must run BEFORE the main migrations because some perf-index
+// migrations (e.g. v45 idx_bat_cardoso_inv_overwritten) target BAT tables.
+// initBatSchema is idempotent: every CREATE / ALTER uses IF NOT EXISTS or a
+// PRAGMA-guarded check, so calling it on existing installs is safe.
+initBatSchema(db);
 initSchema(db);
 runMigrations(db);
 validateEncryptionKey();
@@ -93,7 +98,7 @@ app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermissio
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
 // ── BAT Supplier Reconciliation (admin-only while testing) ──
-initBatSchema(db);
+// (initBatSchema already ran earlier, before the migrations.)
 app.use(createBatReconciliationRouter({ requireAuth, requireAdmin }));
 
 if (process.env.HUB_MODE === 'true') {
