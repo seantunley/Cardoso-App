@@ -31,7 +31,7 @@ export default function SalesRepExposure() {
   const summary = data?.summary;
 
   const chartData = useMemo(() => reps.slice(0, 20).map(r => ({
-    name: r.sales_rep.length > 18 ? r.sales_rep.slice(0, 16) + '…' : r.sales_rep,
+    name: r.sales_rep.length > 16 ? r.sales_rep.slice(0, 14) + '…' : r.sales_rep,
     fullName: r.sales_rep,
     total: r.total_outstanding,
     count: r.customer_count,
@@ -95,7 +95,7 @@ export default function SalesRepExposure() {
 
           <div className="report-print-hide mt-4">
             <ChartCard title="Outstanding by Sales Rep · Top 20" sub="Bar = total R; opacity scales with red-flag count" height={Math.max(300, chartData.length * 22)}>
-              <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 16, left: 100, bottom: 24 }}>
+              <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 16, left: 6, bottom: 24 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis
                   type="number"
@@ -108,7 +108,8 @@ export default function SalesRepExposure() {
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={120}
+                  width={140}
+                  interval={0}
                   tick={AXIS_TICK}
                   tickLine={AXIS_LINE}
                   axisLine={AXIS_LINE}
