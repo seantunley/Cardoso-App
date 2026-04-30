@@ -632,11 +632,26 @@ function parseAmount(val) {
 
 // ── Sage 300 Queries ─────────────────────────────────────────────────────────
 
-export async function querySageCreditNotes(weekNumber) {
+export async function querySageCreditNotes(weekNumber, year) {
   const sagePool = await getSagePool();
   // APIBC join is LEFT so credit-note lines whose batch header has been
   // purged / archived still appear (they were dropped silently before,
   // making per-week totals diverge from the cached week totals).
+  //
+  // Year filter: WEEK NN appears in the description verbatim, but the
+  // calendar year only lives on h.DATEINVC (an INT YYYYMMDD). We bound
+  // h.DATEINVC to a window around the supplied year so a Week 7 / 2026
+  // recon never picks up Week 7 / 2025 lines. Window is generous
+  // (Dec of prev year → Jan of next year) to handle ISO-week year
+  // rollover at the edges, then we trust the WEEK NN match to disambiguate.
+  const wk = String(weekNumber).padStart(2, '0');
+  const yr = parseInt(year, 10);
+  const yearLow  = yr ? (yr - 1) * 10000 + 1201 : 0;        // Dec 1 of previous year
+  const yearHigh = yr ? (yr + 1) * 10000 + 131  : 99991231; // Jan 31 of next year
+  const yearClause = yr
+    ? `AND h.DATEINVC BETWEEN ${yearLow} AND ${yearHigh}`
+    : '';
+
   const result = await sagePool.request().query(`
     SELECT
       h.CNTBTCH AS batch_number,
@@ -672,7 +687,8 @@ export async function querySageCreditNotes(weekNumber) {
     INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
     LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
     WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
-      AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${String(weekNumber).padStart(2, '0')}%'
+      AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${wk}%'
+      ${yearClause}
     ORDER BY
       CASE
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 1

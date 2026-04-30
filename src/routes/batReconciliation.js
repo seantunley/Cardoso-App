@@ -99,7 +99,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
       // so the UI shows it instead of silently displaying zero credit notes.
       try {
-        const creditNotes = await querySageCreditNotes(parsed.weekNumber);
+        const creditNotes = await querySageCreditNotes(parsed.weekNumber, year);
         storeSageCreditNotes(reconId, creditNotes);
         db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(reconId);
       } catch (sageErr) {
@@ -135,12 +135,13 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
 
   router.get('/api/bat/sage-credit-notes', ...gate, async (req, res) => {
     const week = parseInt(req.query.week, 10);
+    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
     if (!week || week < 1 || week > 53) {
       return res.status(400).json({ error: 'Valid week number required (1-53)' });
     }
     try {
-      const creditNotes = await querySageCreditNotes(week);
-      res.json({ week, count: creditNotes.length, creditNotes });
+      const creditNotes = await querySageCreditNotes(week, year);
+      res.json({ week, year, count: creditNotes.length, creditNotes });
     } catch (err) {
       console.error('[bat] Sage credit notes query failed:', err.message);
       res.status(500).json({ error: 'Failed to query Sage 300: ' + err.message });
@@ -431,7 +432,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const recon = getReconciliation(id);
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     try {
-      const creditNotes = await querySageCreditNotes(recon.week_number);
+      const creditNotes = await querySageCreditNotes(recon.week_number, recon.year);
       db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
       storeSageCreditNotes(id, creditNotes);
       db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(id);
