@@ -73,7 +73,9 @@ export default function Reconciliation() {
   // picked up without a hard reload.
   useEffect(() => {
     if (view !== 'detail') return;
-    fetch('/api/bat/ocr-pause', { credentials: 'include' })
+    // GET /api/bat/ocr-status reads the pause flag (the matching /ocr-pause
+    // endpoint is POST-only).
+    fetch('/api/bat/ocr-status', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setOcrPausedState(!!d.paused); })
       .catch(() => {});
