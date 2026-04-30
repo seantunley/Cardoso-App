@@ -60,6 +60,46 @@ function summarizeDiff(changes, MAX_PARTS = 6) {
   return parts.slice(0, MAX_PARTS).join('; ') + ` (+${parts.length - MAX_PARTS} more)`;
 }
 
+// In-memory queue + 250 ms flush. Audit rows piled up on the request thread
+// during sync runs (the writer slot was held by the sync transaction), pushing
+// API latency from <5 ms to 100–500 ms. Buffering lets the request return
+// immediately and the rows land in a single batched transaction soon after.
+const QUEUE = [];
+const QUEUE_HARD_CAP = 5000;        // safety: drop oldest if writer wedges
+const FLUSH_INTERVAL_MS = 250;
+let flushTimer = null;
+
+const flushBatch = db.transaction((rows) => {
+  for (const r of rows) insertAudit.run(...r);
+});
+
+function flush() {
+  if (QUEUE.length === 0) return;
+  const batch = QUEUE.splice(0, QUEUE.length);
+  try {
+    flushBatch(batch);
+  } catch (err) {
+    console.error('[audit] flush failed:', err.message, '— dropped', batch.length, 'row(s)');
+  }
+}
+
+function ensureFlushScheduled() {
+  if (flushTimer) return;
+  flushTimer = setTimeout(() => {
+    flushTimer = null;
+    flush();
+  }, FLUSH_INTERVAL_MS);
+  // Don't keep the event loop alive just for this — service shutdown
+  // triggers a final flush via the SIGTERM hook below.
+  if (typeof flushTimer.unref === 'function') flushTimer.unref();
+}
+
+// Final flush on graceful shutdown so we don't lose buffered audit rows.
+const finalFlush = () => { try { if (flushTimer) clearTimeout(flushTimer); flush(); } catch {} };
+process.on('SIGTERM', finalFlush);
+process.on('SIGINT', finalFlush);
+process.on('beforeExit', finalFlush);
+
 export function logAudit({
   req,
   action,
@@ -79,7 +119,7 @@ export function logAudit({
     if (!resolvedDetails && changes && (changes.before || changes.after)) {
       resolvedDetails = summarizeDiff(changes);
     }
-    insertAudit.run(
+    QUEUE.push([
       String(action || 'unknown').slice(0, 64),
       user.email || 'system',
       user.full_name || user.email || '',
@@ -90,9 +130,14 @@ export function logAudit({
       changes ? JSON.stringify(changes).slice(0, 4000) : null,
       extractIp(req),
       status === 'failure' ? 'failure' : 'success',
-    );
+    ]);
+    if (QUEUE.length > QUEUE_HARD_CAP) {
+      const dropped = QUEUE.splice(0, QUEUE.length - QUEUE_HARD_CAP);
+      console.warn(`[audit] queue overflowing — dropped ${dropped.length} oldest row(s)`);
+    }
+    ensureFlushScheduled();
   } catch (err) {
-    console.error('[audit] insert failed:', err.message);
+    console.error('[audit] enqueue failed:', err.message);
   }
 }
 

@@ -254,22 +254,24 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       return false;
     };
     try {
-      // Pre-filter by outstanding_balance_num > 0 (indexed) before the LIKE
-      // scan — customers with zero balance can't have an unpaid invoice match.
+      // Filter on the normalised `unpaid_invoice_numbers` column (uppercase
+      // space-joined invoice numbers, maintained by SQLite triggers from
+      // unpaid_invoices). Tiny string instead of the 1–3 KB JSON blob, so the
+      // LIKE substring scan moves orders of magnitude less data.
       const sql = isHub
         ? `SELECT r.customer_number, r.customer_name, r.outstanding_balance, r.unpaid_invoices,
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
            WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > 0
-             AND r.unpaid_invoices LIKE ?`
+             AND r.unpaid_invoice_numbers LIKE ?`
         : `SELECT customer_number, customer_name, outstanding_balance, unpaid_invoices
            FROM datarecord
            WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > 0
-             AND unpaid_invoices LIKE ?`;
+             AND unpaid_invoice_numbers LIKE ?`;
       // Cast a wide net via LIKE — search by the digits portion when the user
-      // didn't include a prefix, so SQL prefilter still hits "IN587925" rows
-      // when they typed "587925".
-      const sqlNeedle = needleDigits && needleDigits.length >= 3 ? needleDigits : raw;
+      // didn't include a prefix. Column is already uppercase so we uppercase
+      // the needle to match.
+      const sqlNeedle = (needleDigits && needleDigits.length >= 3 ? needleDigits : raw).toUpperCase();
       const candidates = db.prepare(sql + ' LIMIT 500').all(`%${sqlNeedle}%`);
       const matches = [];
       for (const r of candidates) {
@@ -528,7 +530,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           FROM auditlog
           WHERE resource_type = 'record'
             AND resource_id = ?
-          ORDER BY datetime(created_date) DESC
+          ORDER BY created_date DESC
           LIMIT 50
         `).all(String(id));
 
@@ -554,14 +556,22 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         return res.status(400).json({ error: 'No conditions provided' });
       }
 
-      // Fetch a reasonably large sample to find matches and non-matches
+      // Fetch a reasonably large sample to find matches and non-matches.
+      // Avoid ORDER BY RANDOM() — that materialises every row to assign a
+      // sort key, then sorts the entire table to take 200. Pick a random
+      // window over the rowid space instead: cheap, still varied between
+      // runs, no full sort.
+      const maxRow = db.prepare('SELECT COALESCE(MAX(rowid), 0) AS m FROM datarecord').get();
+      const offset = maxRow.m > 200
+        ? Math.max(0, Math.floor(Math.random() * (maxRow.m - 200)))
+        : 0;
       const rows = db.prepare(
         `SELECT customer_number, customer_name, outstanding_balance,
                 unpaid_invoices, receipts, updated_date, created_date,
                 age_analysis, flag_color, flag_reason, flag_source,
                 auto_flagged, terms, note, synced_at
-         FROM datarecord ORDER BY RANDOM() LIMIT 200`
-      ).all().map(expandDataRecord);
+         FROM datarecord WHERE rowid > ? ORDER BY rowid LIMIT 200`
+      ).all(offset).map(expandDataRecord);
 
       function evalCondition(cond, record) {
         const raw = record[cond.field];
@@ -912,15 +922,18 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         }
 
         if (rawSearch) {
+          // Dropped \`data LIKE ?\` — that branch substring-scanned the full
+          // JSON blob (~3 KB per row × 4000 rows = ~12 MB per keystroke).
+          // The user-meaningful identifiers are already covered by the four
+          // dedicated columns below.
           whereParts.push(`(
             customer_number LIKE ? OR
             customer_name LIKE ? OR
             source_id LIKE ? OR
-            source_table LIKE ? OR
-            data LIKE ?
+            source_table LIKE ?
           )`);
           const like = `%${rawSearch}%`;
-          params.push(like, like, like, like, like);
+          params.push(like, like, like, like);
         }
 
         const whereClause = whereParts.length > 0 ? `WHERE ${whereParts.join(' AND ')}` : '';

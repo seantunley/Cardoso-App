@@ -357,11 +357,12 @@ export function debugCreditForCustomer(customerNumber) {
     step('Exposure cap check', { enabled: cfg.outstandingBalanceCap.enabled, skipped: true, reason: totalInvoiced === 0 ? 'No invoiced amount' : 'Disabled' });
   }
 
-  // Historical flags
+  // Historical flags. created_date is ISO-8601, so lexical sort matches
+  // chronological — datetime() wrapper would defeat the composite index.
   const flagHistory = db.prepare(`
     SELECT action_type, changes FROM auditlog
     WHERE resource_type = 'record' AND resource_id = ?
-    ORDER BY datetime(created_date) DESC LIMIT 50
+    ORDER BY created_date DESC LIMIT 50
   `).all(String(record.id));
 
   const flagEntries = flagHistory

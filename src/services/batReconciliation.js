@@ -1159,6 +1159,19 @@ export function listReconciliations() {
     r.matched_count = m?.matched || 0;
     r.exact_match_count = m?.exact || 0;
   }
+  // Stash the per-recon match map + the all-extraction totals on the returned
+  // array so getDashboardData() can skip its own duplicate full scan of
+  // bat_invoice_extractions. Plain Array, just with two extra non-enumerable
+  // properties — JSON serialisation ignores them.
+  let totalMatched = 0, totalExactMatched = 0;
+  for (const m of matchByRecon.values()) {
+    totalMatched += m.matched;
+    totalExactMatched += m.exact;
+  }
+  Object.defineProperty(reconRows, '_matchTotals', {
+    value: { totalMatched, totalExactMatched },
+    enumerable: false,
+  });
   return reconRows;
 }
 
@@ -1571,11 +1584,15 @@ async function processQueue(reconId) {
   // lane. The in-memory `inFlight` Set is the source of truth for "claimed by
   // a lane this run". Avoids changing the SQL schema or status values that
   // the UI checks against.
+  // Statement hoisted out of the per-claim loop — was being re-prepared on
+  // every OCR completion (200+ times per recon). Backed by the new
+  // idx_bat_extractions_recon_status composite index (migration v50).
+  const claimNextStmt = db.prepare(
+    "SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending' ORDER BY id LIMIT ?"
+  );
   const inFlight = new Set();
   const claimNext = () => {
-    const candidates = db.prepare(
-      "SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending' ORDER BY id LIMIT ?"
-    ).all(reconId, OCR_CONCURRENCY * 4);
+    const candidates = claimNextStmt.all(reconId, OCR_CONCURRENCY * 4);
     for (const row of candidates) {
       if (!inFlight.has(row.id)) { inFlight.add(row.id); return row; }
     }
@@ -2063,13 +2080,6 @@ export function getDashboardData(year) {
   const yr = Number.parseInt(year, 10);
   const scoped = Number.isFinite(yr) && yr > 1900 && yr < 9999 ? yr : null;
   const yearWhere = scoped ? 'WHERE year = ?' : '';
-  const yearJoin = scoped
-    ? `WHERE EXISTS (
-         SELECT 1 FROM bat_reconciliations r
-         WHERE r.id = bat_invoice_extractions.reconciliation_id
-           AND r.year = ?
-       )`
-    : '';
   const yearArg = scoped ? [scoped] : [];
 
   const reconciliations = listReconciliations()
@@ -2096,28 +2106,17 @@ export function getDashboardData(year) {
   } catch {}
   const totalVariance = totalSupplier - totalSage;
 
-  // totalPods + matched + exact-matched: pod_count is a cheap COUNT(*); matched
-  // counts are computed in JS via a single Cardoso lookup map. Replaces two
-  // correlated EXISTS subqueries with non-sargable string normalization.
+  // totalPods + matched + exact-matched: skip the duplicate full scan of
+  // bat_invoice_extractions — listReconciliations() already built the
+  // per-recon match map. Sum its per-row matched_count / exact_match_count
+  // (which are already year-filtered via the `reconciliations` array slice
+  // above), and pull totalPods straight from the cached pod_count column.
   let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
   try {
-    const podRow = db.prepare(
-      `SELECT COUNT(*) AS c FROM bat_invoice_extractions ${yearJoin}`
-    ).get(...yearArg);
-    totalPods = podRow?.c || 0;
-    const cardosoAmounts = buildCardosoLookup();
-    const extRows = db.prepare(
-      `SELECT extracted_invoice, order_amount
-         FROM bat_invoice_extractions
-        WHERE extracted_invoice IS NOT NULL
-        ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}`
-    ).all(...yearArg);
-    for (const e of extRows) {
-      const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-      const cAmount = cardosoAmounts.get(key);
-      if (cAmount === undefined) continue;
-      totalMatched++;
-      if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) totalExactMatched++;
+    for (const r of reconciliations) {
+      totalPods         += r.pod_count || 0;
+      totalMatched      += r.matched_count || 0;
+      totalExactMatched += r.exact_match_count || 0;
     }
   } catch {}
   // Match rate = invoices that match by BOTH number AND amount (within R 0.01)

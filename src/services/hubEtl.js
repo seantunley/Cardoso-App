@@ -6,7 +6,9 @@
  */
 
 import BetterSqlite3 from 'better-sqlite3';
-import { mkdirSync, writeFileSync, renameSync } from 'fs';
+import { mkdirSync, writeFileSync, renameSync, createWriteStream } from 'fs';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
 import path from 'path';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
@@ -405,14 +407,16 @@ async function runHubBackupPull() {
           } catch {}
           return;
         }
-        const buf = Buffer.from(await upstream.arrayBuffer());
         const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
         mkdirSync(dir, { recursive: true });
         const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
-        writeFileSync(file, buf);
+        // Stream the response body straight to disk instead of buffering the
+        // whole DB in memory. A 200 MB site DB used to spike RSS by 200 MB
+        // and block the event loop during the sync writeFileSync.
+        await pipeline(Readable.fromWeb(upstream.body), createWriteStream(file));
         const integrity = checkBackupIntegrity(site.id, file);
-        console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
+        console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
 
         // Also pull the site's .env config alongside the db so disaster
         // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
