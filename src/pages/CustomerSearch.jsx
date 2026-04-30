@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
-import { Card, CardContent } from "@/components/ui/card";
 import { AlertCircle, Database, Flag, CheckCircle, RefreshCw, FileSearch, Search, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";

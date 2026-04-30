@@ -5,11 +5,8 @@ import {
   ChevronLeft,
   ChevronRight,
   KeyRound,
-  ClipboardList,
-  Network,
   Sun,
   Moon,
-  FlaskConical,
 } from "lucide-react";
 import { applyTheme } from "@/lib/AuthContext";
 
@@ -245,7 +242,6 @@ const IconReconciliation = ({ className, style }) => (
     <circle cx="19" cy="9.5" r="1.1" fill="#f59e0b"/>
   </svg>
 );
-import { BarChart2, PhoneCall, TrendingUp, FileBarChart, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";

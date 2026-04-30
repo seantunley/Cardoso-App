@@ -2,8 +2,7 @@ import { useMemo, useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCompactR, fmtCount, downloadCsv,
-  ResponsiveContainer, BarChart, Bar, Cell,
+  fmtR, fmtCompactR, fmtCount, downloadCsv, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,

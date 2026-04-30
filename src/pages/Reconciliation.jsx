@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { reportClientError } from '@/lib/clientLog';
-import { RefreshCw, FileText, ChevronLeft, ChevronDown, ChevronRight, AlertTriangle, Upload, CheckCircle, XCircle, Calendar as CalendarIcon } from 'lucide-react';
+import { RefreshCw, FileText, ChevronLeft, ChevronDown, ChevronRight, AlertTriangle, Upload, Calendar as CalendarIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';

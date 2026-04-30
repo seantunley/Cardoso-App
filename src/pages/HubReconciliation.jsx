@@ -1,10 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  ReportFrame, ChartCard, SummaryTile,
-  fmtR, fmtRSigned, fmtCount,
-  ResponsiveContainer, BarChart, Bar, Cell,
+import { ChartCard, SummaryTile,
+  fmtR, fmtRSigned, fmtCount, BarChart, Bar,
   ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedGrid,
   REPORT_COLORS,
 } from '@/components/reports/lib';

@@ -93,7 +93,7 @@ export default function FlaggedCustomersModal({
     setPagedCustomers((current) => (page === 0 ? fetchedPage.records : [...current, ...fetchedPage.records]));
     setTotalCount(fetchedPage.total);
     setHasMore(fetchedPage.hasMore);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [fetchedPage, page, open]);
 
   const displayCustomers = externalCustomers ?? pagedCustomers;

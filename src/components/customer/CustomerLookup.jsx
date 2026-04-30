@@ -386,7 +386,7 @@ export default function CustomerLookup({
     if (!triggerLookup) return;
     handleLookup(triggerLookup);
   // We intentionally only re-run when triggerLookup changes, passing the value directly
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+   
   }, [triggerLookup]);
 
   useEffect(() => {
