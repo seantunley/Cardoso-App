@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { getVersionStatus } from '../services/versionCheck.js';
 import { logError } from '../lib/errorLog.js';
+import { logAudit } from '../lib/audit.js';
 
 const require = createRequire(import.meta.url);
 
@@ -364,6 +365,12 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       return res.status(400).json({ error: 'Auto-update only supported on Windows.' });
     }
     const result = await triggerWindowsUpdate();
+    logAudit({
+      req, action: 'app_update_trigger', resourceType: 'system',
+      resourceName: 'App update',
+      details: result.ok ? 'Update started; service will restart' : `Update failed: ${result.reason}`,
+      status: result.ok ? 'success' : 'failure',
+    });
     if (result.ok) {
       res.json({ ok: true, message: 'Update started. Service will restart automatically.' });
     } else {
@@ -378,6 +385,12 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       }
       const dryRun = req.body?.dryRun !== false;
       const result = dedupeCustomers({ dryRun });
+      logAudit({
+        req, action: dryRun ? 'dedupe_customers_dryrun' : 'dedupe_customers',
+        resourceType: 'system', resourceName: 'Customer deduplication',
+        details: dryRun ? `Dry-run found ${result.duplicates_found || 0} duplicate group(s)` : `Removed ${result.removed || 0} duplicate(s)`,
+        changes: result,
+      });
       res.json(result);
     } catch (error) {
       console.error('[maintenance] dedupe customers failed:', error.message);
@@ -406,6 +419,12 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       }
 
       const result = clearImportedSqlData();
+      logAudit({
+        req, action: 'clear_imported_data', resourceType: 'system',
+        resourceName: 'Imported customer data',
+        details: `Cleared imported customer data; password-confirmed by ${req.currentUser.email}`,
+        changes: result,
+      });
       res.json(result);
     } catch (error) {
       console.error('[maintenance] clear imported data failed:', error.message);

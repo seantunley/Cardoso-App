@@ -3,6 +3,15 @@ import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataReco
 import { applyAutoFlagRulesToRecord } from '../services/autoFlag.js';
 import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
 import { runCustomerSqlQuery } from '../services/customerSqlPool.js';
+import { logAudit } from '../lib/audit.js';
+
+// Tables whose CRUD via the generic /api/:table routes deserves an audit row.
+// datarecord is excluded — it has its own per-flag audit further down.
+const AUDITED_TABLES = {
+  databaseconnection: { type: 'connection', label: 'Connection', nameKey: 'name' },
+  autoflagrule:       { type: 'rule',       label: 'Auto-flag rule', nameKey: 'name' },
+  customfieldconfig:  { type: 'system',     label: 'Custom field',   nameKey: 'field_label' },
+};
 
 /**
  * Creates the data-record, auto-flag, and dynamic CRUD routes router.
@@ -671,6 +680,12 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         }
       });
       applyAll();
+      logAudit({
+        req, action: 'apply_auto_flags', resourceType: 'system',
+        resourceName: 'Auto-flag rules',
+        details: `Flagged ${flagged}, cleared ${cleared}`,
+        changes: { flagged, cleared, active_rules: activeRules.length },
+      });
       res.json({ flagged, cleared });
     } catch (err) {
       console.error('apply-auto-flags error:', err);
@@ -682,6 +697,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   router.post('/api/clear-auto-flags', requireAuth, (req, res) => {
     try {
       const result = stmts.clearAllAutoFlags.run();
+      logAudit({
+        req, action: 'clear_auto_flags', resourceType: 'system',
+        resourceName: 'All auto-flags',
+        details: `Cleared ${result.changes} auto-flagged record(s)`,
+      });
       res.json({ cleared: result.changes });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -734,6 +754,12 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         }
       });
       upsert();
+      logAudit({
+        req, action: 'import_rules', resourceType: 'rule',
+        resourceName: 'Auto-flag rules import',
+        details: `Created ${created}, updated ${updated}, skipped ${skipped}`,
+        changes: { created, updated, skipped, total_in_file: rules.length },
+      });
       res.json({ created, updated, skipped });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -1087,6 +1113,19 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       const placeholders = columns.map(() => '?').join(',');
       const stmt = db.prepare(`INSERT INTO "${table}" (${columns.join(',')}) VALUES (${placeholders})`);
       const info = stmt.run(...Object.values(data));
+
+      const meta = AUDITED_TABLES[table];
+      if (meta) {
+        const safeData = { ...data };
+        if ('encrypted_password' in safeData) safeData.encrypted_password = '[redacted]';
+        logAudit({
+          req, action: `create_${meta.type}`, resourceType: meta.type,
+          resourceId: info.lastInsertRowid,
+          resourceName: data[meta.nameKey] || `${meta.label} ${info.lastInsertRowid}`,
+          details: `${meta.label} created`,
+          changes: { after: safeData },
+        });
+      }
       res.json({ id: info.lastInsertRowid, ...data });
     } catch (e) {
       console.error('POST error:', e);
@@ -1185,6 +1224,27 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       const stmt = db.prepare(`UPDATE "${table}" SET ${sets} WHERE id = ?`);
       stmt.run(...Object.values(data), id);
 
+      const auditMeta = AUDITED_TABLES[table];
+      if (auditMeta) {
+        const beforeChanges = {};
+        const afterChanges = {};
+        for (const k of keys) {
+          if (existing[k] !== data[k]) {
+            beforeChanges[k] = k === 'encrypted_password' ? '[redacted]' : existing[k];
+            afterChanges[k]  = k === 'encrypted_password' ? '[redacted]' : data[k];
+          }
+        }
+        if (Object.keys(afterChanges).length > 0) {
+          logAudit({
+            req, action: `update_${auditMeta.type}`, resourceType: auditMeta.type,
+            resourceId: id,
+            resourceName: data[auditMeta.nameKey] || existing[auditMeta.nameKey] || `${auditMeta.label} ${id}`,
+            details: `Updated ${Object.keys(afterChanges).length} field(s): ${Object.keys(afterChanges).join(', ')}`,
+            changes: { before: beforeChanges, after: afterChanges },
+          });
+        }
+      }
+
       if (table === 'datarecord' && flagChanged) {
         const beforeColorLabel = oldFlagColor || 'none';
         const afterColorLabel = newFlagColor || 'none';
@@ -1279,8 +1339,21 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
 
     try {
+      const meta = AUDITED_TABLES[table];
+      let existing = null;
+      if (meta) {
+        existing = db.prepare(`SELECT * FROM "${table}" WHERE id = ?`).get(id);
+      }
       const stmt = db.prepare(`DELETE FROM "${table}" WHERE id = ?`);
       stmt.run(id);
+      if (meta && existing) {
+        logAudit({
+          req, action: `delete_${meta.type}`, resourceType: meta.type,
+          resourceId: id,
+          resourceName: existing[meta.nameKey] || `${meta.label} ${id}`,
+          details: `${meta.label} deleted`,
+        });
+      }
       res.json({ success: true });
     } catch (e) {
       console.error('DELETE error:', e);

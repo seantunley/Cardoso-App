@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
+import { logAudit } from '../lib/audit.js';
 
 /**
  * Creates the auth and user routes router.
@@ -311,6 +312,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       );
 
       const newUser = getUserById(info.lastInsertRowid);
+      logAudit({
+        req, action: 'create_user', resourceType: 'user',
+        resourceId: newUser.id, resourceName: newUser.email,
+        details: `Role: ${role}${mustChange ? ' (must change password on first login)' : ''}`,
+      });
       res.json({
         success: true,
         user: sanitizeUser(newUser),
@@ -368,6 +374,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       db.prepare(`UPDATE "user" SET ${sets} WHERE id = ?`).run(...Object.values(updates), id);
 
       const updated = getUserById(id);
+      const beforeChanges = Object.fromEntries(Object.keys(updates).map(k => [k, existing[k]]));
+      logAudit({
+        req, action: 'update_user_permissions', resourceType: 'user',
+        resourceId: updated.id, resourceName: updated.email,
+        details: `Updated ${Object.keys(updates).length} permission(s)`,
+        changes: { before: beforeChanges, after: updates },
+      });
       res.json({
         success: true,
         user: sanitizeUser(updated),
@@ -404,6 +417,14 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         .run(normalizedEmail, (full_name || '').trim(), id);
 
       const updated = getUserById(id);
+      logAudit({
+        req, action: 'update_user_profile', resourceType: 'user',
+        resourceId: updated.id, resourceName: updated.email,
+        changes: {
+          before: { email: existing.email, full_name: existing.full_name },
+          after:  { email: updated.email,  full_name: updated.full_name },
+        },
+      });
       res.json(sanitizeUser(updated));
     } catch (err) {
       console.error('Update profile error:', err);
@@ -428,6 +449,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const passwordHash = await bcrypt.hash(password, 12);
       db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(passwordHash, id);
 
+      logAudit({
+        req, action: 'update_user_password', resourceType: 'user',
+        resourceId: existing.id, resourceName: existing.email,
+        details: parseInt(id, 10) === req.currentUser.id ? 'Self-service password change' : 'Admin password reset',
+      });
       res.json({ success: true });
     } catch (error) {
       console.error('Update password error:', error);
@@ -451,6 +477,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       db.prepare(`DELETE FROM "user" WHERE id = ?`).run(targetId);
 
+      logAudit({
+        req, action: 'delete_user', resourceType: 'user',
+        resourceId: existing.id, resourceName: existing.email,
+        details: `Role: ${existing.role}`,
+      });
       res.json({ success: true });
     } catch (error) {
       console.error('Delete user error:', error);

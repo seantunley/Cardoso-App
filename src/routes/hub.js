@@ -13,6 +13,7 @@ import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
+import { logAudit } from '../lib/audit.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
@@ -117,6 +118,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const { backup_sync_enabled } = req.body;
     if (typeof backup_sync_enabled !== 'boolean') return res.status(400).json({ error: 'backup_sync_enabled must be boolean' });
     hubRepository.setBackupSyncEnabled(backup_sync_enabled);
+    logAudit({
+      req, action: backup_sync_enabled ? 'enable_hub_backups' : 'disable_hub_backups',
+      resourceType: 'system', resourceName: 'Hub backup sync',
+      details: `Backup sync ${backup_sync_enabled ? 'enabled' : 'disabled'}`,
+    });
     res.json({ ok: true, backup_sync_enabled });
   });
 
@@ -136,6 +142,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
     backupPullInProgress = true;
     setHubSetting('last_backup_pull', JSON.stringify({ status: 'running', startedAt: new Date().toISOString() }));
+    logAudit({
+      req, action: 'hub_backup_pull_trigger', resourceType: 'system',
+      resourceName: 'Hub manual backup pull',
+      details: 'Manual backup pull started',
+    });
     res.json({ ok: true, message: 'Backup pull started' });
     try {
       await runHubBackupPull();
@@ -777,6 +788,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         performedBy: req.currentUser?.email,
         target: 'all_sites',
       });
+      logAudit({
+        req, action: 'hub_force_resync_all', resourceType: 'system',
+        resourceName: 'All hub sites',
+        details: 'Cleared hub_records, hub_inventory, hub_sync_log; full pull triggered',
+      });
       res.status(202).json({ message: 'Force resync triggered — full pull from all sites' });
       syncAllSites().catch(err => console.error('[HUB] Force resync error:', err));
     } catch (err) {
@@ -791,11 +807,16 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
-      const site = db.prepare('SELECT slug FROM hub_sites WHERE id = ?').get(siteId);
+      const site = db.prepare('SELECT slug, name FROM hub_sites WHERE id = ?').get(siteId);
       logHubAudit({
         action: 'force_resync',
         performedBy: req.currentUser?.email,
         target: site?.slug || siteId,
+      });
+      logAudit({
+        req, action: 'hub_force_resync_site', resourceType: 'system',
+        resourceId: siteId, resourceName: site?.name || site?.slug || siteId,
+        details: `Cleared site data and triggered full pull for site ${siteId}`,
       });
       syncAllSites().catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
@@ -821,6 +842,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         performedBy: req.currentUser?.email,
         target: site.slug || siteId,
         detail: `Removed site "${site.name}" (${siteId}) and all associated data`,
+      });
+      logAudit({
+        req, action: 'hub_delete_site', resourceType: 'system',
+        resourceId: siteId, resourceName: site.name,
+        details: `Removed site "${site.name}" (${site.slug || siteId}) and all associated data`,
       });
 
       res.json({ ok: true, message: `Deleted site "${site.name}" and all its data` });

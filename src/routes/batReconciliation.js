@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
+import { logAudit } from '../lib/audit.js';
 import {
   parseSupplierSpreadsheet,
   querySageCreditNotes,
@@ -111,9 +112,21 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       const backfilled = backfillOrderAmounts(parsed.orderAmounts);
 
       const reconciliation = getReconciliation(reconId);
+      logAudit({
+        req, action: 'bat_upload', resourceType: 'system',
+        resourceId: reconId,
+        resourceName: `Week ${parsed.weekNumber}/${year}`,
+        details: `Filename: ${req.file.originalname}; PODs: ${parsed.podUrls?.length || 0}; backfilled: ${backfilled}`,
+        changes: { fees: parsed.fees, week_number: parsed.weekNumber, year },
+      });
       res.json({ ok: true, reconciliation, backfilled });
     } catch (err) {
       console.error('[bat] Upload failed:', err.message);
+      logAudit({
+        req, action: 'bat_upload', resourceType: 'system',
+        resourceName: req.file?.originalname || 'unknown',
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message || 'Failed to process spreadsheet' });
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
@@ -153,9 +166,21 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
 
     try {
       const result = await runInvoiceExtraction(reconciliationId);
+      logAudit({
+        req, action: 'bat_extract_invoices', resourceType: 'system',
+        resourceId: reconciliationId,
+        resourceName: `Week ${recon.week_number}/${recon.year}`,
+        details: result.message || `Triggered extraction for ${result.total || 0} invoice(s)`,
+      });
       res.json(result);
     } catch (err) {
       console.error('[bat] Extraction trigger failed:', err.message);
+      logAudit({
+        req, action: 'bat_extract_invoices', resourceType: 'system',
+        resourceId: reconciliationId,
+        resourceName: `Week ${recon.week_number}/${recon.year}`,
+        details: err.message, status: 'failure',
+      });
       res.status(err.status || 500).json({ error: err.message, code: err.code });
     }
   });
@@ -359,11 +384,19 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
 
   router.post('/api/bat/ocr-pause', ...gate, (req, res) => {
     const paused = !!req.body?.paused;
+    const wasPaused = isOcrPaused();
     setOcrPaused(paused);
     let resumed = false;
     if (!paused) {
       // Kick off the worker for any leftover pending extractions
       try { resumeExtractionWorker(); resumed = true; } catch {}
+    }
+    if (wasPaused !== paused) {
+      logAudit({
+        req, action: paused ? 'ocr_pause' : 'ocr_resume', resourceType: 'system',
+        resourceName: 'OCR worker',
+        details: paused ? 'OCR worker paused' : `OCR worker resumed${resumed ? ' (worker started)' : ''}`,
+      });
     }
     res.json({ paused: isOcrPaused(), resumed });
   });
@@ -489,6 +522,10 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
   });
 
   router.put('/api/bat/settings', ...gate, (req, res) => {
+    const before = Object.fromEntries(
+      db.prepare('SELECT key, value FROM bat_settings WHERE key IN (' + Object.keys(req.body || {}).map(() => '?').join(',') + ')')
+        .all(...Object.keys(req.body || {})).map(r => [r.key, r.value])
+    );
     const upsert = db.prepare('INSERT INTO bat_settings (key, value, updated_at) VALUES (?, ?, datetime(\'now\')) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at');
     const tx = db.transaction((entries) => {
       for (const [k, v] of entries) upsert.run(k, v);
@@ -500,6 +537,16 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'sage_connection_id')) {
       resetSagePool().catch(() => {});
     }
+    // Redact API keys before auditing
+    const redact = (k, v) => /key|secret|token|password/i.test(k) ? '[redacted]' : v;
+    const beforeRedacted = Object.fromEntries(Object.entries(before).map(([k, v]) => [k, redact(k, v)]));
+    const afterRedacted  = Object.fromEntries(Object.entries(req.body || {}).map(([k, v]) => [k, redact(k, v)]));
+    logAudit({
+      req, action: 'update_bat_settings', resourceType: 'system',
+      resourceName: 'BAT reconciliation settings',
+      details: `Updated ${Object.keys(req.body || {}).length} setting(s): ${Object.keys(req.body || {}).join(', ')}`,
+      changes: { before: beforeRedacted, after: afterRedacted },
+    });
     res.json({ ok: true });
   });
 
