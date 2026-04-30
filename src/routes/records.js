@@ -848,13 +848,20 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
         const startsWith = `${query}%`;
         const contains = `%${query}%`;
+        // Exclude empty-named rows. Sage's ARCUS keeps closed / placeholder
+        // accounts with IDCUST set but NAMECUST blank; they sync down
+        // faithfully but pollute the lookup. They're never things a user is
+        // actually trying to find.
         const rows = db.prepare(`
           SELECT *
           FROM datarecord
-          WHERE TRIM(customer_number) LIKE ?
-             OR customer_name LIKE ?
-             OR TRIM(customer_number) LIKE ?
-             OR customer_name LIKE ?
+          WHERE TRIM(COALESCE(customer_name, '')) != ''
+            AND (
+                  TRIM(customer_number) LIKE ?
+               OR customer_name LIKE ?
+               OR TRIM(customer_number) LIKE ?
+               OR customer_name LIKE ?
+            )
           ORDER BY
             CASE
               WHEN TRIM(customer_number) = ? THEN 0
