@@ -278,7 +278,7 @@ export default function HubUserManager({ sites = [] }) {
             <Button
               onClick={() => saveAllowedSitesMutation.mutate()}
               disabled={saveAllowedSitesMutation.isPending}
-              className="bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] gap-1.5"
+              className="gap-1.5"
             >
               {saveAllowedSitesMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
               Save

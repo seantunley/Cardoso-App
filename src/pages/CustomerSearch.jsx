@@ -2,9 +2,511 @@ import { useState, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Card, CardContent } from "@/components/ui/card";
-import { AlertCircle, Database, Flag, CheckCircle, RefreshCw } from "lucide-react";
+import { AlertCircle, Database, Flag, CheckCircle, RefreshCw, FileSearch, Search, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { toast } from "sonner";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
+
+function parseAmount(val) {
+  if (val == null || val === "") return 0;
+  const n = parseFloat(String(val).replace(/[^0-9.\-]/g, ""));
+  return isNaN(n) ? 0 : n;
+}
+
+function fmtR(v) {
+  return Math.abs(parseAmount(v)).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function AmountLookupModal({ open, onClose, onPickCustomer }) {
+  const [amount, setAmount] = useState("");
+  const [tolerance, setTolerance] = useState("5");
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState(null);
+  const [sageResults, setSageResults] = useState(null);
+  const [sageSearching, setSageSearching] = useState(false);
+  const [sageError, setSageError] = useState(null);
+  const [sageDays, setSageDays] = useState(365);
+
+  useEffect(() => {
+    if (!open) {
+      setAmount(""); setTolerance("5"); setResults(null); setError(null); setSearching(false);
+      setSageResults(null); setSageError(null); setSageSearching(false); setSageDays(365);
+    }
+  }, [open]);
+
+  const search = async () => {
+    const v = parseFloat(String(amount).replace(/[^0-9.\-]/g, ""));
+    if (!Number.isFinite(v) || v <= 0) { setError("Enter a valid rand amount"); return; }
+    setSearching(true); setError(null); setResults(null);
+    setSageResults(null); setSageError(null); // reset sage when local re-searches
+    try {
+      const qs = new URLSearchParams({ amount: String(v), tolerance });
+      const r = await fetch(`/api/customer-by-invoice-amount?${qs.toString()}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Local lookup failed (HTTP ${r.status})`);
+      setResults(d.matches || []);
+    } catch (err) {
+      setError(err.message);
+      toast.error(`Invoice amount lookup failed: ${err.message}`);
+    } finally { setSearching(false); }
+  };
+
+  const searchSage = async () => {
+    const v = parseFloat(String(amount).replace(/[^0-9.\-]/g, ""));
+    if (!Number.isFinite(v) || v <= 0) return;
+    setSageSearching(true); setSageError(null); setSageResults(null);
+    try {
+      const qs = new URLSearchParams({ amount: String(v), tolerance, days: String(sageDays) });
+      const r = await fetch(`/api/customer-by-invoice-amount/sage?${qs.toString()}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Sage query failed (HTTP ${r.status})`);
+      setSageResults(d.matches || []);
+    } catch (err) {
+      setSageError(err.message);
+      toast.error(`Sage 300 lookup failed: ${err.message}`);
+    } finally { setSageSearching(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "2px" }}>
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">Find invoice by amount</DialogTitle>
+          <DialogDescription className="font-sans normal-case tracking-normal text-sm leading-relaxed text-muted-foreground">
+            For matching unidentified bank deposits — searches every unpaid invoice within the chosen rand tolerance of the typed amount.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2 mt-2">
+          <div className="relative flex-1">
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 font-mono text-xs text-muted-foreground pointer-events-none">R</span>
+            <input
+              autoFocus
+              type="text"
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value.replace(/[^0-9.,\-]/g, ""))}
+              onKeyDown={(e) => e.key === "Enter" && search()}
+              placeholder="11710.66"
+              className="w-full bg-background border border-border text-foreground pl-7 pr-3 py-2 text-sm font-mono tabular-nums outline-none focus:border-accent"
+              style={{ borderRadius: "2px" }}
+            />
+            {amount && (
+              <button onClick={() => setAmount("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <select
+            value={tolerance}
+            onChange={(e) => setTolerance(e.target.value)}
+            className="bg-background border border-border text-foreground px-2 py-2 text-xs font-mono outline-none focus:border-accent"
+            style={{ borderRadius: "2px" }}
+            title="How far above or below the typed amount to search"
+          >
+            <option value="0">Exact</option>
+            <option value="0.05">±R 0.05</option>
+            <option value="0.50">±R 0.50</option>
+            <option value="5">±R 5.00</option>
+            <option value="50">±R 50.00</option>
+          </select>
+          <button
+            onClick={search}
+            disabled={searching || !amount.trim()}
+            className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
+            style={{
+              borderRadius: "2px",
+              borderColor: "var(--phosphor)",
+              color: "var(--phosphor)",
+              background: "hsla(33,95%,55%,0.08)",
+            }}
+            onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.background = "hsla(33,95%,55%,0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33,95%,55%,0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+          >
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+            {error}
+          </div>
+        )}
+
+        {results !== null && !searching && (
+          <div className="mt-4 max-h-[55vh] overflow-auto">
+            {results.length === 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground font-mono text-center py-4">
+                  No invoice in the local database within ±R {tolerance} of R {amount}.
+                </p>
+                <SageFallbackPanel
+                  enabled
+                  searching={sageSearching}
+                  error={sageError}
+                  results={sageResults}
+                  onSearch={searchSage}
+                  days={sageDays}
+                  setDays={setSageDays}
+                  onPickCustomer={onPickCustomer}
+                  onClose={onClose}
+                  variant="amount"
+                  contextLabel={`±R ${tolerance} of R ${amount}`}
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
+                  {results.length} match{results.length === 1 ? "" : "es"} · sorted by closest first
+                  {results.some(m => m.match_type === "exact") && (
+                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[hsl(145_55%_75%)]" style={{ background: "hsla(145, 55%, 45%, 0.15)", border: "1px solid hsla(145, 55%, 45%, 0.5)", borderRadius: "2px" }}>
+                      ● exact match found
+                    </span>
+                  )}
+                </div>
+                {results.map((m, i) => {
+                  const exact = m.match_type === "exact";
+                  const stripColour = exact ? "hsl(145 55% 45%)" : "var(--phosphor)";
+                  const diffColour = exact ? "text-[hsl(145_55%_75%)]" : Math.abs(m.diff) < 0.10 ? "text-[var(--phosphor)]" : "text-muted-foreground";
+                  return (
+                    <button
+                      key={`${m.customer_number}-${m.invoice_number}-${i}`}
+                      onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
+                      className={`w-full relative p-3 text-left transition-colors ${exact ? "" : "bg-card border border-border hover:bg-muted/30"}`}
+                      style={{
+                        borderRadius: "2px",
+                        ...(exact && {
+                          background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
+                          border: "1px solid hsl(145 55% 45%)",
+                          boxShadow: "0 0 14px hsla(145, 55%, 45%, 0.35)",
+                        }),
+                      }}
+                    >
+                      <div className="absolute left-0 top-0 bottom-0" style={{ width: exact ? "3px" : "2px", background: stripColour, boxShadow: `0 0 ${exact ? 12 : 8}px ${stripColour}80` }} />
+                      {exact && (
+                        <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-[hsl(24_8%_6%)]" style={{ background: "hsl(145 55% 45%)", borderRadius: "2px", boxShadow: "0 0 10px hsla(145,55%,45%,0.5)" }}>
+                          Exact match
+                        </span>
+                      )}
+                      <div className="pl-2 grid grid-cols-[1fr_auto] gap-3 items-baseline">
+                        <div className="min-w-0">
+                          <div className={`font-display text-lg truncate ${exact ? "text-[hsl(145_55%_85%)]" : "text-foreground"}`}>{m.customer_name || "—"}</div>
+                          <div className="font-mono text-sm uppercase tracking-[0.12em] text-muted-foreground mt-0.5">
+                            {m.customer_number || "—"}
+                            {m.invoice_number ? ` · ${m.invoice_number}` : ""}
+                            {m.invoice_date ? ` · ${m.invoice_date}` : ""}
+                            {m.site_name ? ` · ${m.site_name}` : ""}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
+                            <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(m.invoice_amount)}
+                          </div>
+                          <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${diffColour}`}>
+                            {exact ? "● exact" : `${m.diff > 0 ? "+" : ""}${m.diff.toFixed(2)}`}
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
+  const [invoice, setInvoice] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState(null);
+  const [results, setResults] = useState(null); // null = not searched; [] = no matches
+  const [sageResults, setSageResults] = useState(null);
+  const [sageSearching, setSageSearching] = useState(false);
+  const [sageError, setSageError] = useState(null);
+  const [sageDays, setSageDays] = useState(730);
+
+  // Reset on close
+  useEffect(() => {
+    if (!open) {
+      setInvoice(""); setResults(null); setError(null); setSearching(false);
+      setSageResults(null); setSageError(null); setSageSearching(false); setSageDays(730);
+    }
+  }, [open]);
+
+  const search = async () => {
+    const q = invoice.trim();
+    if (q.length < 3) { setError("Enter at least 3 characters"); return; }
+    setSearching(true); setError(null); setResults(null);
+    setSageResults(null); setSageError(null);
+    try {
+      const r = await fetch(`/api/customer-by-invoice?invoice=${encodeURIComponent(q)}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Local lookup failed (HTTP ${r.status})`);
+      setResults(d.matches || []);
+    } catch (err) {
+      setError(err.message);
+      toast.error(`Invoice lookup failed: ${err.message}`);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const searchSage = async () => {
+    const q = invoice.trim();
+    if (q.length < 3) return;
+    setSageSearching(true); setSageError(null); setSageResults(null);
+    try {
+      const r = await fetch(`/api/customer-by-invoice/sage?invoice=${encodeURIComponent(q)}&days=${sageDays}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `Sage query failed (HTTP ${r.status})`);
+      setSageResults(d.matches || []);
+    } catch (err) {
+      setSageError(err.message);
+      toast.error(`Sage 300 lookup failed: ${err.message}`);
+    } finally { setSageSearching(false); }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "2px" }}>
+        <DialogHeader>
+          <DialogTitle className="font-display text-2xl">Find customer by invoice</DialogTitle>
+          <DialogDescription className="font-sans normal-case tracking-normal text-sm leading-relaxed text-muted-foreground">
+            Enter any unpaid invoice number to find the customer holding it.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center gap-2 mt-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" strokeWidth={1.5} />
+            <input
+              autoFocus
+              value={invoice}
+              onChange={(e) => setInvoice(e.target.value.toUpperCase())}
+              onKeyDown={(e) => e.key === "Enter" && search()}
+              placeholder="e.g. IN587925"
+              className="w-full bg-background border border-border text-foreground pl-9 pr-3 py-2 text-sm font-mono outline-none focus:border-accent"
+              style={{ borderRadius: "2px" }}
+            />
+            {invoice && (
+              <button onClick={() => setInvoice("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={search}
+            disabled={searching || invoice.trim().length < 3}
+            className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
+            style={{
+              borderRadius: "2px",
+              borderColor: "var(--phosphor)",
+              color: "var(--phosphor)",
+              background: "hsla(33,95%,55%,0.08)",
+            }}
+            onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.background = "hsla(33,95%,55%,0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33,95%,55%,0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+          >
+            {searching ? "Searching…" : "Search"}
+          </button>
+        </div>
+
+        {error && (
+          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+            {error}
+          </div>
+        )}
+
+        {results !== null && !searching && (
+          <div className="mt-4 max-h-[50vh] overflow-auto">
+            {results.length === 0 ? (
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground font-mono text-center py-4">
+                  No customer in the local database with invoice "{invoice}".
+                </p>
+                <SageFallbackPanel
+                  enabled
+                  searching={sageSearching}
+                  error={sageError}
+                  results={sageResults}
+                  onSearch={searchSage}
+                  days={sageDays}
+                  setDays={setSageDays}
+                  onPickCustomer={onPickCustomer}
+                  onClose={onClose}
+                  variant="invoice"
+                  contextLabel={`"${invoice}"`}
+                />
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
+                  {results.length} match{results.length === 1 ? "" : "es"}
+                </div>
+                {results.map((m, i) => {
+                  const balance = parseAmount(m.outstanding_balance);
+                  const balanceColour = balance > 10000 ? "text-red-400" : balance > 0 ? "text-orange-400" : "text-muted-foreground";
+                  return (
+                    <button
+                      key={`${m.customer_number}-${i}`}
+                      onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
+                      className="w-full relative bg-card border border-border p-3 text-left hover:bg-muted/30 transition-colors"
+                      style={{ borderRadius: "2px" }}
+                    >
+                      <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 8px hsla(33,95%,55%,0.4)" }} />
+                      <div className="pl-2 flex items-baseline justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="font-display text-lg text-foreground truncate">{m.customer_name || "—"}</div>
+                          <div className="font-mono text-sm uppercase tracking-[0.12em] text-muted-foreground mt-0.5">
+                            {m.customer_number || "—"}{m.site_name ? ` · ${m.site_name}` : ""}
+                          </div>
+                        </div>
+                        <div className={`font-mono text-sm tabular-nums shrink-0 ${balanceColour}`}>
+                          <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(balance)}
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Shared "Search older in Sage" fallback panel — used by both lookup modals
+// when the local database has no match. One-shot read-through query against
+// Sage 300 via the BAT module's MSSQL pool. Nothing is persisted locally.
+function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPickCustomer, onClose, variant, contextLabel, days, setDays }) {
+  if (!enabled) return null;
+
+  return (
+    <div className="rounded-[2px] border border-dashed border-border p-4 bg-card/50">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">Older invoices?</div>
+          <p className="text-sm text-foreground/90">
+            Search Sage 300 directly for {contextLabel}. Read-only, nothing is stored locally.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {setDays && (
+            <select
+              value={days}
+              onChange={(e) => setDays(parseInt(e.target.value, 10))}
+              className="bg-background border border-border text-foreground px-2 py-2 text-xs font-mono outline-none focus:border-accent"
+              style={{ borderRadius: "2px" }}
+              title="How far back to search in Sage"
+              disabled={searching}
+            >
+              <option value={30}>Last 30 days</option>
+              <option value={90}>Last 90 days</option>
+              <option value={180}>Last 6 months</option>
+              <option value={365}>Last year</option>
+              <option value={730}>Last 2 years</option>
+              <option value={3650}>Last 10 years</option>
+            </select>
+          )}
+          <button
+            onClick={onSearch}
+            disabled={searching}
+            className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
+            style={{
+              borderRadius: "2px",
+              borderColor: "hsl(200 80% 55%)",
+              color: "hsl(200 80% 75%)",
+              background: "hsla(200, 80%, 55%, 0.10)",
+            }}
+            onMouseEnter={(e) => { if (!e.currentTarget.disabled) { e.currentTarget.style.background = "hsla(200, 80%, 55%, 0.20)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(200, 80%, 55%, 0.35)"; } }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(200, 80%, 55%, 0.10)"; e.currentTarget.style.boxShadow = "none"; }}
+          >
+            {searching ? "Querying Sage…" : "Search older in Sage"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+          {error}
+        </div>
+      )}
+
+      {results !== null && !searching && (
+        <div className="mt-4">
+          {results.length === 0 ? (
+            <p className="text-sm text-muted-foreground font-mono text-center py-4">
+              Sage 300 also has no match for {contextLabel}.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
+                {results.length} Sage match{results.length === 1 ? "" : "es"} · live read-through
+              </div>
+              {results.map((m, i) => {
+                const exact = m.match_type === "exact";
+                const stripColour = exact ? "hsl(145 55% 45%)" : "hsl(200 80% 55%)";
+                return (
+                  <button
+                    key={`sage-${m.customer_number}-${m.invoice_number}-${i}`}
+                    onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
+                    className={`w-full relative p-3 text-left transition-colors ${exact ? "" : "bg-card border border-border hover:bg-muted/30"}`}
+                    style={{
+                      borderRadius: "2px",
+                      ...(exact && {
+                        background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
+                        border: "1px solid hsl(145 55% 45%)",
+                        boxShadow: "0 0 14px hsla(145, 55%, 45%, 0.35)",
+                      }),
+                    }}
+                  >
+                    <div className="absolute left-0 top-0 bottom-0" style={{ width: exact ? "3px" : "2px", background: stripColour, boxShadow: `0 0 ${exact ? 12 : 8}px ${stripColour}80` }} />
+                    <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold" style={{ background: "hsl(200 80% 55%)", color: "hsl(200 25% 6%)", borderRadius: "2px", boxShadow: "0 0 8px hsla(200, 80%, 55%, 0.5)" }}>
+                      Sage
+                    </span>
+                    {m.paid && (
+                      <span className="absolute top-3 right-12 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: m.paid === "paid" ? "hsl(145 55% 75%)" : "hsl(33 95% 75%)", background: m.paid === "paid" ? "hsla(145, 55%, 45%, 0.12)" : "hsla(33, 95%, 55%, 0.12)", border: `1px solid ${m.paid === "paid" ? "hsla(145, 55%, 45%, 0.4)" : "hsla(33, 95%, 55%, 0.4)"}`, borderRadius: "2px" }}>
+                        {m.paid}
+                      </span>
+                    )}
+                    <div className="pl-2 grid grid-cols-[1fr_auto] gap-3 items-baseline">
+                      <div className="min-w-0">
+                        <div className={`font-display text-lg truncate ${exact ? "text-[hsl(145_55%_85%)]" : "text-foreground"}`}>{m.customer_name || "—"}</div>
+                        <div className="font-mono text-sm uppercase tracking-[0.12em] text-muted-foreground mt-0.5">
+                          {m.customer_number || "—"}
+                          {m.invoice_number ? ` · ${m.invoice_number}` : ""}
+                          {m.invoice_date ? ` · ${m.invoice_date}` : ""}
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
+                          <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(m.invoice_amount)}
+                        </div>
+                        {variant === "amount" && typeof m.diff === "number" && (
+                          <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${exact ? "text-[hsl(145_55%_75%)]" : "text-muted-foreground"}`}>
+                            {exact ? "● exact" : `${m.diff > 0 ? "+" : ""}${m.diff.toFixed(2)}`}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function CustomerSearch() {
   const queryClient = useQueryClient();
@@ -12,6 +514,8 @@ export default function CustomerSearch() {
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [selectedFlagColor, setSelectedFlagColor] = useState(null);
   const [customerNumberToLookup, setCustomerNumberToLookup] = useState("");
+  const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
+  const [amountModalOpen, setAmountModalOpen] = useState(false);
 
   const { data: currentUser } = useQuery({
     queryKey: ["currentUser"],
@@ -106,17 +610,64 @@ export default function CustomerSearch() {
     <div className="min-h-screen bg-background">
       <div className="max-w-5xl mx-auto px-8 py-10 space-y-6">
         {/* Header */}
-        <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Customer Management
+        <div className="border-b border-border pb-5 flex items-end justify-between gap-4 flex-wrap">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+              § Customer Management
+            </div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Search the <em className="text-phosphor">ledger</em>.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3">
+              Review customer accounts, balances, and outstanding activity.
+            </p>
           </div>
-          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
-            Search the <em className="text-phosphor">ledger</em>.
-          </h1>
-          <p className="text-sm text-muted-foreground mt-3">
-            Review customer accounts, balances, and outstanding activity.
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={() => setInvoiceModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.2em] transition-colors"
+              style={{
+                borderRadius: "2px",
+                border: "1px solid var(--phosphor)",
+                color: "var(--phosphor)",
+                background: "hsla(33, 95%, 55%, 0.08)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+              title="Find a customer by an unpaid invoice number"
+            >
+              <FileSearch className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Find by invoice
+            </button>
+            <button
+              onClick={() => setAmountModalOpen(true)}
+              className="inline-flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.2em] transition-colors"
+              style={{
+                borderRadius: "2px",
+                border: "1px solid var(--phosphor)",
+                color: "var(--phosphor)",
+                background: "hsla(33, 95%, 55%, 0.08)",
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+              title="Find an unpaid invoice by its amount (with a few cents tolerance)"
+            >
+              <Search className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Find by amount
+            </button>
+          </div>
         </div>
+
+        <InvoiceLookupModal
+          open={invoiceModalOpen}
+          onClose={() => setInvoiceModalOpen(false)}
+          onPickCustomer={(num) => setCustomerNumberToLookup(num)}
+        />
+        <AmountLookupModal
+          open={amountModalOpen}
+          onClose={() => setAmountModalOpen(false)}
+          onPickCustomer={(num) => setCustomerNumberToLookup(num)}
+        />
 
         {/* Flag Stats */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-border border border-border stagger-in" style={{ borderRadius: "2px" }}>

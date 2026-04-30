@@ -2,6 +2,7 @@ import express from 'express';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord, normalizeFieldKey, validateCustomFieldKey, sanitizeConnection } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from '../services/autoFlag.js';
 import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
+import { runCustomerSqlQuery } from '../services/customerSqlPool.js';
 
 /**
  * Creates the data-record, auto-flag, and dynamic CRUD routes router.
@@ -213,6 +214,278 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   );
 
   // ==================== RECORD HISTORY ROUTE ====================
+  // GET /api/customer-by-invoice?invoice=IN12345 — quick lookup tool used by
+  // the Customer Management screen. Returns the customer (account number,
+  // name, outstanding balance) holding any unpaid invoice matching the given
+  // number. The unpaid_invoices column is JSON like
+  // [{"number":"IN12345","amount":"...","date":"..."}, ...] so we use a
+  // tolerant LIKE pattern (works without json_extract overhead).
+  router.get('/api/customer-by-invoice', requireAuth, (req, res) => {
+    const raw = String(req.query.invoice || '').trim();
+    if (raw.length < 3) return res.status(400).json({ error: 'Invoice number too short (min 3 chars).' });
+    const isHub = process.env.HUB_MODE === 'true';
+    // Normalise to uppercase alphanumerics. Stored invoices are padded with
+    // trailing spaces ("IN587925              "), so we always strip those.
+    const needle = raw.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+    const needleDigits = raw.replace(/[^0-9]/g, '');
+    if (!needle) return res.status(400).json({ error: 'No usable characters in invoice number.' });
+    // Match logic: an invoice matches if EITHER
+    //   (a) its full alphanum normalisation equals the search needle, OR
+    //   (b) the user typed digits-only AND those digits appear at the end of
+    //       the stored invoice's digit run (so "587925" matches "IN587925").
+    const matchInvoice = (storedRaw) => {
+      const stored = String(storedRaw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+      if (!stored) return false;
+      if (stored === needle) return true;
+      if (needleDigits && needleDigits.length >= 3) {
+        const storedDigits = stored.replace(/[^0-9]/g, '');
+        if (storedDigits === needleDigits) return true;
+        if (storedDigits.endsWith(needleDigits)) return true;
+      }
+      return false;
+    };
+    try {
+      // Pre-filter by outstanding_balance_num > 0 (indexed) before the LIKE
+      // scan — customers with zero balance can't have an unpaid invoice match.
+      const sql = isHub
+        ? `SELECT r.customer_number, r.customer_name, r.outstanding_balance, r.unpaid_invoices,
+                  COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > 0
+             AND r.unpaid_invoices LIKE ?`
+        : `SELECT customer_number, customer_name, outstanding_balance, unpaid_invoices
+           FROM datarecord
+           WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > 0
+             AND unpaid_invoices LIKE ?`;
+      // Cast a wide net via LIKE — search by the digits portion when the user
+      // didn't include a prefix, so SQL prefilter still hits "IN587925" rows
+      // when they typed "587925".
+      const sqlNeedle = needleDigits && needleDigits.length >= 3 ? needleDigits : raw;
+      const candidates = db.prepare(sql + ' LIMIT 500').all(`%${sqlNeedle}%`);
+      const matches = [];
+      for (const r of candidates) {
+        let invs;
+        try { invs = JSON.parse(r.unpaid_invoices || '[]'); } catch { continue; }
+        if (!Array.isArray(invs)) continue;
+        if (invs.some(i => matchInvoice(i?.number))) {
+          matches.push({
+            customer_number: r.customer_number || '',
+            customer_name: r.customer_name || '',
+            outstanding_balance: r.outstanding_balance || '0',
+            site_name: r.site_name || null,
+          });
+        }
+      }
+      res.json({ invoice: raw, matches });
+    } catch (err) {
+      console.error('[customer-by-invoice] error:', err.stack || err);
+      res.status(500).json({ error: `Local lookup failed: ${err.message || 'unknown error'}` });
+    }
+  });
+
+  // GET /api/customer-by-invoice-amount?amount=11710.66&tolerance=0.50
+  // Finds invoices whose amount is within `tolerance` rand of the given amount.
+  // Useful for matching unidentified bank deposits to invoices when the payer
+  // didn't include a reference.
+  router.get('/api/customer-by-invoice-amount', requireAuth, (req, res) => {
+    const target = parseFloat(String(req.query.amount || '').replace(/[^0-9.\-]/g, ''));
+    const tolRaw = parseFloat(String(req.query.tolerance || '0.50'));
+    const tolerance = Number.isFinite(tolRaw) ? Math.max(0, tolRaw) : 0.50;
+    if (!Number.isFinite(target) || target <= 0) {
+      return res.status(400).json({ error: 'Invalid amount.' });
+    }
+    const isHub = process.env.HUB_MODE === 'true';
+    try {
+      // Pre-filter at SQL layer: only customers with a balance (uses
+      // outstanding_balance_num index — see migration v47) AND a non-empty
+      // unpaid_invoices JSON. Cuts the candidate pool dramatically before we
+      // start parsing JSON in JS. Hard cap at 5000 rows for safety.
+      const sql = isHub
+        ? `SELECT r.customer_number, r.customer_name, r.outstanding_balance, r.unpaid_invoices,
+                  COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > 0
+             AND r.unpaid_invoices IS NOT NULL AND r.unpaid_invoices != '' AND r.unpaid_invoices != '[]'
+           LIMIT 5000`
+        : `SELECT customer_number, customer_name, outstanding_balance, unpaid_invoices
+           FROM datarecord
+           WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > 0
+             AND unpaid_invoices IS NOT NULL AND unpaid_invoices != '' AND unpaid_invoices != '[]'
+           LIMIT 5000`;
+      const rows = db.prepare(sql).all();
+      const matches = [];
+      // Pre-compute the rounded target to avoid math in the inner loop.
+      const targetRounded = Math.round(target * 100);
+      const tolRounded = Math.round(tolerance * 100);
+      for (const r of rows) {
+        let invs;
+        try { invs = JSON.parse(r.unpaid_invoices || '[]'); } catch { continue; }
+        if (!Array.isArray(invs)) continue;
+        for (const inv of invs) {
+          // Cheap reject: skip if no amount field at all.
+          if (!inv || inv.amount == null || inv.amount === '') continue;
+          const amt = parseFloat(String(inv.amount).replace(/[^0-9.\-]/g, ''));
+          if (!Number.isFinite(amt) || amt <= 0) continue;
+          // Integer-cents math is faster than absDiff <= tolerance and safer
+          // than floating-point comparisons.
+          const amtCents = Math.round(amt * 100);
+          if (Math.abs(amtCents - targetRounded) > tolRounded) continue;
+          const diff = (amtCents - targetRounded) / 100;
+          matches.push({
+            customer_number: r.customer_number || '',
+            customer_name: r.customer_name || '',
+            outstanding_balance: r.outstanding_balance || '0',
+            site_name: r.site_name || null,
+            invoice_number: String(inv.number || '').trim() || null,
+            invoice_amount: amt,
+            invoice_date: inv?.date || null,
+            diff: Math.round(diff * 100) / 100,
+            abs_diff: Math.abs(diff),
+            match_type: Math.abs(diff) < 0.005 ? 'exact' : 'fuzzy',
+          });
+        }
+      }
+      // Tightest match first; cap at 100 results.
+      matches.sort((a, b) => a.abs_diff - b.abs_diff);
+      res.json({ amount: target, tolerance, matches: matches.slice(0, 100) });
+    } catch (err) {
+      console.error('[customer-by-invoice-amount] error:', err.stack || err);
+      res.status(500).json({ error: `Local lookup failed: ${err.message || 'unknown error'}` });
+    }
+  });
+
+  // ── Sage 300 fallbacks ─────────────────────────────────────────────────
+  // The local datarecord only stores each customer's 5 most-recent unpaid
+  // invoices; older or paid invoices live only in Sage. These two endpoints
+  // hit Sage 300 directly via the BAT module's MSSQL pool. Used by the
+  // Customer Management lookup modals when the local search returns nothing.
+
+  // GET /api/customer-by-invoice/sage?invoice=IN12345&days=730
+  router.get('/api/customer-by-invoice/sage', requireAuth, async (req, res) => {
+    const raw = String(req.query.invoice || '').trim();
+    if (raw.length < 3) return res.status(400).json({ error: 'Invoice number too short.' });
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 730, 1), 3650);
+    // Build a tolerant LIKE — match either the raw value or its digit-tail
+    // (so "587925" finds "IN587925"). Escape SQL single-quotes.
+    const safe = raw.replace(/'/g, "''");
+    const digitsOnly = raw.replace(/[^0-9]/g, '');
+    // Date bound: AROBL grows to millions of rows over years. Default 2 years
+    // back; client can override with ?days=N up to 10 years.
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffInt = Number(cutoff.toISOString().slice(0, 10).replace(/-/g, ''));
+    try {
+      // AROBL holds AR open-balance rows for invoices (IN*) and receipts (PY*).
+      // One invoice may have multiple AROBL lines, so SUM amounts per (invoice,
+      // date, customer). Join ARCUS for name + current balance + national-
+      // account roll-up. Search is unbounded by row count — no 5-invoice cap
+      // like the sync engine has — but bounded by date for query speed.
+      const digitsClauseCte = digitsOnly && digitsOnly.length >= 3
+        ? `OR LTRIM(RTRIM(IDINVC)) LIKE '%${digitsOnly}'`
+        : '';
+      const result = await runCustomerSqlQuery(`
+        WITH agg AS (
+          SELECT
+            LTRIM(RTRIM(IDINVC))      AS invoice_number,
+            DATEINVC                  AS invoice_date,
+            LTRIM(RTRIM(IDCUST))      AS customer_number,
+            SUM(ISNULL(AMTINVCHC, 0)) AS invoice_amount
+          FROM AROBL
+          WHERE DATEINVC >= ${cutoffInt}
+            AND (LTRIM(RTRIM(IDINVC)) LIKE '%${safe}%' ${digitsClauseCte})
+          GROUP BY LTRIM(RTRIM(IDINVC)), DATEINVC, LTRIM(RTRIM(IDCUST))
+        )
+        SELECT TOP 200
+          agg.invoice_number,
+          agg.invoice_date,
+          agg.customer_number,
+          LTRIM(RTRIM(c.NAMECUST))                    AS customer_name,
+          agg.invoice_amount,
+          ISNULL(c.AMTBALDUEH, 0)                     AS outstanding_balance,
+          NULLIF(LTRIM(RTRIM(c.IDNATACCT)), '')       AS national_account
+        FROM agg
+        LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = agg.customer_number
+        ORDER BY agg.invoice_date DESC
+      `);
+      const matches = (result.recordset || []).map(r => ({
+        invoice_number: r.invoice_number || '',
+        invoice_date: r.invoice_date || null,
+        invoice_amount: Number(r.invoice_amount) || 0,
+        customer_number: r.customer_number || '',
+        customer_name: r.customer_name || '',
+        outstanding_balance: String(r.outstanding_balance || 0),
+        source: 'sage',
+      }));
+      res.json({ invoice: raw, matches, source: 'sage' });
+    } catch (err) {
+      console.error('[customer-by-invoice/sage] error:', err.message);
+      res.status(500).json({ error: `Sage lookup failed: ${err.message}` });
+    }
+  });
+
+  // GET /api/customer-by-invoice-amount/sage?amount=11710.66&tolerance=5&days=365
+  router.get('/api/customer-by-invoice-amount/sage', requireAuth, async (req, res) => {
+    const target = parseFloat(String(req.query.amount || '').replace(/[^0-9.\-]/g, ''));
+    const tolRaw = parseFloat(String(req.query.tolerance || '5'));
+    const tolerance = Number.isFinite(tolRaw) ? Math.max(0, tolRaw) : 5;
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 365, 1), 3650);
+    if (!Number.isFinite(target) || target <= 0) return res.status(400).json({ error: 'Invalid amount.' });
+    // Bound by date so the query stays index-friendly. INVDATE is YYYYMMDD INT.
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - days);
+    const cutoffInt = Number(cutoff.toISOString().slice(0, 10).replace(/-/g, ''));
+    const lower = (target - tolerance).toFixed(2);
+    const upper = (target + tolerance).toFixed(2);
+    try {
+      // Aggregate AROBL invoice lines per IDINVC, then filter by amount.
+      // Limit to invoices (IN*) — receipts (PY*) carry negative amounts and
+      // would also match the BETWEEN range with the wrong sign semantics.
+      const result = await runCustomerSqlQuery(`
+        WITH agg AS (
+          SELECT
+            LTRIM(RTRIM(IDINVC))      AS invoice_number,
+            DATEINVC                  AS invoice_date,
+            LTRIM(RTRIM(IDCUST))      AS customer_number,
+            SUM(ISNULL(AMTINVCHC, 0)) AS invoice_amount
+          FROM AROBL
+          WHERE DATEINVC >= ${cutoffInt}
+            AND LTRIM(RTRIM(IDINVC)) LIKE 'IN%'
+          GROUP BY LTRIM(RTRIM(IDINVC)), DATEINVC, LTRIM(RTRIM(IDCUST))
+        )
+        SELECT TOP 100
+          agg.invoice_number,
+          agg.invoice_date,
+          agg.customer_number,
+          LTRIM(RTRIM(c.NAMECUST)) AS customer_name,
+          agg.invoice_amount,
+          ISNULL(c.AMTBALDUEH, 0)  AS outstanding_balance,
+          ABS(agg.invoice_amount - ${target}) AS abs_diff
+        FROM agg
+        LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = agg.customer_number
+        WHERE agg.invoice_amount BETWEEN ${lower} AND ${upper}
+        ORDER BY ABS(agg.invoice_amount - ${target}) ASC, agg.invoice_date DESC
+      `);
+      const matches = (result.recordset || []).map(r => {
+        const amt = Number(r.invoice_amount) || 0;
+        const diff = Math.round((amt - target) * 100) / 100;
+        return {
+          invoice_number: r.invoice_number || '',
+          invoice_date: r.invoice_date || null,
+          invoice_amount: amt,
+          customer_number: r.customer_number || '',
+          customer_name: r.customer_name || '',
+          outstanding_balance: String(r.outstanding_balance || 0),
+          diff,
+          abs_diff: Math.abs(diff),
+          match_type: Math.abs(diff) < 0.005 ? 'exact' : 'fuzzy',
+          source: 'sage',
+        };
+      });
+      res.json({ amount: target, tolerance, days, matches, source: 'sage' });
+    } catch (err) {
+      console.error('[customer-by-invoice-amount/sage] error:', err.message);
+      res.status(500).json({ error: `Sage lookup failed: ${err.message}` });
+    }
+  });
+
   router.get(
     '/api/datarecord/:id/history',
     requireAuth,

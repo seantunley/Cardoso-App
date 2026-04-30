@@ -70,6 +70,28 @@ function redactEnvFile(envText) {
     .join('\n');
 }
 
+// Clean up any stale snapshot files left behind from a crashed previous run.
+// The /api/backup/download handler unlinks its temp file on success or stream
+// error, but a process kill mid-snapshot would leave one behind. Run once at
+// module load.
+(function cleanupStaleSnapshots() {
+  try {
+    const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
+    if (!fs.existsSync(tmpDir)) return;
+    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    let removed = 0;
+    for (const f of fs.readdirSync(tmpDir)) {
+      const p = path.join(tmpDir, f);
+      try {
+        if (fs.statSync(p).mtimeMs < cutoff) { fs.unlinkSync(p); removed++; }
+      } catch {}
+    }
+    if (removed > 0) console.log(`[backup] Cleaned up ${removed} stale snapshot file(s) from previous run`);
+  } catch (err) {
+    console.warn('[backup] Stale-snapshot cleanup failed:', err.message);
+  }
+})();
+
 export function createBackupRouter() {
   const router = express.Router();
 
@@ -219,27 +241,54 @@ export function createBackupRouter() {
   });
 
   // GET /api/backup/download
-  router.get('/api/backup/download', requireReportingToken, (req, res) => {
+  // Streams a CONSISTENT snapshot of the SQLite database to the caller (the
+  // hub backup puller, primarily). Previously this streamed the live db file
+  // off disk while it was open and being written to — resulting in backups
+  // that would fail PRAGMA integrity_check on the hub side and get renamed
+  // to .corrupt. Now we use SQLite's online backup API to write a snapshot
+  // to a temp file, stream that, then delete it. Safe under concurrent writes.
+  router.get('/api/backup/download', requireReportingToken, async (req, res) => {
+    const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
+    let tmpPath = null;
     try {
-      db.pragma('wal_checkpoint(TRUNCATE)');
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      tmpPath = path.join(tmpDir, `snapshot-${process.pid}-${ts}.db`);
 
-      const resolvedDbPath = path.resolve(dbPath);
+      // Online backup — safe even while the live db has writers attached.
+      // better-sqlite3's .backup() returns a Promise that resolves once the
+      // pages have been copied; the resulting file is fully checkpointed
+      // (no separate WAL needed).
+      await db.backup(tmpPath);
+
       const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0, 10)}.db`;
+      const size = fs.statSync(tmpPath).size;
 
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('Content-Length', String(size));
       res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
       res.setHeader('X-Backup-Timestamp', new Date().toISOString());
+      res.setHeader('X-Backup-Bytes', String(size));
 
-      const stream = fs.createReadStream(resolvedDbPath);
+      const stream = fs.createReadStream(tmpPath);
+      let cleaned = false;
+      const cleanup = () => {
+        if (cleaned) return; cleaned = true;
+        if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
+      };
       stream.on('error', (err) => {
         console.error('[backup] Stream error:', err.message);
-        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream database' });
+        cleanup();
+        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream snapshot' });
       });
+      stream.on('end', cleanup);
+      res.on('close', cleanup); // client disconnect
       stream.pipe(res);
     } catch (err) {
-      console.error('[backup] Error preparing backup:', err.message);
-      res.status(500).json({ error: err.message });
+      console.error('[backup] Snapshot/stream failed:', err.message);
+      if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
+      if (!res.headersSent) res.status(500).json({ error: err.message });
     }
   });
 

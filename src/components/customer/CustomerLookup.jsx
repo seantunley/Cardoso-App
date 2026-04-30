@@ -747,9 +747,8 @@ export default function CustomerLookup({
   return (
     <div className="space-y-4">
       {/* ── Search bar ── */}
-      <div className="relative rounded-xl border border-border bg-card p-5 shadow-xl">
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-indigo-500/50 to-transparent" />
-        <p className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Customer Lookup</p>
+      <div className="relative bg-card p-5" style={{ borderRadius: "2px" }}>
+        <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-3">Customer Lookup</p>
         <div className="flex gap-2.5">
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -789,8 +788,22 @@ export default function CustomerLookup({
           <Button
             onClick={() => handleLookup()}
             disabled={loading}
-            className="h-11 px-5 bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] border-0 transition-all"
-            style={{ borderRadius: "2px" }}
+            className="h-11 px-5 transition-all"
+            style={{
+              borderRadius: "2px",
+              border: "1px solid var(--phosphor)",
+              color: "var(--phosphor)",
+              background: "hsla(33, 95%, 55%, 0.10)",
+            }}
+            onMouseEnter={(e) => {
+              if (e.currentTarget.disabled) return;
+              e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.20)";
+              e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.10)";
+              e.currentTarget.style.boxShadow = "none";
+            }}
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -814,13 +827,17 @@ export default function CustomerLookup({
               closeAndReset();
             }
           }}
-          className={cn(
-            "max-w-[960px] w-full border-4 bg-background p-0 flex flex-col max-h-[90dvh]",
-            customer?.flag_color === "red" && "border-red-500",
-            customer?.flag_color === "green" && "border-green-500",
-            customer?.flag_color === "orange" && "border-orange-500",
-            (!customer?.flag_color || customer?.flag_color === "none") && "border-border"
-          )}
+          className="max-w-[960px] w-full p-0 flex flex-col max-h-[90dvh] border border-border bg-background"
+          style={{
+            // Customer flag colour is communicated via the left strip when set;
+            // unflagged customers get a neutral border (no amber accent).
+            borderLeftWidth: customer?.flag_color && customer.flag_color !== 'none' ? '3px' : '1px',
+            borderLeftColor: customer?.flag_color === 'red'    ? 'hsl(0 72% 50%)'
+                            : customer?.flag_color === 'orange' ? 'var(--phosphor)'
+                            : customer?.flag_color === 'green'  ? 'hsl(145 55% 45%)'
+                            : 'hsl(var(--border))',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+          }}
         >
           <DialogHeader className="sr-only">
             <DialogTitle>{customer?.customer_name || "Customer"}</DialogTitle>
@@ -1062,7 +1079,6 @@ export default function CustomerLookup({
                 <Button
                   onClick={handleApplyFlag}
                   disabled={isUpdatingFlag}
-                  className="bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)]"
                 >
                   {isUpdatingFlag ? (
                     <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Applying…</>

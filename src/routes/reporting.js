@@ -324,6 +324,16 @@ export function createReportingRouter({ requireAuth }) {
   const stmts = buildStatements(db);
   const router = express.Router();
 
+  // Memoize prepared statements by SQL text. better-sqlite3 Statement objects
+  // are reusable across calls; re-preparing the same string per request is
+  // wasted CPU when the SQL is identical.
+  const stmtCache = new Map();
+  const prep = (sql) => {
+    let s = stmtCache.get(sql);
+    if (!s) { s = db.prepare(sql); stmtCache.set(sql, s); }
+    return s;
+  };
+
   // GET /api/kpis
   router.get('/api/kpis', requireAuth, (req, res) => {
     try {
@@ -368,7 +378,7 @@ export function createReportingRouter({ requireAuth }) {
       let allRecords = [];
 
       if (isHub) {
-        sites = db.prepare(`
+        sites = prep(`
           SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
@@ -397,7 +407,9 @@ export function createReportingRouter({ requireAuth }) {
                r.customer_number, r.customer_name, r.sales_rep, r.account_type,
                r.outstanding_balance, r.unpaid_invoices, r.receipts,
                r.flag_color, r.flag_reason, r.auto_flagged, r.terms,
-               COALESCE(s.name, r.site_id) AS site_name
+               COALESCE(s.name, r.site_id) AS site_name,
+               COUNT(*) OVER() AS _total_count,
+               SUM(r.outstanding_balance_num) OVER() AS _total_sum
              FROM hub_records r
              LEFT JOIN hub_sites s ON s.id = r.site_id
              WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
@@ -409,18 +421,16 @@ export function createReportingRouter({ requireAuth }) {
         const params = siteFilter !== 'all' ? [balanceAmountGt, siteFilter] : [balanceAmountGt];
         if (!needsInMemoryFilter) {
           params.push(limit, (page - 1) * limit);
-          // Need a separate count for pagination metadata
-          const countStmt = db.prepare(`SELECT COUNT(*) as count FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ? ${siteWhere}`);
-          const countParams = siteFilter !== 'all' ? [balanceAmountGt, siteFilter] : [balanceAmountGt];
-          total = (countStmt.get(...countParams) || { count: 0 }).count;
-          // Sum for total outstanding across SQL-filtered set
-          const sumStmt = db.prepare(`SELECT COALESCE(SUM(r.outstanding_balance_num), 0) as total FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ? ${siteWhere}`);
-          filteredTotalOutstanding = parseFloat(sumStmt.get(...countParams).total || 0);
         }
-        allRecords = db.prepare(fetchSql).all(...params).map(expandDataRecord);
+        const rawRows = prep(fetchSql).all(...params);
+        if (!needsInMemoryFilter && rawRows.length > 0) {
+          total = rawRows[0]._total_count || 0;
+          filteredTotalOutstanding = parseFloat(rawRows[0]._total_sum || 0);
+        }
+        allRecords = rawRows.map(({ _total_count, _total_sum, ...row }) => expandDataRecord(row));
 
       } else {
-        sites = db.prepare(`
+        sites = prep(`
           SELECT DISTINCT ? AS site_name FROM datarecord
           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
             AND outstanding_balance != '0'
@@ -443,7 +453,9 @@ export function createReportingRouter({ requireAuth }) {
                     outstanding_balance, unpaid_invoices, receipts,
                     flag_color, flag_reason, auto_flagged, terms,
                     data, local_fields,
-                    ? AS site_name
+                    ? AS site_name,
+                    COUNT(*) OVER() AS _total_count,
+                    SUM(outstanding_balance_num) OVER() AS _total_sum
              FROM datarecord
              WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
                AND outstanding_balance != '0'
@@ -453,13 +465,12 @@ export function createReportingRouter({ requireAuth }) {
         const params = needsInMemoryFilter
           ? [SITE_NAME, balanceAmountGt]
           : [SITE_NAME, balanceAmountGt, limit, (page - 1) * limit];
-        if (!needsInMemoryFilter) {
-          const countStmt = db.prepare(`SELECT COUNT(*) as count FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`);
-          total = (countStmt.get(balanceAmountGt) || { count: 0 }).count;
-          const sumStmt = db.prepare(`SELECT COALESCE(SUM(outstanding_balance_num), 0) as total FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`);
-          filteredTotalOutstanding = parseFloat(sumStmt.get(balanceAmountGt).total || 0);
+        const rawRows = prep(fetchSql).all(...params);
+        if (!needsInMemoryFilter && rawRows.length > 0) {
+          total = rawRows[0]._total_count || 0;
+          filteredTotalOutstanding = parseFloat(rawRows[0]._total_sum || 0);
         }
-        allRecords = db.prepare(fetchSql).all(...params)
+        allRecords = rawRows
           .map(hydrateSalesRepAndAccountType)
           .map(expandDataRecord);
       }
@@ -494,10 +505,10 @@ export function createReportingRouter({ requireAuth }) {
         // Lightweight separate fetch — only needs the columns required to
         // hydrate sales_rep from JSON blobs.
         repSource = isHub
-          ? db.prepare(
+          ? prep(
               `SELECT r.sales_rep FROM hub_records r WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ?`
             ).all(balanceAmountGt)
-          : db.prepare(
+          : prep(
               `SELECT sales_rep, data, local_fields FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`
             ).all(balanceAmountGt).map(hydrateSalesRepAndAccountType);
       }
@@ -538,7 +549,7 @@ export function createReportingRouter({ requireAuth }) {
         const dataParams = [minBalance];
         let whereSite = '';
         if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; dataParams.push(siteFilter); }
-        sites = db.prepare(
+        sites = prep(
           `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
            WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
@@ -546,7 +557,7 @@ export function createReportingRouter({ requireAuth }) {
              AND r.outstanding_balance_num > ?
            ORDER BY site_name`
         ).all(minBalance).map(r => r.site_name).filter(Boolean);
-        records = db.prepare(
+        records = prep(
           `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type, r.terms,
                   r.outstanding_balance, r.unpaid_invoices, r.receipts,
                   r.flag_color, r.flag_reason, r.auto_flagged,
@@ -556,11 +567,12 @@ export function createReportingRouter({ requireAuth }) {
              AND r.outstanding_balance != '0'
              AND r.outstanding_balance_num > ?
              ${whereSite}
-           ORDER BY r.outstanding_balance_num DESC`
+           ORDER BY r.outstanding_balance_num DESC
+           LIMIT 5000`
         ).all(...dataParams).map(expandDataRecord);
       } else {
         sites = [SITE_NAME];
-        records = db.prepare(
+        records = prep(
           `SELECT customer_number, customer_name, sales_rep, account_type, terms,
                   outstanding_balance, unpaid_invoices, receipts,
                   flag_color, flag_reason, auto_flagged,
@@ -570,9 +582,11 @@ export function createReportingRouter({ requireAuth }) {
            WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
              AND outstanding_balance != '0'
              AND outstanding_balance_num > ?
-           ORDER BY outstanding_balance_num DESC`
+           ORDER BY outstanding_balance_num DESC
+           LIMIT 5000`
         ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
       }
+      const truncated = records.length === 5000;
 
       // Filter by sales rep / account type in JS (these can come from JSON blobs)
       const filtered = records.filter(r => {
@@ -614,6 +628,8 @@ export function createReportingRouter({ requireAuth }) {
           bucket_counts: bucketCounts,
         },
         filters: { sites, sales_reps: salesReps, account_types: accountTypes },
+        truncated,
+        truncated_at: truncated ? 5000 : null,
         generated_at: new Date().toISOString(),
         site_name: SITE_NAME,
         hub_mode: isHub,
@@ -633,7 +649,7 @@ export function createReportingRouter({ requireAuth }) {
     try {
       let records;
       if (isHub) {
-        records = db.prepare(
+        records = prep(
           `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type,
                   r.outstanding_balance, r.flag_color, r.unpaid_invoices,
                   COALESCE(s.name, r.site_id) AS site_name
@@ -643,7 +659,7 @@ export function createReportingRouter({ requireAuth }) {
              AND r.outstanding_balance_num > ?`
         ).all(minBalance).map(expandDataRecord);
       } else {
-        records = db.prepare(
+        records = prep(
           `SELECT customer_number, customer_name, sales_rep, account_type,
                   outstanding_balance, flag_color, unpaid_invoices,
                   data, local_fields,
@@ -704,7 +720,7 @@ export function createReportingRouter({ requireAuth }) {
     try {
       const yearWhere = year ? 'WHERE r.year = ?' : '';
       const params = year ? [year] : [];
-      const rows = db.prepare(
+      const rows = prep(
         `SELECT r.year, r.week_number,
                 r.supplier_total, r.supplier_discount, r.supplier_delivery, r.supplier_pricing,
                 COALESCE(c.total, r.sage_total) AS sage_total,
@@ -772,7 +788,7 @@ export function createReportingRouter({ requireAuth }) {
         total_exception_amount:  weeks.reduce((s, w) => s + w.exc_amount, 0),
       };
 
-      const yearsRow = db.prepare('SELECT DISTINCT year FROM bat_reconciliations ORDER BY year DESC').all();
+      const yearsRow = prep('SELECT DISTINCT year FROM bat_reconciliations ORDER BY year DESC').all();
       res.json({ weeks, summary, year, available_years: yearsRow.map(r => r.year), generated_at: new Date().toISOString() });
     } catch (err) {
       console.error('[reporting] bat-weekly error:', err);
@@ -785,7 +801,7 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/reports/bat-ytd', requireAuth, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : new Date().getFullYear();
     try {
-      const supplierAgg = db.prepare(
+      const supplierAgg = prep(
         `SELECT
            COALESCE(SUM(supplier_discount), 0) AS discount,
            COALESCE(SUM(supplier_delivery), 0) AS delivery,
@@ -794,7 +810,7 @@ export function createReportingRouter({ requireAuth }) {
            COUNT(*) AS week_count
          FROM bat_reconciliations WHERE year = ?`
       ).get(year);
-      const sageAgg = db.prepare(
+      const sageAgg = prep(
         `SELECT
            COALESCE(SUM(discount), 0) AS discount,
            COALESCE(SUM(delivery), 0) AS delivery,
@@ -813,7 +829,7 @@ export function createReportingRouter({ requireAuth }) {
         return { ...f, variance, variance_pct: variancePct };
       });
 
-      const yearsRow = db.prepare(`SELECT DISTINCT year FROM bat_reconciliations UNION SELECT DISTINCT year FROM bat_sage_week_cache ORDER BY year DESC`).all();
+      const yearsRow = prep(`SELECT DISTINCT year FROM bat_reconciliations UNION SELECT DISTINCT year FROM bat_sage_week_cache ORDER BY year DESC`).all();
       res.json({
         year,
         fees,
@@ -839,7 +855,7 @@ export function createReportingRouter({ requireAuth }) {
     try {
       const yearJoin = year ? 'AND r.year = ?' : '';
       const params = year ? [year] : [];
-      const rows = db.prepare(
+      const rows = prep(
         `SELECT e.exception_reason, e.store_name, e.order_amount,
                 r.year, r.week_number
          FROM bat_invoice_extractions e
@@ -876,7 +892,7 @@ export function createReportingRouter({ requireAuth }) {
       const byReason = Array.from(reasonMap.values()).sort((a, b) => b.amount - a.amount);
       const byStore  = Array.from(storeMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 25);
 
-      const yearsRow = db.prepare(
+      const yearsRow = prep(
         `SELECT DISTINCT r.year FROM bat_invoice_extractions e LEFT JOIN bat_reconciliations r ON r.id = e.reconciliation_id WHERE e.is_exception = 1 AND r.year IS NOT NULL ORDER BY r.year DESC`
       ).all();
 
@@ -900,37 +916,72 @@ export function createReportingRouter({ requireAuth }) {
     const isHub = process.env.HUB_MODE === 'true';
     const topN = Math.min(Math.max(parseInt(req.query.top, 10) || 25, 5), 200);
     try {
-      const sql = isHub
-        ? `SELECT i.item_number, i.item_description, i.qty_on_hand, i.last_cost, i.price, i.commodity, i.inventory_value, COALESCE(s.name, i.site_id) AS site_name FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id`
-        : `SELECT item_number, item_description, qty_on_hand, last_cost, price, commodity, inventory_value, ? AS site_name FROM inventoryrecord`;
-      const rows = isHub ? db.prepare(sql).all() : db.prepare(sql).all(SITE_NAME);
-
+      // Two cheap aggregate queries instead of pulling every SKU into JS:
+      //   1. by-commodity rollup (one row per commodity)
+      //   2. top-N highest-value items (LIMIT N)
+      // The previous implementation loaded every row + ran an O(n log n) JS
+      // sort on potentially 10K+ SKUs.
       const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '').replace(/\s/g, '')); return Number.isFinite(n) ? n : 0; };
-      const enriched = rows.map(r => ({
+      const valueExpr = `COALESCE(NULLIF(CAST(REPLACE(REPLACE(COALESCE(inventory_value, ''), ',', ''), ' ', '') AS REAL), 0),
+                                  CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)
+                                  * CAST(REPLACE(REPLACE(COALESCE(last_cost, '0'), ',', ''), ' ', '') AS REAL))`;
+      const qtyExpr = `CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)`;
+      const commoditySql = isHub
+        ? `SELECT
+             COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
+             COUNT(*)         AS item_count,
+             SUM(${valueExpr}) AS total_value,
+             SUM(${qtyExpr})   AS total_qty
+           FROM hub_inventory
+           GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
+           ORDER BY total_value DESC`
+        : `SELECT
+             COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
+             COUNT(*)         AS item_count,
+             SUM(${valueExpr}) AS total_value,
+             SUM(${qtyExpr})   AS total_qty
+           FROM inventoryrecord
+           GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
+           ORDER BY total_value DESC`;
+      const byCommodity = prep(commoditySql).all().map(r => ({
+        commodity: r.commodity,
+        item_count: r.item_count,
+        total_value: num(r.total_value),
+        total_qty: num(r.total_qty),
+      }));
+
+      const topItemsSql = isHub
+        ? `SELECT i.item_number, i.item_description, i.qty_on_hand, i.last_cost, i.price,
+                  COALESCE(NULLIF(TRIM(i.commodity), ''), '— Uncategorised') AS commodity,
+                  ${valueExpr.replace(/\binventory_value\b/g, 'i.inventory_value').replace(/\bqty_on_hand\b/g, 'i.qty_on_hand').replace(/\blast_cost\b/g, 'i.last_cost')} AS inventory_value,
+                  COALESCE(s.name, i.site_id) AS site_name
+           FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+           ORDER BY inventory_value DESC
+           LIMIT ?`
+        : `SELECT item_number, item_description, qty_on_hand, last_cost, price,
+                  COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
+                  ${valueExpr} AS inventory_value,
+                  ? AS site_name
+           FROM inventoryrecord
+           ORDER BY inventory_value DESC
+           LIMIT ?`;
+      const topItems = (isHub ? prep(topItemsSql).all(topN) : prep(topItemsSql).all(SITE_NAME, topN)).map(r => ({
         item_number: r.item_number,
         item_description: r.item_description,
         qty_on_hand: num(r.qty_on_hand),
         last_cost: num(r.last_cost),
         price: num(r.price),
-        commodity: (r.commodity || '— Uncategorised').toString().trim() || '— Uncategorised',
-        inventory_value: num(r.inventory_value) || (num(r.qty_on_hand) * num(r.last_cost)),
+        commodity: r.commodity,
+        inventory_value: num(r.inventory_value),
         site_name: r.site_name,
       }));
 
-      const commodityMap = new Map();
-      let totalValue = 0;
-      for (const it of enriched) {
-        let c = commodityMap.get(it.commodity);
-        if (!c) { c = { commodity: it.commodity, item_count: 0, total_value: 0, total_qty: 0 }; commodityMap.set(it.commodity, c); }
-        c.item_count++; c.total_value += it.inventory_value; c.total_qty += it.qty_on_hand;
-        totalValue += it.inventory_value;
-      }
-      const byCommodity = Array.from(commodityMap.values()).sort((a, b) => b.total_value - a.total_value);
-      const topItems = enriched.slice().sort((a, b) => b.inventory_value - a.inventory_value).slice(0, topN);
+      const totalValue = byCommodity.reduce((s, c) => s + c.total_value, 0);
+      const totalItems = byCommodity.reduce((s, c) => s + c.item_count, 0);
 
       res.json({
         summary: {
-          total_items: enriched.length,
+          total_items: totalItems,
           total_value: totalValue,
           distinct_commodities: byCommodity.length,
         },
@@ -942,7 +993,7 @@ export function createReportingRouter({ requireAuth }) {
       });
     } catch (err) {
       console.error('[reporting] inventory-value error:', err);
-      res.status(500).json({ error: 'Failed to fetch inventory report' });
+      res.status(500).json({ error: `Failed to fetch inventory report: ${err.message || 'unknown'}` });
     }
   });
 
@@ -968,7 +1019,7 @@ export function createReportingRouter({ requireAuth }) {
       let rows;
       if (isHub) {
         const hubWhere = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-        rows = db.prepare(
+        rows = prep(
           `SELECT i.id, i.site_id, COALESCE(s.name, i.site_id) AS site_name,
                   i.item_number, i.item_description, i.qty_on_hand, i.last_cost,
                   i.price_list, i.price, i.stocking_uom, i.commodity, i.inventory_value, i.terms, i.synced_at
@@ -977,7 +1028,7 @@ export function createReportingRouter({ requireAuth }) {
            ${hubWhere} ORDER BY i.item_number ASC LIMIT ?`
         ).all(...params);
       } else {
-        rows = db.prepare(
+        rows = prep(
           `SELECT * FROM inventoryrecord ${where} ORDER BY item_number ASC LIMIT ?`
         ).all(...params);
       }
@@ -1032,14 +1083,14 @@ export function createReportingRouter({ requireAuth }) {
     const offset = parseInt(req.query.offset) || 0;
     let rows;
     if (since) {
-      rows = db.prepare(
+      rows = prep(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
          FROM datarecord WHERE updated_date > ? ORDER BY updated_date ASC LIMIT ? OFFSET ?`
       ).all(since, limit, offset).map(hydrateSalesRepAndAccountType).map(({ data, ...row }) => row);
     } else {
-      rows = db.prepare(
+      rows = prep(
         `SELECT id, customer_number, customer_name, flag_color, flag_reason, flag_created_by,
                 outstanding_balance, unpaid_invoices, receipts, auto_flagged, terms,
                 updated_date, synced_at, source_table, source_id, sales_rep, account_type, data, local_fields
@@ -1097,7 +1148,7 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/reporting/bat-summary', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       // Per-week base rows (year, week) joined with sage cache so totals are always live.
-      const rows = db.prepare(
+      const rows = prep(
         `SELECT r.year, r.week_number,
                 COALESCE(r.supplier_total, 0) AS supplier_total,
                 COALESCE(c.total, r.sage_total, 0) AS sage_total,
@@ -1121,7 +1172,7 @@ export function createReportingRouter({ requireAuth }) {
         if (r.created_at && (!last_upload_at || r.created_at > last_upload_at)) last_upload_at = r.created_at;
       }
 
-      const exc = db.prepare(
+      const exc = prep(
         `SELECT COUNT(*) AS c, COALESCE(SUM(order_amount), 0) AS a
          FROM bat_invoice_extractions WHERE is_exception = 1`
       ).get();
@@ -1151,7 +1202,7 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/reporting/inventory', reportingRateLimiter, requireReportingToken, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;
-    const rows = db.prepare(
+    const rows = prep(
       `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, terms, updated_date
        FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
     ).all(limit, offset);

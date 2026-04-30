@@ -388,7 +388,9 @@ async function runHubBackupPull() {
     await Promise.allSettled(batch.map(async (site) => {
       try {
         const controller = new AbortController();
-        const hardTimeout = setTimeout(() => controller.abort(), 60000);
+        // 5 min cap — DB snapshots can run several MB over Tailscale; the
+        // previous 60 s ceiling routinely killed legitimate transfers.
+        const hardTimeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
         const upstream = await fetch(`${site.url}/api/backup/download`, {
           headers: { 'x-reporting-token': site.token || '' },
           signal: controller.signal,
@@ -411,6 +413,34 @@ async function runHubBackupPull() {
         writeFileSync(file, buf);
         const integrity = checkBackupIntegrity(site.id, file);
         console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
+
+        // Also pull the site's .env config alongside the db so disaster
+        // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
+        // will return 403 — log and continue. Whether secrets are redacted
+        // depends on the site's BACKUP_CONFIG_EXPORT_MODE setting.
+        try {
+          const envCtrl = new AbortController();
+          const envTimeout = setTimeout(() => envCtrl.abort(), 30_000);
+          const envRes = await fetch(`${site.url}/api/backup/config`, {
+            headers: { 'x-reporting-token': site.token || '' },
+            signal: envCtrl.signal,
+          });
+          clearTimeout(envTimeout);
+          if (envRes.ok) {
+            const envText = await envRes.text();
+            const mode = envRes.headers.get('x-backup-config-mode') || 'unknown';
+            const envFile = path.join(dir, `config-${site.id}-${ts}.env`);
+            writeFileSync(envFile, envText, 'utf8');
+            console.log(`[HUB BACKUP] ${site.name}: saved .env config (${envText.length} bytes, mode=${mode})`);
+          } else if (envRes.status === 403) {
+            console.log(`[HUB BACKUP] ${site.name}: .env export disabled on site (BACKUP_CONFIG_EXPORT_MODE=disabled)`);
+          } else {
+            console.warn(`[HUB BACKUP] ${site.name}: .env fetch HTTP ${envRes.status}`);
+          }
+        } catch (envErr) {
+          // Don't let a config-pull failure mark the whole site backup as failed.
+          console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed: ${envErr.message}`);
+        }
       } catch (err) {
         logError('hub.backupPull', err, { site_name: site.name, site_id: site.id });
         try {

@@ -152,7 +152,12 @@ export default function AgedDebtors() {
         <>
           {/* Summary tiles */}
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">
-            <SummaryTile label="Customers" value={summary.total_customers.toLocaleString('en-ZA')} accent="var(--phosphor)" />
+            <SummaryTile
+              label="Customers"
+              value={summary.total_customers.toLocaleString('en-ZA')}
+              sub={data?.truncated ? `truncated at ${data.truncated_at?.toLocaleString('en-ZA') || ''}` : undefined}
+              accent={data?.truncated ? 'hsl(0 72% 50%)' : 'var(--phosphor)'}
+            />
             <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
             <SummaryTile label="Current (<7d)" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets.current)}</>} sub={`${summary.bucket_counts.current} cust`} accent={BUCKET_META.current.color} />
             <SummaryTile label="14–20 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['14-20'])}</>} sub={`${summary.bucket_counts['14-20']} cust`} accent={BUCKET_META['14-20'].color} />

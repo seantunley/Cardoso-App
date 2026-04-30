@@ -786,7 +786,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               type="button"
               onClick={handleImport}
               disabled={isImporting}
-              className="bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)]"
+              
             >
               {isImporting ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing...</>
