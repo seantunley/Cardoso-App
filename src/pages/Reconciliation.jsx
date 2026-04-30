@@ -13,8 +13,10 @@ import InvoiceMatching from '@/components/reconciliation/InvoiceMatching';
 import ReconciliationSummary from '@/components/reconciliation/ReconciliationSummary';
 import ExtractionProgress from '@/components/reconciliation/ExtractionProgress';
 import DashboardOverview from '@/components/reconciliation/DashboardOverview';
+import { useColorScheme } from '@/lib/useColorScheme';
 
 export default function Reconciliation() {
+  const colorScheme = useColorScheme();
   const [view, setView] = useState('dashboard'); // dashboard | detail
   const [dashTab, setDashTab] = useState('archive'); // archive | upload
   const [reconciliations, setReconciliations] = useState([]);
@@ -33,8 +35,26 @@ export default function Reconciliation() {
   const [crossrefYear, setCrossrefYear] = useState('all');
   const [crossrefWeek, setCrossrefWeek] = useState('all');
   const [crossrefInvoice, setCrossrefInvoice] = useState('');
-  const [weekCompYear, setWeekCompYear] = useState(String(new Date().getFullYear()));
-  const [archiveYear, setArchiveYear] = useState(String(new Date().getFullYear()));
+  // Page-level viewing year — drives which reconciliations show up in the
+  // archive list, the per-week comparison, and (eventually) the dashboard
+  // summary tiles. Persisted in localStorage so a page reload doesn't reset
+  // back to the current calendar year mid-session.
+  const [viewingYear, setViewingYear] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('bat.viewingYear');
+      if (saved) return saved;
+    } catch {}
+    return String(new Date().getFullYear());
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('bat.viewingYear', viewingYear); } catch {}
+  }, [viewingYear]);
+  // Legacy aliases — kept so existing JSX bindings still work. Both feed off
+  // the same viewingYear so the user only sees one selector.
+  const weekCompYear = viewingYear;
+  const setWeekCompYear = setViewingYear;
+  const archiveYear = viewingYear;
+  const setArchiveYear = setViewingYear;
   const [uploadOpen, setUploadOpen] = useState(false);
   const [cardosoOpen, setCardosoOpen] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
@@ -94,12 +114,13 @@ export default function Reconciliation() {
     // cardoso-match is heavy (cross-table fuzzy match across every extraction)
     // and only consumed by the cross-reference tab, so it's fetched lazily on
     // demand rather than blocking the initial dashboard render.
+    const yearParam = viewingYear && viewingYear !== 'all' ? `?year=${encodeURIComponent(viewingYear)}` : '';
     await Promise.all([
-      safeFetch('dashboard', '/api/bat/dashboard', (data) => setDashboardData(data)),
+      safeFetch('dashboard', `/api/bat/dashboard${yearParam}`, (data) => setDashboardData(data)),
       safeFetch('reconciliations', '/api/bat/reconciliations', (data) => setReconciliations(data.reconciliations || [])),
       safeFetch('week-status', '/api/bat/week-status', (data) => setWeekStatus(data)),
     ]);
-  }, []);
+  }, [viewingYear]);
 
   // Lazy-load the heavy cross-reference match only when the user opens that tab.
   useEffect(() => {
@@ -427,6 +448,50 @@ export default function Reconciliation() {
           </div>
           {view === 'dashboard' && (
             <div className="flex items-center gap-2 flex-wrap">
+              {(() => {
+                const currentYear = new Date().getFullYear();
+                const knownYears = Array.from(new Set(reconciliations.map(r => r.year).filter(Boolean)));
+                // Always offer current year + an "all" option so a fresh install
+                // can still flip the selector even before the first upload.
+                const years = Array.from(new Set([...knownYears, currentYear])).sort((a, b) => b - a);
+                return (
+                  <div
+                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium mr-4"
+                    style={{
+                      color: 'var(--phosphor)',
+                      background: 'hsla(33, 95%, 55%, 0.08)',
+                      border: '1px solid hsla(33, 95%, 55%, 0.5)',
+                      borderRadius: '12px',
+                      boxShadow: '0 0 0 1px transparent, 0 0 12px hsla(33,95%,55%,0.18)',
+                    }}
+                    title="Filter the BAT dashboard, archive and week comparison to one calendar year. Saved between sessions."
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="leading-none">Year</span>
+                    <select
+                      value={viewingYear}
+                      onChange={(e) => setViewingYear(e.target.value)}
+                      className="font-mono text-[11px] uppercase tracking-[0.22em] focus:outline-none cursor-pointer leading-none"
+                      style={{
+                        colorScheme,
+                        color: 'var(--phosphor)',
+                        background: 'transparent',
+                        border: 0,
+                        margin: 0,
+                        padding: 0,
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                        backgroundImage: 'none',
+                      }}
+                    >
+                      <option value="all">All</option>
+                      {years.map(y => <option key={y} value={String(y)}>{y}</option>)}
+                    </select>
+                    <ChevronDown className="h-3 w-3 shrink-0 opacity-70 -ml-1" strokeWidth={2} />
+                  </div>
+                );
+              })()}
               <PhosphorButton
                 onClick={() => setUploadOpen(true)}
                 icon={Upload}
@@ -605,15 +670,8 @@ export default function Reconciliation() {
                       Filters
                     </div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <select
-                        value={weekCompYear}
-                        onChange={(e) => setWeekCompYear(e.target.value)}
-                        className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '12px' }}
-                      >
-                        <option value="all">All years</option>
-                        {allYears.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
+                      {/* Year selector lives in the page header now — controls
+                          this section via viewingYear (see weekCompYear alias). */}
                       <button
                         type="button"
                         onClick={() => setHideBalanced((v) => !v)}
@@ -883,16 +941,8 @@ export default function Reconciliation() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Year</span>
-                    <select
-                      value={archiveYear}
-                      onChange={(e) => setArchiveYear(e.target.value)}
-                      className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                      style={{ borderRadius: '12px' }}
-                    >
-                      <option value="all">All years</option>
-                      {archiveYears.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
+                    {/* Year now lives in the page header — drives this list via
+                        the archiveYear alias on viewingYear. */}
                     <button
                       onClick={() => setHideMatched(!hideMatched)}
                       className="inline-flex items-center gap-2 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"

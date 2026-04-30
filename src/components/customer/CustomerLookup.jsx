@@ -762,23 +762,32 @@ export default function CustomerLookup({
               style={{ borderRadius: "12px" }}
             />
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 border border-border bg-card shadow-xl overflow-hidden" style={{ borderRadius: "12px" }}>
+              <div
+                className="absolute left-0 right-0 top-full z-50 mt-1.5 overflow-hidden bg-background"
+                style={{
+                  borderRadius: "12px",
+                  border: "1px solid hsl(var(--border))",
+                  boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px hsla(33,95%,55%,0.12), 0 0 24px hsla(33,95%,55%,0.08)",
+                }}
+              >
                 {suggestions.map((s, idx) => (
                   <button
                     key={s.record.id ?? idx}
                     onClick={() => handleSuggestionClick(s)}
                     className={cn(
-                      "w-full border-b border-border/60 px-4 py-2.5 text-left last:border-0 transition-colors relative",
+                      "w-full border-b border-border/60 px-4 py-3 text-left last:border-0 transition-colors relative",
                       idx === selectedSuggestionIndex
-                        ? "bg-accent/10 text-foreground"
-                        : "hover:bg-muted text-foreground"
+                        ? "bg-accent/15 text-foreground"
+                        : "hover:bg-muted/40 text-foreground"
                     )}
                   >
                     {idx === selectedSuggestionIndex && (
                       <span className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.4)" }} />
                     )}
-                    <div className="text-sm font-medium">{s.customerName}</div>
-                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground mt-0.5">#{s.customerNumber}</div>
+                    <div className="text-sm font-semibold leading-tight">{s.customerName || <span className="text-muted-foreground italic">(no name)</span>}</div>
+                    <div className="font-mono text-[11px] tracking-wider text-muted-foreground mt-1">
+                      {s.customerNumber ? `#${s.customerNumber}` : '—'}
+                    </div>
                   </button>
                 ))}
               </div>

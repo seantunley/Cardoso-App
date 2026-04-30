@@ -711,7 +711,7 @@ export default function CustomerSearch() {
 
         {/* Customer Lookup + Last Sync side by side */}
         <div className="flex flex-col sm:flex-row gap-4 items-stretch">
-          <div className="flex-1 bg-card border border-border min-w-0 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+          <div className="flex-1 bg-card border border-border min-w-0" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
             <CustomerLookup
               currentUser={currentUser}
               onRecordSelect={setSelectedRecord}

@@ -632,17 +632,36 @@ function parseAmount(val) {
 
 // ── Sage 300 Queries ─────────────────────────────────────────────────────────
 
-export async function querySageCreditNotes(weekNumber) {
+export async function querySageCreditNotes(weekNumber, year) {
   const sagePool = await getSagePool();
+  // APIBC join is LEFT so credit-note lines whose batch header has been
+  // purged / archived still appear (they were dropped silently before,
+  // making per-week totals diverge from the cached week totals).
+  //
+  // Year filter: WEEK NN appears in the description verbatim, but the
+  // calendar year only lives on h.DATEINVC (an INT YYYYMMDD). We bound
+  // h.DATEINVC to a window around the supplied year so a Week 7 / 2026
+  // recon never picks up Week 7 / 2025 lines. Window is generous
+  // (Dec of prev year → Jan of next year) to handle ISO-week year
+  // rollover at the edges, then we trust the WEEK NN match to disambiguate.
+  const wk = String(weekNumber).padStart(2, '0');
+  const yr = parseInt(year, 10);
+  const yearLow  = yr ? (yr - 1) * 10000 + 1201 : 0;        // Dec 1 of previous year
+  const yearHigh = yr ? (yr + 1) * 10000 + 131  : 99991231; // Jan 31 of next year
+  const yearClause = yr
+    ? `AND h.DATEINVC BETWEEN ${yearLow} AND ${yearHigh}`
+    : '';
+
   const result = await sagePool.request().query(`
     SELECT
-      bc.CNTBTCH AS batch_number,
-      LTRIM(RTRIM(bc.BTCHDESC)) AS batch_description,
+      h.CNTBTCH AS batch_number,
+      LTRIM(RTRIM(COALESCE(bc.BTCHDESC, ''))) AS batch_description,
       CASE bc.BTCHSTTS
         WHEN 1 THEN 'Open'
         WHEN 3 THEN 'Posted'
         WHEN 4 THEN 'Deleted'
         WHEN 7 THEN 'Posted'
+        WHEN NULL THEN 'Archived'
         ELSE 'Unknown (' + CAST(bc.BTCHSTTS AS VARCHAR) + ')'
       END AS batch_status,
       LTRIM(RTRIM(h.IDVEND)) AS vendor_number,
@@ -660,14 +679,16 @@ export async function querySageCreditNotes(weekNumber) {
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
         ELSE 'OTHER'
       END AS fee_type,
       d.AMTDISTHC AS line_amount
-    FROM APIBC bc
-    INNER JOIN APIBH h ON h.CNTBTCH = bc.CNTBTCH
+    FROM APIBH h
     INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
+    LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
     WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
-      AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${String(weekNumber).padStart(2, '0')}%'
+      AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${wk}%'
+      ${yearClause}
     ORDER BY
       CASE
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 1
@@ -675,7 +696,7 @@ export async function querySageCreditNotes(weekNumber) {
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 3
         ELSE 4
       END,
-      bc.CNTBTCH
+      h.CNTBTCH
   `);
   return result.recordset || [];
 }
@@ -2036,20 +2057,41 @@ async function matchExtractedInvoices(reconId) {
 
 // ── Dashboard Aggregates ─────────────────────────────────────────────────────
 
-export function getDashboardData() {
-  const reconciliations = listReconciliations();
-  // totalSupplier — single SQL aggregate against bat_reconciliations.
+export function getDashboardData(year) {
+  // year may be a number, a numeric string, "all", or undefined. Anything
+  // that isn't a valid year falls through to "all-time" (no scoping).
+  const yr = Number.parseInt(year, 10);
+  const scoped = Number.isFinite(yr) && yr > 1900 && yr < 9999 ? yr : null;
+  const yearWhere = scoped ? 'WHERE year = ?' : '';
+  const yearJoin = scoped
+    ? `WHERE EXISTS (
+         SELECT 1 FROM bat_reconciliations r
+         WHERE r.id = bat_invoice_extractions.reconciliation_id
+           AND r.year = ?
+       )`
+    : '';
+  const yearArg = scoped ? [scoped] : [];
+
+  const reconciliations = listReconciliations()
+    .filter(r => !scoped || r.year === scoped);
+
+  // totalSupplier — single SQL aggregate against bat_reconciliations, scoped.
   let totalSupplier = 0;
   try {
-    const row = db.prepare('SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations').get();
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations ${yearWhere}`
+    ).get(...yearArg);
     totalSupplier = row?.s || 0;
   } catch {}
-  // totalSage = sum of all Sage credit notes for the CURRENT YEAR, regardless
-  // of whether we've uploaded a supplier file for that week.
+  // totalSage = sum of all Sage credit notes for the chosen year (or all-time
+  // if "All" picked). Bypasses bat_reconciliations entirely so weeks without
+  // an uploaded supplier sheet still count.
   let totalSage = 0;
   try {
-    const currentYear = new Date().getFullYear();
-    const row = db.prepare('SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?').get(currentYear);
+    const sql = scoped
+      ? 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?'
+      : 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache';
+    const row = db.prepare(sql).get(...yearArg);
     totalSage = row?.s || 0;
   } catch {}
   const totalVariance = totalSupplier - totalSage;
@@ -2059,12 +2101,17 @@ export function getDashboardData() {
   // correlated EXISTS subqueries with non-sargable string normalization.
   let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
   try {
-    const podRow = db.prepare('SELECT COUNT(*) AS c FROM bat_invoice_extractions').get();
+    const podRow = db.prepare(
+      `SELECT COUNT(*) AS c FROM bat_invoice_extractions ${yearJoin}`
+    ).get(...yearArg);
     totalPods = podRow?.c || 0;
     const cardosoAmounts = buildCardosoLookup();
     const extRows = db.prepare(
-      "SELECT extracted_invoice, order_amount FROM bat_invoice_extractions WHERE extracted_invoice IS NOT NULL"
-    ).all();
+      `SELECT extracted_invoice, order_amount
+         FROM bat_invoice_extractions
+        WHERE extracted_invoice IS NOT NULL
+        ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}`
+    ).all(...yearArg);
     for (const e of extRows) {
       const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
       const cAmount = cardosoAmounts.get(key);
@@ -2085,14 +2132,16 @@ export function getDashboardData() {
       SELECT COUNT(*) AS c, COALESCE(SUM(order_amount), 0) AS a
       FROM bat_invoice_extractions
       WHERE is_exception = 1
-    `).get();
+      ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}
+    `).get(...yearArg);
     totalExceptionsCount = row?.c || 0;
     totalExceptionsAmount = row?.a || 0;
     const rawRows = db.prepare(`
       SELECT exception_reason, order_amount
       FROM bat_invoice_extractions
       WHERE is_exception = 1
-    `).all();
+      ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}
+    `).all(...yearArg);
     // Normalize: lowercase, strip punctuation, collapse whitespace, drop duplicate words.
     // Lets "Incorrect delivery status/quantity" and "Incorrect delivery status/Incorrect quantity"
     // collapse to the same key.

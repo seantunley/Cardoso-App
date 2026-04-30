@@ -105,18 +105,31 @@ const tableConfigs = JSON.stringify({
 }, null, 2);
 
 const name = 'Sage 300 (BAT Reconciliation)';
-const existing = db.prepare('SELECT id FROM databaseconnection WHERE LOWER(name) = LOWER(?)').get(name);
+const existing = db.prepare('SELECT id, sync_query, is_bat_only FROM databaseconnection WHERE LOWER(name) = LOWER(?)').get(name);
 
 if (existing) {
-  db.prepare('UPDATE databaseconnection SET table_configs = ?, updated_date = CURRENT_TIMESTAMP WHERE id = ?')
-    .run(tableConfigs, existing.id);
-  console.log(`Updated existing Sage connection (id ${existing.id}) with query metadata.`);
+  // Refresh table_configs metadata. Also fill sync_query / is_bat_only if
+  // the row predates those fields, but never overwrite a query the user
+  // has already customised.
+  const fields = ['table_configs = ?', 'updated_date = CURRENT_TIMESTAMP'];
+  const params = [tableConfigs];
+  if (!existing.sync_query || !existing.sync_query.trim()) {
+    fields.push('sync_query = ?');
+    params.push(creditNotesQuery);
+  }
+  if (existing.is_bat_only !== 1) {
+    fields.push('is_bat_only = 1');
+  }
+  params.push(existing.id);
+  db.prepare(`UPDATE databaseconnection SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+  console.log(`Updated existing Sage connection (id ${existing.id}); sync_query ${existing.sync_query?.trim() ? 'preserved' : 'seeded'}, is_bat_only ${existing.is_bat_only === 1 ? 'already set' : 'set to 1'}.`);
 } else {
   const info = db.prepare(`
     INSERT INTO databaseconnection (
       name, host, port, database_name, username, encrypted_password,
-      use_encryption, table_configs, status, created_by, created_date, updated_date
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      use_encryption, table_configs, sync_query, is_bat_only,
+      status, created_by, created_date, updated_date
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
   `).run(
     name,
     'FILL_IN_SAGE_HOST',
@@ -126,10 +139,12 @@ if (existing) {
     '',
     0,
     tableConfigs,
+    creditNotesQuery,   // sync_query — required by Connections UI
+    1,                  // is_bat_only — excluded from generic sync engine
     'inactive',
     'system:bat-seed',
   );
-  console.log(`Seeded Sage connection (id ${info.lastInsertRowid}).`);
+  console.log(`Seeded Sage connection (id ${info.lastInsertRowid}) with credit-notes query and is_bat_only=1.`);
 }
 
 const row = db.prepare('SELECT id, name, host, database_name, username, status FROM databaseconnection WHERE LOWER(name) LIKE ?').get('%sage%');
