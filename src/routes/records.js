@@ -1122,7 +1122,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           req, action: `create_${meta.type}`, resourceType: meta.type,
           resourceId: info.lastInsertRowid,
           resourceName: data[meta.nameKey] || `${meta.label} ${info.lastInsertRowid}`,
-          details: `${meta.label} created`,
+          // No explicit details — auto-summary turns the new field values into
+          // "Name: ∅ → Acme; Host: ∅ → 10.0.0.5; …" so the row tells the
+          // reader what was created, not just that something was.
           changes: { after: safeData },
         });
       }
@@ -1348,11 +1350,25 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       const stmt = db.prepare(`DELETE FROM "${table}" WHERE id = ?`);
       stmt.run(id);
       if (meta && existing) {
+        // Pick a few identity-bearing columns to put in changes.before so the
+        // auto-summary shows what was lost (host, database_name, priority, etc.)
+        // rather than just "Connection deleted".
+        const identityFields = {
+          databaseconnection: ['name', 'host', 'database_name', 'port', 'status'],
+          autoflagrule:       ['rule_name', 'priority', 'flag_color', 'is_active'],
+          customfieldconfig:  ['field_label', 'field_key', 'field_type'],
+        };
+        const cols = identityFields[table] || [meta.nameKey];
+        const beforeSnap = {};
+        for (const c of cols) {
+          if (existing[c] !== undefined) beforeSnap[c] = c === 'encrypted_password' ? '[redacted]' : existing[c];
+        }
         logAudit({
           req, action: `delete_${meta.type}`, resourceType: meta.type,
           resourceId: id,
           resourceName: existing[meta.nameKey] || `${meta.label} ${id}`,
-          details: `${meta.label} deleted`,
+          // Auto-summary will render "Name: Acme → ∅; Host: 10.0.0.5 → ∅; …"
+          changes: { before: beforeSnap, after: {} },
         });
       }
       res.json({ success: true });
