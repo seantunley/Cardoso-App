@@ -36,7 +36,7 @@ export default function FieldMappingSuggestions({
 
       // AI mapping suggestions require a connected LLM service (not yet configured).
       throw new Error("AI mapping is not available in this deployment.");
-      /* eslint-disable no-unreachable */
+       
       const result = await api.integrations?.Core?.InvokeLLM({
         prompt: `Analyze these SQL database columns and suggest mappings to local database fields.
 

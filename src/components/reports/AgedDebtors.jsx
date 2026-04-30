@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtRSigned, fmtCompactR, downloadCsv,
-  ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
+  fmtR, fmtCompactR, downloadCsv, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
