@@ -374,13 +374,25 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       db.prepare(`UPDATE "user" SET ${sets} WHERE id = ?`).run(...Object.values(updates), id);
 
       const updated = getUserById(id);
-      const beforeChanges = Object.fromEntries(Object.keys(updates).map(k => [k, existing[k]]));
-      logAudit({
-        req, action: 'update_user_permissions', resourceType: 'user',
-        resourceId: updated.id, resourceName: updated.email,
-        details: `Updated ${Object.keys(updates).length} permission(s)`,
-        changes: { before: beforeChanges, after: updates },
-      });
+      // Only audit the permissions that ACTUALLY changed (UI typically sends
+      // every permission key on every save, even untouched ones).
+      const realChangesBefore = {};
+      const realChangesAfter = {};
+      for (const k of Object.keys(updates)) {
+        if (existing[k] !== updates[k]) {
+          realChangesBefore[k] = existing[k];
+          realChangesAfter[k]  = updates[k];
+        }
+      }
+      const changedCount = Object.keys(realChangesAfter).length;
+      if (changedCount > 0) {
+        logAudit({
+          req, action: 'update_user_permissions', resourceType: 'user',
+          resourceId: updated.id, resourceName: updated.email,
+          // Let logAudit auto-summarise the before→after diff in action_details.
+          changes: { before: realChangesBefore, after: realChangesAfter },
+        });
+      }
       res.json({
         success: true,
         user: sanitizeUser(updated),

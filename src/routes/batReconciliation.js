@@ -537,16 +537,24 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     if (Object.prototype.hasOwnProperty.call(req.body || {}, 'sage_connection_id')) {
       resetSagePool().catch(() => {});
     }
-    // Redact API keys before auditing
+    // Redact API keys before auditing, and only audit keys that ACTUALLY changed.
     const redact = (k, v) => /key|secret|token|password/i.test(k) ? '[redacted]' : v;
-    const beforeRedacted = Object.fromEntries(Object.entries(before).map(([k, v]) => [k, redact(k, v)]));
-    const afterRedacted  = Object.fromEntries(Object.entries(req.body || {}).map(([k, v]) => [k, redact(k, v)]));
-    logAudit({
-      req, action: 'update_bat_settings', resourceType: 'system',
-      resourceName: 'BAT reconciliation settings',
-      details: `Updated ${Object.keys(req.body || {}).length} setting(s): ${Object.keys(req.body || {}).join(', ')}`,
-      changes: { before: beforeRedacted, after: afterRedacted },
-    });
+    const realBefore = {};
+    const realAfter  = {};
+    for (const k of Object.keys(req.body || {})) {
+      if (String(before[k] ?? '') !== String((req.body || {})[k] ?? '')) {
+        realBefore[k] = redact(k, before[k]);
+        realAfter[k]  = redact(k, (req.body || {})[k]);
+      }
+    }
+    if (Object.keys(realAfter).length > 0) {
+      logAudit({
+        req, action: 'update_bat_settings', resourceType: 'system',
+        resourceName: 'BAT reconciliation settings',
+        // Auto-summarised in details — e.g. "Sage Connection Id: 1 → 2; Tg1 Rate: 0.0009 → 0.001"
+        changes: { before: realBefore, after: realAfter },
+      });
+    }
     res.json({ ok: true });
   });
 

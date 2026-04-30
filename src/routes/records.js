@@ -1239,7 +1239,8 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             req, action: `update_${auditMeta.type}`, resourceType: auditMeta.type,
             resourceId: id,
             resourceName: data[auditMeta.nameKey] || existing[auditMeta.nameKey] || `${auditMeta.label} ${id}`,
-            details: `Updated ${Object.keys(afterChanges).length} field(s): ${Object.keys(afterChanges).join(', ')}`,
+            // Let logAudit auto-summarise the before→after diff so the row
+            // shows exactly which fields changed, with old → new values.
             changes: { before: beforeChanges, after: afterChanges },
           });
         }
