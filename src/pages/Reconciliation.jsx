@@ -33,8 +33,26 @@ export default function Reconciliation() {
   const [crossrefYear, setCrossrefYear] = useState('all');
   const [crossrefWeek, setCrossrefWeek] = useState('all');
   const [crossrefInvoice, setCrossrefInvoice] = useState('');
-  const [weekCompYear, setWeekCompYear] = useState(String(new Date().getFullYear()));
-  const [archiveYear, setArchiveYear] = useState(String(new Date().getFullYear()));
+  // Page-level viewing year — drives which reconciliations show up in the
+  // archive list, the per-week comparison, and (eventually) the dashboard
+  // summary tiles. Persisted in localStorage so a page reload doesn't reset
+  // back to the current calendar year mid-session.
+  const [viewingYear, setViewingYear] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('bat.viewingYear');
+      if (saved) return saved;
+    } catch {}
+    return String(new Date().getFullYear());
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('bat.viewingYear', viewingYear); } catch {}
+  }, [viewingYear]);
+  // Legacy aliases — kept so existing JSX bindings still work. Both feed off
+  // the same viewingYear so the user only sees one selector.
+  const weekCompYear = viewingYear;
+  const setWeekCompYear = setViewingYear;
+  const archiveYear = viewingYear;
+  const setArchiveYear = setViewingYear;
   const [uploadOpen, setUploadOpen] = useState(false);
   const [cardosoOpen, setCardosoOpen] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
@@ -427,6 +445,28 @@ export default function Reconciliation() {
           </div>
           {view === 'dashboard' && (
             <div className="flex items-center gap-2 flex-wrap">
+              {(() => {
+                const currentYear = new Date().getFullYear();
+                const knownYears = Array.from(new Set(reconciliations.map(r => r.year).filter(Boolean)));
+                // Always offer current year + an "all" option so a fresh install
+                // can still flip the selector even before the first upload.
+                const years = Array.from(new Set([...knownYears, currentYear])).sort((a, b) => b - a);
+                return (
+                  <div className="flex items-center gap-2 border border-border bg-card px-3 py-2" style={{ borderRadius: '12px' }}>
+                    <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Year</span>
+                    <select
+                      value={viewingYear}
+                      onChange={(e) => setViewingYear(e.target.value)}
+                      className="bg-transparent font-mono text-xs tabular-nums text-foreground focus:outline-none cursor-pointer"
+                      title="Filter the BAT dashboard, archive and week comparison to one calendar year. Saved between sessions."
+                    >
+                      <option value="all">All</option>
+                      {years.map(y => <option key={y} value={String(y)}>{y}</option>)}
+                    </select>
+                  </div>
+                );
+              })()}
               <PhosphorButton
                 onClick={() => setUploadOpen(true)}
                 icon={Upload}
@@ -605,15 +645,8 @@ export default function Reconciliation() {
                       Filters
                     </div>
                     <div className="flex items-center gap-3 flex-wrap">
-                      <select
-                        value={weekCompYear}
-                        onChange={(e) => setWeekCompYear(e.target.value)}
-                        className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '12px' }}
-                      >
-                        <option value="all">All years</option>
-                        {allYears.map(y => <option key={y} value={y}>{y}</option>)}
-                      </select>
+                      {/* Year selector lives in the page header now — controls
+                          this section via viewingYear (see weekCompYear alias). */}
                       <button
                         type="button"
                         onClick={() => setHideBalanced((v) => !v)}
@@ -883,16 +916,8 @@ export default function Reconciliation() {
                     )}
                   </div>
                   <div className="flex items-center gap-3 flex-wrap">
-                    <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Year</span>
-                    <select
-                      value={archiveYear}
-                      onChange={(e) => setArchiveYear(e.target.value)}
-                      className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                      style={{ borderRadius: '12px' }}
-                    >
-                      <option value="all">All years</option>
-                      {archiveYears.map(y => <option key={y} value={y}>{y}</option>)}
-                    </select>
+                    {/* Year now lives in the page header — drives this list via
+                        the archiveYear alias on viewingYear. */}
                     <button
                       onClick={() => setHideMatched(!hideMatched)}
                       className="inline-flex items-center gap-2 px-2.5 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
