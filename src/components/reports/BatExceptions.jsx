@@ -32,7 +32,7 @@ export default function BatExceptions() {
   const byStore = data?.by_store || [];
 
   const reasonChartData = useMemo(() => byReason.slice(0, 10).map((r, i) => ({
-    name: r.reason.length > 24 ? r.reason.slice(0, 22) + '…' : r.reason,
+    name: r.reason.length > 36 ? r.reason.slice(0, 34) + '…' : r.reason,
     fullName: r.reason,
     amount: r.amount,
     count: r.count,
@@ -40,7 +40,7 @@ export default function BatExceptions() {
   })), [byReason]);
 
   const storeChartData = useMemo(() => byStore.slice(0, 15).map(s => ({
-    name: s.store_name.length > 18 ? s.store_name.slice(0, 16) + '…' : s.store_name,
+    name: s.store_name.length > 32 ? s.store_name.slice(0, 30) + '…' : s.store_name,
     fullName: s.store_name,
     amount: s.amount,
     count: s.count,
@@ -109,7 +109,7 @@ export default function BatExceptions() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis type="number" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR}
                   label={{ value: 'Amount (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
-                <YAxis type="category" dataKey="name" width={170} interval={0} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
+                <YAxis type="category" dataKey="name" width={250} interval={0} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
                 <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
                   formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
                 <Bar dataKey="amount" radius={[0, 2, 2, 0]}>
@@ -122,7 +122,7 @@ export default function BatExceptions() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis type="number" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR}
                   label={{ value: 'Amount (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
-                <YAxis type="category" dataKey="name" width={140} interval={0} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
+                <YAxis type="category" dataKey="name" width={230} interval={0} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
                 <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
                   formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
                 <Bar dataKey="amount" fill={REPORT_COLORS.danger} radius={[0, 2, 2, 0]} />

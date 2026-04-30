@@ -31,7 +31,7 @@ export default function SalesRepExposure() {
   const summary = data?.summary;
 
   const chartData = useMemo(() => reps.slice(0, 20).map(r => ({
-    name: r.sales_rep.length > 16 ? r.sales_rep.slice(0, 14) + '…' : r.sales_rep,
+    name: r.sales_rep.length > 28 ? r.sales_rep.slice(0, 26) + '…' : r.sales_rep,
     fullName: r.sales_rep,
     total: r.total_outstanding,
     count: r.customer_count,
@@ -108,7 +108,7 @@ export default function SalesRepExposure() {
                 <YAxis
                   type="category"
                   dataKey="name"
-                  width={140}
+                  width={210}
                   interval={0}
                   tick={AXIS_TICK}
                   tickLine={AXIS_LINE}
