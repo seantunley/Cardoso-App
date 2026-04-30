@@ -72,11 +72,14 @@ export default function Dashboard() {
         <Header subtitle={lastSync ? `Last sync ${relativeTime(lastSync)}` : "Awaiting first sync"} />
 
         {/* ── Hero KPI row — oversized numbers, minimal chrome ── */}
-        <div className="mt-12 grid grid-cols-1 lg:grid-cols-12 gap-px bg-border border border-border stagger-in">
+        <div className="mt-12 grid grid-cols-1 lg:grid-cols-12 gap-4 stagger-in">
           {/* Total Records — the headline number */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="lg:col-span-5 bg-card px-8 py-10 flex flex-col justify-between min-h-[240px] cursor-default group">
+              <div
+                className="lg:col-span-5 bg-card border border-border px-8 py-10 flex flex-col justify-between min-h-[240px] cursor-default group"
+                style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+              >
                 <div className="flex items-start justify-between">
                   <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                     01 · Records on file
@@ -100,7 +103,10 @@ export default function Dashboard() {
           </Tooltip>
 
           {/* Flag breakdown — the core workflow visualized */}
-          <div className="lg:col-span-4 bg-card px-8 py-10 flex flex-col justify-between">
+          <div
+            className="lg:col-span-4 bg-card border border-border px-8 py-10 flex flex-col justify-between"
+            style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+          >
             <div className="flex items-start justify-between">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 02 · Flag distribution
@@ -146,7 +152,10 @@ export default function Dashboard() {
           </div>
 
           {/* System pulse — connections + sync status */}
-          <div className="lg:col-span-3 bg-card px-8 py-10 flex flex-col justify-between">
+          <div
+            className="lg:col-span-3 bg-card border border-border px-8 py-10 flex flex-col justify-between"
+            style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+          >
             <div>
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 03 · System
@@ -175,7 +184,10 @@ export default function Dashboard() {
 
         {/* ── Flagged priority strip — only visible if flagged records exist ── */}
         {flaggedTotal > 0 && (
-          <div className="mt-px border border-border bg-card px-8 py-5 flex items-center justify-between gap-6">
+          <div
+            className="mt-4 border border-border bg-card px-8 py-5 flex items-center justify-between gap-6"
+            style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+          >
             <div className="flex items-center gap-5">
               <div
                 className="w-1 h-10"

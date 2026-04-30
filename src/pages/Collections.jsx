@@ -157,7 +157,7 @@ export default function Collections() {
               {filteredRows.length} customer{filteredRows.length === 1 ? "" : "s"} · {formatCurrency(totalOutstanding)} outstanding
             </p>
           </div>
-          <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: "2px" }}>
+          <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: "12px" }}>
             <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }} />
             <div className="pl-2">
               <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Displayed total</div>

@@ -22,7 +22,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
         </div>
         <div
           className="border py-10 text-center"
-          style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '2px' }}
+          style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '12px' }}
         >
           <p className="text-sm text-muted-foreground">
             No fee comparison data. Query Sage 300 first.
@@ -45,7 +45,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
 
       <div
         className="border bg-card overflow-hidden"
-        style={{ borderColor: 'hsl(var(--border))', borderRadius: '2px' }}
+        style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
       >
         <table className="w-full text-sm">
           <thead>
@@ -106,7 +106,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
       {creditNotes?.length > 0 && (
         <details
           className="border bg-card p-4 group"
-          style={{ borderColor: 'hsl(var(--border))', borderRadius: '2px' }}
+          style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
         >
           <summary className="font-mono text-[10px] uppercase tracking-[0.2em] cursor-pointer text-muted-foreground hover:text-accent transition-colors list-none flex items-center gap-2">
             <span className="inline-block transition-transform group-open:rotate-90">›</span>

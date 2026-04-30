@@ -74,7 +74,7 @@ const TOOLTIP_STYLE = {
   background: 'hsl(var(--card))',
   border: '1px solid hsl(var(--border))',
   borderLeft: '2px solid var(--phosphor)',
-  borderRadius: '2px',
+  borderRadius: '12px',
   fontSize: 12,
   fontFamily: 'monospace',
   boxShadow: '0 8px 24px rgba(0,0,0,0.45), 0 0 14px hsla(33,95%,55%,0.12)',
@@ -372,7 +372,7 @@ export function ReportFrame({
             <button
               onClick={onExportCsv}
               className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
-              style={{ borderRadius: '2px' }}
+              style={{ borderRadius: '12px' }}
             >
               CSV
             </button>
@@ -382,7 +382,7 @@ export function ReportFrame({
               onClick={onPrint}
               className="inline-flex items-center gap-1.5 border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
               style={{
-                borderRadius: '2px',
+                borderRadius: '12px',
                 borderColor: 'var(--phosphor)',
                 color: 'var(--phosphor)',
                 background: 'hsla(33, 95%, 55%, 0.08)',
@@ -395,7 +395,7 @@ export function ReportFrame({
       </div>
 
       {error && (
-        <div className="report-print-hide bg-card px-4 py-3" style={{ border: '1px solid hsl(var(--destructive))', borderRadius: '2px' }}>
+        <div className="report-print-hide bg-card px-4 py-3" style={{ border: '1px solid hsl(var(--destructive))', borderRadius: '12px' }}>
           <p className="text-sm text-destructive font-mono">{error.message || String(error)}</p>
         </div>
       )}
@@ -418,7 +418,7 @@ export function ReportFrame({
 // Small chart-card wrapper with a title.
 export function ChartCard({ title, sub, children, height = 260 }) {
   return (
-    <div className="bg-card p-4" style={{ border: '1px solid hsl(var(--border))', borderRadius: '2px' }}>
+    <div className="bg-card p-4" style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}>
       <div className="flex items-baseline justify-between mb-3">
         <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{title}</div>
         {sub && <div className="font-mono text-[10px] text-muted-foreground/60">{sub}</div>}
@@ -435,7 +435,7 @@ export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big
   return (
     <div
       className="report-print-tile relative bg-card p-4 min-h-[100px]"
-      style={{ border: '1px solid hsl(var(--border))', borderRadius: '2px', gridColumn: width }}
+      style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px', gridColumn: width }}
     >
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"

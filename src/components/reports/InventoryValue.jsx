@@ -73,14 +73,14 @@ export default function InventoryValue() {
       }
       printFooter={<PrintFooter note="Inventory Value · Cardoso" />}
     >
-      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '2px' }}>
+      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '12px' }}>
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Top items</label>
           <select
             value={topN}
             onChange={(e) => setTopN(parseInt(e.target.value, 10))}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs outline-none focus:border-accent"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           >
             {[10, 25, 50, 100, 200].map(n => <option key={n} value={n}>Top {n}</option>)}
           </select>
@@ -117,7 +117,7 @@ export default function InventoryValue() {
           </div>
 
           <div className="report-print-section-title hidden">Value by Commodity</div>
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <div className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground border-b border-border">By commodity</div>
             <table className="report-print-table w-full text-xs">
               <thead>
@@ -159,7 +159,7 @@ export default function InventoryValue() {
             </table>
           </div>
 
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <div className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground border-b border-border">Top {topN} items by value</div>
             <table className="report-print-table w-full text-xs">
               <thead>

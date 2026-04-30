@@ -156,7 +156,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       res.json(result);
     } catch (err) {
       console.error('[bat] Extraction trigger failed:', err.message);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message, code: err.code });
     }
   });
 

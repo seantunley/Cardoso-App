@@ -1258,6 +1258,15 @@ export function getExtractionProgress(reconId) {
 }
 
 export async function runInvoiceExtraction(reconId) {
+  if (ocrPaused) {
+    // Don't silently swallow the request — the UI disables the button when
+    // paused, but a stale tab or scripted caller can still hit this endpoint.
+    const err = new Error('OCR is paused — resume it in Settings → Reconciliation before extracting.');
+    err.code = 'OCR_PAUSED';
+    err.status = 409;
+    throw err;
+  }
+
   const pending = db.prepare(
     "SELECT COUNT(*) as c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
   ).get(reconId)?.c || 0;

@@ -15,7 +15,7 @@ export default function WeekSelector({ reconciliations, onSelect }) {
     return (
       <div
         className="border py-16 text-center"
-        style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '2px' }}
+        style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '12px' }}
       >
         <p className="font-display text-2xl text-foreground mb-2">No reconciliations yet.</p>
         <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -57,7 +57,7 @@ export default function WeekSelector({ reconciliations, onSelect }) {
             style={{
               border: `1px solid ${borderColor}`,
               boxShadow: borderGlow,
-              borderRadius: '2px',
+              borderRadius: '12px',
             }}
           >
             <div

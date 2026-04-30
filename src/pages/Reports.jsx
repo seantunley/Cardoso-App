@@ -78,7 +78,7 @@ export default function Reports() {
                           style={{
                             border: isActive ? `1px solid ${item.accent}` : '1px solid transparent',
                             borderLeftWidth: isActive ? '2px' : '1px',
-                            borderRadius: '2px',
+                            borderRadius: '12px',
                             boxShadow: isActive ? `0 0 12px ${item.accent}25` : 'none',
                           }}
                         >
@@ -108,7 +108,7 @@ export default function Reports() {
 
           <main>
             {active?.component ? <active.component /> : (
-              <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '2px' }}>
+              <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
                 <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Select a report from the left.</p>
               </div>
             )}

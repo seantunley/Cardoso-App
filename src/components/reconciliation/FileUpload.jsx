@@ -42,7 +42,7 @@ export default function FileUpload({ onComplete }) {
         style={{
           borderColor: dragging ? 'var(--phosphor)' : 'hsl(var(--border))',
           background: dragging ? 'hsla(33, 95%, 55%, 0.04)' : 'hsl(var(--card))',
-          borderRadius: '2px',
+          borderRadius: '12px',
         }}
         onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
         onDragLeave={() => setDragging(false)}
@@ -83,7 +83,7 @@ export default function FileUpload({ onComplete }) {
       {error && (
         <div
           className="relative border border-border bg-card mt-3 px-4 py-2.5"
-          style={{ borderRadius: '2px' }}
+          style={{ borderRadius: '12px' }}
         >
           <div
             className="absolute left-0 top-0 bottom-0 w-[2px]"

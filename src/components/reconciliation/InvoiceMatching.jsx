@@ -329,7 +329,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                   style={{
                     borderColor: 'hsl(var(--border))',
                     color: 'hsl(var(--muted-foreground))',
-                    borderRadius: '2px',
+                    borderRadius: '12px',
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.borderColor = 'var(--phosphor)';
@@ -351,7 +351,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       </div>
 
       {/* Category Tabs */}
-      <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '2px' }}>
+      <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '12px' }}>
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -405,7 +405,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
             style={{
               borderColor: 'hsl(var(--border))',
               color: 'hsl(var(--foreground))',
-              borderRadius: '2px',
+              borderRadius: '12px',
             }}
             onFocus={(e) => (e.currentTarget.style.borderColor = 'var(--phosphor)')}
             onBlur={(e) => (e.currentTarget.style.borderColor = 'hsl(var(--border))')}
@@ -415,7 +415,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           className="border bg-card px-3 py-2 font-mono text-[11px] uppercase tracking-wider outline-none text-foreground"
-          style={{ borderColor: 'hsl(var(--border))', borderRadius: '2px' }}
+          style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
         >
           <option value="all">All</option>
           <option value="matched">Matched</option>
@@ -428,7 +428,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       {/* Table */}
       <div
         className="border overflow-auto max-h-[28rem]"
-        style={{ borderColor: 'hsl(var(--border))', borderRadius: '2px' }}
+        style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
       >
         {(() => {
           const colOrder = [
@@ -500,7 +500,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                         <TooltipTrigger asChild>
                           <span
                             className="font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help"
-                            style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '2px' }}
+                            style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '12px' }}
                           >
                             ×{e.duplicate_count} dup
                           </span>

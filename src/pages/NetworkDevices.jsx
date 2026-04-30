@@ -347,30 +347,30 @@ export default function NetworkDevices() {
 
             {/* Configured: summary tiles */}
             {configured && (
-              <div className="grid grid-cols-2 gap-px bg-border border border-border md:grid-cols-4 stagger-in" style={{ borderRadius: "2px" }}>
-                <div className="relative bg-card p-5 pl-6">
-                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4 stagger-in">
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
                   <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
                     <Wifi className="h-3 w-3" strokeWidth={1.5} /> Sites connected
                   </div>
                   <div className="font-display text-4xl leading-none text-foreground tabular-nums">{connectedCount}<span className="text-muted-foreground text-2xl">/{sites.length}</span></div>
                 </div>
-                <div className="relative bg-card p-5 pl-6">
-                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
                   <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
                     <Users className="h-3 w-3" strokeWidth={1.5} /> Total hosts
                   </div>
                   <div className="font-display text-4xl leading-none text-foreground tabular-nums">{fmtNum(totalHosts)}</div>
                 </div>
-                <div className="relative bg-card p-5 pl-6">
-                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
                   <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
                     <Activity className="h-3 w-3" strokeWidth={1.5} /> Active flows
                   </div>
                   <div className="font-display text-4xl leading-none text-foreground tabular-nums">{fmtNum(totalFlows)}</div>
                 </div>
-                <div className="relative bg-card p-5 pl-6">
-                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: ntopngOk ? "hsl(145 55% 45%)" : "hsl(var(--destructive))" }} />
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: ntopngOk ? "hsl(145 55% 45%)" : "hsl(var(--destructive))" }} />
                   <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
                     <Server className="h-3 w-3" strokeWidth={1.5} /> ntopng
                   </div>

@@ -70,7 +70,7 @@ export default function HubReconciliation() {
               disabled={refreshMutation.isPending}
               className="inline-flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
               style={{
-                borderRadius: '2px',
+                borderRadius: '12px',
                 border: '1px solid var(--phosphor)',
                 color: 'var(--phosphor)',
                 background: 'hsla(33, 95%, 55%, 0.08)',
@@ -83,7 +83,7 @@ export default function HubReconciliation() {
         </div>
 
         {error && (
-          <div className="bg-card px-4 py-3 mb-5" style={{ border: '1px solid hsl(var(--destructive))', borderRadius: '2px' }}>
+          <div className="bg-card px-4 py-3 mb-5" style={{ border: '1px solid hsl(var(--destructive))', borderRadius: '12px' }}>
             <p className="text-sm text-destructive font-mono">{error.message}</p>
           </div>
         )}
@@ -129,7 +129,7 @@ export default function HubReconciliation() {
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {sites.map(s => <SiteCard key={s.site_id} site={s} />)}
               {sites.length === 0 && (
-                <div className="col-span-full bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '2px' }}>
+                <div className="col-span-full bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
                   <p className="font-mono text-[11px] uppercase tracking-[0.2em]">
                     No sites registered. Configure HUB_SITES env var with at least one site URL + token.
                   </p>
@@ -161,7 +161,7 @@ function SiteCard({ site }) {
   const syncedAt = site.synced_at ? new Date(site.synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
   return (
-    <div className="relative bg-card p-4" style={{ border: `1px solid ${badge.color === 'hsl(var(--destructive))' ? 'hsl(var(--destructive))' : 'hsl(var(--border))'}`, borderRadius: '2px' }}>
+    <div className="relative bg-card p-4" style={{ border: `1px solid ${badge.color === 'hsl(var(--destructive))' ? 'hsl(var(--destructive))' : 'hsl(var(--border))'}`, borderRadius: '12px' }}>
       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: color, boxShadow: `0 0 10px ${glow}` }} />
       <div className="pl-2 space-y-3">
         <div className="flex items-start justify-between gap-2">

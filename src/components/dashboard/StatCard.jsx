@@ -26,7 +26,7 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, co
   return (
     <div
       className="relative bg-card border border-border group transition-colors hover:border-[var(--phosphor)]"
-      style={{ borderRadius: "2px" }}
+      style={{ borderRadius: "12px" }}
     >
       {/* Phosphor left accent — the signature element */}
       <div

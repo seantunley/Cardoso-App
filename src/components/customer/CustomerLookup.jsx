@@ -747,7 +747,7 @@ export default function CustomerLookup({
   return (
     <div className="space-y-4">
       {/* ── Search bar ── */}
-      <div className="relative bg-card p-5" style={{ borderRadius: "2px" }}>
+      <div className="relative bg-card p-5" style={{ borderRadius: "12px" }}>
         <p className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-3">Customer Lookup</p>
         <div className="flex gap-2.5">
           <div className="relative flex-1">
@@ -759,10 +759,10 @@ export default function CustomerLookup({
               onKeyDown={handleKeyDown}
               placeholder="Customer number or name…"
               className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-[var(--phosphor)]/30 text-sm font-mono"
-              style={{ borderRadius: "2px" }}
+              style={{ borderRadius: "12px" }}
             />
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1 border border-border bg-card shadow-xl overflow-hidden" style={{ borderRadius: "2px" }}>
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 border border-border bg-card shadow-xl overflow-hidden" style={{ borderRadius: "12px" }}>
                 {suggestions.map((s, idx) => (
                   <button
                     key={s.record.id ?? idx}
@@ -790,7 +790,7 @@ export default function CustomerLookup({
             disabled={loading}
             className="h-11 px-5 transition-all"
             style={{
-              borderRadius: "2px",
+              borderRadius: "12px",
               border: "1px solid var(--phosphor)",
               color: "var(--phosphor)",
               background: "hsla(33, 95%, 55%, 0.10)",

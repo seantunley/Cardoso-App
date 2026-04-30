@@ -196,7 +196,7 @@ export default function HubUserManager({ sites = [] }) {
                       key={s.slug}
                       title={`Pushed ${new Date(s.pushed_at).toLocaleDateString()}`}
                       className="inline-flex items-center font-mono text-[10px] uppercase tracking-[0.15em] px-1.5 py-0.5 bg-accent/10 text-accent border border-accent/30"
-                      style={{ borderRadius: "2px" }}
+                      style={{ borderRadius: "12px" }}
                     >
                       {s.slug}
                     </span>

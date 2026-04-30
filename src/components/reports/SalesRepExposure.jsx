@@ -70,14 +70,14 @@ export default function SalesRepExposure() {
       }
       printFooter={<PrintFooter note="Sales Rep Exposure · Cardoso" />}
     >
-      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '2px' }}>
+      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '12px' }}>
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Min Balance (R)</label>
           <input
             type="number" min={0} step={1} value={minBalance}
             onChange={(e) => setMinBalance(parseFloat(e.target.value) || 0)}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs tabular-nums outline-none focus:border-accent"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           />
         </div>
       </div>
@@ -108,7 +108,7 @@ export default function SalesRepExposure() {
           </div>
 
           <div className="report-print-section-title hidden">Per-Rep Detail</div>
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <table className="report-print-table w-full text-xs">
               <thead>
                 <tr className="border-b border-border">

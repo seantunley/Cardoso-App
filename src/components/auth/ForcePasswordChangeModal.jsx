@@ -45,7 +45,7 @@ export default function ForcePasswordChangeModal({ open, onSuccess }) {
       <DialogContent className="sm:max-w-md" onInteractOutside={e => e.preventDefault()}>
         <DialogHeader>
           <div className="flex items-center gap-3 mb-1">
-            <div className="bg-accent/10 p-2" style={{ borderRadius: "2px" }}>
+            <div className="bg-accent/10 p-2" style={{ borderRadius: "12px" }}>
               <KeyRound className="h-5 w-5 text-accent" />
             </div>
             <DialogTitle className="text-lg">Set your password</DialogTitle>

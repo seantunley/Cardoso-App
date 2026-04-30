@@ -8,7 +8,7 @@ export default function ExtractionProgress({ progress }) {
   return (
     <div
       className="relative border border-border bg-card p-5 space-y-3"
-      style={{ borderRadius: '2px' }}
+      style={{ borderRadius: '12px' }}
     >
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"

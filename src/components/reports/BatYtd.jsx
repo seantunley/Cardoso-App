@@ -63,14 +63,14 @@ export default function BatYtd() {
       }
       printFooter={<PrintFooter note="BAT YTD Fee Breakdown · Cardoso" />}
     >
-      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '2px' }}>
+      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '12px' }}>
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Year</label>
           <select
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value, 10))}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs outline-none focus:border-accent"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           >
             {(data?.available_years || [year]).map(y => <option key={y} value={y}>{y}</option>)}
           </select>
@@ -105,7 +105,7 @@ export default function BatYtd() {
             </ChartCard>
           </div>
 
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <table className="report-print-table w-full text-xs">
               <thead>
                 <tr className="border-b border-border">

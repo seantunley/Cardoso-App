@@ -2,15 +2,18 @@ import React from 'react';
 
 function Tile({ label, value, sub, accent = 'var(--phosphor)', glow = 'hsla(33, 95%, 55%, 0.35)', large = false }) {
   return (
-    <div className="relative bg-card p-6 min-h-[140px] flex flex-col justify-between group">
+    <div
+      className="relative bg-card border border-border p-6 min-h-[140px] flex flex-col justify-between group overflow-hidden"
+      style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+    >
       <div
-        className="absolute left-0 top-0 bottom-0 w-[2px] transition-all"
+        className="absolute left-0 right-0 bottom-0 h-[2px] transition-all"
         style={{ background: accent, boxShadow: `0 0 12px ${glow}` }}
       />
-      <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground pl-2">
+      <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
         {label}
       </div>
-      <div className="pl-2">
+      <div>
         <div
           className={`font-display leading-none text-foreground tabular-nums ${large ? 'text-5xl lg:text-6xl' : 'text-4xl'}`}
         >
@@ -43,10 +46,7 @@ export default function ReconciliationSummary({ recon }) {
       <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-5">
         § Summary
       </div>
-      <div
-        className="grid gap-px bg-border border border-border sm:grid-cols-2 lg:grid-cols-4 stagger-in"
-        style={{ borderRadius: '2px' }}
-      >
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-in">
         <Tile
           label="BAT Total"
           value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(recon.supplier_total)}</>}

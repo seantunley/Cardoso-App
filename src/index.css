@@ -60,25 +60,25 @@
   }
 
   .dark {
-    /* Dark = obsidian night terminal */
-    --background: 24 8% 6%;            /* near-black with warm cast */
+    /* Dark = obsidian night terminal — one shade brighter for less murk */
+    --background: 24 8% 10%;           /* lifted off near-black */
     --foreground: 40 25% 92%;          /* warm bone */
-    --card: 24 8% 9%;
+    --card: 24 8% 13%;
     --card-foreground: 40 25% 92%;
-    --popover: 24 8% 9%;
+    --popover: 24 8% 13%;
     --popover-foreground: 40 25% 92%;
     --primary: 40 25% 92%;
-    --primary-foreground: 24 8% 6%;
-    --secondary: 24 6% 14%;
+    --primary-foreground: 24 8% 10%;
+    --secondary: 24 6% 18%;
     --secondary-foreground: 40 25% 92%;
-    --muted: 24 6% 13%;
-    --muted-foreground: 30 10% 58%;
+    --muted: 24 6% 17%;
+    --muted-foreground: 30 10% 60%;
     --accent: 33 95% 55%;              /* phosphor amber — the one signature color */
-    --accent-foreground: 24 8% 6%;
+    --accent-foreground: 24 8% 10%;
     --destructive: 0 72% 50%;          /* hot oxblood */
     --destructive-foreground: 40 25% 92%;
-    --border: 24 6% 16%;
-    --input: 24 6% 14%;
+    --border: 24 6% 20%;
+    --input: 24 6% 18%;
     --ring: 33 95% 55%;
     --chart-1: 33 95% 55%;
     --chart-2: 145 55% 45%;
@@ -86,18 +86,18 @@
     --chart-4: 200 80% 55%;
     --chart-5: 30 25% 55%;
 
-    --sidebar-background: 24 10% 4%;
+    --sidebar-background: 24 10% 8%;
     --sidebar-foreground: 40 20% 78%;
     --sidebar-primary: 33 95% 55%;
-    --sidebar-primary-foreground: 24 10% 4%;
-    --sidebar-accent: 24 8% 11%;
+    --sidebar-primary-foreground: 24 10% 8%;
+    --sidebar-accent: 24 8% 15%;
     --sidebar-accent-foreground: 40 20% 92%;
-    --sidebar-border: 24 8% 13%;
+    --sidebar-border: 24 8% 17%;
     --sidebar-ring: 33 95% 55%;
 
-    --bg-primary: hsl(24 8% 6%);
-    --bg-secondary: hsl(24 8% 9%);
-    --bg-tertiary: hsl(24 6% 14%);
+    --bg-primary: hsl(24 8% 10%);
+    --bg-secondary: hsl(24 8% 13%);
+    --bg-tertiary: hsl(24 6% 18%);
     --text-primary: hsl(40 25% 92%);
     --text-secondary: hsl(30 10% 58%);
     --text-tertiary: hsl(30 8% 42%);

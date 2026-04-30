@@ -47,6 +47,17 @@ export default function Reconciliation() {
   const [generating, setGenerating] = useState(false);
   const [tg1Rate, setTg1Rate] = useState('0.0009');
   const [tg2Rate, setTg2Rate] = useState('0.0001');
+  const [ocrPaused, setOcrPausedState] = useState(false);
+  // Reflect the global OCR pause switch in the Extract button. Re-checked
+  // whenever a reconciliation is opened so toggling pause in Settings is
+  // picked up without a hard reload.
+  useEffect(() => {
+    if (view !== 'detail') return;
+    fetch('/api/bat/ocr-pause', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setOcrPausedState(!!d.paused); })
+      .catch(() => {});
+  }, [view, selected?.id]);
   // Load saved TG rates from bat_settings on mount so the inputs show the
   // last-used per-site values instead of the macro defaults.
   useEffect(() => {
@@ -443,16 +454,13 @@ export default function Reconciliation() {
 
             {/* Week status block */}
             {weekStatus && (
-              <div
-                className="grid gap-px bg-border border border-border sm:grid-cols-3 stagger-in"
-                style={{ borderRadius: '2px' }}
-              >
-                <div className="relative bg-card p-5">
+              <div className="grid gap-4 sm:grid-cols-3 stagger-in">
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-[2px]"
+                    className="absolute left-0 right-0 bottom-0 h-[2px]"
                     style={{ background: 'var(--phosphor)', boxShadow: '0 0 12px hsla(33,95%,55%,0.35)' }}
                   />
-                  <div className="pl-2">
+                  <div>
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2">
                       Current Week
                     </div>
@@ -461,15 +469,15 @@ export default function Reconciliation() {
                     </div>
                   </div>
                 </div>
-                <div className="relative bg-card p-5">
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-[2px]"
+                    className="absolute left-0 right-0 bottom-0 h-[2px]"
                     style={{
                       background: weekStatus.lastWeekPaid ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
                       boxShadow: weekStatus.lastWeekPaid ? '0 0 12px hsla(145,55%,45%,0.3)' : 'none',
                     }}
                   />
-                  <div className="pl-2">
+                  <div>
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2">
                       Last Week Paid (Sage)
                     </div>
@@ -483,15 +491,15 @@ export default function Reconciliation() {
                     )}
                   </div>
                 </div>
-                <div className="relative bg-card p-5">
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
                   <div
-                    className="absolute left-0 top-0 bottom-0 w-[2px]"
+                    className="absolute left-0 right-0 bottom-0 h-[2px]"
                     style={{
                       background: weekStatus.missingWeeks?.length > 0 ? 'hsl(var(--destructive))' : 'hsl(145 55% 45%)',
                       boxShadow: weekStatus.missingWeeks?.length > 0 ? '0 0 12px hsla(0,72%,50%,0.3)' : '0 0 12px hsla(145,55%,45%,0.3)',
                     }}
                   />
-                  <div className="pl-2">
+                  <div>
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2">
                       Missing Credit Notes
                     </div>
@@ -555,7 +563,7 @@ export default function Reconciliation() {
               return (
                 <div
                   className="border border-border bg-card overflow-hidden"
-                  style={{ borderRadius: '2px' }}
+                  style={{ borderRadius: '12px' }}
                 >
                   <div className="flex items-center justify-between p-5 border-b border-border gap-4 flex-wrap">
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
@@ -586,7 +594,7 @@ export default function Reconciliation() {
                           } catch (e) { toast.error(`Refresh failed: ${e.message}`); }
                         }}
                         className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:text-foreground transition-colors border border-border bg-card px-3 py-1.5"
-                        style={{ borderRadius: '2px' }}
+                        style={{ borderRadius: '12px' }}
                       >
                         Refresh Sage cache
                       </button>
@@ -601,7 +609,7 @@ export default function Reconciliation() {
                         value={weekCompYear}
                         onChange={(e) => setWeekCompYear(e.target.value)}
                         className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '2px' }}
+                        style={{ borderRadius: '12px' }}
                       >
                         <option value="all">All years</option>
                         {allYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -614,7 +622,7 @@ export default function Reconciliation() {
                           color: hideBalanced ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
                           background: hideBalanced ? 'hsla(145, 55%, 45%, 0.08)' : 'transparent',
                           border: hideBalanced ? '1px solid hsla(145, 55%, 45%, 0.5)' : '1px solid hsl(var(--border))',
-                          borderRadius: '2px',
+                          borderRadius: '12px',
                         }}
                       >
                         <span
@@ -622,7 +630,7 @@ export default function Reconciliation() {
                           style={{
                             border: hideBalanced ? '1px solid hsl(145 55% 45%)' : '1px solid hsl(var(--border))',
                             background: hideBalanced ? 'hsl(145 55% 45%)' : 'transparent',
-                            borderRadius: '2px',
+                            borderRadius: '12px',
                           }}
                         >
                           {hideBalanced && (
@@ -737,7 +745,7 @@ export default function Reconciliation() {
                         };
 
                     const renderHalf = (rows, label) => (
-                      <div className="overflow-auto max-h-[28rem] border border-border" style={{ borderRadius: '2px' }}>
+                      <div className="overflow-auto max-h-[28rem] border border-border" style={{ borderRadius: '12px' }}>
                         <table className="w-full text-sm">
                           <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
                             <tr style={{ borderBottom: '1px solid hsl(var(--border))' }}>
@@ -774,7 +782,7 @@ export default function Reconciliation() {
             })()}
 
             {/* Dashboard tabs */}
-            <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '2px' }}>
+            <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '12px' }}>
               {[
                 { id: 'archive', label: 'Reconciliations', count: reconciliations.length },
                 { id: 'crossref', label: 'Cross-Reference' },
@@ -826,7 +834,7 @@ export default function Reconciliation() {
                 <section className="space-y-4">
                   <div
                     className="relative bg-card px-6 py-4"
-                    style={{ border: '1px solid hsl(var(--border))', borderRadius: '2px' }}
+                    style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}
                   >
                     <div
                       className="absolute left-0 top-0 bottom-0 w-[2px]"
@@ -880,7 +888,7 @@ export default function Reconciliation() {
                       value={archiveYear}
                       onChange={(e) => setArchiveYear(e.target.value)}
                       className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                      style={{ borderRadius: '2px' }}
+                      style={{ borderRadius: '12px' }}
                     >
                       <option value="all">All years</option>
                       {archiveYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -892,7 +900,7 @@ export default function Reconciliation() {
                         color: hideMatched ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))',
                         background: hideMatched ? 'hsla(145, 55%, 45%, 0.08)' : 'transparent',
                         border: hideMatched ? '1px solid hsla(145, 55%, 45%, 0.5)' : '1px solid hsl(var(--border))',
-                        borderRadius: '2px',
+                        borderRadius: '12px',
                       }}
                     >
                       <span
@@ -932,7 +940,7 @@ export default function Reconciliation() {
                 </p>
 
                 {cardosoError && (
-                  <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '2px' }}>
+                  <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                     <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'hsl(var(--destructive))' }} />
                     <p className="font-mono text-xs text-destructive pl-2">{cardosoError}</p>
                   </div>
@@ -940,7 +948,7 @@ export default function Reconciliation() {
 
                 {/* Duplicate prompt */}
                 {showDupePrompt && pendingCardosoFile && (
-                  <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: '2px' }}>
+                  <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: '12px' }}>
                     <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'var(--phosphor)', boxShadow: '0 0 12px hsla(33,95%,55%,0.35)' }} />
                     <div className="pl-2 space-y-3">
                       <div>
@@ -954,14 +962,14 @@ export default function Reconciliation() {
                           onClick={() => doCardosoUpload(pendingCardosoFile, 'overwrite')}
                           disabled={cardosoUploading}
                           className="px-4 py-2 border border-foreground bg-transparent text-foreground font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] transition-colors disabled:opacity-50"
-                          style={{ borderRadius: '2px' }}
+                          style={{ borderRadius: '12px' }}
                         >
                           Overwrite duplicates
                         </button>
                         <button
                           onClick={() => { setShowDupePrompt(false); setPendingCardosoFile(null); }}
                           className="px-4 py-2 border border-border bg-card text-muted-foreground font-mono text-[10px] uppercase tracking-[0.2em] hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
-                          style={{ borderRadius: '2px' }}
+                          style={{ borderRadius: '12px' }}
                         >
                           Keep existing
                         </button>
@@ -1001,7 +1009,7 @@ export default function Reconciliation() {
                   const filterActive = crossrefYear !== 'all' || crossrefWeek !== 'all' || invSearch !== '';
                   return (
                   <>
-                    <div className="grid gap-px bg-border border border-border sm:grid-cols-5 stagger-in" style={{ borderRadius: '2px' }}>
+                    <div className="grid gap-3 sm:grid-cols-5 stagger-in">
                       <MatchTile label="Matched" value={cardosoMatch.stats.matched} color="hsl(145 55% 45%)" />
                       <MatchTile label="Auto-Corrected" value={cardosoMatch.stats.autoCorrections || 0} color="hsl(200 80% 55%)" />
                       <MatchTile label="Amount Mismatches" value={cardosoMatch.stats.mismatches} color="var(--phosphor)" />
@@ -1015,7 +1023,7 @@ export default function Reconciliation() {
                         value={crossrefYear}
                         onChange={(e) => { setCrossrefYear(e.target.value); setCrossrefWeek('all'); }}
                         className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '2px' }}
+                        style={{ borderRadius: '12px' }}
                       >
                         <option value="all">All years</option>
                         {availableYears.map(y => <option key={y} value={y}>{y}</option>)}
@@ -1024,7 +1032,7 @@ export default function Reconciliation() {
                         value={crossrefWeek}
                         onChange={(e) => setCrossrefWeek(e.target.value)}
                         className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none"
-                        style={{ borderRadius: '2px' }}
+                        style={{ borderRadius: '12px' }}
                       >
                         <option value="all">All weeks</option>
                         {availableWeeks.map(w => <option key={w} value={w}>Week {w}</option>)}
@@ -1035,7 +1043,7 @@ export default function Reconciliation() {
                         value={crossrefInvoice}
                         onChange={(e) => setCrossrefInvoice(e.target.value)}
                         className="bg-card border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none w-32"
-                        style={{ borderRadius: '2px' }}
+                        style={{ borderRadius: '12px' }}
                       />
                       <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground tabular-nums">
                         {filteredRows.length} of {allRows.length} row{allRows.length !== 1 ? 's' : ''}
@@ -1050,7 +1058,7 @@ export default function Reconciliation() {
                       )}
                     </div>
 
-                    <div className="border overflow-auto max-h-[32rem]" style={{ borderColor: 'hsl(var(--border))', borderRadius: '2px' }}>
+                    <div className="border overflow-auto max-h-[32rem]" style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}>
                       <table className="min-w-full text-xs">
                         <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
                           <tr>
@@ -1087,7 +1095,7 @@ export default function Reconciliation() {
                                   return dc > 1 ? (
                                     <Tooltip>
                                       <TooltipTrigger asChild>
-                                        <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help" style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '2px' }}>×{dc} dup</span>
+                                        <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help" style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '12px' }}>×{dc} dup</span>
                                       </TooltipTrigger>
                                       <TooltipContent>This invoice number appears on {dc} different POD extractions — at least {dc - 1} are wrong.</TooltipContent>
                                     </Tooltip>
@@ -1161,7 +1169,7 @@ export default function Reconciliation() {
         {view === 'detail' && selected && (
           <>
             {backfillMsg && (
-              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '2px' }}>
+              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                 <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'var(--phosphor)', boxShadow: '0 0 12px hsla(33,95%,55%,0.35)' }} />
                 <p className="font-mono text-xs text-accent pl-2">{backfillMsg}</p>
               </div>
@@ -1172,22 +1180,33 @@ export default function Reconciliation() {
               <button
                 onClick={handleRefreshSage}
                 className="flex items-center gap-2 border border-border bg-card px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
-                style={{ borderRadius: '2px' }}
+                style={{ borderRadius: '12px' }}
               >
                 <RefreshCw className="h-3 w-3" /> Refresh Sage
               </button>
-              <button
-                onClick={handleStartExtraction}
-                disabled={extracting}
-                className="flex items-center gap-2 border border-foreground bg-transparent text-foreground px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] transition-colors disabled:opacity-50"
-                style={{ borderRadius: '2px' }}
-              >
-                <FileText className="h-3 w-3" /> {extracting ? 'Extracting…' : 'Extract Invoices (OCR)'}
-              </button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={ocrPaused ? 'cursor-not-allowed' : ''}>
+                    <button
+                      onClick={handleStartExtraction}
+                      disabled={extracting || ocrPaused}
+                      className="flex items-center gap-2 border border-foreground bg-transparent text-foreground px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] transition-colors disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:shadow-none disabled:pointer-events-none"
+                      style={{ borderRadius: '12px' }}
+                    >
+                      <FileText className="h-3 w-3" /> {ocrPaused ? 'Extract Invoices (OCR off)' : (extracting ? 'Extracting…' : 'Extract Invoices (OCR)')}
+                    </button>
+                  </span>
+                </TooltipTrigger>
+                {ocrPaused && (
+                  <TooltipContent side="top">
+                    OCR is paused in Settings → Reconciliation. Resume it there to enable extraction.
+                  </TooltipContent>
+                )}
+              </Tooltip>
             </div>
 
             {extractError && (
-              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '2px' }}>
+              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                 <div
                   className="absolute left-0 top-0 bottom-0 w-[2px]"
                   style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
@@ -1250,7 +1269,7 @@ export default function Reconciliation() {
           </DialogHeader>
 
           {/* Generate from Sage */}
-          <div className="border border-border bg-card p-4 mt-2" style={{ borderRadius: '2px' }}>
+          <div className="border border-border bg-card p-4 mt-2" style={{ borderRadius: '12px' }}>
             <div className="mb-3">
               <p className="font-display text-base text-foreground">Generate from Sage</p>
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-0.5">
@@ -1267,7 +1286,7 @@ export default function Reconciliation() {
                   value={tg1Rate}
                   onChange={(e) => setTg1Rate(e.target.value)}
                   className="bg-background border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none w-20"
-                  style={{ borderRadius: '2px' }}
+                  style={{ borderRadius: '12px' }}
                 />
               </div>
               <div className="flex flex-col gap-1">
@@ -1277,7 +1296,7 @@ export default function Reconciliation() {
                   value={tg2Rate}
                   onChange={(e) => setTg2Rate(e.target.value)}
                   className="bg-background border border-border text-foreground px-2 py-1.5 font-mono text-xs tabular-nums focus:border-accent outline-none w-20"
-                  style={{ borderRadius: '2px' }}
+                  style={{ borderRadius: '12px' }}
                 />
               </div>
               <button
@@ -1315,7 +1334,7 @@ export default function Reconciliation() {
                   }
                 }}
                 className="px-4 py-2 border border-foreground bg-transparent text-foreground font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] transition-colors disabled:opacity-50 flex items-center gap-2"
-                style={{ borderRadius: '2px' }}
+                style={{ borderRadius: '12px' }}
               >
                 {generating && <RefreshCw className="h-3 w-3 animate-spin" />}
                 {generating ? 'Generating…' : 'Generate'}
@@ -1329,7 +1348,7 @@ export default function Reconciliation() {
                     } catch (e) { toast.error(`Cancel failed: ${e.message}`); }
                   }}
                   className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(0,72%,50%,0.18)] hover:shadow-[0_0_12px_hsla(0,72%,50%,0.35)] transition-colors"
-                  style={{ borderRadius: '2px' }}
+                  style={{ borderRadius: '12px' }}
                 >
                   Cancel
                 </button>
@@ -1341,7 +1360,7 @@ export default function Reconciliation() {
 
           <div
             className="border border-dashed py-5 px-6 text-center transition-colors cursor-pointer"
-            style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '2px' }}
+            style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '12px' }}
             onClick={() => cardosoFileRef.current?.click()}
           >
             <input
@@ -1383,7 +1402,7 @@ function PhosphorButton({ onClick, icon: Icon, label, tip }) {
         color: 'var(--phosphor)',
         background: 'hsla(33, 95%, 55%, 0.08)',
         border: '1px solid hsla(33, 95%, 55%, 0.5)',
-        borderRadius: '2px',
+        borderRadius: '12px',
         boxShadow: '0 0 0 1px transparent, 0 0 12px hsla(33,95%,55%,0.18)',
       }}
       onMouseEnter={(e) => {
@@ -1425,7 +1444,7 @@ function DatePickerField({ label, value, onChange }) {
           <button
             type="button"
             className="bg-background border border-border text-foreground px-3 py-1.5 font-mono text-xs tabular-nums hover:border-accent transition-colors flex items-center gap-2 w-[180px] justify-start"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           >
             <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
             <span className="truncate">{display}</span>
@@ -1459,12 +1478,15 @@ function DatePickerField({ label, value, onChange }) {
 
 function MatchTile({ label, value, color }) {
   return (
-    <div className="relative bg-card p-4">
+    <div
+      className="relative bg-card border border-border p-4 overflow-hidden"
+      style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}
+    >
       <div
-        className="absolute left-0 top-0 bottom-0 w-[2px]"
+        className="absolute left-0 right-0 bottom-0 h-[2px]"
         style={{ background: color, boxShadow: `0 0 10px ${color}40` }}
       />
-      <div className="pl-2">
+      <div>
         <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1.5">{label}</div>
         <div className="font-display text-3xl leading-none tabular-nums" style={{ color }}>{value}</div>
       </div>

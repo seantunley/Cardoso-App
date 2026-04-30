@@ -122,7 +122,7 @@ export default function AgedDebtors() {
       printFooter={<PrintFooter note="Aged Debtors · Cardoso" />}
     >
       {/* Filters */}
-      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-5 gap-3" style={{ borderRadius: '2px' }}>
+      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-5 gap-3" style={{ borderRadius: '12px' }}>
         <FilterField label="Sales Rep" value={salesRep} onChange={setSalesRep} options={[{ value: 'all', label: 'All reps' }, ...filters.sales_reps.map(r => ({ value: r, label: r }))]} />
         <FilterField label="Account Type" value={accountType} onChange={setAccountType} options={[{ value: 'all', label: 'All types' }, ...filters.account_types.map(t => ({ value: t, label: t }))]} />
         {data?.hub_mode && (
@@ -134,14 +134,14 @@ export default function AgedDebtors() {
             type="number" min={0} step={1} value={minBalance}
             onChange={(e) => setMinBalance(parseFloat(e.target.value) || 0)}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs tabular-nums outline-none focus:border-accent"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           />
         </div>
         <div className="flex items-end">
           <button
             onClick={() => { setSalesRep('all'); setAccountType('all'); setSite('all'); setMinBalance(3); }}
             className="w-full border border-border px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           >
             Reset filters
           </button>
@@ -190,7 +190,7 @@ export default function AgedDebtors() {
 
           {/* Table */}
           <div className="report-print-section-title hidden">Customer Detail</div>
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <table className="report-print-table w-full text-xs">
               <thead>
                 <tr className="border-b border-border">
@@ -254,7 +254,7 @@ function FilterField({ label, value, onChange, options }) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs outline-none focus:border-accent"
-        style={{ borderRadius: '2px' }}
+        style={{ borderRadius: '12px' }}
       >
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>

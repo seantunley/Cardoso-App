@@ -77,14 +77,14 @@ export default function BatExceptions() {
       }
       printFooter={<PrintFooter note="BAT Exceptions Summary · Cardoso" />}
     >
-      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '2px' }}>
+      <div className="report-print-hide bg-card border border-border p-3 grid grid-cols-2 lg:grid-cols-4 gap-3" style={{ borderRadius: '12px' }}>
         <div>
           <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">Year</label>
           <select
             value={year}
             onChange={(e) => setYear(e.target.value)}
             className="w-full bg-background border border-border text-foreground px-2 py-1.5 text-xs outline-none focus:border-accent"
-            style={{ borderRadius: '2px' }}
+            style={{ borderRadius: '12px' }}
           >
             <option value="all">All years</option>
             {(data?.available_years || []).map(y => <option key={y} value={y}>{y}</option>)}
@@ -125,7 +125,7 @@ export default function BatExceptions() {
           </div>
 
           <div className="report-print-section-title hidden">Exceptions by Reason</div>
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <div className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground border-b border-border">By reason</div>
             <table className="report-print-table w-full text-xs">
               <thead>
@@ -164,7 +164,7 @@ export default function BatExceptions() {
             </table>
           </div>
 
-          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '2px' }}>
+          <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <div className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground border-b border-border">Top stores by exception value</div>
             <table className="report-print-table w-full text-xs">
               <thead>

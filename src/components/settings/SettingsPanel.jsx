@@ -1628,7 +1628,7 @@ function ReconciliationSettingsTab() {
           disabled={saving}
           className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
           style={{
-            borderRadius: '2px',
+            borderRadius: '12px',
             borderColor: 'var(--phosphor)',
             color: 'var(--phosphor)',
             background: 'hsla(33, 95%, 55%, 0.08)',
@@ -1713,7 +1713,7 @@ function OcrPauseToggle() {
           disabled={busy}
           className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
           style={{
-            borderRadius: '2px',
+            borderRadius: '12px',
             borderColor: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
             color: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
             background: 'transparent',
@@ -1787,7 +1787,7 @@ function ReplicateSupplierTool() {
             onClick={() => setConfirmOpen(true)}
             className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
             style={{
-              borderRadius: '2px',
+              borderRadius: '12px',
               borderColor: 'hsl(var(--destructive))',
               color: 'hsl(var(--destructive))',
               background: 'hsla(0, 72%, 50%, 0.08)',
@@ -1819,7 +1819,7 @@ function ReplicateSupplierTool() {
               disabled={running || !pwd}
               className="px-3 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
               style={{
-                borderRadius: '2px',
+                borderRadius: '12px',
                 borderColor: 'hsl(var(--destructive))',
                 color: 'hsl(var(--destructive))',
                 background: 'hsla(0, 72%, 50%, 0.08)',
@@ -1841,7 +1841,7 @@ function ReplicateSupplierTool() {
               onClick={() => { setConfirmOpen(false); setPwd(''); }}
               disabled={running}
               className="px-3 py-2 border border-border text-muted-foreground font-mono text-[10px] uppercase tracking-[0.2em] hover:text-foreground transition-colors"
-              style={{ borderRadius: '2px' }}
+              style={{ borderRadius: '12px' }}
             >
               Cancel
             </button>

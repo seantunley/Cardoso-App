@@ -27,7 +27,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
   }[connection.status] || "transparent";
 
   return (
-    <div className="group relative bg-card border border-border p-6 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "2px" }}>
+    <div className="group relative bg-card border border-border p-6 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "12px" }}>
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"
         style={{ background: accentBar, boxShadow: `0 0 12px ${accentGlow}` }}
@@ -42,7 +42,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
               <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5 truncate">{connection.host}</p>
             </div>
           </div>
-          <Badge className={cn("border font-mono text-[10px] uppercase tracking-[0.15em]", statusColors[connection.status])} style={{ borderRadius: "2px" }}>
+          <Badge className={cn("border font-mono text-[10px] uppercase tracking-[0.15em]", statusColors[connection.status])} style={{ borderRadius: "12px" }}>
             {connection.status}
           </Badge>
         </div>

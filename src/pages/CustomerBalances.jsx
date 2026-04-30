@@ -590,7 +590,7 @@ export default function CustomerBalances() {
                 disabled={rows.length === 0}
                 className="flex items-center gap-2 border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
                 style={{
-                  borderRadius: "2px",
+                  borderRadius: "12px",
                   borderColor: 'var(--phosphor)',
                   color: 'var(--phosphor)',
                   background: 'hsla(33, 95%, 55%, 0.08)',
@@ -616,7 +616,7 @@ export default function CustomerBalances() {
               <button
                 onClick={() => refetch()}
                 className="flex items-center gap-2 border border-border bg-card px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors min-h-[40px]"
-                style={{ borderRadius: "2px" }}
+                style={{ borderRadius: "12px" }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.borderColor = 'var(--phosphor)';
                   e.currentTarget.style.color = 'var(--phosphor)';

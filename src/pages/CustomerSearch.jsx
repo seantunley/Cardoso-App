@@ -71,7 +71,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "2px" }}>
+      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "12px" }}>
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">Find invoice by amount</DialogTitle>
           <DialogDescription className="font-sans normal-case tracking-normal text-sm leading-relaxed text-muted-foreground">
@@ -91,7 +91,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
               onKeyDown={(e) => e.key === "Enter" && search()}
               placeholder="11710.66"
               className="w-full bg-background border border-border text-foreground pl-7 pr-3 py-2 text-sm font-mono tabular-nums outline-none focus:border-accent"
-              style={{ borderRadius: "2px" }}
+              style={{ borderRadius: "12px" }}
             />
             {amount && (
               <button onClick={() => setAmount("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -103,7 +103,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
             value={tolerance}
             onChange={(e) => setTolerance(e.target.value)}
             className="bg-background border border-border text-foreground px-2 py-2 text-xs font-mono outline-none focus:border-accent"
-            style={{ borderRadius: "2px" }}
+            style={{ borderRadius: "12px" }}
             title="How far above or below the typed amount to search"
           >
             <option value="0">Exact</option>
@@ -117,7 +117,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
             disabled={searching || !amount.trim()}
             className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
             style={{
-              borderRadius: "2px",
+              borderRadius: "12px",
               borderColor: "var(--phosphor)",
               color: "var(--phosphor)",
               background: "hsla(33,95%,55%,0.08)",
@@ -130,7 +130,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
         </div>
 
         {error && (
-          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "12px" }}>
             {error}
           </div>
         )}
@@ -161,7 +161,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                 <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
                   {results.length} match{results.length === 1 ? "" : "es"} · sorted by closest first
                   {results.some(m => m.match_type === "exact") && (
-                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[hsl(145_55%_75%)]" style={{ background: "hsla(145, 55%, 45%, 0.15)", border: "1px solid hsla(145, 55%, 45%, 0.5)", borderRadius: "2px" }}>
+                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[hsl(145_55%_75%)]" style={{ background: "hsla(145, 55%, 45%, 0.15)", border: "1px solid hsla(145, 55%, 45%, 0.5)", borderRadius: "12px" }}>
                       ● exact match found
                     </span>
                   )}
@@ -176,7 +176,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                       onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
                       className={`w-full relative p-3 text-left transition-colors ${exact ? "" : "bg-card border border-border hover:bg-muted/30"}`}
                       style={{
-                        borderRadius: "2px",
+                        borderRadius: "12px",
                         ...(exact && {
                           background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
                           border: "1px solid hsl(145 55% 45%)",
@@ -186,7 +186,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                     >
                       <div className="absolute left-0 top-0 bottom-0" style={{ width: exact ? "3px" : "2px", background: stripColour, boxShadow: `0 0 ${exact ? 12 : 8}px ${stripColour}80` }} />
                       {exact && (
-                        <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-[hsl(24_8%_6%)]" style={{ background: "hsl(145 55% 45%)", borderRadius: "2px", boxShadow: "0 0 10px hsla(145,55%,45%,0.5)" }}>
+                        <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-[hsl(24_8%_6%)]" style={{ background: "hsl(145 55% 45%)", borderRadius: "12px", boxShadow: "0 0 10px hsla(145,55%,45%,0.5)" }}>
                           Exact match
                         </span>
                       )}
@@ -274,7 +274,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "2px" }}>
+      <DialogContent className="sm:max-w-4xl" style={{ borderRadius: "12px" }}>
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">Find customer by invoice</DialogTitle>
           <DialogDescription className="font-sans normal-case tracking-normal text-sm leading-relaxed text-muted-foreground">
@@ -292,7 +292,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
               onKeyDown={(e) => e.key === "Enter" && search()}
               placeholder="e.g. IN587925"
               className="w-full bg-background border border-border text-foreground pl-9 pr-3 py-2 text-sm font-mono outline-none focus:border-accent"
-              style={{ borderRadius: "2px" }}
+              style={{ borderRadius: "12px" }}
             />
             {invoice && (
               <button onClick={() => setInvoice("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
@@ -305,7 +305,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
             disabled={searching || invoice.trim().length < 3}
             className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
             style={{
-              borderRadius: "2px",
+              borderRadius: "12px",
               borderColor: "var(--phosphor)",
               color: "var(--phosphor)",
               background: "hsla(33,95%,55%,0.08)",
@@ -318,7 +318,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
         </div>
 
         {error && (
-          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+          <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "12px" }}>
             {error}
           </div>
         )}
@@ -357,7 +357,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
                       key={`${m.customer_number}-${i}`}
                       onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
                       className="w-full relative bg-card border border-border p-3 text-left hover:bg-muted/30 transition-colors"
-                      style={{ borderRadius: "2px" }}
+                      style={{ borderRadius: "12px" }}
                     >
                       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 8px hsla(33,95%,55%,0.4)" }} />
                       <div className="pl-2 flex items-baseline justify-between gap-3">
@@ -404,7 +404,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
               value={days}
               onChange={(e) => setDays(parseInt(e.target.value, 10))}
               className="bg-background border border-border text-foreground px-2 py-2 text-xs font-mono outline-none focus:border-accent"
-              style={{ borderRadius: "2px" }}
+              style={{ borderRadius: "12px" }}
               title="How far back to search in Sage"
               disabled={searching}
             >
@@ -421,7 +421,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
             disabled={searching}
             className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40"
             style={{
-              borderRadius: "2px",
+              borderRadius: "12px",
               borderColor: "hsl(200 80% 55%)",
               color: "hsl(200 80% 75%)",
               background: "hsla(200, 80%, 55%, 0.10)",
@@ -435,7 +435,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
       </div>
 
       {error && (
-        <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "2px" }}>
+        <div className="mt-3 px-3 py-2 text-sm text-destructive font-mono" style={{ border: "1px solid hsl(var(--destructive))", borderRadius: "12px" }}>
           {error}
         </div>
       )}
@@ -460,7 +460,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                     onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
                     className={`w-full relative p-3 text-left transition-colors ${exact ? "" : "bg-card border border-border hover:bg-muted/30"}`}
                     style={{
-                      borderRadius: "2px",
+                      borderRadius: "12px",
                       ...(exact && {
                         background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
                         border: "1px solid hsl(145 55% 45%)",
@@ -469,11 +469,11 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                     }}
                   >
                     <div className="absolute left-0 top-0 bottom-0" style={{ width: exact ? "3px" : "2px", background: stripColour, boxShadow: `0 0 ${exact ? 12 : 8}px ${stripColour}80` }} />
-                    <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold" style={{ background: "hsl(200 80% 55%)", color: "hsl(200 25% 6%)", borderRadius: "2px", boxShadow: "0 0 8px hsla(200, 80%, 55%, 0.5)" }}>
+                    <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold" style={{ background: "hsl(200 80% 55%)", color: "hsl(200 25% 6%)", borderRadius: "12px", boxShadow: "0 0 8px hsla(200, 80%, 55%, 0.5)" }}>
                       Sage
                     </span>
                     {m.paid && (
-                      <span className="absolute top-3 right-12 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: m.paid === "paid" ? "hsl(145 55% 75%)" : "hsl(33 95% 75%)", background: m.paid === "paid" ? "hsla(145, 55%, 45%, 0.12)" : "hsla(33, 95%, 55%, 0.12)", border: `1px solid ${m.paid === "paid" ? "hsla(145, 55%, 45%, 0.4)" : "hsla(33, 95%, 55%, 0.4)"}`, borderRadius: "2px" }}>
+                      <span className="absolute top-3 right-12 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: m.paid === "paid" ? "hsl(145 55% 75%)" : "hsl(33 95% 75%)", background: m.paid === "paid" ? "hsla(145, 55%, 45%, 0.12)" : "hsla(33, 95%, 55%, 0.12)", border: `1px solid ${m.paid === "paid" ? "hsla(145, 55%, 45%, 0.4)" : "hsla(33, 95%, 55%, 0.4)"}`, borderRadius: "12px" }}>
                         {m.paid}
                       </span>
                     )}
@@ -627,7 +627,7 @@ export default function CustomerSearch() {
               onClick={() => setInvoiceModalOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.2em] transition-colors"
               style={{
-                borderRadius: "2px",
+                borderRadius: "12px",
                 border: "1px solid var(--phosphor)",
                 color: "var(--phosphor)",
                 background: "hsla(33, 95%, 55%, 0.08)",
@@ -643,7 +643,7 @@ export default function CustomerSearch() {
               onClick={() => setAmountModalOpen(true)}
               className="inline-flex items-center gap-2 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.2em] transition-colors"
               style={{
-                borderRadius: "2px",
+                borderRadius: "12px",
                 border: "1px solid var(--phosphor)",
                 color: "var(--phosphor)",
                 background: "hsla(33, 95%, 55%, 0.08)",
@@ -670,18 +670,21 @@ export default function CustomerSearch() {
         />
 
         {/* Flag Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-border border border-border stagger-in" style={{ borderRadius: "2px" }}>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 stagger-in">
           {FLAG_TILES.map(({ key, label, sub, count, hue, glow, icon: Icon }) => (
             <button
               key={key}
               onClick={() => handleFlagClick(key)}
-              className="relative bg-card text-left px-5 py-4 transition-colors hover:bg-muted/40 group cursor-pointer"
+              className="relative bg-card text-left px-5 py-4 border border-border transition-all hover:bg-muted/30 hover:-translate-y-0.5 group cursor-pointer overflow-hidden"
+              style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 6px 18px rgba(0,0,0,0.35), 0 0 0 1px ${glow}`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.25)"; }}
             >
               <div
-                className="absolute left-0 top-0 bottom-0 w-[2px] transition-all"
+                className="absolute left-0 right-0 bottom-0 h-[2px] transition-all"
                 style={{ background: hue, boxShadow: `0 0 12px ${glow}` }}
               />
-              <div className="flex items-start justify-between pl-2">
+              <div className="flex items-start justify-between">
                 <div className="min-w-0">
                   <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
                     {label}
@@ -708,8 +711,8 @@ export default function CustomerSearch() {
         />
 
         {/* Customer Lookup + Last Sync side by side */}
-        <div className="flex flex-col sm:flex-row gap-px bg-border border border-border items-stretch" style={{ borderRadius: "2px" }}>
-          <div className="flex-1 bg-card min-w-0">
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+          <div className="flex-1 bg-card border border-border min-w-0 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
             <CustomerLookup
               currentUser={currentUser}
               onRecordSelect={setSelectedRecord}
@@ -721,16 +724,19 @@ export default function CustomerSearch() {
           </div>
 
           {selectedConnection && (
-            <div className="w-full sm:flex-shrink-0 sm:w-56 bg-card relative px-5 py-4 flex flex-col justify-center">
+            <div
+              className="w-full sm:flex-shrink-0 sm:w-56 bg-card border border-border relative px-5 py-4 flex flex-col justify-center overflow-hidden"
+              style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
+            >
               <div
-                className="absolute left-0 top-0 bottom-0 w-[2px]"
+                className="absolute left-0 right-0 bottom-0 h-[2px]"
                 style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }}
               />
-              <div className="flex items-center gap-2 mb-2 pl-2">
+              <div className="flex items-center gap-2 mb-2">
                 <RefreshCw className="w-3 h-3 text-accent" />
                 <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Last Sync</p>
               </div>
-              <div className="pl-2">
+              <div>
                 {selectedConnection.last_sync ? (
                   <>
                     <p className="font-mono text-xs text-muted-foreground">
@@ -763,7 +769,7 @@ export default function CustomerSearch() {
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (
-          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "2px" }}>
+          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "12px" }}>
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
               style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }}
@@ -781,7 +787,7 @@ export default function CustomerSearch() {
         )}
 
         {activeConnections.length > 0 && (
-          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "2px" }}>
+          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "12px" }}>
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
               style={{ background: "hsl(145 55% 45%)", boxShadow: "0 0 12px hsla(145,55%,45%,0.3)" }}
