@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtRSigned, downloadCsv,
+  fmtR, fmtRSigned, fmtCompactR, downloadCsv,
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedLegend, ThemedGrid,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
+  LEGEND_WRAPPER,
 } from './lib';
 
 const BUCKET_META = {
@@ -168,10 +171,29 @@ export default function AgedDebtors() {
           <div className="report-print-hide grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
             <ChartCard title="Outstanding by Aging Bucket" sub="Rand value · R 0.01 tolerance">
               <BarChart data={bucketChartData} margin={{ top: 10, right: 16, left: 6, bottom: 26 }}>
-                <ThemedGrid />
-                <ThemedXAxis dataKey="name" label="Aging bucket" />
-                <ThemedYAxis currency label="Outstanding (R)" />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} cust`, p.payload.name]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={AXIS_TICK}
+                  tickLine={AXIS_LINE}
+                  axisLine={AXIS_LINE}
+                  label={{ value: 'Aging bucket', position: 'insideBottom', offset: -5, style: AXIS_LABEL }}
+                />
+                <YAxis
+                  tick={AXIS_TICK}
+                  tickLine={AXIS_LINE}
+                  axisLine={AXIS_LINE}
+                  tickFormatter={fmtCompactR}
+                  width={70}
+                  label={{ value: 'Outstanding (R)', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_CONTENT}
+                  labelStyle={TOOLTIP_LABEL}
+                  itemStyle={TOOLTIP_ITEM}
+                  cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} cust`, p.payload.name]}
+                />
                 <Bar dataKey="amount" radius={[2, 2, 0, 0]}>
                   {bucketChartData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                 </Bar>
@@ -182,8 +204,14 @@ export default function AgedDebtors() {
                 <Pie data={bucketChartData} dataKey="amount" nameKey="name" innerRadius={55} outerRadius={95} paddingAngle={2}>
                   {bucketChartData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
                 </Pie>
-                <ThemedLegend />
-                <ThemedTooltip formatter={(v) => `R ${fmtR(v)}`} />
+                <Legend wrapperStyle={LEGEND_WRAPPER} iconType="square" />
+                <Tooltip
+                  contentStyle={TOOLTIP_CONTENT}
+                  labelStyle={TOOLTIP_LABEL}
+                  itemStyle={TOOLTIP_ITEM}
+                  cursor={TOOLTIP_CURSOR}
+                  formatter={(v) => `R ${fmtR(v)}`}
+                />
               </PieChart>
             </ChartCard>
           </div>

@@ -55,14 +55,21 @@ export const PALETTE = [
   'hsl(310 70% 60%)',
 ];
 
-// ── Themed Recharts defaults ──────────────────────────────────────────────
-const AXIS_TICK_PROPS = {
+// ── Themed Recharts defaults (prop bundles, not wrappers) ────────────────
+// Recharts identifies XAxis / YAxis / Legend / CartesianGrid / Tooltip
+// children by static class metadata on the actual component, so wrapping them
+// in a custom function loses axis rendering entirely. Export styling as
+// prop bundles instead — callers spread these onto the raw Recharts elements
+// (re-exported below) so the chart still recognises them.
+export const AXIS_TICK = {
   fill: 'hsl(var(--muted-foreground))',
   fontSize: 11,
   fontFamily: 'monospace',
 };
 
-const AXIS_LABEL_PROPS = {
+export const AXIS_LINE = { stroke: 'hsl(var(--border))' };
+
+export const AXIS_LABEL = {
   fill: 'hsl(var(--muted-foreground))',
   fontSize: 10,
   fontFamily: 'monospace',
@@ -70,7 +77,7 @@ const AXIS_LABEL_PROPS = {
   textTransform: 'uppercase',
 };
 
-const TOOLTIP_STYLE = {
+export const TOOLTIP_CONTENT = {
   background: 'hsl(var(--card))',
   border: '1px solid hsl(var(--border))',
   borderLeft: '2px solid var(--phosphor)',
@@ -81,7 +88,7 @@ const TOOLTIP_STYLE = {
   padding: '8px 12px',
 };
 
-const TOOLTIP_LABEL_STYLE = {
+export const TOOLTIP_LABEL = {
   color: 'hsl(var(--muted-foreground))',
   fontSize: 10,
   textTransform: 'uppercase',
@@ -89,16 +96,26 @@ const TOOLTIP_LABEL_STYLE = {
   marginBottom: 4,
 };
 
-const TOOLTIP_ITEM_STYLE = {
+export const TOOLTIP_ITEM = {
   color: 'hsl(var(--foreground))',
   fontSize: 12,
 };
 
-const LEGEND_STYLE = {
+export const TOOLTIP_CURSOR = { fill: 'hsla(33, 95%, 55%, 0.06)' };
+
+export const LEGEND_WRAPPER = {
   fontSize: 11,
   fontFamily: 'monospace',
   paddingTop: 8,
 };
+
+// Aliases retained for any internal references below.
+const AXIS_TICK_PROPS = AXIS_TICK;
+const AXIS_LABEL_PROPS = AXIS_LABEL;
+const TOOLTIP_STYLE = TOOLTIP_CONTENT;
+const TOOLTIP_LABEL_STYLE = TOOLTIP_LABEL;
+const TOOLTIP_ITEM_STYLE = TOOLTIP_ITEM;
+const LEGEND_STYLE = LEGEND_WRAPPER;
 
 // Common axis components — use them in every chart so styling is uniform.
 export function ThemedXAxis({ label, ...props }) {
@@ -151,7 +168,10 @@ export function ThemedGrid() {
 }
 
 // Re-export Recharts primitives so report files only import from here.
-export { ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell };
+export {
+  ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, RechartsTooltip as Tooltip, Legend,
+};
 
 // ── Print stylesheet ──────────────────────────────────────────────────────
 // Each report passes a unique `id` and chooses orientation. The hook installs

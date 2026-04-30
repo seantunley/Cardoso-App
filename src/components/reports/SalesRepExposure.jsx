@@ -2,9 +2,11 @@ import { useMemo, useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCount, downloadCsv,
+  fmtR, fmtCompactR, fmtCount, downloadCsv,
   ResponsiveContainer, BarChart, Bar, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedGrid,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
   REPORT_COLORS,
 } from './lib';
 
@@ -94,10 +96,30 @@ export default function SalesRepExposure() {
           <div className="report-print-hide mt-4">
             <ChartCard title="Outstanding by Sales Rep · Top 20" sub="Bar = total R; opacity scales with red-flag count" height={Math.max(300, chartData.length * 22)}>
               <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 16, left: 100, bottom: 24 }}>
-                <ThemedGrid />
-                <ThemedXAxis type="number" currency label="Outstanding (R)" />
-                <ThemedYAxis type="category" dataKey="name" width={120} tickFormatter={(v) => v} label="" />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} cust · ${p.payload.red} red`, p.payload.fullName]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis
+                  type="number"
+                  tick={AXIS_TICK}
+                  tickLine={AXIS_LINE}
+                  axisLine={AXIS_LINE}
+                  tickFormatter={fmtCompactR}
+                  label={{ value: 'Outstanding (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  width={120}
+                  tick={AXIS_TICK}
+                  tickLine={AXIS_LINE}
+                  axisLine={AXIS_LINE}
+                />
+                <Tooltip
+                  contentStyle={TOOLTIP_CONTENT}
+                  labelStyle={TOOLTIP_LABEL}
+                  itemStyle={TOOLTIP_ITEM}
+                  cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} cust · ${p.payload.red} red`, p.payload.fullName]}
+                />
                 <Bar dataKey="total" radius={[0, 2, 2, 0]}>
                   {chartData.map((entry, i) => (
                     <Cell key={i} fill={REPORT_COLORS.primary} fillOpacity={Math.min(0.3 + (entry.red * 0.15), 1)} />

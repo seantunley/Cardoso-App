@@ -4,8 +4,11 @@ import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtCount, downloadCsv,
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedLegend, ThemedGrid,
-  PALETTE, REPORT_COLORS,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
+  LEGEND_WRAPPER,
+  PALETTE, REPORT_COLORS, fmtCompactR,
 } from './lib';
 
 function fetchInventoryValue(topN) {
@@ -101,16 +104,19 @@ export default function InventoryValue() {
                 <Pie data={commodityChartData} dataKey="value" nameKey="name" innerRadius={60} outerRadius={110} paddingAngle={1}>
                   {commodityChartData.map((e, i) => <Cell key={i} fill={e.color} />)}
                 </Pie>
-                <ThemedLegend />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.items} items`, p.payload.fullName]} />
+                <Legend wrapperStyle={LEGEND_WRAPPER} iconType="square" />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.items} items`, p.payload.fullName]} />
               </PieChart>
             </ChartCard>
             <ChartCard title={`Top ${Math.min(topN, 15)} Items by Value`} sub="Highest-value SKUs" height={Math.max(280, topItemsChartData.length * 22)}>
               <BarChart data={topItemsChartData} layout="vertical" margin={{ top: 10, right: 16, left: 100, bottom: 10 }}>
-                <ThemedGrid />
-                <ThemedXAxis type="number" currency label="Value (R)" />
-                <ThemedYAxis type="category" dataKey="name" width={120} tickFormatter={(v) => v} />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · qty ${p.payload.qty}`, p.payload.desc || p.payload.name]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis type="number" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR}
+                  label={{ value: 'Value (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis type="category" dataKey="name" width={120} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · qty ${p.payload.qty}`, p.payload.desc || p.payload.name]} />
                 <Bar dataKey="value" fill={REPORT_COLORS.primary} radius={[0, 2, 2, 0]} />
               </BarChart>
             </ChartCard>

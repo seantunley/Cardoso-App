@@ -4,8 +4,11 @@ import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtRSigned, fmtPct, downloadCsv,
   ResponsiveContainer, BarChart, Bar, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedLegend, ThemedGrid,
-  REPORT_COLORS,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
+  LEGEND_WRAPPER,
+  REPORT_COLORS, fmtCompactR,
 } from './lib';
 
 const FEE_COLORS = {
@@ -94,11 +97,14 @@ export default function BatYtd() {
           <div className="report-print-hide mt-4">
             <ChartCard title="BAT vs Sage by Fee Type" sub={`Year ${year} totals`} height={320}>
               <BarChart data={fees} margin={{ top: 10, right: 16, left: 6, bottom: 32 }}>
-                <ThemedGrid />
-                <ThemedXAxis dataKey="fee_type" label="Fee type" />
-                <ThemedYAxis currency label="Rand" />
-                <ThemedTooltip formatter={(v, n) => [`R ${fmtR(v)}`, n === 'supplier' ? 'BAT' : 'Sage']} />
-                <ThemedLegend />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="fee_type" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE}
+                  label={{ value: 'Fee type', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR} width={70}
+                  label={{ value: 'Rand', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n) => [`R ${fmtR(v)}`, n === 'supplier' ? 'BAT' : 'Sage']} />
+                <Legend wrapperStyle={LEGEND_WRAPPER} iconType="square" />
                 <Bar dataKey="supplier" name="BAT" fill={REPORT_COLORS.primary} radius={[2, 2, 0, 0]} />
                 <Bar dataKey="sage" name="Sage" fill={REPORT_COLORS.secondary} radius={[2, 2, 0, 0]} />
               </BarChart>

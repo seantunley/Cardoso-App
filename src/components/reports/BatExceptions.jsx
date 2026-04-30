@@ -4,8 +4,10 @@ import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtCount, downloadCsv,
   ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedLegend, ThemedGrid,
-  PALETTE, REPORT_COLORS,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
+  PALETTE, REPORT_COLORS, fmtCompactR,
 } from './lib';
 
 function fetchBatExceptions(year) {
@@ -104,10 +106,12 @@ export default function BatExceptions() {
           <div className="report-print-hide grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
             <ChartCard title="Top exception reasons by R" sub="Top 10 · all-time">
               <BarChart data={reasonChartData} layout="vertical" margin={{ top: 10, right: 16, left: 110, bottom: 10 }}>
-                <ThemedGrid />
-                <ThemedXAxis type="number" currency label="Amount (R)" />
-                <ThemedYAxis type="category" dataKey="name" width={130} tickFormatter={(v) => v} />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis type="number" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR}
+                  label={{ value: 'Amount (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis type="category" dataKey="name" width={130} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
                 <Bar dataKey="amount" radius={[0, 2, 2, 0]}>
                   {reasonChartData.map((e, i) => <Cell key={i} fill={e.color} />)}
                 </Bar>
@@ -115,10 +119,12 @@ export default function BatExceptions() {
             </ChartCard>
             <ChartCard title="Top stores by exception R" sub="Top 15">
               <BarChart data={storeChartData} layout="vertical" margin={{ top: 10, right: 16, left: 110, bottom: 10 }}>
-                <ThemedGrid />
-                <ThemedXAxis type="number" currency label="Amount (R)" />
-                <ThemedYAxis type="category" dataKey="name" width={130} tickFormatter={(v) => v} />
-                <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis type="number" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR}
+                  label={{ value: 'Amount (R)', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis type="category" dataKey="name" width={130} tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n, p) => [`R ${fmtR(v)} · ${p.payload.count} inv`, p.payload.fullName]} />
                 <Bar dataKey="amount" fill={REPORT_COLORS.danger} radius={[0, 2, 2, 0]} />
               </BarChart>
             </ChartCard>

@@ -4,8 +4,11 @@ import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtRSigned, fmtPct, fmtCount, downloadCsv,
   ResponsiveContainer, BarChart, Bar, LineChart, Line, Cell,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedLegend, ThemedGrid,
-  REPORT_COLORS,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  AXIS_TICK, AXIS_LINE, AXIS_LABEL,
+  TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
+  LEGEND_WRAPPER,
+  REPORT_COLORS, fmtCompactR,
 } from './lib';
 
 function fetchBatWeekly(year) {
@@ -110,21 +113,29 @@ export default function BatWeekly() {
           <div className="report-print-hide grid grid-cols-1 lg:grid-cols-2 gap-3 mt-4">
             <ChartCard title="Weekly BAT vs Credit Notes" sub="Side-by-side per week">
               <BarChart data={chartData} margin={{ top: 10, right: 16, left: 6, bottom: 32 }}>
-                <ThemedGrid />
-                <ThemedXAxis dataKey="label" label="Week" interval={Math.floor(chartData.length / 12) || 0} />
-                <ThemedYAxis currency label="Rand" />
-                <ThemedTooltip formatter={(v, n) => [`R ${fmtR(v)}`, n === 'bat' ? 'BAT' : 'Credit Notes']} />
-                <ThemedLegend />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE}
+                  interval={Math.floor(chartData.length / 12) || 0}
+                  label={{ value: 'Week', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR} width={70}
+                  label={{ value: 'Rand', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v, n) => [`R ${fmtR(v)}`, n === 'bat' ? 'BAT' : 'Credit Notes']} />
+                <Legend wrapperStyle={LEGEND_WRAPPER} iconType="square" />
                 <Bar dataKey="bat" name="BAT" fill={REPORT_COLORS.primary} radius={[2, 2, 0, 0]} />
                 <Bar dataKey="sage" name="Credit Notes" fill={REPORT_COLORS.secondary} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ChartCard>
             <ChartCard title="Weekly Variance" sub="BAT − Credit Notes; ideal = 0">
               <LineChart data={chartData} margin={{ top: 10, right: 16, left: 6, bottom: 32 }}>
-                <ThemedGrid />
-                <ThemedXAxis dataKey="label" label="Week" interval={Math.floor(chartData.length / 12) || 0} />
-                <ThemedYAxis currency label="Variance (R)" />
-                <ThemedTooltip formatter={(v) => [`R ${fmtRSigned(v)}`, 'Variance']} />
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
+                <XAxis dataKey="label" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE}
+                  interval={Math.floor(chartData.length / 12) || 0}
+                  label={{ value: 'Week', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
+                <YAxis tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR} width={70}
+                  label={{ value: 'Variance (R)', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }} />
+                <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
+                  formatter={(v) => [`R ${fmtRSigned(v)}`, 'Variance']} />
                 <Line type="monotone" dataKey="variance" stroke={REPORT_COLORS.danger} strokeWidth={2} dot={{ r: 3, fill: REPORT_COLORS.danger }} />
               </LineChart>
             </ChartCard>
