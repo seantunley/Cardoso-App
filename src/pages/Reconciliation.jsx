@@ -456,7 +456,7 @@ export default function Reconciliation() {
                 const years = Array.from(new Set([...knownYears, currentYear])).sort((a, b) => b - a);
                 return (
                   <div
-                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium"
+                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium mr-4"
                     style={{
                       color: 'var(--phosphor)',
                       background: 'hsla(33, 95%, 55%, 0.08)',
