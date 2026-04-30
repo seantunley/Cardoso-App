@@ -634,15 +634,19 @@ function parseAmount(val) {
 
 export async function querySageCreditNotes(weekNumber) {
   const sagePool = await getSagePool();
+  // APIBC join is LEFT so credit-note lines whose batch header has been
+  // purged / archived still appear (they were dropped silently before,
+  // making per-week totals diverge from the cached week totals).
   const result = await sagePool.request().query(`
     SELECT
-      bc.CNTBTCH AS batch_number,
-      LTRIM(RTRIM(bc.BTCHDESC)) AS batch_description,
+      h.CNTBTCH AS batch_number,
+      LTRIM(RTRIM(COALESCE(bc.BTCHDESC, ''))) AS batch_description,
       CASE bc.BTCHSTTS
         WHEN 1 THEN 'Open'
         WHEN 3 THEN 'Posted'
         WHEN 4 THEN 'Deleted'
         WHEN 7 THEN 'Posted'
+        WHEN NULL THEN 'Archived'
         ELSE 'Unknown (' + CAST(bc.BTCHSTTS AS VARCHAR) + ')'
       END AS batch_status,
       LTRIM(RTRIM(h.IDVEND)) AS vendor_number,
@@ -660,12 +664,13 @@ export async function querySageCreditNotes(weekNumber) {
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
         ELSE 'OTHER'
       END AS fee_type,
       d.AMTDISTHC AS line_amount
-    FROM APIBC bc
-    INNER JOIN APIBH h ON h.CNTBTCH = bc.CNTBTCH
+    FROM APIBH h
     INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
+    LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
     WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
       AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${String(weekNumber).padStart(2, '0')}%'
     ORDER BY
@@ -675,7 +680,7 @@ export async function querySageCreditNotes(weekNumber) {
         WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 3
         ELSE 4
       END,
-      bc.CNTBTCH
+      h.CNTBTCH
   `);
   return result.recordset || [];
 }
