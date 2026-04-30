@@ -214,4 +214,4 @@ Reconciliation + performance pass + UI polish.
 
 ## Version
 
-Current version: **v2026.4.5**
+Current version: **v2026.4.6**
