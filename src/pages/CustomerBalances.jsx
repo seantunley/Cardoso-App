@@ -8,10 +8,10 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 
 // ── Resizable columns ────────────────────────────────────────────────────
 const CB_COLUMN_DEFAULTS = {
-  idx: 40, name: 476, custId: 110, site: 60, rep: 97,
-  lastInv: 107, lastRec: 104, outstanding: 196, credit: 90,
+  idx: 40, name: 476, custId: 105, site: 54, rep: 83,
+  lastInv: 107, lastRec: 104, outstanding: 132, credit: 90,
 };
-const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v2";
+const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v3";
 
 function useColumnWidths() {
   const [widths, setWidths] = useState(() => {
