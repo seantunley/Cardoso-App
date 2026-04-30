@@ -433,7 +433,16 @@ export default function Inventory() {
         {/* Print-only header */}
         <div className="inv-print-header hidden border-b border-border mb-3 pb-2">
           <h1 className="text-lg font-bold">Inventory</h1>
-          <p className="text-xs text-gray-600">Printed: {new Date().toLocaleString("en-ZA")} · {rows.length} item{rows.length !== 1 ? "s" : ""}</p>
+          <p className="text-xs text-gray-600">
+            Printed: {new Date().toLocaleString("en-ZA")} ·{' '}
+            {(highlightBelowCost ? rows.filter(r => {
+              const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
+              const cost = parseFloat(String(r.last_cost || '').replace(/[^0-9.-]/g, ''));
+              return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+            }).length : rows.length)} item{rows.length !== 1 ? "s" : ""}
+            {highlightBelowCost && ' · Below-cost only'}
+            {activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''} applied`}
+          </p>
         </div>
 
         {/* Print-only full table */}
@@ -477,6 +486,11 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
     return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
   };
 
+  // When the "Highlight below cost" toggle is on, the print should only
+  // include those rows (treat the toggle as a hard filter for print scope —
+  // on screen it stays a visual highlight).
+  const printRows = highlightBelowCost ? rows.filter(isBelowCost) : rows;
+
   return (
     <div className="inv-print-only hidden print-table-shell rounded-xl border border-border bg-card overflow-hidden">
       <div className="print-table-wrap">
@@ -494,7 +508,7 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
             </tr>
           </thead>
           <tbody>
-            {rows.map((row, idx) => (
+            {printRows.map((row, idx) => (
               <tr
                 key={`print-${row.site_id || 'site'}-${row.item_number || idx}-${idx}`}
                 className={`border-b border-border ${highlightBelowCost && isBelowCost(row) ? 'bg-red-500/10' : ''}`}

@@ -102,15 +102,16 @@ export default function Login() {
             § 01 · Access
           </div>
           <h1 className="font-display text-6xl xl:text-7xl leading-[0.95] tracking-tight">
-            Every <em className="text-phosphor">customer</em>,
+            Every <em className="text-phosphor">rand</em>,
             <br />
-            every rand,
+            every reconciliation,
             <br />
             on the record.
           </h1>
           <p className="mt-10 text-sm text-muted-foreground max-w-md leading-relaxed">
-            A single source of truth for customer accounts, credit flags,
-            inventory, and branch operations. Quietly precise. Never guessing.
+            One platform for customer accounts, BAT reconciliation,
+            inventory, printable reports and multi-site hub aggregation.
+            Quietly precise. Never guessing.
           </p>
         </div>
 

@@ -87,22 +87,12 @@ export default function WeekSelector({ reconciliations, onSelect }) {
               </div>
 
               <div className="pt-2 border-t border-border">
-                <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground mb-1">
+                <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                   <span>OCR</span>
                   <span className="tabular-nums">
                     {r.found_count || 0}<span className="text-muted-foreground/50">/{r.pod_count || 0}</span>
                     <span className="text-accent ml-2">{ocrPct}%</span>
                   </span>
-                </div>
-                <div className="h-[2px] bg-muted overflow-hidden">
-                  <div
-                    className="h-full transition-all duration-500"
-                    style={{
-                      width: `${ocrPct}%`,
-                      background: 'var(--phosphor)',
-                      boxShadow: '0 0 8px hsla(33, 95%, 55%, 0.4)',
-                    }}
-                  />
                 </div>
               </div>
             </div>

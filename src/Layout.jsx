@@ -68,23 +68,161 @@ const IconInventory = ({ className, style }) => (
   </svg>
 );
 
+// Network Devices — stacked server racks with status LEDs + signal bars.
+const IconNetworkDevices = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Back rack */}
+    <rect x="3.5" y="3" width="13" height="5" rx="1" fill="#22d3ee" opacity="0.35"/>
+    {/* Front rack */}
+    <rect x="2.5" y="6.5" width="13" height="5" rx="1" fill="#06b6d4"/>
+    <rect x="2.5" y="6.5" width="13" height="0.7" fill="#67e8f9" opacity="0.7"/>
+    {/* LEDs */}
+    <circle cx="13.5" cy="9" r="0.6" fill="#22c55e"/>
+    <circle cx="11.5" cy="9" r="0.6" fill="#fbbf24"/>
+    {/* Signal bars rising bottom-right */}
+    <rect x="8"  y="15"   width="1.5" height="2"   rx="0.2" fill="#a78bfa"/>
+    <rect x="10" y="13.5" width="1.5" height="3.5" rx="0.2" fill="#a78bfa"/>
+    <rect x="12" y="12"   width="1.5" height="5"   rx="0.2" fill="#c4b5fd"/>
+    <rect x="14" y="10.5" width="1.5" height="6.5" rx="0.2" fill="#c4b5fd"/>
+  </svg>
+);
+
+// Collections — phone receiver with a phosphor pulse signal beside it.
+const IconCollections = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Phone receiver body */}
+    <path d="M5 3.5c-0.7 0-1.3 0.5-1.4 1.2L3 8.5c1.5 1 3 2.5 4 4l3.8-0.6c0.7-0.1 1.2-0.7 1.2-1.4L11.5 8c-1.5-1-3-2.5-4-4L5 3.5Z"
+          fill="#f97316"/>
+    <path d="M5 3.5c-0.7 0-1.3 0.5-1.4 1.2L3 8.5c1.5 1 3 2.5 4 4l3.8-0.6c0.7-0.1 1.2-0.7 1.2-1.4L11.5 8c-1.5-1-3-2.5-4-4L5 3.5Z"
+          stroke="#fdba74" strokeWidth="0.4"/>
+    {/* Signal arcs */}
+    <path d="M14 5.5c1 0.5 1.7 1.5 1.7 2.7" stroke="#34d399" strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+    <path d="M14.5 3c2 0.7 3.3 2.5 3.3 4.7" stroke="#34d399" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.55"/>
+    {/* Bottom dot */}
+    <circle cx="14" cy="14" r="1.4" fill="#fbbf24"/>
+  </svg>
+);
+
+// Credit Debug — laboratory flask with bubbling phosphor liquid.
+const IconCreditDebug = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Flask outline */}
+    <path d="M8 2.5h4v4l3.5 8c0.4 0.9-0.3 1.9-1.3 1.9H5.8c-1 0-1.7-1-1.3-1.9L8 6.5v-4Z"
+          fill="#1e293b" stroke="#94a3b8" strokeWidth="0.7" strokeLinejoin="round"/>
+    {/* Liquid (phosphor amber) */}
+    <path d="M6 12.5l1.7-3.8h4.6L14 12.5c0.3 0.8-0.2 1.5-1 1.5H7c-0.8 0-1.3-0.7-1-1.5Z"
+          fill="#f59e0b"/>
+    {/* Surface highlight */}
+    <ellipse cx="10" cy="9" rx="2" ry="0.3" fill="#fde68a" opacity="0.5"/>
+    {/* Bubbles */}
+    <circle cx="9" cy="11" r="0.5" fill="#fef3c7" opacity="0.8"/>
+    <circle cx="11" cy="12" r="0.4" fill="#fef3c7" opacity="0.6"/>
+    <circle cx="10" cy="9.5" r="0.3" fill="#fef3c7"/>
+    {/* Stopper */}
+    <rect x="7.5" y="2" width="5" height="1.4" rx="0.4" fill="#a78bfa"/>
+  </svg>
+);
+
+// Reconciliation — two parallel columns with a phosphor compare bracket.
+const IconReconciliationCompare = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Left column (BAT) - amber */}
+    <rect x="2" y="4" width="5" height="12" rx="0.8" fill="#f97316"/>
+    <rect x="2" y="4" width="5" height="0.7" fill="#fed7aa" opacity="0.6"/>
+    <line x1="3" y1="7"  x2="6" y2="7"  stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="3" y1="9"  x2="6" y2="9"  stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="3" y1="11" x2="6" y2="11" stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    {/* Right column (Sage) - green */}
+    <rect x="13" y="4" width="5" height="12" rx="0.8" fill="#10b981"/>
+    <rect x="13" y="4" width="5" height="0.7" fill="#a7f3d0" opacity="0.6"/>
+    <line x1="14" y1="7"  x2="17" y2="7"  stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="14" y1="9"  x2="17" y2="9"  stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="14" y1="11" x2="17" y2="11" stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    {/* Compare bracket arrows */}
+    <path d="M7.5 9 L9.5 9 M10.5 9 L12.5 9" stroke="#fbbf24" strokeWidth="1.2" strokeLinecap="round"/>
+    <circle cx="10" cy="9" r="1" fill="#fbbf24"/>
+    <path d="M9 8.5 L8.2 9 L9 9.5 M11 8.5 L11.8 9 L11 9.5"
+          stroke="#fde68a" strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+);
+
+// Site Metrics — overlapping bar chart + circular gauge accent.
+const IconSiteMetrics = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Background bars */}
+    <rect x="2"  y="9"  width="2.5" height="8"  rx="0.4" fill="#a78bfa" opacity="0.7"/>
+    <rect x="5.2" y="6"  width="2.5" height="11" rx="0.4" fill="#8b5cf6"/>
+    <rect x="8.4" y="11" width="2.5" height="6"  rx="0.4" fill="#a78bfa" opacity="0.85"/>
+    <rect x="11.6" y="4" width="2.5" height="13" rx="0.4" fill="#7c3aed"/>
+    <rect x="14.8" y="8" width="2.5" height="9"  rx="0.4" fill="#a78bfa" opacity="0.85"/>
+    {/* Highlights on tallest */}
+    <rect x="11.6" y="4" width="2.5" height="0.5" fill="#ddd6fe"/>
+    {/* Gauge dot top-right */}
+    <circle cx="16.5" cy="3.5" r="1.6" fill="#fbbf24"/>
+    <circle cx="16.5" cy="3.5" r="0.7" fill="#fef3c7"/>
+  </svg>
+);
+
+// Trends — gradient line chart climbing with markers.
+const IconTrends = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Background area fill */}
+    <path d="M2 16 L2 13 L6 11 L9 12.5 L13 7 L18 4 L18 16 Z" fill="#34d399" opacity="0.18"/>
+    {/* Line */}
+    <path d="M2 13 L6 11 L9 12.5 L13 7 L18 4" stroke="#10b981" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Markers */}
+    <circle cx="2"  cy="13"   r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="6"  cy="11"   r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="9"  cy="12.5" r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="13" cy="7"    r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="18" cy="4"    r="1.4" fill="#fbbf24" stroke="#78350f" strokeWidth="0.4"/>
+    {/* Baseline */}
+    <line x1="1.5" y1="17" x2="18.5" y2="17" stroke="#6ee7b7" strokeWidth="0.7" opacity="0.7"/>
+  </svg>
+);
+
+// Hub Audit Log — clipboard with checkmark + signature line.
+const IconHubAuditLog = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Clipboard back */}
+    <rect x="3" y="4" width="14" height="14" rx="1.5" fill="#f43f5e" opacity="0.85"/>
+    {/* Clip */}
+    <rect x="7" y="2.5" width="6" height="3" rx="0.6" fill="#fda4af"/>
+    {/* Page */}
+    <rect x="4.5" y="6.5" width="11" height="10" rx="0.6" fill="#fff1f2"/>
+    {/* Lines */}
+    <line x1="6" y1="9"  x2="13" y2="9"  stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    <line x1="6" y1="11" x2="13" y2="11" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    <line x1="6" y1="13" x2="11" y2="13" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    {/* Big checkmark */}
+    <path d="M6.5 14.5 L8 16 L13 11" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+);
+
 // Reconciliation — phosphor pulse cutting through stacked ledger rows.
 // Teal rows = static records; amber waveform = live matching across them.
+// Reports — stacked report sheets with a colourful bar-chart popping forward.
 const IconReports = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
-    {/* Document base with phosphor amber border-left */}
-    <rect x="3" y="2.5" width="13" height="15" rx="1.2" fill="hsl(33 95% 55%)" opacity="0.10"/>
-    <rect x="3" y="2.5" width="0.7" height="15" fill="hsl(33 95% 55%)"/>
-    {/* Bar chart bars in colourful palette */}
-    <rect x="5"   y="11" width="1.6" height="4.5" rx="0.2" fill="hsl(33 95% 55%)"/>
-    <rect x="7.2" y="8.5" width="1.6" height="7"   rx="0.2" fill="hsl(145 55% 45%)"/>
-    <rect x="9.4" y="10" width="1.6" height="5.5" rx="0.2" fill="hsl(200 80% 55%)"/>
-    <rect x="11.6" y="6.5" width="1.6" height="9" rx="0.2" fill="hsl(280 70% 65%)"/>
-    {/* Header lines (title bars) */}
-    <line x1="5" y1="4.5" x2="13.5" y2="4.5" stroke="hsl(var(--foreground))" strokeWidth="0.7" opacity="0.7"/>
-    <line x1="5" y1="6.2" x2="11"   y2="6.2" stroke="hsl(var(--foreground))" strokeWidth="0.5" opacity="0.4"/>
-    {/* Trend line dot */}
-    <circle cx="13.5" cy="5.5" r="0.6" fill="hsl(0 72% 50%)"/>
+    {/* Back sheet (offset for depth) */}
+    <rect x="6" y="1.5" width="11" height="13" rx="1" fill="#cbd5e1" opacity="0.5"/>
+    {/* Middle sheet */}
+    <rect x="4.5" y="3" width="11" height="13" rx="1" fill="#94a3b8" opacity="0.7"/>
+    {/* Front sheet */}
+    <rect x="3" y="4.5" width="11" height="13" rx="1" fill="#f1f5f9"/>
+    <rect x="3" y="4.5" width="11" height="2" rx="1" fill="#e2e8f0"/>
+    {/* Title lines on front sheet */}
+    <line x1="4.5" y1="5.5" x2="11"  y2="5.5" stroke="#475569" strokeWidth="0.5"/>
+    {/* Chart bars on the front sheet (colourful) */}
+    <rect x="4.5" y="13"   width="1.4" height="3.5" rx="0.2" fill="#f97316"/>
+    <rect x="6.4" y="11.5" width="1.4" height="5"   rx="0.2" fill="#10b981"/>
+    <rect x="8.3" y="12"   width="1.4" height="4.5" rx="0.2" fill="#3b82f6"/>
+    <rect x="10.2" y="9.5" width="1.4" height="7"   rx="0.2" fill="#a855f7"/>
+    {/* Trend line over the bars */}
+    <path d="M5.2 13 L7.1 11.5 L9 12 L10.9 9.5"
+          stroke="#fbbf24" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Trend dot */}
+    <circle cx="10.9" cy="9.5" r="0.8" fill="#fbbf24" stroke="#78350f" strokeWidth="0.3"/>
   </svg>
 );
 
@@ -121,20 +259,20 @@ import { reportClientError } from "@/lib/clientLog";
 const APP_VERSION = "2026.3.9";
 
 const navItems = [
-  { name: "Customer Management", icon: IconCustomerSearch,   page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
-  { name: "Customer Management", icon: IconHubDashboard,     page: "HubDashboard",     hubOnly: true },
-  { name: "Customer Balances",   icon: IconCustomerBalances, page: "CustomerBalances", permission: "can_access_customer_balances" },
-  { name: "Collections",         icon: PhoneCall,            page: "Collections",      permission: "can_access_collections", siteOnly: true },
-  { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
-  { name: "Network Devices",     icon: Network,              page: "NetworkDevices",   permission: "can_access_network_devices" },
-  { name: "Reconciliation",      icon: GitCompare,           page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
-  { name: "Site Metrics",        icon: BarChart2,            page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
-  { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
-  { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
-  { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
-  { name: "Credit Debug",        icon: FlaskConical,         page: "CreditDebug",      adminOnly: true },
-  { name: "Reconciliation",      icon: GitCompare,           page: "Reconciliation",   permission: "can_access_reconciliation" },
-  { name: "Reports",             icon: FileBarChart,         page: "Reports",          permission: "can_access_reports" },
+  { name: "Customer Management", icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
+  { name: "Customer Management", icon: IconHubDashboard,          page: "HubDashboard",     hubOnly: true },
+  { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
+  { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
+  { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
+  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
+  { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
+  { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
+  { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
+  { name: "Hub Audit Log",       icon: IconHubAuditLog,           page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
+  { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
+  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation" },
+  { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
 ];
 
 export default function Layout({ children, currentPageName }) {
