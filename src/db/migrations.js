@@ -311,10 +311,17 @@ function buildMigrations(db) {
       name: 'force_add_missing_columns',
       up() {
         // Force-add columns that may have been silently missed on older installs.
-        // Uses raw ALTER TABLE with try/catch instead of ensureColumn so it always
-        // attempts the add regardless of migration history.
+        // Uses raw ALTER TABLE: SQLite throws "duplicate column name" when the
+        // column already exists, which is the expected/idempotent case here.
+        // Any other error (table missing, constraint failure) is real and must surface.
         const forceAdd = (table, col, def) => {
-          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); } catch (_) {}
+          try { db.exec(`ALTER TABLE "${table}" ADD COLUMN ${col} ${def}`); }
+          catch (e) {
+            if (!/duplicate column name/i.test(e.message)) {
+              console.error(`[migration-14] forceAdd failed on ${table}.${col}: ${e.message}`);
+              throw e;
+            }
+          }
         };
         forceAdd('inventoryrecord', 'stocking_uom', 'TEXT');
         forceAdd('inventoryrecord', 'commodity', 'TEXT');
@@ -1065,6 +1072,208 @@ function buildMigrations(db) {
 
         // Add unique index to prevent future duplicates
         db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_datarecord_source_unique ON datarecord (source_table, source_id) WHERE source_id IS NOT NULL AND source_id != ''`);
+      },
+    },
+    {
+      version: 43,
+      name: 'drop_speedtest_tables',
+      up() {
+        db.exec(`DROP TABLE IF EXISTS site_speedtest`);
+        db.exec(`DROP TABLE IF EXISTS hub_speedtest`);
+      },
+    },
+    {
+      version: 44,
+      name: 'bat_sage_week_cache',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS bat_sage_week_cache (
+            year INTEGER NOT NULL,
+            week_number INTEGER NOT NULL,
+            delivery REAL DEFAULT 0,
+            discount REAL DEFAULT 0,
+            pricing REAL DEFAULT 0,
+            total REAL DEFAULT 0,
+            batch_count INTEGER DEFAULT 0,
+            refreshed_at TEXT,
+            PRIMARY KEY (year, week_number)
+          )
+        `);
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS bat_sage_cache_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT
+          )
+        `);
+      },
+    },
+    {
+      version: 45,
+      name: 'bat_reconciliation_perf_indexes',
+      up() {
+        // c_overwritten is filtered in replicateSupplierIntoCardoso() and
+        // counted in the post-replicate summary. Without this index those
+        // queries scan the full bat_cardoso_invoices table.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_bat_cardoso_inv_overwritten
+          ON bat_cardoso_invoices(c_overwritten)
+        `);
+        // extracted_invoice is the join key on every cross-ref query against
+        // bat_cardoso_invoices (UPPER/REPLACE wraps mean the index is only
+        // partially usable, but it still helps the IS NOT NULL / IS NULL passes
+        // in listReconciliations and getDashboardData).
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_bat_extractions_invoice
+          ON bat_invoice_extractions(extracted_invoice)
+          WHERE extracted_invoice IS NOT NULL
+        `);
+      },
+    },
+    {
+      version: 46,
+      name: 'databaseconnection_is_bat_only',
+      up() {
+        // Per-connection flag isolating BAT Sage connections from the general
+        // sync engine. When 1, the connection is NOT swept by the scheduler /
+        // auto-sync into the local datarecord table — it's only accessed via
+        // the BAT module (getSagePool in batReconciliation.js). Default 0.
+        const cols = db.prepare("PRAGMA table_info(databaseconnection)").all().map(c => c.name);
+        if (!cols.includes('is_bat_only')) {
+          db.exec(`ALTER TABLE databaseconnection ADD COLUMN is_bat_only INTEGER DEFAULT 0`);
+        }
+        // Auto-mark any connection currently set as the BAT Sage connection
+        // (via bat_settings.sage_connection_id) so the existing setup stops
+        // bleeding into customer search the moment this migration runs.
+        try {
+          const row = db.prepare("SELECT value FROM bat_settings WHERE key = 'sage_connection_id'").get();
+          const id = row?.value ? parseInt(row.value, 10) : null;
+          if (id) db.prepare("UPDATE databaseconnection SET is_bat_only = 1 WHERE id = ?").run(id);
+        } catch {}
+      },
+    },
+    {
+      version: 47,
+      name: 'datarecord_outstanding_balance_num',
+      up() {
+        // Numeric mirror of outstanding_balance (which is TEXT, often with
+        // commas / spaces). Lets ORDER BY / WHERE use a real index instead of
+        // CAST(REPLACE(REPLACE(...))) on every row. SQLite triggers keep the
+        // numeric column in sync on every insert/update — no app-code changes
+        // needed in the sync engine.
+        const dataCols = db.prepare("PRAGMA table_info(datarecord)").all().map(c => c.name);
+        if (!dataCols.includes('outstanding_balance_num')) {
+          db.exec(`ALTER TABLE datarecord ADD COLUMN outstanding_balance_num REAL`);
+        }
+        db.exec(`
+          UPDATE datarecord
+          SET outstanding_balance_num = CASE
+            WHEN outstanding_balance IS NULL OR outstanding_balance = '' OR outstanding_balance = '0'
+              THEN NULL
+            ELSE CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL)
+          END
+        `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_balance_num ON datarecord(outstanding_balance_num)`);
+        // Triggers — fire on insert/update of outstanding_balance only.
+        db.exec(`
+          CREATE TRIGGER IF NOT EXISTS trg_datarecord_balance_num_ins
+          AFTER INSERT ON datarecord
+          BEGIN
+            UPDATE datarecord SET outstanding_balance_num = CASE
+              WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                THEN NULL
+              ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+            END WHERE id = NEW.id;
+          END
+        `);
+        db.exec(`
+          CREATE TRIGGER IF NOT EXISTS trg_datarecord_balance_num_upd
+          AFTER UPDATE OF outstanding_balance ON datarecord
+          BEGIN
+            UPDATE datarecord SET outstanding_balance_num = CASE
+              WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                THEN NULL
+              ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+            END WHERE id = NEW.id;
+          END
+        `);
+
+        // Mirror on hub_records if present.
+        try {
+          const hubCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
+          if (hubCols.length > 0 && !hubCols.includes('outstanding_balance_num')) {
+            db.exec(`ALTER TABLE hub_records ADD COLUMN outstanding_balance_num REAL`);
+            db.exec(`
+              UPDATE hub_records
+              SET outstanding_balance_num = CASE
+                WHEN outstanding_balance IS NULL OR outstanding_balance = '' OR outstanding_balance = '0'
+                  THEN NULL
+                ELSE CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL)
+              END
+            `);
+            db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_balance_num ON hub_records(outstanding_balance_num)`);
+            db.exec(`
+              CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_ins
+              AFTER INSERT ON hub_records
+              BEGIN
+                UPDATE hub_records SET outstanding_balance_num = CASE
+                  WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                    THEN NULL
+                  ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+                END WHERE id = NEW.id;
+              END
+            `);
+            db.exec(`
+              CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_upd
+              AFTER UPDATE OF outstanding_balance ON hub_records
+              BEGIN
+                UPDATE hub_records SET outstanding_balance_num = CASE
+                  WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                    THEN NULL
+                  ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+                END WHERE id = NEW.id;
+              END
+            `);
+          }
+        } catch {}
+      },
+    },
+    {
+      version: 48,
+      name: 'hub_bat_summary',
+      up() {
+        // Per-site BAT reconciliation summary, populated by the daily hub puller.
+        // One row per site (site_id is PK). Hub UI aggregates these into the
+        // cross-site Reconciliation page.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_bat_summary (
+            site_id TEXT PRIMARY KEY,
+            total_supplier REAL DEFAULT 0,
+            total_sage REAL DEFAULT 0,
+            total_variance REAL DEFAULT 0,
+            weeks_count INTEGER DEFAULT 0,
+            matched_count INTEGER DEFAULT 0,
+            mismatch_count INTEGER DEFAULT 0,
+            awaiting_count INTEGER DEFAULT 0,
+            total_exceptions INTEGER DEFAULT 0,
+            total_exception_amount REAL DEFAULT 0,
+            last_upload_at TEXT,
+            synced_at TEXT,
+            last_error TEXT
+          )
+        `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_bat_summary_synced ON hub_bat_summary(synced_at)`);
+      },
+    },
+    {
+      version: 49,
+      name: 'reconciliation_permissions',
+      up() {
+        // New per-user permissions for the BAT Reconciliation modules added
+        // in this release. Default 0 — admins always see them via the role
+        // bypass in hasPermission() — opt-in for non-admin users.
+        ensureColumn(db, 'user', 'can_access_reconciliation', 'INTEGER DEFAULT 0');
+        ensureColumn(db, 'user', 'can_access_hub_reconciliation', 'INTEGER DEFAULT 0');
       },
     },
   ];

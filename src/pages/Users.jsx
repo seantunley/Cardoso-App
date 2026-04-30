@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Loader2, Plus, Shield, User as UserIcon, RefreshCw, Trash2, KeyRound, Lock, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { reportClientError } from "@/lib/clientLog";
 import CreateLocalUserModal from "../components/users/CreateLocalUserModal";
 import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
@@ -20,7 +21,7 @@ export default function Users({ embedded = false }) {
 
   const { data: hubKpis } = useQuery({
     queryKey: ["hub-kpis"],
-    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(() => null),
+    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then(r => r.ok ? r.json() : null).catch(err => { reportClientError("Users.hubKpis", err); return null; }),
     enabled: isAdmin,
     retry: false,
   });
@@ -123,7 +124,7 @@ export default function Users({ embedded = false }) {
                 <tr key={user.id} className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors">
                   <td className="px-4 py-3 font-medium text-foreground">
                     {user.full_name || "Unnamed"}
-                    {currentUser?.id === user.id && <Badge variant="outline" className="ml-2 text-xs border-blue-500/40 text-blue-400">You</Badge>}
+                    {currentUser?.id === user.id && <Badge variant="outline" className="ml-2 text-xs border-accent/40 text-accent">You</Badge>}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">{user.email}</td>
                   <td className="px-4 py-3">
@@ -172,10 +173,13 @@ export default function Users({ embedded = false }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-5xl mx-auto p-6 space-y-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground mt-1">Manage user accounts and permissions</p>
+      <div className="max-w-5xl mx-auto px-8 py-10 space-y-6">
+        <div className="border-b border-border pb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Access Control</div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            The <em className="text-phosphor">operators</em>.
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">Manage user accounts and permissions</p>
         </div>
         {content}
       </div>

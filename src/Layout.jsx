@@ -67,7 +67,185 @@ const IconInventory = ({ className, style }) => (
     <line x1="6" y1="6.5" x2="14" y2="6.5" stroke="#f97316" strokeWidth="1"/>
   </svg>
 );
-import { BarChart2, PhoneCall, TrendingUp } from "lucide-react";
+
+// Network Devices — stacked server racks with status LEDs + signal bars.
+const IconNetworkDevices = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Back rack */}
+    <rect x="3.5" y="3" width="13" height="5" rx="1" fill="#22d3ee" opacity="0.35"/>
+    {/* Front rack */}
+    <rect x="2.5" y="6.5" width="13" height="5" rx="1" fill="#06b6d4"/>
+    <rect x="2.5" y="6.5" width="13" height="0.7" fill="#67e8f9" opacity="0.7"/>
+    {/* LEDs */}
+    <circle cx="13.5" cy="9" r="0.6" fill="#22c55e"/>
+    <circle cx="11.5" cy="9" r="0.6" fill="#fbbf24"/>
+    {/* Signal bars rising bottom-right */}
+    <rect x="8"  y="15"   width="1.5" height="2"   rx="0.2" fill="#a78bfa"/>
+    <rect x="10" y="13.5" width="1.5" height="3.5" rx="0.2" fill="#a78bfa"/>
+    <rect x="12" y="12"   width="1.5" height="5"   rx="0.2" fill="#c4b5fd"/>
+    <rect x="14" y="10.5" width="1.5" height="6.5" rx="0.2" fill="#c4b5fd"/>
+  </svg>
+);
+
+// Collections — phone receiver with a phosphor pulse signal beside it.
+const IconCollections = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Phone receiver body */}
+    <path d="M5 3.5c-0.7 0-1.3 0.5-1.4 1.2L3 8.5c1.5 1 3 2.5 4 4l3.8-0.6c0.7-0.1 1.2-0.7 1.2-1.4L11.5 8c-1.5-1-3-2.5-4-4L5 3.5Z"
+          fill="#f97316"/>
+    <path d="M5 3.5c-0.7 0-1.3 0.5-1.4 1.2L3 8.5c1.5 1 3 2.5 4 4l3.8-0.6c0.7-0.1 1.2-0.7 1.2-1.4L11.5 8c-1.5-1-3-2.5-4-4L5 3.5Z"
+          stroke="#fdba74" strokeWidth="0.4"/>
+    {/* Signal arcs */}
+    <path d="M14 5.5c1 0.5 1.7 1.5 1.7 2.7" stroke="#34d399" strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+    <path d="M14.5 3c2 0.7 3.3 2.5 3.3 4.7" stroke="#34d399" strokeWidth="1.4" strokeLinecap="round" fill="none" opacity="0.55"/>
+    {/* Bottom dot */}
+    <circle cx="14" cy="14" r="1.4" fill="#fbbf24"/>
+  </svg>
+);
+
+// Credit Debug — laboratory flask with bubbling phosphor liquid.
+const IconCreditDebug = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Flask outline */}
+    <path d="M8 2.5h4v4l3.5 8c0.4 0.9-0.3 1.9-1.3 1.9H5.8c-1 0-1.7-1-1.3-1.9L8 6.5v-4Z"
+          fill="#1e293b" stroke="#94a3b8" strokeWidth="0.7" strokeLinejoin="round"/>
+    {/* Liquid (phosphor amber) */}
+    <path d="M6 12.5l1.7-3.8h4.6L14 12.5c0.3 0.8-0.2 1.5-1 1.5H7c-0.8 0-1.3-0.7-1-1.5Z"
+          fill="#f59e0b"/>
+    {/* Surface highlight */}
+    <ellipse cx="10" cy="9" rx="2" ry="0.3" fill="#fde68a" opacity="0.5"/>
+    {/* Bubbles */}
+    <circle cx="9" cy="11" r="0.5" fill="#fef3c7" opacity="0.8"/>
+    <circle cx="11" cy="12" r="0.4" fill="#fef3c7" opacity="0.6"/>
+    <circle cx="10" cy="9.5" r="0.3" fill="#fef3c7"/>
+    {/* Stopper */}
+    <rect x="7.5" y="2" width="5" height="1.4" rx="0.4" fill="#a78bfa"/>
+  </svg>
+);
+
+// Reconciliation — two parallel columns with a phosphor compare bracket.
+const IconReconciliationCompare = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Left column (BAT) - amber */}
+    <rect x="2" y="4" width="5" height="12" rx="0.8" fill="#f97316"/>
+    <rect x="2" y="4" width="5" height="0.7" fill="#fed7aa" opacity="0.6"/>
+    <line x1="3" y1="7"  x2="6" y2="7"  stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="3" y1="9"  x2="6" y2="9"  stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="3" y1="11" x2="6" y2="11" stroke="#fef3c7" strokeWidth="0.6" opacity="0.7"/>
+    {/* Right column (Sage) - green */}
+    <rect x="13" y="4" width="5" height="12" rx="0.8" fill="#10b981"/>
+    <rect x="13" y="4" width="5" height="0.7" fill="#a7f3d0" opacity="0.6"/>
+    <line x1="14" y1="7"  x2="17" y2="7"  stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="14" y1="9"  x2="17" y2="9"  stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    <line x1="14" y1="11" x2="17" y2="11" stroke="#d1fae5" strokeWidth="0.6" opacity="0.7"/>
+    {/* Compare bracket arrows */}
+    <path d="M7.5 9 L9.5 9 M10.5 9 L12.5 9" stroke="#fbbf24" strokeWidth="1.2" strokeLinecap="round"/>
+    <circle cx="10" cy="9" r="1" fill="#fbbf24"/>
+    <path d="M9 8.5 L8.2 9 L9 9.5 M11 8.5 L11.8 9 L11 9.5"
+          stroke="#fde68a" strokeWidth="0.7" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+);
+
+// Site Metrics — overlapping bar chart + circular gauge accent.
+const IconSiteMetrics = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Background bars */}
+    <rect x="2"  y="9"  width="2.5" height="8"  rx="0.4" fill="#a78bfa" opacity="0.7"/>
+    <rect x="5.2" y="6"  width="2.5" height="11" rx="0.4" fill="#8b5cf6"/>
+    <rect x="8.4" y="11" width="2.5" height="6"  rx="0.4" fill="#a78bfa" opacity="0.85"/>
+    <rect x="11.6" y="4" width="2.5" height="13" rx="0.4" fill="#7c3aed"/>
+    <rect x="14.8" y="8" width="2.5" height="9"  rx="0.4" fill="#a78bfa" opacity="0.85"/>
+    {/* Highlights on tallest */}
+    <rect x="11.6" y="4" width="2.5" height="0.5" fill="#ddd6fe"/>
+    {/* Gauge dot top-right */}
+    <circle cx="16.5" cy="3.5" r="1.6" fill="#fbbf24"/>
+    <circle cx="16.5" cy="3.5" r="0.7" fill="#fef3c7"/>
+  </svg>
+);
+
+// Trends — gradient line chart climbing with markers.
+const IconTrends = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Background area fill */}
+    <path d="M2 16 L2 13 L6 11 L9 12.5 L13 7 L18 4 L18 16 Z" fill="#34d399" opacity="0.18"/>
+    {/* Line */}
+    <path d="M2 13 L6 11 L9 12.5 L13 7 L18 4" stroke="#10b981" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Markers */}
+    <circle cx="2"  cy="13"   r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="6"  cy="11"   r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="9"  cy="12.5" r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="13" cy="7"    r="1" fill="#34d399" stroke="#064e3b" strokeWidth="0.4"/>
+    <circle cx="18" cy="4"    r="1.4" fill="#fbbf24" stroke="#78350f" strokeWidth="0.4"/>
+    {/* Baseline */}
+    <line x1="1.5" y1="17" x2="18.5" y2="17" stroke="#6ee7b7" strokeWidth="0.7" opacity="0.7"/>
+  </svg>
+);
+
+// Hub Audit Log — clipboard with checkmark + signature line.
+const IconHubAuditLog = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Clipboard back */}
+    <rect x="3" y="4" width="14" height="14" rx="1.5" fill="#f43f5e" opacity="0.85"/>
+    {/* Clip */}
+    <rect x="7" y="2.5" width="6" height="3" rx="0.6" fill="#fda4af"/>
+    {/* Page */}
+    <rect x="4.5" y="6.5" width="11" height="10" rx="0.6" fill="#fff1f2"/>
+    {/* Lines */}
+    <line x1="6" y1="9"  x2="13" y2="9"  stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    <line x1="6" y1="11" x2="13" y2="11" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    <line x1="6" y1="13" x2="11" y2="13" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
+    {/* Big checkmark */}
+    <path d="M6.5 14.5 L8 16 L13 11" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+  </svg>
+);
+
+// Reconciliation — phosphor pulse cutting through stacked ledger rows.
+// Teal rows = static records; amber waveform = live matching across them.
+// Reports — stacked report sheets with a colourful bar-chart popping forward.
+const IconReports = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Back sheet (offset for depth) */}
+    <rect x="6" y="1.5" width="11" height="13" rx="1" fill="#cbd5e1" opacity="0.5"/>
+    {/* Middle sheet */}
+    <rect x="4.5" y="3" width="11" height="13" rx="1" fill="#94a3b8" opacity="0.7"/>
+    {/* Front sheet */}
+    <rect x="3" y="4.5" width="11" height="13" rx="1" fill="#f1f5f9"/>
+    <rect x="3" y="4.5" width="11" height="2" rx="1" fill="#e2e8f0"/>
+    {/* Title lines on front sheet */}
+    <line x1="4.5" y1="5.5" x2="11"  y2="5.5" stroke="#475569" strokeWidth="0.5"/>
+    {/* Chart bars on the front sheet (colourful) */}
+    <rect x="4.5" y="13"   width="1.4" height="3.5" rx="0.2" fill="#f97316"/>
+    <rect x="6.4" y="11.5" width="1.4" height="5"   rx="0.2" fill="#10b981"/>
+    <rect x="8.3" y="12"   width="1.4" height="4.5" rx="0.2" fill="#3b82f6"/>
+    <rect x="10.2" y="9.5" width="1.4" height="7"   rx="0.2" fill="#a855f7"/>
+    {/* Trend line over the bars */}
+    <path d="M5.2 13 L7.1 11.5 L9 12 L10.9 9.5"
+          stroke="#fbbf24" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Trend dot */}
+    <circle cx="10.9" cy="9.5" r="0.8" fill="#fbbf24" stroke="#78350f" strokeWidth="0.3"/>
+  </svg>
+);
+
+const IconReconciliation = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Subtle ledger frame */}
+    <rect x="1.5" y="3" width="17" height="14" rx="1.2" fill="#0d9488" opacity="0.12"/>
+    {/* Stacked ledger rows */}
+    <line x1="3" y1="5.5"  x2="17" y2="5.5"  stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="8"    x2="17" y2="8"    stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="12"   x2="17" y2="12"   stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="14.5" x2="17" y2="14.5" stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    {/* Soft phosphor halo behind the pulse */}
+    <path d="M1 10 L4 10 L5.5 7 L7.5 13 L9.5 8 L11.5 12 L13.5 9.5 L19 9.5"
+          stroke="#f59e0b" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.25"/>
+    {/* Phosphor pulse waveform */}
+    <path d="M1 10 L4 10 L5.5 7 L7.5 13 L9.5 8 L11.5 12 L13.5 9.5 L19 9.5"
+          stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Leading-edge dot */}
+    <circle cx="19" cy="9.5" r="1.1" fill="#f59e0b"/>
+  </svg>
+);
+import { BarChart2, PhoneCall, TrendingUp, FileBarChart, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
@@ -75,21 +253,26 @@ import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 import SettingsPanel from "@/components/settings/SettingsPanel";
+import { toast } from "sonner";
+import { reportClientError } from "@/lib/clientLog";
 
 const APP_VERSION = "2026.3.9";
 
 const navItems = [
-  { name: "Customer Management", icon: IconCustomerSearch,   page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
-  { name: "Customer Management", icon: IconHubDashboard,     page: "HubDashboard",     hubOnly: true },
-  { name: "Customer Balances",   icon: IconCustomerBalances, page: "CustomerBalances", permission: "can_access_customer_balances" },
-  { name: "Collections",         icon: PhoneCall,            page: "Collections",      permission: "can_access_collections", siteOnly: true },
-  { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
-  { name: "Network Devices",     icon: Network,              page: "NetworkDevices",   permission: "can_access_network_devices" },
-  { name: "Site Metrics",        icon: BarChart2,            page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
-  { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
-  { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
-  { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
-  { name: "Credit Debug",        icon: FlaskConical,         page: "CreditDebug",      adminOnly: true },
+  { name: "Customer Management", icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
+  { name: "Customer Management", icon: IconHubDashboard,          page: "HubDashboard",     hubOnly: true },
+  { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
+  { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
+  { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
+  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
+  { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
+  { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
+  { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
+  { name: "Hub Audit Log",       icon: IconHubAuditLog,           page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
+  { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
+  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation" },
+  { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -115,7 +298,7 @@ export default function Layout({ children, currentPageName }) {
     fetch("/api/app-info")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(() => {});
+      .catch(err => reportClientError("Layout.appInfo", err));
   }, []);
 
   useEffect(() => {
@@ -130,7 +313,7 @@ export default function Layout({ children, currentPageName }) {
           updateAvailable: Boolean(d.updateAvailable),
         });
       })
-      .catch(() => {});
+      .catch(err => reportClientError("Layout.versionStatus", err));
     return () => { isMounted = false; };
   }, [currentUser]);
 
@@ -210,119 +393,203 @@ export default function Layout({ children, currentPageName }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside className={cn(
-        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-200 ease-out",
-        isCollapsed ? "w-14" : "w-56"
-      )}>
-        <div className={"border-b border-border px-3 pt-6 pb-3"}>
-          <div className={cn("flex items-center mb-0 w-full", isCollapsed ? "justify-center" : "gap-3")}>
-            <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-                <rect width="32" height="32" rx="7" fill="#1e293b"/>
-                <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bc32)"/>
-                <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
-                <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
-                <path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" fill="none"/>
-                <defs><linearGradient id="bc32" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs>
-              </svg>
-            </div>
-            <div className={cn("min-w-0 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "w-full opacity-100")}>
-                <h1 className="font-semibold text-base text-foreground leading-tight whitespace-nowrap">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground whitespace-nowrap">Business System</p>
+      <aside
+        className={cn(
+          "fixed top-0 left-0 z-50 hidden h-full flex-col lg:flex transition-all duration-300 ease-out",
+          isCollapsed ? "w-14" : "w-60"
+        )}
+        style={{
+          background: "hsl(var(--sidebar-background))",
+          color: "hsl(var(--sidebar-foreground))",
+          borderRight: "1px solid hsl(var(--sidebar-border))",
+        }}
+      >
+        {/* ── Brand block ── */}
+        <div className="px-3 pt-6 pb-5" style={{ borderBottom: "1px solid hsl(var(--sidebar-border))" }}>
+          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-3")}>
+            {/* Signature phosphor square */}
+            <div
+              className="shrink-0"
+              style={{
+                width: "22px",
+                height: "22px",
+                background: "var(--phosphor)",
+                boxShadow: "0 0 20px hsla(33, 95%, 55%, 0.5)",
+              }}
+            />
+            <div
+              className={cn(
+                "min-w-0 overflow-hidden transition-all duration-200 ease-out",
+                isCollapsed ? "w-0 opacity-0" : "w-full opacity-100"
+              )}
+            >
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[hsl(var(--sidebar-foreground))/0.6] whitespace-nowrap">
+                Cardoso
               </div>
+              <div className="font-display text-lg leading-tight text-[hsl(var(--sidebar-foreground))] whitespace-nowrap">
+                Ledger
+              </div>
+            </div>
           </div>
-          {currentUser && (
-            <div className={cn("mt-6 rounded-lg bg-muted px-2.5 py-1.5 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0 mt-0 py-0 px-0" : "max-h-20 opacity-100")}>
-              <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
-              <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
+          {currentUser && !isCollapsed && (
+            <div className="mt-6 space-y-1">
+              <p
+                className="truncate font-mono text-[10px] uppercase tracking-[0.2em]"
+                style={{ color: "hsla(var(--sidebar-foreground), 0.5)" }}
+              >
+                Operator
+              </p>
+              <p className="truncate text-xs font-medium text-[hsl(var(--sidebar-foreground))]">
+                {currentUser.full_name || "User"}
+              </p>
+              <p className="truncate font-mono text-[10px]" style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}>
+                {currentUser.email}
+              </p>
             </div>
           )}
         </div>
-        <nav className={cn("flex-1 space-y-1", isCollapsed ? "p-2 flex flex-col items-center" : "p-3")}>
-          {visibleNavItems.map((item) => {
-            const isActive = currentPageName === item.page;
-            const showAttention = item.page === "HubBackups" && backupAttention;
-            return (
-              <Link
-                key={item.page}
-                to={`/${item.page}`}
-                title={isCollapsed ? item.name : undefined}
-                className={cn(
-                  "relative flex items-center rounded-lg text-xs font-medium transition-all duration-200",
-                  isActive
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  isCollapsed
-                    ? "justify-center w-8 h-8 mx-auto"
-                    : "gap-2.5 px-3 py-2 w-full"
-                )}
-              >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {showAttention && (
-                  <span className={cn(
-                    "absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card",
-                    isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
-                  )} />
-                )}
-                <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{item.name}</span>
-              </Link>
-            );
-          })}
+
+        {/* ── Nav items — terminal list with phosphor left-bar on active ── */}
+        <nav className={cn("flex-1 overflow-y-auto", isCollapsed ? "py-3 px-1 flex flex-col items-center" : "py-3 px-3")}>
+          {!isCollapsed && (
+            <div
+              className="px-2 pb-2 mb-1 font-mono text-[9px] uppercase tracking-[0.25em]"
+              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
+            >
+              § Navigation
+            </div>
+          )}
+          <div className={cn("space-y-0.5", isCollapsed && "flex flex-col items-center w-full")}>
+            {visibleNavItems.map((item) => {
+              const isActive = currentPageName === item.page;
+              const showAttention = item.page === "HubBackups" && backupAttention;
+              return (
+                <Link
+                  key={item.page}
+                  to={`/${item.page}`}
+                  title={isCollapsed ? item.name : undefined}
+                  className={cn(
+                    "relative flex items-center text-xs font-medium transition-colors duration-150 group",
+                    isCollapsed ? "justify-center w-10 h-10 mx-auto" : "gap-3 pl-4 pr-2 py-2.5 w-full text-sm"
+                  )}
+                  style={{
+                    color: isActive
+                      ? "hsl(var(--sidebar-accent-foreground))"
+                      : "hsla(var(--sidebar-foreground), 0.65)",
+                    background: isActive ? "hsl(var(--sidebar-accent))" : "transparent",
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "hsl(var(--sidebar-foreground))"; }}
+                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.65)"; }}
+                >
+                  {/* Phosphor active indicator — left bar */}
+                  {isActive && (
+                    <span
+                      className="absolute left-0 top-1 bottom-1 w-[2px]"
+                      style={{
+                        background: "var(--phosphor)",
+                        boxShadow: "0 0 12px hsla(33, 95%, 55%, 0.7)",
+                      }}
+                    />
+                  )}
+                  <item.icon className="h-6 w-6 shrink-0" />
+                  {showAttention && (
+                    <span
+                      className={cn(
+                        "absolute inline-flex h-1.5 w-1.5",
+                        isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
+                      )}
+                      style={{
+                        background: "var(--phosphor)",
+                        boxShadow: "0 0 8px hsla(33, 95%, 55%, 0.8)",
+                      }}
+                    />
+                  )}
+                  <span
+                    className={cn(
+                      "overflow-hidden whitespace-nowrap transition-all duration-200 ease-out tracking-tight",
+                      isCollapsed ? "w-0 opacity-0" : "opacity-100"
+                    )}
+                  >
+                    {item.name}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </nav>
-        <div className={cn("border-t border-border", isCollapsed ? "p-2 flex flex-col items-center space-y-1" : "space-y-0.5 p-3")}>
+        <div
+          className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "space-y-0 p-3")}
+          style={{ borderTop: "1px solid hsl(var(--sidebar-border))" }}
+        >
+          {!isCollapsed && (
+            <div
+              className="px-2 pb-2 font-mono text-[9px] uppercase tracking-[0.25em]"
+              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
+            >
+              § Controls
+            </div>
+          )}
           {canSeeSettings && (
-            <button
-              onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}
-              className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-              <Settings className="h-4 w-4 shrink-0" />
-              <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
-            </button>
+            <SidebarButton
+              onClick={() => setSettingsOpen(true)}
+              icon={Settings}
+              label="Settings"
+              collapsed={isCollapsed}
+            />
           )}
 
-          <button
+          <SidebarButton
             onClick={() => {
               const next = theme === 'dark' ? 'light' : 'dark';
               setTheme(next);
               applyTheme(next);
-              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {});
+              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
+                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+                .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
             }}
-            title={isCollapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-          </button>
+            icon={theme === 'dark' ? Sun : Moon}
+            label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            <KeyRound className="h-4 w-4 shrink-0" />
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
-          </button>
+          <SidebarButton
+            onClick={() => setChangePasswordOpen(true)}
+            icon={KeyRound}
+            label="Password"
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
-          </button>
+          <SidebarButton
+            onClick={() => logout(true)}
+            icon={LogOut}
+            label="Logout"
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
-          </button>
+          <SidebarButton
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            icon={isCollapsed ? ChevronRight : ChevronLeft}
+            label="Collapse"
+            collapsed={isCollapsed}
+          />
 
-          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-20 opacity-100")}>
+          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-24 opacity-100")}>
             <div
               className={cn(
-                "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-                versionStatus.updateAvailable && isAdmin
-                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300 cursor-pointer hover:bg-yellow-500/25"
-                  : versionStatus.updateAvailable
-                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300"
-                  : "border-transparent text-muted-foreground/50"
+                "mt-3 mx-1 px-2 py-1.5 transition-colors font-mono text-[9px] uppercase tracking-[0.2em]",
+                versionStatus.updateAvailable && isAdmin ? "cursor-pointer" : ""
               )}
+              style={{
+                borderLeft: versionStatus.updateAvailable
+                  ? "2px solid var(--phosphor)"
+                  : "2px solid transparent",
+                color: versionStatus.updateAvailable
+                  ? "var(--phosphor)"
+                  : "hsla(var(--sidebar-foreground), 0.35)",
+                background: versionStatus.updateAvailable && isAdmin
+                  ? "hsla(33, 95%, 55%, 0.05)"
+                  : "transparent",
+              }}
               title={
                 versionStatus.updateAvailable
                   ? isAdmin
@@ -334,43 +601,59 @@ export default function Layout({ children, currentPageName }) {
               }
               onClick={versionStatus.updateAvailable && isAdmin && !showUpdateConfirm ? triggerUpdate : undefined}
             >
-              <p>v{versionStatus.currentVersion}</p>
+              <div className="flex items-center justify-between">
+                <span>Build</span>
+                <span className="tabular-nums" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>
+                  v{versionStatus.currentVersion}
+                </span>
+              </div>
               {versionStatus.updateAvailable && (
                 updateInstalling
-                  ? <p className="font-medium animate-pulse">Installing…</p>
+                  ? <p className="mt-1 animate-pulse">Installing…</p>
                   : showUpdateConfirm
                   ? (
-                    <div className="mt-1 space-y-1">
-                      <p className="font-medium text-yellow-300">Install now?</p>
-                      <div className="flex gap-1 justify-center">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
-                          className="px-2 py-0.5 rounded text-[10px] bg-yellow-500/30 hover:bg-yellow-500/50 text-yellow-200 font-semibold"
-                        >Install</button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
-                          className="px-2 py-0.5 rounded text-[10px] bg-muted hover:bg-muted/80 text-muted-foreground"
-                        >Cancel</button>
-                      </div>
+                    <div className="mt-1.5 flex gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
+                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] border border-current hover:bg-current hover:text-[hsl(var(--sidebar-background))] transition-colors"
+                      >Install</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
+                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] hover:bg-[hsl(var(--sidebar-accent))] transition-colors"
+                        style={{ color: "hsla(var(--sidebar-foreground), 0.6)" }}
+                      >Cancel</button>
                     </div>
                   )
-                  : <><p className="font-medium">Update available</p><p className="font-semibold">v{versionStatus.latestVersion}{isAdmin ? " — click" : ""}</p></>
+                  : <p className="mt-1">→ v{versionStatus.latestVersion} available{isAdmin ? " · click" : ""}</p>
               )}
             </div>
-            </div>
+          </div>
         </div>
       </aside>
-      <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
-        <div className="flex items-center gap-2">
-          <div className="rounded-lg overflow-hidden" style={{width:"28px",height:"28px"}}><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="32" height="32" rx="7" fill="#1e293b"/><rect x="4" y="13" width="24" height="15" rx="3" fill="#3b82f6"/><rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bg)"/><rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/><rect x="13" y="17" width="6" height="6" rx="1" fill="#93c5fd"/><path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round"/><defs><linearGradient id="bg" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs></svg></div>
-          <span className="font-bold text-foreground">Cardoso</span>
+      <header
+        className="fixed left-0 right-0 top-0 z-50 flex h-14 items-center justify-between px-4 lg:hidden"
+        style={{ background: "hsl(var(--sidebar-background))", borderBottom: "1px solid hsl(var(--sidebar-border))", color: "hsl(var(--sidebar-foreground))" }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            style={{
+              width: "18px",
+              height: "18px",
+              background: "var(--phosphor)",
+              boxShadow: "0 0 16px hsla(33, 95%, 55%, 0.5)",
+            }}
+          />
+          <div className="flex flex-col leading-tight">
+            <span className="font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>Cardoso</span>
+            <span className="font-display text-base">Ledger</span>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {canSeeSettings && (
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {}); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
-            {theme === 'dark' ? <Sun className="h-5 w-5 text-amber-400" /> : <Moon className="h-5 w-5 text-blue-400" />}
+          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); }); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+            {theme === 'dark' ? <Sun className="h-5 w-5 text-accent" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change Password">
             <KeyRound className="h-5 w-5 text-muted-foreground" />
@@ -394,7 +677,7 @@ export default function Layout({ children, currentPageName }) {
           );
         })}
       </nav>
-      <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
+      <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-14" : "lg:ml-60")}>
         {children}
       </main>
       {currentUser && (
@@ -413,5 +696,26 @@ export default function Layout({ children, currentPageName }) {
         hubMode={hubMode}
       />
     </div>
+  );
+}
+
+function SidebarButton({ onClick, icon: Icon, label, collapsed }) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "flex items-center text-xs font-medium transition-colors duration-150 w-full",
+        collapsed ? "justify-center w-10 h-10" : "gap-3 pl-4 pr-2 py-2.5"
+      )}
+      style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--phosphor)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.55)"; }}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className={cn("overflow-hidden whitespace-nowrap tracking-tight", collapsed ? "w-0 opacity-0" : "opacity-100")}>
+        {label}
+      </span>
+    </button>
   );
 }

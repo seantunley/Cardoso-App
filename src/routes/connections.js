@@ -9,6 +9,7 @@ import sql from 'mssql';
 import { decryptPassword } from '../services/encryption.js';
 import { buildSqlServerConfig } from '../services/mssqlSecurity.js';
 import { runConnectionImport } from '../services/syncEngine.js';
+import { logAudit } from '../lib/audit.js';
 
 export function createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) {
   const router = Router();
@@ -171,10 +172,24 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         return res.status(503).json({ error: 'Server is shutting down' });
       }
 
+      const conn = db.prepare('SELECT id, name FROM databaseconnection WHERE id = ?').get(req.params.connectionId);
       try {
         const result = await runConnectionImport(req.params.connectionId, { isShuttingDown });
+        logAudit({
+          req, action: 'manual_import', resourceType: 'connection',
+          resourceId: req.params.connectionId,
+          resourceName: conn?.name || `Connection ${req.params.connectionId}`,
+          details: result?.summary || `Imported ${result?.processed ?? 0} record(s); ${result?.inserted ?? 0} inserted, ${result?.updated ?? 0} updated`,
+          changes: result,
+        });
         res.json(result);
       } catch (error) {
+        logAudit({
+          req, action: 'manual_import', resourceType: 'connection',
+          resourceId: req.params.connectionId,
+          resourceName: conn?.name || `Connection ${req.params.connectionId}`,
+          details: error.message, status: 'failure',
+        });
         res.status(500).json({ error: error.message || 'Import failed' });
       }
     }

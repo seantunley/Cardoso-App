@@ -99,9 +99,12 @@ export default function AuditLog() {
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
 
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground">Audit Logs</h1>
-          <p className="mt-2 text-muted-foreground">Track actions and access within the app</p>
+        <div className="border-b border-border pb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Audit</div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            Every <em className="text-phosphor">action</em>.
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">Track actions and access within the app</p>
         </div>
 
         <Tabs defaultValue="audit" className="space-y-4">

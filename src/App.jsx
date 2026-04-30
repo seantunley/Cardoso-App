@@ -1,5 +1,7 @@
 import { useState, useEffect, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
+import { reportClientError } from "@/lib/clientLog";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
 import NavigationTracker from "@/lib/NavigationTracker";
@@ -65,7 +67,7 @@ const AuthenticatedApp = () => {
     fetch("/api/app-info", { credentials: "include" })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(() => {});
+      .catch(err => reportClientError("App.appInfo", err));
   }, [isAuthenticated]);
 
   if (isLoadingPublicSettings || isLoadingAuth) {
@@ -131,6 +133,7 @@ function App() {
           <AuthenticatedApp />
         </Router>
         <Toaster />
+        <SonnerToaster richColors position="top-right" duration={5000} closeButton />
       </QueryClientProvider>
     </div>
   );

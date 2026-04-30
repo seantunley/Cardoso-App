@@ -130,8 +130,8 @@ export default function HubUserManager({ sites = [] }) {
                 className={cn(
                   "text-sm px-3 py-1.5 rounded-full border font-medium transition-all",
                   selectedSites.has(s.site_id)
-                    ? "bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
-                    : "border-zinc-600 text-zinc-400 hover:border-indigo-500 hover:text-indigo-400"
+                    ? "bg-foreground text-background border-foreground ring-2 ring-[var(--phosphor)]/40"
+                    : "border-border text-muted-foreground hover:border-[var(--phosphor)] hover:text-[var(--phosphor)]"
                 )}
               >
                 {s.site_name || s.site_slug || s.site_id}
@@ -195,7 +195,8 @@ export default function HubUserManager({ sites = [] }) {
                     <span
                       key={s.slug}
                       title={`Pushed ${new Date(s.pushed_at).toLocaleDateString()}`}
-                      className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800"
+                      className="inline-flex items-center font-mono text-[10px] uppercase tracking-[0.15em] px-1.5 py-0.5 bg-accent/10 text-accent border border-accent/30"
+                      style={{ borderRadius: "12px" }}
                     >
                       {s.slug}
                     </span>
@@ -210,7 +211,7 @@ export default function HubUserManager({ sites = [] }) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 w-7 p-0 text-zinc-500 hover:text-indigo-400 flex-shrink-0"
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-[var(--phosphor)] flex-shrink-0"
                 onClick={e => { e.stopPropagation(); openManageDialog(u); }}
                 title="Manage site access"
               >
@@ -262,8 +263,8 @@ export default function HubUserManager({ sites = [] }) {
                 className={cn(
                   "text-sm px-3 py-1.5 rounded-full border font-medium transition-all",
                   manageSiteIds.has(s.site_id)
-                    ? "bg-indigo-600 text-white border-indigo-600 ring-2 ring-indigo-400/50 shadow-md"
-                    : "border-zinc-600 text-zinc-400 hover:border-indigo-500 hover:text-indigo-400"
+                    ? "bg-foreground text-background border-foreground ring-2 ring-[var(--phosphor)]/40"
+                    : "border-border text-muted-foreground hover:border-[var(--phosphor)] hover:text-[var(--phosphor)]"
                 )}
               >
                 {s.site_name || s.site_slug || s.site_id}
@@ -277,7 +278,7 @@ export default function HubUserManager({ sites = [] }) {
             <Button
               onClick={() => saveAllowedSitesMutation.mutate()}
               disabled={saveAllowedSitesMutation.isPending}
-              className="bg-indigo-600 hover:bg-indigo-700 gap-1.5"
+              className="gap-1.5"
             >
               {saveAllowedSitesMutation.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
               Save

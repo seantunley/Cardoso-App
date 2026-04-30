@@ -102,6 +102,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     status: "inactive",
     record_type: "customer",
     sync_interval_hours: "",
+    is_bat_only: false,
   });
 
   const [connectionTestStatus, setConnectionTestStatus] = useState(null);
@@ -162,6 +163,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         record_type: connection.record_type || "customer",
         sync_interval_hours: connection.sync_interval_hours != null ? String(connection.sync_interval_hours) : "",
         use_encryption: Boolean(connection.use_encryption),
+        is_bat_only: Boolean(connection.is_bat_only),
       });
       // Reset query test state when editing an existing connection
       setQueryTestStatus(null);
@@ -182,6 +184,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
         status: "inactive",
         record_type: "customer",
         sync_interval_hours: "",
+        is_bat_only: false,
       });
       setConnectionTestStatus(null);
       setQueryTestStatus(null);
@@ -323,6 +326,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
       record_type: formData.record_type || "customer",
       sync_interval_hours: formData.sync_interval_hours ? parseInt(formData.sync_interval_hours, 10) : null,
       use_encryption: formData.use_encryption ? 1 : 0,
+      is_bat_only: formData.is_bat_only ? 1 : 0,
     };
 
     onSave(dataToSave, connection?.id);
@@ -462,6 +466,25 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </div>
           </div>
 
+          {/* ── BAT-only isolation ── */}
+          <div className="flex items-start gap-3 rounded-lg border border-amber-700/50 bg-amber-950/20 px-4 py-3">
+            <input
+              id="is_bat_only"
+              type="checkbox"
+              checked={!!formData.is_bat_only}
+              onChange={(e) => setFormData({ ...formData, is_bat_only: e.target.checked })}
+              className="mt-0.5 h-4 w-4 rounded border-gray-600 bg-gray-800 accent-amber-500 cursor-pointer"
+            />
+            <div>
+              <label htmlFor="is_bat_only" className="text-sm font-medium text-gray-200 cursor-pointer">
+                BAT-only — exclude from customer search sync
+              </label>
+              <p className="text-xs text-gray-400 mt-0.5">
+                Tick this for the BAT Sage SQL connection. The scheduler will skip it, and it won't be imported into the local customer database. The BAT module connects to it directly via its own pool.
+              </p>
+            </div>
+          </div>
+
           {/* ── Test connection ── */}
           <div className="pt-2">
             <Button
@@ -522,7 +545,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
                   ? "border-green-700 text-green-400 hover:bg-green-900/20"
                   : queryTestStatus === "error"
                     ? "border-red-700 text-red-400 hover:bg-red-900/20"
-                    : "border-blue-700 text-blue-300 hover:bg-blue-900/20"
+                    : "border-accent/50 text-accent hover:bg-accent/10"
               }`}
             >
               {queryTestStatus === "testing" ? (
@@ -763,7 +786,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
               type="button"
               onClick={handleImport}
               disabled={isImporting}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
+              
             >
               {isImporting ? (
                 <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Syncing...</>

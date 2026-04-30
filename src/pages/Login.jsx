@@ -2,25 +2,9 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Loader2, Lock, User, Eye, EyeOff } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-
-const CardosoBriefcase = ({ size = 48 }) => (
-  <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width={size} height={size}>
-    <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#lg1)"/>
-    <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
-    <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
-    <path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" fill="none"/>
-    <defs>
-      <linearGradient id="lg1" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#3b82f6"/>
-        <stop offset="1" stopColor="#6366f1"/>
-      </linearGradient>
-    </defs>
-  </svg>
-);
+import { reportClientError } from "@/lib/clientLog";
 
 export default function Login() {
   const navigate = useNavigate();
@@ -37,7 +21,7 @@ export default function Login() {
     fetch("/api/app-info")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.version) setAppVersion(d.version); })
-      .catch(() => {});
+      .catch(err => reportClientError("Login.appInfo", err));
   }, []);
 
   useEffect(() => {
@@ -51,17 +35,17 @@ export default function Login() {
     e.preventDefault();
     setLocalError("");
     if (!formData.email || !formData.password) {
-      setLocalError("Please enter your username and password.");
+      setLocalError("Credentials required.");
       return;
     }
     try {
       setIsSubmitting(true);
       const user = await login(formData.email, formData.password);
-      if (!user) return; // hub redirect or force-password-change — AuthContext handles it
+      if (!user) return;
       const redirectTo = location.state?.from?.pathname || "/";
       navigate(redirectTo, { replace: true });
     } catch (error) {
-      setLocalError(error.message || "Login failed.");
+      setLocalError(error.message || "Authentication failed.");
     } finally {
       setIsSubmitting(false);
     }
@@ -69,10 +53,12 @@ export default function Login() {
 
   if (isLoadingAuth) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "radial-gradient(ellipse at 60% 0%, #1e3a5f 0%, #0f172a 60%)" }}>
-        <div className="flex items-center gap-3 text-slate-300">
-          <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
-          <span className="text-sm">Checking session…</span>
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="flex items-center gap-3">
+          <Loader2 className="w-4 h-4 animate-spin text-accent" />
+          <span className="font-mono text-xs uppercase tracking-[0.2em] text-muted-foreground">
+            Verifying session
+          </span>
         </div>
       </div>
     );
@@ -81,130 +67,113 @@ export default function Login() {
   const displayError = localError || authError?.message;
 
   return (
-    <div
-      className="min-h-screen flex"
-      style={{ background: "radial-gradient(ellipse at 65% 0%, #1e3a5f 0%, #0f172a 55%)" }}
-    >
-      {/* ── Left panel (hidden on mobile) ── */}
-      <div className="hidden lg:flex lg:flex-1 flex-col justify-between p-12 relative overflow-hidden">
-        {/* Decorative glow blobs */}
+    <div className="min-h-screen flex flex-col lg:flex-row bg-background text-foreground overflow-hidden">
+      {/* ── Left: editorial statement ── */}
+      <div className="relative hidden lg:flex lg:flex-1 flex-col justify-between p-16 overflow-hidden border-r border-border">
+        {/* Ambient phosphor wash */}
         <div
+          className="absolute inset-0 pointer-events-none"
           style={{
-            position: "absolute", inset: 0, pointerEvents: "none",
-            background: "radial-gradient(circle at 30% 50%, rgba(99,102,241,0.15) 0%, transparent 65%), radial-gradient(circle at 80% 80%, rgba(59,130,246,0.1) 0%, transparent 55%)",
+            background:
+              "radial-gradient(ellipse 80% 60% at 20% 10%, hsla(33, 95%, 55%, 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 90%, hsla(33, 95%, 55%, 0.04) 0%, transparent 50%)",
           }}
         />
-        {/* Brand */}
-        <div className="flex items-center gap-3 relative z-10">
-          <CardosoBriefcase size={36} />
-          <span className="text-lg font-bold text-white tracking-tight">Cardoso Cigarettes</span>
+        {/* Hairline grid */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.04]"
+          style={{
+            backgroundImage:
+              "linear-gradient(to right, hsl(var(--foreground)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--foreground)) 1px, transparent 1px)",
+            backgroundSize: "48px 48px",
+          }}
+        />
+
+        {/* Top mark */}
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-6 h-6 bg-accent" style={{ boxShadow: "0 0 28px hsla(33,95%,55%,0.6)" }} />
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
+            Cardoso / Ledger System
+          </span>
         </div>
-        {/* Hero copy */}
-        <div className="relative z-10 max-w-sm">
-          <h2 className="text-3xl font-bold text-white leading-snug mb-3">
-            Your business,<br />under control.
-          </h2>
-          <p className="text-slate-400 text-sm leading-relaxed">
-            Manage customers, track balances, monitor inventory, and keep your team aligned — all in one place.
-          </p>
-          {/* Decorative stat pills */}
-          <div className="mt-8 flex flex-wrap gap-3">
-            {[
-              { label: "Customer Records", color: "rgba(59,130,246,0.2)", border: "rgba(59,130,246,0.4)", text: "#93c5fd" },
-              { label: "Auto-Flagging", color: "rgba(16,185,129,0.2)", border: "rgba(16,185,129,0.4)", text: "#6ee7b7" },
-              { label: "Hub Dashboard", color: "rgba(99,102,241,0.2)", border: "rgba(99,102,241,0.4)", text: "#c7d2fe" },
-            ].map(p => (
-              <span
-                key={p.label}
-                className="text-xs font-medium px-3 py-1.5 rounded-full"
-                style={{ background: p.color, border: `1px solid ${p.border}`, color: p.text }}
-              >
-                {p.label}
-              </span>
-            ))}
+
+        {/* Hero quote */}
+        <div className="relative z-10 max-w-xl">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent mb-8">
+            § 01 · Access
           </div>
+          <h1 className="font-display text-6xl xl:text-7xl leading-[0.95] tracking-tight">
+            Every <em className="text-phosphor">rand</em>,
+            <br />
+            every reconciliation,
+            <br />
+            on the record.
+          </h1>
+          <p className="mt-10 text-sm text-muted-foreground max-w-md leading-relaxed">
+            One platform for customer accounts, BAT reconciliation,
+            inventory, printable reports and multi-site hub aggregation.
+            Quietly precise. Never guessing.
+          </p>
         </div>
-        {/* Footer */}
-        <p className="text-xs text-slate-600 relative z-10">© 2026 Cardoso Cigarettes. All rights reserved.</p>
+
+        {/* Bottom meta */}
+        <div className="relative z-10 flex items-end justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+          <span>© 2026 Cardoso</span>
+          <span>Johannesburg / ZA</span>
+        </div>
       </div>
 
-      {/* ── Right panel (login form) ── */}
-      <div className="w-full lg:w-[420px] flex flex-col items-center justify-center p-4 sm:p-8 lg:p-12">
-        {/* Mobile brand header */}
-        <div className="lg:hidden flex flex-col items-center mb-8 gap-2">
-          <CardosoBriefcase size={44} />
-          <h1 className="text-xl font-bold text-white tracking-tight">Cardoso Cigarettes</h1>
-          <p className="text-sm text-slate-400">Business System</p>
+      {/* ── Right: the terminal ── */}
+      <div className="flex-1 lg:flex-none lg:w-[480px] flex flex-col justify-center px-6 py-16 lg:px-16 relative">
+        {/* Mobile mark */}
+        <div className="lg:hidden mb-12 flex items-center gap-3">
+          <div className="w-5 h-5 bg-accent" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
+            Cardoso / Ledger
+          </span>
         </div>
 
-        {/* Card */}
-        <div
-          className="w-full rounded-2xl p-5 sm:p-8"
-          style={{
-            background: "rgba(15,23,42,0.85)",
-            border: "1px solid rgba(99,102,241,0.2)",
-            boxShadow: "0 25px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.03)",
-            backdropFilter: "blur(12px)",
-          }}
-        >
-          {/* Desktop brand inside card */}
-          <div className="hidden lg:flex items-center gap-2.5 mb-7">
-            <CardosoBriefcase size={28} />
-            <div>
-              <div className="text-sm font-semibold text-white leading-tight">Cardoso Cigarettes</div>
-              <div className="text-[11px] text-slate-500">Business System</div>
-            </div>
+        <div className="max-w-sm w-full">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+            Sign in
           </div>
+          <h2 className="font-display text-4xl leading-tight mb-10">
+            Identify yourself.
+          </h2>
 
-          <h2 className="text-xl font-bold text-white mb-1">Welcome back</h2>
-          <p className="text-sm text-slate-400 mb-6">Sign in to your account to continue</p>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Username */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-slate-300">Username</Label>
-              <div className="relative">
-                <User className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
-                  type="text"
-                  autoComplete="username"
-                  value={formData.email}
-                  onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-                  placeholder="Enter your username"
-                  className="pl-10 text-sm"
-                  style={{
-                    background: "rgba(30,41,59,0.8)",
-                    border: "1px solid rgba(99,102,241,0.25)",
-                    color: "#f1f5f9",
-                  }}
-                  required
-                />
-              </div>
+          <form onSubmit={handleSubmit} className="space-y-7">
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                Username
+              </label>
+              <input
+                type="text"
+                autoComplete="username"
+                value={formData.email}
+                onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
+                className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-foreground/40"
+                placeholder="e.g. s.tunley"
+                required
+              />
             </div>
 
-            {/* Password */}
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-slate-300">Password</Label>
+            <div>
+              <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                Password
+              </label>
               <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-                <Input
+                <input
                   type={showPassword ? "text" : "password"}
                   autoComplete="current-password"
                   value={formData.password}
                   onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                  placeholder="Enter your password"
-                  className="pl-10 pr-10 text-sm"
-                  style={{
-                    background: "rgba(30,41,59,0.8)",
-                    border: "1px solid rgba(99,102,241,0.25)",
-                    color: "#f1f5f9",
-                  }}
+                  className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 pr-10 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-foreground/40"
+                  placeholder="••••••••"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500 hover:text-slate-300 transition-colors"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-muted-foreground hover:text-accent transition-colors"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -212,41 +181,42 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Error */}
             {displayError && (
-              <div
-                className="flex items-start gap-2 rounded-lg px-3 py-2.5 text-sm text-red-300"
-                style={{ background: "rgba(153,27,27,0.2)", border: "1px solid rgba(239,68,68,0.3)" }}
-              >
-                <span className="mt-0.5 shrink-0">⚠</span>
-                <span>{displayError}</span>
+              <div className="flex items-start gap-3 border-l-2 border-destructive pl-3 py-2">
+                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mt-0.5">Err</span>
+                <span className="text-sm text-foreground">{displayError}</span>
               </div>
             )}
 
-            {/* Submit */}
             <button
               type="submit"
               disabled={isSubmitting}
-              className="w-full flex items-center justify-center gap-2 rounded-lg py-3 text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60 disabled:cursor-not-allowed min-h-[44px]"
-              style={{
-                background: isSubmitting
-                  ? "rgba(99,102,241,0.6)"
-                  : "linear-gradient(135deg, #4f46e5 0%, #3b82f6 100%)",
-                boxShadow: isSubmitting ? "none" : "0 4px 20px rgba(79,70,229,0.4)",
-              }}
+              className="group w-full flex items-center justify-between border border-foreground bg-transparent hover:bg-[hsla(33,95%,55%,0.18)] hover:border-[var(--phosphor)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] disabled:opacity-50 disabled:cursor-not-allowed px-5 py-4 transition-all duration-200 mt-4"
             >
-              {isSubmitting
-                ? <><Loader2 className="w-4 h-4 animate-spin" /> Signing in…</>
-                : "Sign in"}
+              <span className="font-mono text-xs uppercase tracking-[0.25em] font-medium">
+                {isSubmitting ? "Authenticating" : "Authenticate"}
+              </span>
+              {isSubmitting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <span className="font-mono text-xs transition-transform group-hover:translate-x-1">
+                  →
+                </span>
+              )}
             </button>
           </form>
+
+          {appVersion && (
+            <div className="mt-16 pt-4 border-t border-border flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                Build
+              </span>
+              <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+                v{appVersion}
+              </span>
+            </div>
+          )}
         </div>
-
-        {appVersion && (
-          <p className="mt-4 text-[11px] text-slate-600 text-center">v{appVersion}</p>
-        )}
-
-        <p className="mt-2 text-xs text-slate-600 text-center lg:hidden">© 2026 Cardoso Cigarettes</p>
       </div>
     </div>
   );

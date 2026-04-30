@@ -1,5 +1,6 @@
 import express from 'express';
 import db from '../db/index.js';
+import { logAudit } from '../lib/audit.js';
 
 function parseAmount(value) {
   const num = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
@@ -36,7 +37,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
           FROM datarecord d
           LEFT JOIN collections c ON c.customer_id = d.id
           WHERE d.flag_color IN ('red', 'orange')
-          ORDER BY CAST(REPLACE(REPLACE(COALESCE(d.outstanding_balance, '0'), ',', ''), ' ', '') AS REAL) DESC,
+          ORDER BY COALESCE(d.outstanding_balance_num, 0) DESC,
                    d.customer_name ASC
         `).all();
 
@@ -108,6 +109,21 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
           LEFT JOIN collections c ON c.customer_id = d.id
           WHERE d.id = ?
         `).get(customerId);
+
+        const beforeStatus = existing?.status || 'pending';
+        const beforeNotes = existing?.notes || '';
+        if (beforeStatus !== status || beforeNotes !== notes) {
+          logAudit({
+            req, action: 'update_collection', resourceType: 'record',
+            resourceId: customerId,
+            resourceName: updated?.name || `Customer ${customerId}`,
+            // Auto-summarised: "Status: pending → contacted; Notes: '' → 'Will pay …'"
+            changes: {
+              before: { status: beforeStatus, notes: beforeNotes },
+              after:  { status, notes },
+            },
+          });
+        }
 
         res.json({
           ...updated,

@@ -23,6 +23,58 @@ const actionColors = {
   rule_applied: "bg-green-100 text-green-800",
   user_login: "bg-slate-100 text-slate-800",
   user_logout: "bg-slate-100 text-slate-800",
+  // New canonical action names
+  create_user: "bg-green-100 text-green-800",
+  update_user_permissions: "bg-blue-100 text-blue-800",
+  update_user_profile: "bg-blue-100 text-blue-800",
+  update_user_password: "bg-amber-100 text-amber-800",
+  delete_user: "bg-red-100 text-red-800",
+  create_connection: "bg-purple-100 text-purple-800",
+  update_connection: "bg-purple-100 text-purple-800",
+  delete_connection: "bg-red-100 text-red-800",
+  create_rule: "bg-indigo-100 text-indigo-800",
+  update_rule: "bg-indigo-100 text-indigo-800",
+  delete_rule: "bg-red-100 text-red-800",
+  create_system: "bg-slate-100 text-slate-800",
+  update_system: "bg-slate-100 text-slate-800",
+  delete_system: "bg-red-100 text-red-800",
+  apply_auto_flags: "bg-green-100 text-green-800",
+  clear_auto_flags: "bg-yellow-100 text-yellow-800",
+  import_rules: "bg-indigo-100 text-indigo-800",
+  publish_credit_logic: "bg-indigo-100 text-indigo-800",
+  push_credit_logic_to_sites: "bg-indigo-100 text-indigo-800",
+  sync_credit_logic_from_hub: "bg-indigo-100 text-indigo-800",
+  bat_upload: "bg-cyan-100 text-cyan-800",
+  bat_extract_invoices: "bg-cyan-100 text-cyan-800",
+  ocr_pause: "bg-yellow-100 text-yellow-800",
+  ocr_resume: "bg-green-100 text-green-800",
+  update_bat_settings: "bg-slate-100 text-slate-800",
+  hub_force_resync_all: "bg-amber-100 text-amber-800",
+  hub_force_resync_site: "bg-amber-100 text-amber-800",
+  hub_delete_site: "bg-red-100 text-red-800",
+  hub_backup_pull_trigger: "bg-cyan-100 text-cyan-800",
+  enable_hub_backups: "bg-green-100 text-green-800",
+  disable_hub_backups: "bg-yellow-100 text-yellow-800",
+  app_update_trigger: "bg-amber-100 text-amber-800",
+  dedupe_customers: "bg-amber-100 text-amber-800",
+  dedupe_customers_dryrun: "bg-slate-100 text-slate-800",
+  clear_imported_data: "bg-red-100 text-red-800",
+  update_ntopng_settings: "bg-slate-100 text-slate-800",
+  update_collection: "bg-cyan-100 text-cyan-800",
+  hub_manual_sync: "bg-cyan-100 text-cyan-800",
+  update_user_allowed_sites: "bg-blue-100 text-blue-800",
+  hub_push_users: "bg-purple-100 text-purple-800",
+  hub_push_rules: "bg-indigo-100 text-indigo-800",
+  hub_dedupe: "bg-amber-100 text-amber-800",
+  hub_dedupe_dryrun: "bg-slate-100 text-slate-800",
+  manual_import: "bg-cyan-100 text-cyan-800",
+  bat_retry_extraction: "bg-cyan-100 text-cyan-800",
+  bat_manual_invoice_override: "bg-amber-100 text-amber-800",
+  bat_refresh_sage: "bg-cyan-100 text-cyan-800",
+  bat_cardoso_generate: "bg-cyan-100 text-cyan-800",
+  bat_replicate_supplier: "bg-amber-100 text-amber-800",
+  bat_cardoso_upload: "bg-cyan-100 text-cyan-800",
+  set_initial_password: "bg-green-100 text-green-800",
 };
 
 const actionLabels = {
@@ -41,6 +93,57 @@ const actionLabels = {
   rule_applied: "Rules Applied",
   user_login: "User Login",
   user_logout: "User Logout",
+  create_user: "User Created",
+  update_user_permissions: "Permissions Updated",
+  update_user_profile: "Profile Updated",
+  update_user_password: "Password Changed",
+  delete_user: "User Deleted",
+  create_connection: "Connection Created",
+  update_connection: "Connection Updated",
+  delete_connection: "Connection Deleted",
+  create_rule: "Rule Created",
+  update_rule: "Rule Updated",
+  delete_rule: "Rule Deleted",
+  create_system: "Item Created",
+  update_system: "Item Updated",
+  delete_system: "Item Deleted",
+  apply_auto_flags: "Auto-flags Applied",
+  clear_auto_flags: "Auto-flags Cleared",
+  import_rules: "Rules Imported",
+  publish_credit_logic: "Credit Logic Published",
+  push_credit_logic_to_sites: "Credit Logic Pushed",
+  sync_credit_logic_from_hub: "Credit Logic Synced",
+  bat_upload: "BAT Upload",
+  bat_extract_invoices: "BAT Extract Triggered",
+  ocr_pause: "OCR Paused",
+  ocr_resume: "OCR Resumed",
+  update_bat_settings: "BAT Settings Updated",
+  hub_force_resync_all: "Force Resync (All)",
+  hub_force_resync_site: "Force Resync (Site)",
+  hub_delete_site: "Site Deleted",
+  hub_backup_pull_trigger: "Backup Pull Triggered",
+  enable_hub_backups: "Hub Backups Enabled",
+  disable_hub_backups: "Hub Backups Disabled",
+  app_update_trigger: "App Update Started",
+  dedupe_customers: "Dedupe Customers",
+  dedupe_customers_dryrun: "Dedupe Dry-run",
+  clear_imported_data: "Imported Data Cleared",
+  update_ntopng_settings: "ntopng Settings",
+  update_collection: "Collection Updated",
+  hub_manual_sync: "Manual Sync (All Sites)",
+  update_user_allowed_sites: "Allowed Sites Updated",
+  hub_push_users: "Users Pushed to Sites",
+  hub_push_rules: "Rules Pushed to Sites",
+  hub_dedupe: "Hub Dedupe",
+  hub_dedupe_dryrun: "Hub Dedupe Dry-run",
+  manual_import: "Manual Sync",
+  bat_retry_extraction: "BAT Retry Extraction",
+  bat_manual_invoice_override: "BAT Invoice Override",
+  bat_refresh_sage: "BAT Sage Refresh",
+  bat_cardoso_generate: "Cardoso Invoices Generated",
+  bat_replicate_supplier: "Cardoso ↤ Supplier",
+  bat_cardoso_upload: "Cardoso Upload",
+  set_initial_password: "Initial Password Set",
 };
 
 function parseChanges(changes) {
@@ -194,7 +297,7 @@ export default function AuditLogTable({ logs = [] }) {
                   )}
                   <button
                     onClick={() => toggleExpanded(log.id)}
-                    className="text-xs text-blue-400 hover:text-blue-300"
+                    className="text-xs text-accent hover:text-[var(--phosphor)] font-mono uppercase tracking-wider"
                   >
                     {isExpanded ? "Hide details" : "Show details"}
                   </button>
@@ -341,7 +444,7 @@ export default function AuditLogTable({ logs = [] }) {
 
                             <button
                               onClick={() => toggleExpanded(log.id)}
-                              className="text-xs text-blue-300 hover:text-blue-200"
+                              className="text-xs text-accent hover:text-[var(--phosphor)] font-mono uppercase tracking-wider"
                             >
                               {isExpanded ? "Hide details" : "Show details"}
                             </button>

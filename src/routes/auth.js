@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
+import { logAudit } from '../lib/audit.js';
 
 /**
  * Creates the auth and user routes router.
@@ -170,6 +171,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       req.session.pendingUserId = null;
       req.session.userId = userId;
 
+      logAudit({
+        req, action: 'set_initial_password', resourceType: 'user',
+        resourceId: user.id, resourceName: user.email,
+        details: 'First-time password set; must_change_password cleared',
+        userOverride: user,
+      });
+
       // Hub redirect check
       if (user.hub_redirect) {
         const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
@@ -311,6 +319,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       );
 
       const newUser = getUserById(info.lastInsertRowid);
+      logAudit({
+        req, action: 'create_user', resourceType: 'user',
+        resourceId: newUser.id, resourceName: newUser.email,
+        details: `Role: ${role}${mustChange ? ' (must change password on first login)' : ''}`,
+      });
       res.json({
         success: true,
         user: sanitizeUser(newUser),
@@ -368,6 +381,25 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       db.prepare(`UPDATE "user" SET ${sets} WHERE id = ?`).run(...Object.values(updates), id);
 
       const updated = getUserById(id);
+      // Only audit the permissions that ACTUALLY changed (UI typically sends
+      // every permission key on every save, even untouched ones).
+      const realChangesBefore = {};
+      const realChangesAfter = {};
+      for (const k of Object.keys(updates)) {
+        if (existing[k] !== updates[k]) {
+          realChangesBefore[k] = existing[k];
+          realChangesAfter[k]  = updates[k];
+        }
+      }
+      const changedCount = Object.keys(realChangesAfter).length;
+      if (changedCount > 0) {
+        logAudit({
+          req, action: 'update_user_permissions', resourceType: 'user',
+          resourceId: updated.id, resourceName: updated.email,
+          // Let logAudit auto-summarise the before→after diff in action_details.
+          changes: { before: realChangesBefore, after: realChangesAfter },
+        });
+      }
       res.json({
         success: true,
         user: sanitizeUser(updated),
@@ -404,6 +436,14 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         .run(normalizedEmail, (full_name || '').trim(), id);
 
       const updated = getUserById(id);
+      logAudit({
+        req, action: 'update_user_profile', resourceType: 'user',
+        resourceId: updated.id, resourceName: updated.email,
+        changes: {
+          before: { email: existing.email, full_name: existing.full_name },
+          after:  { email: updated.email,  full_name: updated.full_name },
+        },
+      });
       res.json(sanitizeUser(updated));
     } catch (err) {
       console.error('Update profile error:', err);
@@ -428,6 +468,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const passwordHash = await bcrypt.hash(password, 12);
       db.prepare(`UPDATE "user" SET password_hash = ? WHERE id = ?`).run(passwordHash, id);
 
+      logAudit({
+        req, action: 'update_user_password', resourceType: 'user',
+        resourceId: existing.id, resourceName: existing.email,
+        details: parseInt(id, 10) === req.currentUser.id ? 'Self-service password change' : 'Admin password reset',
+      });
       res.json({ success: true });
     } catch (error) {
       console.error('Update password error:', error);
@@ -451,6 +496,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       db.prepare(`DELETE FROM "user" WHERE id = ?`).run(targetId);
 
+      logAudit({
+        req, action: 'delete_user', resourceType: 'user',
+        resourceId: existing.id, resourceName: existing.email,
+        details: `Role: ${existing.role}`,
+      });
       res.json({ success: true });
     } catch (error) {
       console.error('Delete user error:', error);

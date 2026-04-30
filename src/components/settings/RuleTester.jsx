@@ -23,7 +23,7 @@ function ConditionBreakdown({ conditionResults, conditions }) {
             {i > 0 && (
               <span className={cn(
                 "font-bold tracking-widest px-1",
-                (r.operator ?? "AND") === "OR" ? "text-indigo-400" : "text-gray-500"
+                (r.operator ?? "AND") === "OR" ? "text-accent" : "text-muted-foreground"
               )}>
                 {r.operator ?? "AND"}
               </span>

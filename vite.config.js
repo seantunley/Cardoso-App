@@ -27,15 +27,18 @@ export default defineConfig({
           "vendor-react": ["react", "react-dom", "react-router-dom"],
           "vendor-query": ["@tanstack/react-query"],
           "vendor-ui": ["lucide-react"],
+          "vendor-charts": ["recharts"],
         },
       },
     },
   },
   server: {
     host: true, // bind to 0.0.0.0 so LAN devices can connect
+    port: 6009,
+    strictPort: true,
     proxy: {
       '/api': {
-        target: 'http://localhost:3001',
+        target: 'http://localhost:3101',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, '/api'), // Ensures /api stays
       },

@@ -5,58 +5,7 @@ import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
-
-export async function runSpeedTestNow() {
-  const { default: speedTest } = await import('speedtest-net');
-  console.log('[speedtest] Starting on-demand speed test...');
-  const result = await speedTest({ acceptLicense: true, acceptGdpr: true });
-  const download_mbps = result.download?.bandwidth != null ? (result.download.bandwidth * 8) / 1_000_000 : null;
-  const upload_mbps = result.upload?.bandwidth != null ? (result.upload.bandwidth * 8) / 1_000_000 : null;
-  const ping_ms = result.ping?.latency ?? null;
-  const isp = result.isp ?? null;
-  const server_name = result.server?.name ?? null;
-  const server_location = result.server?.location ?? result.server?.country ?? null;
-  const timestamp = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO site_speedtest (timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location);
-  db.prepare(`
-    DELETE FROM site_speedtest WHERE id NOT IN (
-      SELECT id FROM site_speedtest ORDER BY id DESC LIMIT 90
-    )
-  `).run();
-  console.log(`[speedtest] Done — ↓${download_mbps?.toFixed(1)} ↑${upload_mbps?.toFixed(1)} ping=${ping_ms}ms`);
-}
-
-async function runSpeedTest() {
-  if (process.env.HUB_MODE === 'true') return;
-  try {
-    const { default: speedTest } = await import('speedtest-net');
-    console.log('[speedtest] Starting speed test...');
-    const result = await speedTest({ acceptLicense: true, acceptGdpr: true });
-    const download_mbps = result.download?.bandwidth != null ? (result.download.bandwidth * 8) / 1_000_000 : null;
-    const upload_mbps = result.upload?.bandwidth != null ? (result.upload.bandwidth * 8) / 1_000_000 : null;
-    const ping_ms = result.ping?.latency ?? null;
-    const isp = result.isp ?? null;
-    const server_name = result.server?.name ?? null;
-    const server_location = result.server?.location ?? result.server?.country ?? null;
-    const timestamp = new Date().toISOString();
-    db.prepare(`
-      INSERT INTO site_speedtest (timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location);
-    // Prune to last 90 results
-    db.prepare(`
-      DELETE FROM site_speedtest WHERE id NOT IN (
-        SELECT id FROM site_speedtest ORDER BY id DESC LIMIT 90
-      )
-    `).run();
-    console.log(`[speedtest] Done — ↓${download_mbps?.toFixed(1)} ↑${upload_mbps?.toFixed(1)} ping=${ping_ms}ms`);
-  } catch (err) {
-    console.error('[speedtest] Speed test failed:', err.message);
-  }
-}
+import { refreshSageWeekTotalsCache } from './services/batReconciliation.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -79,8 +28,10 @@ async function runScheduledSyncCycle() {
   scheduledSyncInProgress = true;
 
   try {
+    // Skip BAT-only connections — those are accessed live by the BAT module
+    // and must NOT be swept into the local datarecord table.
     const connections = db
-      .prepare(`SELECT id, name FROM databaseconnection WHERE status = 'active'`)
+      .prepare(`SELECT id, name FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0`)
       .all();
 
     for (const connection of connections) {
@@ -134,10 +85,19 @@ export async function runLocalBackup() {
 export function startSchedulers() {
   cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle));
   cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
+
+  // BAT Sage week-totals cache — refresh every 3h on weekdays at 7/10/13/16
+  cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', () => {
+    refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] scheduled refresh failed:', e.message));
+  }));
+  // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
+  setTimeout(() => {
+    refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] boot refresh failed:', e.message));
+  }, 15000);
+
   if (process.env.HUB_MODE !== 'true') {
     // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
     cronTasks.push(cron.schedule('0 2 * * *', runLocalBackup));
-    cronTasks.push(cron.schedule('0 7,10,13,16 * * *', runSpeedTest));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
     setTimeout(() => {
       syncCreditLogicFromHub({ triggeredBy: 'startup' }).catch((error) => {
@@ -154,7 +114,7 @@ export function startSchedulers() {
   intervals.push(setInterval(async () => {
     try {
       const conns = db.prepare(
-        "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
+        "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
       ).all();
       const now = Date.now();
       for (const conn of conns) {

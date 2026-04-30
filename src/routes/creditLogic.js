@@ -15,6 +15,7 @@ import {
   updateHubSiteCreditLogicStatus,
 } from "../services/creditLogic.js";
 import { debugCreditForCustomer } from "../services/creditDebug.js";
+import { logAudit } from "../lib/audit.js";
 
 export function createCreditLogicRouter({ requireAuth, requirePermission }) {
   const router = express.Router();
@@ -37,9 +38,19 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
     if (process.env.HUB_MODE === "true") return res.status(400).json({ error: "Hub instances already use the source-of-truth config locally." });
     try {
       const result = await syncCreditLogicFromHub({ triggeredBy: req.currentUser?.email || "manual" });
+      logAudit({
+        req, action: 'sync_credit_logic_from_hub', resourceType: 'rule',
+        resourceName: 'Credit logic',
+        details: result.ok ? `Synced version ${result.logicVersion || ''}` : `Partial: ${result.message || 'see details'}`,
+        status: result.ok ? 'success' : 'failure',
+      });
       res.status(result.ok ? 200 : 207).json(result);
     } catch (err) {
       console.error('[credit-logic] sync-from-hub error:', err);
+      logAudit({
+        req, action: 'sync_credit_logic_from_hub', resourceType: 'rule',
+        resourceName: 'Credit logic', details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message });
     }
   });
@@ -54,6 +65,11 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
     if (process.env.HUB_MODE !== "true") return res.status(400).json({ error: "Not running in hub mode" });
     try {
       const published = publishCreditLogicVersion({ config: req.body?.config, notes: req.body?.notes || null, createdBy: req.currentUser?.email || null });
+      logAudit({
+        req, action: 'publish_credit_logic', resourceType: 'rule',
+        resourceId: published.version, resourceName: 'Credit logic',
+        details: req.body?.notes ? `Version ${published.version}: ${String(req.body.notes).slice(0, 200)}` : `Version ${published.version} published`,
+      });
       res.status(201).json({ current: published, versions: listCreditLogicVersions(), siteStatuses: getHubCreditLogicSiteStatuses() });
     } catch (error) {
       res.status(error.statusCode || 500).json({ error: error.message, details: error.details || null });
@@ -64,9 +80,19 @@ export function createCreditLogicRouter({ requireAuth, requirePermission }) {
     if (process.env.HUB_MODE !== "true") return res.status(400).json({ error: "Not running in hub mode" });
     try {
       const result = await pushCreditLogicToSites({ siteIds: Array.isArray(req.body?.site_ids) ? req.body.site_ids : null });
+      logAudit({
+        req, action: 'push_credit_logic_to_sites', resourceType: 'rule',
+        resourceName: 'Credit logic',
+        details: `Pushed to ${result.success || 0} site(s), failed ${result.failed || 0}`,
+        status: (result.failed || 0) > 0 ? 'failure' : 'success',
+      });
       res.status(result.failed === 0 ? 200 : 207).json({ ...result, siteStatuses: getHubCreditLogicSiteStatuses() });
     } catch (err) {
       console.error('[credit-logic] push-to-sites error:', err);
+      logAudit({
+        req, action: 'push_credit_logic_to_sites', resourceType: 'rule',
+        resourceName: 'Credit logic', details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message });
     }
   });

@@ -16,6 +16,7 @@ import {
   getNtopngConfig,
 } from '../services/ntopngService.js';
 import db from '../db/index.js';
+import { logAudit } from '../lib/audit.js';
 
 export function createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = express.Router();
@@ -130,6 +131,9 @@ export function createNetworkDevicesRouter({ requireAuth, requireAdmin, requireP
         return res.status(400).json({ error: 'Hub mode not enabled' });
       }
       const { ntopng_url, ntopng_user, ntopng_password } = req.body || {};
+      // Snapshot before for audit diff
+      const beforeRows = db.prepare(`SELECT key, value FROM hub_settings WHERE key IN ('ntopng_url','ntopng_user','ntopng_password')`).all();
+      const before = Object.fromEntries(beforeRows.map(r => [r.key, r.key === 'ntopng_password' ? '[redacted]' : r.value]));
       const upsert = db.prepare(
         `INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`
       );
@@ -139,6 +143,25 @@ export function createNetworkDevicesRouter({ requireAuth, requireAdmin, requireP
         if (ntopng_password !== undefined && ntopng_password !== '') upsert.run('ntopng_password', String(ntopng_password));
       });
       apply();
+      const after = {};
+      if (ntopng_url !== undefined) after.ntopng_url = String(ntopng_url).trim();
+      if (ntopng_user !== undefined) after.ntopng_user = String(ntopng_user).trim();
+      if (ntopng_password !== undefined && ntopng_password !== '') after.ntopng_password = '[redacted]';
+      // Filter to actually-changed keys
+      const realBefore = {}; const realAfter = {};
+      for (const k of Object.keys(after)) {
+        if (String(before[k] ?? '') !== String(after[k])) {
+          realBefore[k] = before[k] ?? '';
+          realAfter[k]  = after[k];
+        }
+      }
+      if (Object.keys(realAfter).length > 0) {
+        logAudit({
+          req, action: 'update_ntopng_settings', resourceType: 'system',
+          resourceName: 'ntopng configuration',
+          changes: { before: realBefore, after: realAfter },
+        });
+      }
       res.json({ ok: true });
   };
   router.put('/api/hub/ntopng/settings', requireAuth, requireAdmin, _saveNtopngSettings);

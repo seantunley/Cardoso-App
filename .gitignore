@@ -143,3 +143,12 @@ dist
 # Service logs
 logs/
 *.log
+
+# Runtime / generated assets — kept locally, fetched on demand on other machines
+eng.traineddata
+*.traineddata
+uploads/
+
+# Sample / large reference spreadsheets (kept locally, not in source)
+docs/*.xls
+docs/*.xlsx

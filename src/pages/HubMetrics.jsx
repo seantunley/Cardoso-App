@@ -1,16 +1,11 @@
 // src/pages/HubMetrics.jsx
-// Hub admin page — speed test metrics and machine health across all registered sites.
+// Hub admin page — machine health across all registered sites.
 
-import { useMemo, useState, useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart2,
   RefreshCw,
-  Wifi,
-  ArrowDown,
-  ArrowUp,
-  Activity,
-  Play,
   MonitorSmartphone,
   Cpu,
   HardDrive,
@@ -22,7 +17,6 @@ import {
   CloudOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function fmtTime(iso) {
@@ -71,13 +65,6 @@ function fmtBytes(bytes) {
   return `${(value / 1024 ** 3).toFixed(1)} GB`;
 }
 
-function downloadBadgeCls(mbps) {
-  if (mbps == null) return "bg-slate-500/10 border border-slate-500/30 text-slate-400";
-  if (mbps >= 50) return "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400";
-  if (mbps >= 10) return "bg-amber-500/10 border border-amber-500/30 text-amber-400";
-  return "bg-red-500/10 border border-red-500/30 text-red-400";
-}
-
 const HEALTH_META = {
   ok: { label: "Healthy", icon: CheckCircle2, cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
   warning: { label: "Attention", icon: AlertTriangle, cls: "bg-amber-500/10 border border-amber-500/30 text-amber-400" },
@@ -115,12 +102,6 @@ function StatusBadge({ pingInfo }) {
   );
 }
 
-async function fetchSpeedtestResults() {
-  const res = await fetch("/api/hub/speedtest", { credentials: "include" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
-}
-
 async function fetchPingStatus() {
   const res = await fetch("/api/hub/ping-status", { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -133,133 +114,13 @@ async function fetchMachineHealth() {
   return res.json();
 }
 
-function SiteSection({ slug, rows, pingInfo, onRunNow }) {
-  const latest = rows[0] ?? null;
-  const tableRows = rows.slice(0, 3);
-  const [running, setRunning] = useState(false);
-
-  const handleRunNow = useCallback(async () => {
-    setRunning(true);
-    try {
-      await onRunNow(slug);
-    } finally {
-      setRunning(false);
-    }
-  }, [slug, onRunNow]);
-
-  return (
-    <div className="bg-card rounded-xl border border-border overflow-hidden">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 px-4 py-2.5 border-b border-border">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
-            <Wifi className="w-3 h-3 text-indigo-400" />
-          </div>
-          <h2 className="text-sm font-semibold text-foreground">{slug}</h2>
-          <StatusBadge pingInfo={pingInfo} />
-        </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRunNow}
-              disabled={running || (pingInfo && !pingInfo.online)}
-              className="text-xs border-indigo-500/40 text-indigo-300 gap-1.5 h-7"
-            >
-              {running ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
-              {running ? "Running…" : "Run now"}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{pingInfo && !pingInfo.online ? "Site is offline" : "Run a speed test on this site now"}</TooltipContent>
-        </Tooltip>
-      </div>
-
-      {!latest ? (
-        <div className="flex flex-col items-center py-10 text-slate-500 gap-2">
-          <Activity className="w-8 h-8 opacity-30" />
-          <p className="text-sm">No data yet — click "Run now" or wait for the next scheduled test</p>
-        </div>
-      ) : (
-        <>
-          <div className="grid grid-cols-3 gap-2 px-4 py-2.5 border-b border-border">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide">↓ Download</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className={`inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default ${downloadBadgeCls(latest.download_mbps)}`}>
-                    <ArrowDown className="w-3 h-3" />
-                    {fmt(latest.download_mbps, " Mbps")}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Download speed measured at last scheduled test</TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide">↑ Upload</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default bg-blue-500/10 border border-blue-500/30 text-blue-400">
-                    <ArrowUp className="w-3 h-3" />
-                    {fmt(latest.upload_mbps, " Mbps")}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Upload speed measured at last scheduled test</TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] text-slate-500 uppercase tracking-wide">Ping</span>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex items-center gap-1 text-sm font-bold px-2 py-1 rounded-md self-start cursor-default bg-purple-500/10 border border-purple-500/30 text-purple-400">
-                    {fmt(latest.ping_ms, " ms")}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Round-trip latency to test server from this site</TooltipContent>
-              </Tooltip>
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="text-[10px] text-slate-500 uppercase tracking-wide border-b border-border">
-                  <th className="text-left px-4 py-1.5 font-medium">Time</th>
-                  <th className="text-right px-3 py-1.5 font-medium">↓ Mbps</th>
-                  <th className="text-right px-3 py-1.5 font-medium">↑ Mbps</th>
-                  <th className="text-right px-3 py-1.5 font-medium">Ping ms</th>
-                  <th className="text-left px-3 py-1.5 font-medium">Server</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tableRows.map((row, i) => (
-                  <tr key={row.id ?? i} className="border-b border-border/50 last:border-0 hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-1.5 text-muted-foreground whitespace-nowrap">{fmtTime(row.timestamp)}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      <span className={`inline-block px-1.5 py-0.5 rounded text-[11px] font-semibold ${downloadBadgeCls(row.download_mbps)}`}>
-                        {fmt(row.download_mbps)}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1.5 text-right font-medium text-blue-400">{fmt(row.upload_mbps)}</td>
-                    <td className="px-3 py-1.5 text-right font-medium text-purple-400">{fmt(row.ping_ms)}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground truncate max-w-[180px]">{row.server_name ?? row.isp ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
 function MetricChip({ icon: Icon, label, value, sub, tone = "default" }) {
   const toneClasses = {
     default: "bg-background/70 border-border/60 text-foreground",
     good: "bg-emerald-500/10 border-emerald-500/30 text-emerald-400",
     warning: "bg-amber-500/10 border-amber-500/30 text-amber-400",
     danger: "bg-red-500/10 border-red-500/30 text-red-400",
-    info: "bg-blue-500/10 border-blue-500/30 text-blue-300",
+    info: "bg-accent/10 border-accent/30 text-accent",
   };
 
   return (
@@ -300,8 +161,8 @@ function MachineHealthCard({ site, pingInfo }) {
       <div className="flex flex-col gap-3 px-4 py-3 border-b border-border">
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30 shrink-0">
-              <MonitorSmartphone className="w-4 h-4 text-indigo-400" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-accent/10 border border-accent/30 shrink-0">
+              <MonitorSmartphone className="w-4 h-4 text-accent" />
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
@@ -315,7 +176,7 @@ function MachineHealthCard({ site, pingInfo }) {
               {site.app_version && (
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <div className="text-[11px] text-blue-400/80 font-mono cursor-default">v{site.app_version}</div>
+                    <div className="text-[11px] text-accent/80 font-mono cursor-default">v{site.app_version}</div>
                   </TooltipTrigger>
                   <TooltipContent>Installed Cardoso App version at this site</TooltipContent>
                 </Tooltip>
@@ -423,7 +284,7 @@ function MachineHealthCard({ site, pingInfo }) {
             {ips.length ? (
               <div className="flex flex-wrap gap-2">
                 {ips.map((ip) => (
-                  <span key={ip} className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium bg-blue-500/10 border border-blue-500/30 text-blue-300">
+                  <span key={ip} className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium bg-accent/10 border border-accent/30 text-accent">
                     {ip}
                   </span>
                 ))}
@@ -435,83 +296,6 @@ function MachineHealthCard({ site, pingInfo }) {
         </div>
       )}
     </div>
-  );
-}
-
-function SpeedtestTab({ data, pingBySite, isLoading, isError, isFetching, refetch, onPullNow, pulling, onRunNow, queryClient }) {
-  const grouped = {};
-  for (const row of data?.results ?? []) {
-    if (!grouped[row.site_slug]) grouped[row.site_slug] = [];
-    grouped[row.site_slug].push(row);
-  }
-
-  const allSlugs = Array.from(new Set([
-    ...Object.keys(grouped),
-    ...Object.keys(pingBySite),
-  ])).sort();
-
-  return (
-    <>
-      <div className="flex items-center gap-2 mb-6">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onPullNow}
-          disabled={pulling}
-          className="text-xs border-indigo-500/40 text-indigo-300"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${pulling ? "animate-spin" : ""}`} />
-          {pulling ? "Pulling…" : "Pull all"}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            refetch();
-            queryClient.invalidateQueries({ queryKey: ["hub-ping-status"] });
-          }}
-          disabled={isFetching}
-          className="text-xs border-border text-muted-foreground"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${isFetching ? "animate-spin" : ""}`} />
-          Refresh
-        </Button>
-      </div>
-
-      {isLoading && (
-        <div className="flex items-center gap-3 text-slate-400 py-12 justify-center">
-          <RefreshCw className="w-5 h-5 animate-spin" />
-          <span>Loading metrics…</span>
-        </div>
-      )}
-
-      {isError && (
-        <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-          Failed to load speedtest results. Make sure you are logged in with access to Site Metrics.
-        </div>
-      )}
-
-      {!isLoading && !isError && (
-        allSlugs.length === 0 ? (
-          <div className="text-center py-16 text-slate-500">
-            <BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-30" />
-            <p>No site data yet. Click "Pull all" or wait for the next scheduled run.</p>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {allSlugs.map((slug) => (
-              <SiteSection
-                key={slug}
-                slug={slug}
-                rows={grouped[slug] ?? []}
-                pingInfo={pingBySite[slug] ?? null}
-                onRunNow={onRunNow}
-              />
-            ))}
-          </div>
-        )
-      )}
-    </>
   );
 }
 
@@ -574,17 +358,6 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
 }
 
 export default function HubMetrics() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [pulling, setPulling] = useState(false);
-  const [activeTab, setActiveTab] = useState("speedtest");
-
-  const speedtestQuery = useQuery({
-    queryKey: ["hub-speedtest"],
-    queryFn: fetchSpeedtestResults,
-    refetchInterval: 300_000,
-  });
-
   const pingQuery = useQuery({
     queryKey: ["hub-ping-status"],
     queryFn: fetchPingStatus,
@@ -602,98 +375,30 @@ export default function HubMetrics() {
     pingBySite[p.site_slug] = p;
   }
 
-  const handlePullNow = useCallback(async () => {
-    setPulling(true);
-    try {
-      const res = await fetch("/api/hub/speedtest/pull", {
-        method: "POST",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const d = await res.json();
-      toast({ title: `Pulled from ${d.pulled} site(s)` });
-      queryClient.invalidateQueries({ queryKey: ["hub-speedtest"] });
-    } catch (err) {
-      toast({ title: "Pull failed", description: err.message, variant: "destructive" });
-    } finally {
-      setPulling(false);
-    }
-  }, [toast, queryClient]);
-
-  const handleRunNow = useCallback(async (slug) => {
-    try {
-      toast({ title: `Running speed test on ${slug}…`, description: "This may take up to 60 seconds." });
-      const res = await fetch("/api/hub/speedtest/run-site", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ slug }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error || `HTTP ${res.status}`);
-      }
-      toast({ title: `Speed test complete for ${slug}` });
-      queryClient.invalidateQueries({ queryKey: ["hub-speedtest"] });
-    } catch (err) {
-      toast({ title: `Failed for ${slug}`, description: err.message, variant: "destructive" });
-    }
-  }, [toast, queryClient]);
-
   return (
     <div className="min-h-screen p-6 bg-background">
       <div className="max-w-6xl mx-auto">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-500/15 border border-indigo-500/30">
-              <BarChart2 className="w-5 h-5 text-indigo-400" />
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 pb-5 border-b border-border">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
+              <BarChart2 className="w-3 h-3 text-accent" strokeWidth={1.5} />
+              § Site Metrics
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Site Metrics</h1>
-              <p className="text-xs text-muted-foreground">Speedtest and Windows machine health across all registered sites</p>
-            </div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Network <em className="text-phosphor">vitals</em>.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3">Windows machine health across all registered sites</p>
           </div>
         </div>
 
-        <div className="inline-flex items-center rounded-xl border border-border bg-card p-1 mb-6">
-          {[
-            { key: "speedtest", label: "Speedtest" },
-            { key: "machine-health", label: "Machine Health" },
-          ].map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === tab.key ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground hover:bg-muted"}`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        {activeTab === "speedtest" ? (
-          <SpeedtestTab
-            data={speedtestQuery.data}
-            pingBySite={pingBySite}
-            isLoading={speedtestQuery.isLoading}
-            isError={speedtestQuery.isError}
-            isFetching={speedtestQuery.isFetching}
-            refetch={speedtestQuery.refetch}
-            onPullNow={handlePullNow}
-            pulling={pulling}
-            onRunNow={handleRunNow}
-            queryClient={queryClient}
-          />
-        ) : (
-          <MachineHealthTab
-            data={machineHealthQuery.data}
-            pingBySite={pingBySite}
-            isLoading={machineHealthQuery.isLoading}
-            isError={machineHealthQuery.isError}
-            isFetching={machineHealthQuery.isFetching}
-            refetch={machineHealthQuery.refetch}
-          />
-        )}
+        <MachineHealthTab
+          data={machineHealthQuery.data}
+          pingBySite={pingBySite}
+          isLoading={machineHealthQuery.isLoading}
+          isError={machineHealthQuery.isError}
+          isFetching={machineHealthQuery.isFetching}
+          refetch={machineHealthQuery.refetch}
+        />
       </div>
     </div>
   );

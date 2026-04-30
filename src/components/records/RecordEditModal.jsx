@@ -136,7 +136,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button onClick={handleSave} className="bg-blue-600 hover:bg-blue-700 text-white">
+              <Button onClick={handleSave} >
                 Save Changes
               </Button>
             </TooltipTrigger>
