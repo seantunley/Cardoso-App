@@ -171,6 +171,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       req.session.pendingUserId = null;
       req.session.userId = userId;
 
+      logAudit({
+        req, action: 'set_initial_password', resourceType: 'user',
+        resourceId: user.id, resourceName: user.email,
+        details: 'First-time password set; must_change_password cleared',
+        userOverride: user,
+      });
+
       // Hub redirect check
       if (user.hub_redirect) {
         const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;

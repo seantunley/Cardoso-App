@@ -912,6 +912,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         performedBy: req.currentUser?.email,
         target: `${dupGroups.length} groups, ${totalRemoved} duplicates ${dryRun ? '(dry run)' : 'removed'}`,
       });
+      logAudit({
+        req, action: dryRun ? 'hub_dedupe_dryrun' : 'hub_dedupe', resourceType: 'system',
+        resourceName: 'Hub customer deduplication',
+        details: dryRun
+          ? `Dry-run found ${dupGroups.length} duplicate group(s) with ${totalRemoved} extra row(s)`
+          : `Removed ${totalRemoved} duplicate row(s) across ${dupGroups.length} group(s)`,
+      });
 
       res.json({ ok: true, dryRun, groups: report.length, totalRemoved, report });
     } catch (err) {
@@ -1018,6 +1025,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // POST /api/hub/sync
   router.post('/api/hub/sync', requireAuth, requireAdmin, (req, res) => {
+    logAudit({
+      req, action: 'hub_manual_sync', resourceType: 'system',
+      resourceName: 'All hub sites',
+      details: `Manual sync triggered for ${HUB_SITES.length} site(s): ${HUB_SITES.map(s => s.slug).join(', ').slice(0, 200)}`,
+    });
     res.status(202).json({ message: 'Sync triggered', sites: HUB_SITES.map(s => s.slug) });
     syncAllSites().catch(err => console.error('[HUB] Manual sync error:', err));
   });
@@ -1109,6 +1121,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         target: user.email,
         detail: JSON.stringify({ allowed_sites: site_slugs }),
       });
+      logAudit({
+        req, action: 'update_user_allowed_sites', resourceType: 'user',
+        resourceId: user.id, resourceName: user.email,
+        details: site_slugs.length === 0
+          ? 'Cleared site access (user can see no sites)'
+          : `Allowed ${site_slugs.length} site(s): ${site_slugs.slice(0, 8).join(', ')}${site_slugs.length > 8 ? ` (+${site_slugs.length - 8} more)` : ''}`,
+      });
 
       res.json({ ok: true, allowed_sites: site_slugs });
     } catch (err) {
@@ -1185,6 +1204,15 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
 
     const allOk = summary.every(s => s.ok);
+    const okCount = summary.filter(s => s.ok).length;
+    const failCount = summary.length - okCount;
+    logAudit({
+      req, action: 'hub_push_users', resourceType: 'user',
+      resourceName: `${usersToSync.length} user(s) → ${targetSites.length} site(s)`,
+      details: `Pushed ${usersToSync.map(u => u.email).slice(0, 5).join(', ')}${usersToSync.length > 5 ? ` (+${usersToSync.length - 5} more)` : ''} to ${okCount}/${summary.length} site(s)${failCount ? `, failed ${failCount}` : ''}`,
+      status: allOk ? 'success' : 'failure',
+      changes: { users: usersToSync.map(u => u.email), sites: summary },
+    });
     res.status(allOk ? 200 : 207).json({ results: summary });
   });
 
@@ -1202,6 +1230,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         performedBy: req.currentUser?.email,
         target: 'all_sites',
         detail: String(result.changes),
+      });
+      logAudit({
+        req, action: 'hub_clear_auto_flags', resourceType: 'system',
+        resourceName: 'Hub auto-flags',
+        details: `Cleared ${result.changes} auto-flagged record(s) hub-wide`,
       });
       res.json({ cleared: result.changes });
     } catch (err) {
@@ -1256,8 +1289,17 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         }
       }));
 
+      const okCount = results.filter((result) => result.status === 'ok').length;
+      const failCount = results.length - okCount;
+      logAudit({
+        req, action: 'hub_push_rules', resourceType: 'rule',
+        resourceName: `${rules.length} rule(s) → ${results.length} site(s)`,
+        details: `Pushed ${rules.length} rule(s) to ${okCount}/${results.length} site(s)${failCount ? `, failed ${failCount}` : ''}`,
+        status: failCount === 0 ? 'success' : 'failure',
+        changes: { rule_count: rules.length, sites: results },
+      });
       res.status(results.every((result) => result.status === 'ok') ? 200 : 207).json({
-        pushed: results.filter((result) => result.status === 'ok').length,
+        pushed: okCount,
         results,
       });
     } catch (err) {

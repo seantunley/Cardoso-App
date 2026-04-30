@@ -243,6 +243,12 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const recon = getReconciliation(reconciliationId);
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     const result = retryNotFound(reconciliationId);
+    logAudit({
+      req, action: 'bat_retry_extraction', resourceType: 'system',
+      resourceId: reconciliationId,
+      resourceName: `Week ${recon.week_number}/${recon.year}`,
+      details: result?.message || `Re-running OCR with Google Vision on ${result?.requeued ?? 0} not-found extraction(s)`,
+    });
     res.json(result);
   });
 
@@ -250,12 +256,31 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const id = parseInt(req.params.id, 10);
     const { invoiceNumber } = req.body;
     if (!invoiceNumber) return res.status(400).json({ error: 'invoiceNumber required' });
+    // Snapshot the previous OCR result so the audit row shows what the
+    // human override changed.
+    const previous = db.prepare('SELECT extraction_id, invoice_number, store_name, extraction_status, reconciliation_id FROM bat_invoice_extractions WHERE id = ?').get(id);
     try {
       const reconId = manualSetInvoice(id, invoiceNumber.trim().toUpperCase());
       const recon = getReconciliation(reconId);
+      logAudit({
+        req, action: 'bat_manual_invoice_override', resourceType: 'system',
+        resourceId: id,
+        resourceName: previous?.store_name || `Extraction ${id}`,
+        details: `Week ${recon?.week_number}/${recon?.year}: invoice "${previous?.invoice_number ?? '∅'}" → "${invoiceNumber.trim().toUpperCase()}" (was ${previous?.extraction_status || 'unknown'})`,
+        changes: {
+          before: { invoice_number: previous?.invoice_number, status: previous?.extraction_status },
+          after:  { invoice_number: invoiceNumber.trim().toUpperCase(), status: 'manual' },
+        },
+      });
       res.json({ ok: true, reconciliation: recon });
     } catch (err) {
       console.error('[bat] Manual invoice set failed:', err.message);
+      logAudit({
+        req, action: 'bat_manual_invoice_override', resourceType: 'system',
+        resourceId: id,
+        resourceName: previous?.store_name || `Extraction ${id}`,
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message });
     }
   });
@@ -411,11 +436,23 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       storeSageCreditNotes(id, creditNotes);
       db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(id);
       const updated = getReconciliation(id);
+      logAudit({
+        req, action: 'bat_refresh_sage', resourceType: 'system',
+        resourceId: id,
+        resourceName: `Week ${recon.week_number}/${recon.year}`,
+        details: `Re-pulled Sage credit notes for week ${recon.week_number}/${recon.year}: ${creditNotes.length} note(s)`,
+      });
       res.json({ ok: true, reconciliation: updated });
     } catch (err) {
       console.error('[bat] Sage refresh failed:', err.message);
       db.prepare('UPDATE bat_reconciliations SET sage_error = ? WHERE id = ?')
         .run(String(err.message).slice(0, 500), id);
+      logAudit({
+        req, action: 'bat_refresh_sage', resourceType: 'system',
+        resourceId: id,
+        resourceName: `Week ${recon.week_number}/${recon.year}`,
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: 'Failed to refresh Sage data: ' + err.message });
     }
   });
@@ -429,9 +466,20 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     }
     try {
       const result = await generateCardosoInvoicesFromSage({ fromDate, toDate, mode, tg1Rate, tg2Rate });
+      logAudit({
+        req, action: 'bat_cardoso_generate', resourceType: 'system',
+        resourceName: `Cardoso invoices ${fromDate} → ${toDate}`,
+        details: `Generated ${result?.inserted ?? 0} invoice(s) from Sage; mode=${mode || 'default'}, TG1=${tg1Rate || '-'}, TG2=${tg2Rate || '-'}`,
+        changes: { fromDate, toDate, mode, tg1Rate, tg2Rate, inserted: result?.inserted, skipped: result?.skipped },
+      });
       res.json(result);
     } catch (err) {
       console.error('[bat] Cardoso generate failed:', err.message);
+      logAudit({
+        req, action: 'bat_cardoso_generate', resourceType: 'system',
+        resourceName: `Cardoso invoices ${fromDate} → ${toDate}`,
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message || 'Generation failed' });
     }
   });
@@ -462,9 +510,20 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       // Auto-rerun the match so the dashboard reflects the new values
       let matching = null;
       try { matching = matchCardosoToSupplier(null); } catch {}
+      logAudit({
+        req, action: 'bat_replicate_supplier', resourceType: 'system',
+        resourceName: 'Cardoso invoices ↤ supplier extractions',
+        details: `Replicated supplier values onto ${result?.updated ?? 0} Cardoso row(s); ${result?.skipped ?? 0} skipped (already overwritten); password-confirmed by ${req.currentUser.email}`,
+        changes: result,
+      });
       res.json({ ...result, matching: matching ? matching.stats : null });
     } catch (err) {
       console.error('[bat] Replicate supplier failed:', err.message);
+      logAudit({
+        req, action: 'bat_replicate_supplier', resourceType: 'system',
+        resourceName: 'Cardoso invoices ↤ supplier extractions',
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message || 'Replicate failed' });
     }
   });
@@ -487,9 +546,20 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       const invoices = parseCardosoSpreadsheet(req.file.path);
       const storeResult = storeCardosoInvoices(null, invoices, req.file.originalname, duplicateMode);
       const matchResult = matchCardosoToSupplier(null);
+      logAudit({
+        req, action: 'bat_cardoso_upload', resourceType: 'system',
+        resourceName: req.file.originalname,
+        details: `Uploaded ${invoices.length} Cardoso invoice(s); duplicateMode=${duplicateMode}; ${storeResult?.inserted ?? 0} inserted, ${storeResult?.updated ?? 0} updated, ${storeResult?.skipped ?? 0} skipped`,
+        changes: { duplicateMode, total: invoices.length, ...storeResult },
+      });
       res.json({ ok: true, cardosoCount: invoices.length, ...storeResult, matching: matchResult });
     } catch (err) {
       console.error('[bat] Cardoso upload failed:', err.message);
+      logAudit({
+        req, action: 'bat_cardoso_upload', resourceType: 'system',
+        resourceName: req.file?.originalname || 'unknown',
+        details: err.message, status: 'failure',
+      });
       res.status(500).json({ error: err.message });
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
