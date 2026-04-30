@@ -406,7 +406,7 @@ export function ReportFrame({
         </div>
       )}
 
-      <div id={`${printId}-printable`}>
+      <div id={`${printId}-printable`} className="space-y-4">
         {printHeader}
         {children}
         {printFooter}
