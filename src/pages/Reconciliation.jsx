@@ -456,7 +456,7 @@ export default function Reconciliation() {
                 const years = Array.from(new Set([...knownYears, currentYear])).sort((a, b) => b - a);
                 return (
                   <div
-                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium mr-4"
+                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium mr-4 leading-none"
                     style={{
                       color: 'var(--phosphor)',
                       background: 'hsla(33, 95%, 55%, 0.08)',
@@ -466,17 +466,29 @@ export default function Reconciliation() {
                     }}
                     title="Filter the BAT dashboard, archive and week comparison to one calendar year. Saved between sessions."
                   >
-                    <CalendarIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
-                    <span>Year</span>
+                    <CalendarIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+                    <span className="leading-none">Year</span>
                     <select
                       value={viewingYear}
                       onChange={(e) => setViewingYear(e.target.value)}
-                      className="bg-transparent font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--phosphor)] focus:outline-none cursor-pointer pr-1"
-                      style={{ colorScheme }}
+                      className="font-mono text-[11px] uppercase tracking-[0.22em] focus:outline-none cursor-pointer leading-none"
+                      style={{
+                        colorScheme,
+                        color: 'var(--phosphor)',
+                        background: 'transparent',
+                        border: 0,
+                        margin: 0,
+                        padding: 0,
+                        appearance: 'none',
+                        WebkitAppearance: 'none',
+                        MozAppearance: 'none',
+                        backgroundImage: 'none',
+                      }}
                     >
                       <option value="all">All</option>
                       {years.map(y => <option key={y} value={String(y)}>{y}</option>)}
                     </select>
+                    <ChevronDown className="h-3 w-3 shrink-0 opacity-70 -ml-1" strokeWidth={2} />
                   </div>
                 );
               })()}
