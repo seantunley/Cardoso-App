@@ -43,7 +43,7 @@ const Toaster = ({
         classNames: {
           toast: [
             'group toast cardoso-toast',
-            'group-[.toaster]:rounded-[2px]',
+            'group-[.toaster]:rounded-[12px]',
             'group-[.toaster]:border',
             'group-[.toaster]:border-l-2',
             'group-[.toaster]:px-4 group-[.toaster]:py-3',
@@ -55,8 +55,8 @@ const Toaster = ({
           ].join(' '),
           title:        'font-sans text-[15px] font-semibold tracking-tight leading-snug',
           description:  'font-sans text-[13px] font-normal leading-snug opacity-90 mt-1',
-          actionButton: 'group-[.toast]:bg-accent group-[.toast]:text-accent-foreground group-[.toast]:rounded-[2px] group-[.toast]:font-sans group-[.toast]:text-xs group-[.toast]:font-medium',
-          cancelButton: 'group-[.toast]:bg-transparent group-[.toast]:text-muted-foreground group-[.toast]:border group-[.toast]:border-border group-[.toast]:rounded-[2px] group-[.toast]:font-sans group-[.toast]:text-xs group-[.toast]:font-medium',
+          actionButton: 'group-[.toast]:bg-accent group-[.toast]:text-accent-foreground group-[.toast]:rounded-[12px] group-[.toast]:font-sans group-[.toast]:text-xs group-[.toast]:font-medium',
+          cancelButton: 'group-[.toast]:bg-transparent group-[.toast]:text-muted-foreground group-[.toast]:border group-[.toast]:border-border group-[.toast]:rounded-[12px] group-[.toast]:font-sans group-[.toast]:text-xs group-[.toast]:font-medium',
           closeButton:  'group-[.toast]:bg-transparent group-[.toast]:border-border group-[.toast]:text-muted-foreground hover:group-[.toast]:text-foreground',
         },
       }}
