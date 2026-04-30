@@ -2057,20 +2057,41 @@ async function matchExtractedInvoices(reconId) {
 
 // ── Dashboard Aggregates ─────────────────────────────────────────────────────
 
-export function getDashboardData() {
-  const reconciliations = listReconciliations();
-  // totalSupplier — single SQL aggregate against bat_reconciliations.
+export function getDashboardData(year) {
+  // year may be a number, a numeric string, "all", or undefined. Anything
+  // that isn't a valid year falls through to "all-time" (no scoping).
+  const yr = Number.parseInt(year, 10);
+  const scoped = Number.isFinite(yr) && yr > 1900 && yr < 9999 ? yr : null;
+  const yearWhere = scoped ? 'WHERE year = ?' : '';
+  const yearJoin = scoped
+    ? `WHERE EXISTS (
+         SELECT 1 FROM bat_reconciliations r
+         WHERE r.id = bat_invoice_extractions.reconciliation_id
+           AND r.year = ?
+       )`
+    : '';
+  const yearArg = scoped ? [scoped] : [];
+
+  const reconciliations = listReconciliations()
+    .filter(r => !scoped || r.year === scoped);
+
+  // totalSupplier — single SQL aggregate against bat_reconciliations, scoped.
   let totalSupplier = 0;
   try {
-    const row = db.prepare('SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations').get();
+    const row = db.prepare(
+      `SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations ${yearWhere}`
+    ).get(...yearArg);
     totalSupplier = row?.s || 0;
   } catch {}
-  // totalSage = sum of all Sage credit notes for the CURRENT YEAR, regardless
-  // of whether we've uploaded a supplier file for that week.
+  // totalSage = sum of all Sage credit notes for the chosen year (or all-time
+  // if "All" picked). Bypasses bat_reconciliations entirely so weeks without
+  // an uploaded supplier sheet still count.
   let totalSage = 0;
   try {
-    const currentYear = new Date().getFullYear();
-    const row = db.prepare('SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?').get(currentYear);
+    const sql = scoped
+      ? 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?'
+      : 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache';
+    const row = db.prepare(sql).get(...yearArg);
     totalSage = row?.s || 0;
   } catch {}
   const totalVariance = totalSupplier - totalSage;
@@ -2080,12 +2101,17 @@ export function getDashboardData() {
   // correlated EXISTS subqueries with non-sargable string normalization.
   let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
   try {
-    const podRow = db.prepare('SELECT COUNT(*) AS c FROM bat_invoice_extractions').get();
+    const podRow = db.prepare(
+      `SELECT COUNT(*) AS c FROM bat_invoice_extractions ${yearJoin}`
+    ).get(...yearArg);
     totalPods = podRow?.c || 0;
     const cardosoAmounts = buildCardosoLookup();
     const extRows = db.prepare(
-      "SELECT extracted_invoice, order_amount FROM bat_invoice_extractions WHERE extracted_invoice IS NOT NULL"
-    ).all();
+      `SELECT extracted_invoice, order_amount
+         FROM bat_invoice_extractions
+        WHERE extracted_invoice IS NOT NULL
+        ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}`
+    ).all(...yearArg);
     for (const e of extRows) {
       const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
       const cAmount = cardosoAmounts.get(key);
@@ -2106,14 +2132,16 @@ export function getDashboardData() {
       SELECT COUNT(*) AS c, COALESCE(SUM(order_amount), 0) AS a
       FROM bat_invoice_extractions
       WHERE is_exception = 1
-    `).get();
+      ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}
+    `).get(...yearArg);
     totalExceptionsCount = row?.c || 0;
     totalExceptionsAmount = row?.a || 0;
     const rawRows = db.prepare(`
       SELECT exception_reason, order_amount
       FROM bat_invoice_extractions
       WHERE is_exception = 1
-    `).all();
+      ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}
+    `).all(...yearArg);
     // Normalize: lowercase, strip punctuation, collapse whitespace, drop duplicate words.
     // Lets "Incorrect delivery status/quantity" and "Incorrect delivery status/Incorrect quantity"
     // collapse to the same key.

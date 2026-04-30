@@ -302,8 +302,10 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
 
   router.get('/api/bat/dashboard', ...gate, (req, res) => {
     const t0 = Date.now();
-    const data = getDashboardData();
-    console.log(`[bat-perf] /api/bat/dashboard: ${Date.now() - t0}ms`);
+    // year=YYYY filters every aggregate (BAT total, Sage total, PODs,
+    // matched, exceptions). year=all (or omitted) returns all-time numbers.
+    const data = getDashboardData(req.query.year);
+    console.log(`[bat-perf] /api/bat/dashboard year=${req.query.year || 'all'}: ${Date.now() - t0}ms`);
     res.json(data);
   });
 

@@ -13,8 +13,10 @@ import InvoiceMatching from '@/components/reconciliation/InvoiceMatching';
 import ReconciliationSummary from '@/components/reconciliation/ReconciliationSummary';
 import ExtractionProgress from '@/components/reconciliation/ExtractionProgress';
 import DashboardOverview from '@/components/reconciliation/DashboardOverview';
+import { useColorScheme } from '@/lib/useColorScheme';
 
 export default function Reconciliation() {
+  const colorScheme = useColorScheme();
   const [view, setView] = useState('dashboard'); // dashboard | detail
   const [dashTab, setDashTab] = useState('archive'); // archive | upload
   const [reconciliations, setReconciliations] = useState([]);
@@ -112,12 +114,13 @@ export default function Reconciliation() {
     // cardoso-match is heavy (cross-table fuzzy match across every extraction)
     // and only consumed by the cross-reference tab, so it's fetched lazily on
     // demand rather than blocking the initial dashboard render.
+    const yearParam = viewingYear && viewingYear !== 'all' ? `?year=${encodeURIComponent(viewingYear)}` : '';
     await Promise.all([
-      safeFetch('dashboard', '/api/bat/dashboard', (data) => setDashboardData(data)),
+      safeFetch('dashboard', `/api/bat/dashboard${yearParam}`, (data) => setDashboardData(data)),
       safeFetch('reconciliations', '/api/bat/reconciliations', (data) => setReconciliations(data.reconciliations || [])),
       safeFetch('week-status', '/api/bat/week-status', (data) => setWeekStatus(data)),
     ]);
-  }, []);
+  }, [viewingYear]);
 
   // Lazy-load the heavy cross-reference match only when the user opens that tab.
   useEffect(() => {
@@ -452,14 +455,24 @@ export default function Reconciliation() {
                 // can still flip the selector even before the first upload.
                 const years = Array.from(new Set([...knownYears, currentYear])).sort((a, b) => b - a);
                 return (
-                  <div className="flex items-center gap-2 border border-border bg-card px-3 py-2" style={{ borderRadius: '12px' }}>
-                    <CalendarIcon className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Year</span>
+                  <div
+                    className="flex items-center gap-2.5 px-5 py-2.5 font-mono text-[11px] uppercase tracking-[0.22em] font-medium"
+                    style={{
+                      color: 'var(--phosphor)',
+                      background: 'hsla(33, 95%, 55%, 0.08)',
+                      border: '1px solid hsla(33, 95%, 55%, 0.5)',
+                      borderRadius: '12px',
+                      boxShadow: '0 0 0 1px transparent, 0 0 12px hsla(33,95%,55%,0.18)',
+                    }}
+                    title="Filter the BAT dashboard, archive and week comparison to one calendar year. Saved between sessions."
+                  >
+                    <CalendarIcon className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    <span>Year</span>
                     <select
                       value={viewingYear}
                       onChange={(e) => setViewingYear(e.target.value)}
-                      className="bg-transparent font-mono text-xs tabular-nums text-foreground focus:outline-none cursor-pointer"
-                      title="Filter the BAT dashboard, archive and week comparison to one calendar year. Saved between sessions."
+                      className="bg-transparent font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--phosphor)] focus:outline-none cursor-pointer pr-1"
+                      style={{ colorScheme }}
                     >
                       <option value="all">All</option>
                       {years.map(y => <option key={y} value={String(y)}>{y}</option>)}
