@@ -2,106 +2,225 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ══════════════════════════════════════════════════════════════════════════════
+   CARDOSO DESIGN SYSTEM — "Ledger"
+   Obsidian + bone + phosphor amber. Sharp edges, tabular figures, dramatic serif
+   display paired with monospace numerics. Industrial, quiet, confident.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
-    --chart-1: 12 76% 61%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 27 87% 67%;
-    --radius: 0.5rem;
-    --sidebar-background: 0 0% 98%;
-    --sidebar-foreground: 240 5.3% 26.1%;
-    --sidebar-primary: 240 5.9% 10%;
-    --sidebar-primary-foreground: 0 0% 98%;
-    --sidebar-accent: 240 4.8% 95.9%;
-    --sidebar-accent-foreground: 240 5.9% 10%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    /* Light theme = cream paper / black ink ledger */
+    --background: 40 30% 96%;          /* warm cream paper */
+    --foreground: 24 10% 10%;          /* near-black ink */
+    --card: 40 30% 98%;
+    --card-foreground: 24 10% 10%;
+    --popover: 40 30% 98%;
+    --popover-foreground: 24 10% 10%;
+    --primary: 24 10% 10%;
+    --primary-foreground: 40 30% 96%;
+    --secondary: 40 20% 92%;
+    --secondary-foreground: 24 10% 10%;
+    --muted: 40 20% 90%;
+    --muted-foreground: 24 8% 42%;
+    --accent: 33 95% 52%;              /* phosphor amber */
+    --accent-foreground: 24 10% 10%;
+    --destructive: 0 70% 42%;          /* oxblood */
+    --destructive-foreground: 40 30% 96%;
+    --border: 30 15% 82%;
+    --input: 30 15% 82%;
+    --ring: 33 95% 52%;
+    --chart-1: 33 95% 52%;
+    --chart-2: 145 50% 35%;
+    --chart-3: 0 70% 42%;
+    --chart-4: 210 60% 40%;
+    --chart-5: 30 20% 40%;
+    --radius: 0.125rem;                /* sharp — 2px */
+    --sidebar-background: 24 10% 8%;   /* sidebar always dark for contrast */
+    --sidebar-foreground: 40 20% 85%;
+    --sidebar-primary: 33 95% 52%;
+    --sidebar-primary-foreground: 24 10% 8%;
+    --sidebar-accent: 24 8% 16%;
+    --sidebar-accent-foreground: 40 20% 92%;
+    --sidebar-border: 24 8% 18%;
+    --sidebar-ring: 33 95% 52%;
+
+    --bg-primary: hsl(40 30% 96%);
+    --bg-secondary: hsl(40 30% 98%);
+    --bg-tertiary: hsl(40 20% 92%);
+    --text-primary: hsl(24 10% 10%);
+    --text-secondary: hsl(24 8% 42%);
+    --text-tertiary: hsl(24 6% 58%);
+    --border-color: hsl(30 15% 82%);
+
+    /* Signature phosphor */
+    --phosphor: hsl(33 95% 52%);
+    --phosphor-dim: hsl(33 85% 42%);
+    --phosphor-glow: hsl(33 100% 60%);
   }
 
   .dark {
-  --background: 220 9% 14%;
-  --foreground: 0 0% 98%;
+    /* Dark = obsidian night terminal */
+    --background: 24 8% 6%;            /* near-black with warm cast */
+    --foreground: 40 25% 92%;          /* warm bone */
+    --card: 24 8% 9%;
+    --card-foreground: 40 25% 92%;
+    --popover: 24 8% 9%;
+    --popover-foreground: 40 25% 92%;
+    --primary: 40 25% 92%;
+    --primary-foreground: 24 8% 6%;
+    --secondary: 24 6% 14%;
+    --secondary-foreground: 40 25% 92%;
+    --muted: 24 6% 13%;
+    --muted-foreground: 30 10% 58%;
+    --accent: 33 95% 55%;              /* phosphor amber — the one signature color */
+    --accent-foreground: 24 8% 6%;
+    --destructive: 0 72% 50%;          /* hot oxblood */
+    --destructive-foreground: 40 25% 92%;
+    --border: 24 6% 16%;
+    --input: 24 6% 14%;
+    --ring: 33 95% 55%;
+    --chart-1: 33 95% 55%;
+    --chart-2: 145 55% 45%;
+    --chart-3: 0 72% 50%;
+    --chart-4: 200 80% 55%;
+    --chart-5: 30 25% 55%;
 
-  --card: 220 9% 18%;
-  --card-foreground: 0 0% 98%;
+    --sidebar-background: 24 10% 4%;
+    --sidebar-foreground: 40 20% 78%;
+    --sidebar-primary: 33 95% 55%;
+    --sidebar-primary-foreground: 24 10% 4%;
+    --sidebar-accent: 24 8% 11%;
+    --sidebar-accent-foreground: 40 20% 92%;
+    --sidebar-border: 24 8% 13%;
+    --sidebar-ring: 33 95% 55%;
 
-  --popover: 220 9% 18%;
-  --popover-foreground: 0 0% 98%;
+    --bg-primary: hsl(24 8% 6%);
+    --bg-secondary: hsl(24 8% 9%);
+    --bg-tertiary: hsl(24 6% 14%);
+    --text-primary: hsl(40 25% 92%);
+    --text-secondary: hsl(30 10% 58%);
+    --text-tertiary: hsl(30 8% 42%);
+    --border-color: hsl(24 6% 16%);
 
-  --primary: 0 0% 98%;
-  --primary-foreground: 220 9% 14%;
-
-  --secondary: 220 8% 22%;
-  --secondary-foreground: 0 0% 98%;
-
-  --muted: 220 8% 22%;
-  --muted-foreground: 220 5% 75%;
-
-  --accent: 220 8% 22%;
-  --accent-foreground: 0 0% 98%;
-
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-
-  --border: 220 8% 26%;
-  --input: 220 8% 26%;
-  --ring: 220 5% 70%;
-
-  --chart-1: 220 70% 60%;
-  --chart-2: 160 60% 50%;
-  --chart-3: 30 80% 60%;
-  --chart-4: 280 65% 65%;
-  --chart-5: 340 75% 60%;
-
-  --sidebar-background: 220 9% 16%;
-  --sidebar-foreground: 0 0% 95%;
-  --sidebar-primary: 224.3 76.3% 55%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 220 8% 22%;
-  --sidebar-accent-foreground: 0 0% 95%;
-  --sidebar-border: 220 8% 26%;
-  --sidebar-ring: 217.2 91.2% 59.8%;
-
-    /* Cardoso semantic vars — dark mode */
-    --bg-primary: #16181d;
-    --bg-secondary: #1e2028;
-    --bg-tertiary: #272a33;
-    --text-primary: #f9fafb;
-    --text-secondary: #9ca3af;
-    --text-tertiary: #6b7280;
-    --border-color: #374151;
+    --phosphor: hsl(33 95% 55%);
+    --phosphor-dim: hsl(33 85% 42%);
+    --phosphor-glow: hsl(33 100% 65%);
   }
 }
-
-
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
 
+  html {
+    font-family: 'Inter Tight', -apple-system, system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11", "tnum";
+    font-variant-numeric: tabular-nums;
+    font-size: 15px;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    letter-spacing: -0.005em;
   }
+
+  /* Display type — dramatic serif with optical italic variant */
+  .font-display {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.02em;
+    font-feature-settings: "dlig", "liga";
+  }
+
+  /* All numbers, codes, IDs, timestamps — monospace with tabular figures */
+  .font-mono,
+  [class*="tabular"],
+  table td:where([class*="num"], [class*="amount"], [class*="count"], [class*="code"]) {
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "zero", "ss02";
+  }
+
+  /* Hairlines — crisper borders for the ledger aesthetic */
+  .ledger-line {
+    background-image: linear-gradient(to right, hsl(var(--border)) 50%, transparent 50%);
+    background-size: 4px 1px;
+    background-repeat: repeat-x;
+    background-position: 0 bottom;
+  }
+
+  /* Paper grain texture for light mode */
+  body:not(.dark *) {
+    background-image:
+      radial-gradient(circle at 20% 10%, rgba(60,40,20,0.015) 0%, transparent 40%),
+      radial-gradient(circle at 85% 85%, rgba(60,40,20,0.02) 0%, transparent 40%);
+  }
+
+  /* Terminal scan-line accent for dark mode — barely perceptible */
+  .dark body,
+  body.dark {
+    background-image:
+      radial-gradient(ellipse at top right, hsla(33, 95%, 55%, 0.025) 0%, transparent 50%),
+      radial-gradient(ellipse at bottom left, hsla(33, 95%, 55%, 0.015) 0%, transparent 50%);
+  }
+
+  /* Signature staggered reveal for data grids */
+  @keyframes ledger-rise {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  @keyframes phosphor-flicker {
+    0%, 100% { opacity: 1; }
+    45% { opacity: 1; }
+    50% { opacity: 0.85; }
+    55% { opacity: 1; }
+  }
+
+  @keyframes number-count {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .stagger-in > * {
+    animation: ledger-rise 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-in > *:nth-child(2) { animation-delay: 80ms; }
+  .stagger-in > *:nth-child(3) { animation-delay: 160ms; }
+  .stagger-in > *:nth-child(4) { animation-delay: 240ms; }
+  .stagger-in > *:nth-child(5) { animation-delay: 320ms; }
+  .stagger-in > *:nth-child(6) { animation-delay: 400ms; }
+
+  /* Phosphor text — the one signature effect */
+  .text-phosphor {
+    color: hsl(var(--accent));
+    text-shadow: 0 0 24px hsla(33, 95%, 55%, 0.25);
+  }
+
+  .dark .text-phosphor {
+    text-shadow: 0 0 32px hsla(33, 95%, 55%, 0.4);
+    animation: phosphor-flicker 8s ease-in-out infinite;
+  }
+
+  /* Eye-catching selection */
+  ::selection {
+    background: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+  }
+
+  /* Scrollbar in brand */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 0; }
+  ::-webkit-scrollbar-thumb:hover { background: hsl(var(--accent)); }
 }

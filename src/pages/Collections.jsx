@@ -147,16 +147,22 @@ export default function Collections() {
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
       <div className="mx-auto max-w-7xl space-y-6">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5">
           <div>
-            <h1 className="text-2xl font-bold">Collections Pipeline</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Collections</div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Chase the <em className="text-phosphor">outstanding</em>.
+            </h1>
+            <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3 tabular-nums">
               {filteredRows.length} customer{filteredRows.length === 1 ? "" : "s"} · {formatCurrency(totalOutstanding)} outstanding
             </p>
           </div>
-          <div className="rounded-xl border border-border bg-card px-4 py-3 text-sm">
-            <div className="text-muted-foreground">Displayed total outstanding</div>
-            <div className="mt-1 text-lg font-semibold text-foreground">{formatCurrency(totalOutstanding)}</div>
+          <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: "2px" }}>
+            <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }} />
+            <div className="pl-2">
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Displayed total</div>
+              <div className="font-display text-2xl text-foreground tabular-nums mt-1">{formatCurrency(totalOutstanding)}</div>
+            </div>
           </div>
         </div>
 

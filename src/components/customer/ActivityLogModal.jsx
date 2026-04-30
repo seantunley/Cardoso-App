@@ -5,7 +5,7 @@ import { Eye, Flag, Edit, Trash2, Calendar, User } from "lucide-react";
 import { format } from "date-fns";
 
 const actionConfig = {
-  viewed: { icon: Eye, label: "Viewed", color: "bg-blue-500/15 text-blue-400 border-blue-500/30" },
+  viewed: { icon: Eye, label: "Viewed", color: "bg-accent/10 text-accent border-accent/30" },
   flag_added: { icon: Flag, label: "Flag Added", color: "bg-green-500/15 text-green-400 border-green-500/30" },
   flag_updated: { icon: Flag, label: "Flag Updated", color: "bg-amber-500/15 text-amber-400 border-amber-500/30" },
   flag_removed: { icon: Trash2, label: "Flag Removed", color: "bg-red-500/15 text-red-400 border-red-500/30" },

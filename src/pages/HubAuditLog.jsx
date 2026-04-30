@@ -58,10 +58,13 @@ export default function HubAuditLog() {
   return (
     <div className="min-h-screen bg-background p-6 text-foreground">
       <div className="mx-auto max-w-7xl space-y-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5 mb-2">
           <div>
-            <h1 className="text-2xl font-bold">Hub Audit Log</h1>
-            <p className="mt-0.5 text-sm text-muted-foreground">Latest hub admin actions, newest first.</p>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Hub Audit</div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              The <em className="text-phosphor">hub</em>, on record.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3">Latest hub admin actions, newest first.</p>
           </div>
           <Button variant="outline" onClick={() => refetch()} disabled={isFetching} className="gap-2">
             <RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} />

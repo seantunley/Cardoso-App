@@ -56,6 +56,12 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       throw new Error('Connection not found');
     }
 
+    // BAT-only connections must NEVER feed datarecord — they're accessed live
+    // by the BAT module's own pool. Refuse the import even if invoked manually.
+    if (connConfig.is_bat_only) {
+      throw new Error('This connection is marked BAT-only and cannot be synced into the local customer database. Untick "BAT-only" on the connection if you want it to feed customer search.');
+    }
+
     syncRunId = db.prepare(`
       INSERT INTO syncrun (connection_id, started_at, status)
       VALUES (?, ?, 'running')

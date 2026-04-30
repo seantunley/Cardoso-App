@@ -165,13 +165,14 @@ export default function Records() {
       <div className={cn("max-w-6xl mx-auto p-6 lg:p-8 space-y-5", hasSelection ? "pb-40 lg:pb-24" : "")}>
 
         {/* Page header */}
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
           <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">
-              Data Records
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Records</div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Raw <em className="text-phosphor">data</em>.
             </h1>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {isLoading ? "Loading…" : `${records.length.toLocaleString("en-US")} shown of ${totalRecords.toLocaleString("en-US")} records`}
+            <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3 tabular-nums">
+              {isLoading ? "Loading…" : `${records.length.toLocaleString("en-US")} of ${totalRecords.toLocaleString("en-US")} shown`}
             </p>
           </div>
         </div>

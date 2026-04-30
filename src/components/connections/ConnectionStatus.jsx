@@ -27,9 +27,9 @@ export default function ConnectionStatus({ connection }) {
         return {
           icon: Clock,
           label: "Testing",
-          color: "text-blue-400",
-          bgColor: "bg-blue-900/20",
-          borderColor: "border-blue-700",
+          color: "text-accent",
+          bgColor: "bg-accent/10",
+          borderColor: "border-accent/50",
           description: "Testing connection..."
         };
       case "inactive":

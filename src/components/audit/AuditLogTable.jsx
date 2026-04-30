@@ -194,7 +194,7 @@ export default function AuditLogTable({ logs = [] }) {
                   )}
                   <button
                     onClick={() => toggleExpanded(log.id)}
-                    className="text-xs text-blue-400 hover:text-blue-300"
+                    className="text-xs text-accent hover:text-[var(--phosphor)] font-mono uppercase tracking-wider"
                   >
                     {isExpanded ? "Hide details" : "Show details"}
                   </button>
@@ -341,7 +341,7 @@ export default function AuditLogTable({ logs = [] }) {
 
                             <button
                               onClick={() => toggleExpanded(log.id)}
-                              className="text-xs text-blue-300 hover:text-blue-200"
+                              className="text-xs text-accent hover:text-[var(--phosphor)] font-mono uppercase tracking-wider"
                             >
                               {isExpanded ? "Hide details" : "Show details"}
                             </button>

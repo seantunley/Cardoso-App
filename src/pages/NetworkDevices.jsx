@@ -174,10 +174,10 @@ function SetupGuide({ guide }) {
   if (!guide) return null;
   return (
     <div className="space-y-4">
-      <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4">
+      <div className="rounded-xl border border-accent/30 bg-accent/10 p-4">
         <div className="flex items-start gap-3">
-          <Info className="h-4 w-4 mt-0.5 shrink-0 text-blue-300" />
-          <div className="text-sm text-blue-100">
+          <Info className="h-4 w-4 mt-0.5 shrink-0 text-accent" />
+          <div className="text-sm text-foreground">
             Network monitoring on site machines is powered by <strong>nProbe</strong>. nProbe captures
             all LAN traffic and exports flows to <strong>ntopng</strong> running on the Hub. The Hub
             then shows live bandwidth and device data per site — no PowerShell scanning required.
@@ -300,19 +300,20 @@ export default function NetworkDevices() {
     <div className="min-h-screen bg-background p-4 md:p-6 text-foreground">
       <div className="mx-auto max-w-5xl space-y-6">
         {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-500/30 bg-cyan-500/10">
-              <Network className="h-5 w-5 text-cyan-300" />
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
+              <Network className="w-3 h-3 text-accent" strokeWidth={1.5} />
+              § Network
             </div>
-            <div>
-              <h1 className="text-2xl font-bold">Network Devices</h1>
-              <p className="text-sm text-muted-foreground">
-                {hubMode
-                  ? "Live network visibility via ntopng + nProbe — per-site flows, hosts, and bandwidth."
-                  : "nProbe setup guide — configure network flow export to the Hub."}
-              </p>
-            </div>
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Every <em className="text-phosphor">device</em>, visible.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3">
+              {hubMode
+                ? "Live network visibility via ntopng + nProbe — per-site flows, hosts, and bandwidth."
+                : "nProbe setup guide — configure network flow export to the Hub."}
+            </p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -346,31 +347,35 @@ export default function NetworkDevices() {
 
             {/* Configured: summary tiles */}
             {configured && (
-              <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                    <Wifi className="h-3.5 w-3.5" /> Sites connected
+              <div className="grid grid-cols-2 gap-px bg-border border border-border md:grid-cols-4 stagger-in" style={{ borderRadius: "2px" }}>
+                <div className="relative bg-card p-5 pl-6">
+                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                    <Wifi className="h-3 w-3" strokeWidth={1.5} /> Sites connected
                   </div>
-                  <div className="text-2xl font-bold">{connectedCount}/{sites.length}</div>
+                  <div className="font-display text-4xl leading-none text-foreground tabular-nums">{connectedCount}<span className="text-muted-foreground text-2xl">/{sites.length}</span></div>
                 </div>
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                    <Users className="h-3.5 w-3.5" /> Total hosts
+                <div className="relative bg-card p-5 pl-6">
+                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                    <Users className="h-3 w-3" strokeWidth={1.5} /> Total hosts
                   </div>
-                  <div className="text-2xl font-bold">{fmtNum(totalHosts)}</div>
+                  <div className="font-display text-4xl leading-none text-foreground tabular-nums">{fmtNum(totalHosts)}</div>
                 </div>
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                    <Activity className="h-3.5 w-3.5" /> Active flows
+                <div className="relative bg-card p-5 pl-6">
+                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                    <Activity className="h-3 w-3" strokeWidth={1.5} /> Active flows
                   </div>
-                  <div className="text-2xl font-bold">{fmtNum(totalFlows)}</div>
+                  <div className="font-display text-4xl leading-none text-foreground tabular-nums">{fmtNum(totalFlows)}</div>
                 </div>
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="flex items-center gap-2 text-xs uppercase tracking-wide text-muted-foreground mb-2">
-                    <Server className="h-3.5 w-3.5" /> ntopng
+                <div className="relative bg-card p-5 pl-6">
+                  <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: ntopngOk ? "hsl(145 55% 45%)" : "hsl(var(--destructive))" }} />
+                  <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
+                    <Server className="h-3 w-3" strokeWidth={1.5} /> ntopng
                   </div>
-                  <div className={`text-sm font-semibold ${ntopngOk ? "text-emerald-400" : "text-red-400"}`}>
-                    {ntopngOk ? "Online" : "Unreachable"}
+                  <div className={`font-display text-2xl leading-none ${ntopngOk ? "text-[hsl(145_55%_45%)]" : "text-destructive"}`}>
+                    {ntopngOk ? "Online" : "Offline"}
                   </div>
                 </div>
               </div>

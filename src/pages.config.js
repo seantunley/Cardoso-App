@@ -55,6 +55,7 @@ const HubBackups = React.lazy(() => import('./pages/HubBackups'));
 const HubMetrics = React.lazy(() => import('./pages/HubMetrics'));
 const HubTrends = React.lazy(() => import('./pages/HubTrends'));
 const HubSyncLog = React.lazy(() => import('./pages/HubSyncLog'));
+const HubReconciliation = React.lazy(() => import('./pages/HubReconciliation'));
 const Connections = React.lazy(() => import('./pages/Connections'));
 const CustomerSearch = React.lazy(() => import('./pages/CustomerSearch'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
@@ -64,6 +65,7 @@ const Users = React.lazy(() => import('./pages/Users'));
 const Inventory = React.lazy(() => import('./pages/Inventory'));
 const NetworkDevices = React.lazy(() => import('./pages/NetworkDevices'));
 const CreditDebug = React.lazy(() => import('./pages/CreditDebug'));
+const Reconciliation = React.lazy(() => import('./pages/Reconciliation'));
 
 
 export const PAGES = {
@@ -78,6 +80,7 @@ export const PAGES = {
     "HubMetrics": HubMetrics,
     "HubTrends": HubTrends,
     "HubSyncLog": HubSyncLog,
+    "HubReconciliation": HubReconciliation,
     "Connections": Connections,
     "CustomerSearch": CustomerSearch,
     "Dashboard": Dashboard,
@@ -85,6 +88,7 @@ export const PAGES = {
     "Reports": Reports,
     "Users": Users,
     "CreditDebug": CreditDebug,
+    "Reconciliation": Reconciliation,
 }
 
 export const pagesConfig = {

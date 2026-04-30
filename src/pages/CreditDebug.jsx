@@ -20,7 +20,7 @@ function StepCard({ step, index, isLast }) {
   return (
     <div className={cn(
       "border rounded-lg overflow-hidden transition-colors",
-      isVerdict ? "border-indigo-500/40 bg-indigo-500/5" : isScore ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
+      isVerdict ? "border-accent/40 bg-accent/5" : isScore ? "border-amber-500/30 bg-amber-500/5" : "border-border bg-card"
     )}>
       <button
         onClick={() => setExpanded(!expanded)}
@@ -28,7 +28,7 @@ function StepCard({ step, index, isLast }) {
       >
         <span className="text-xs font-mono text-muted-foreground w-6 shrink-0">#{step.step}</span>
         {expanded ? <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" /> : <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />}
-        <span className={cn("text-sm font-medium", isVerdict && "text-indigo-400", isScore && "text-amber-400")}>{step.label}</span>
+        <span className={cn("text-sm font-medium", isVerdict && "text-accent", isScore && "text-amber-400")}>{step.label}</span>
       </button>
       {expanded && (
         <div className="px-4 pb-4 pt-1">
@@ -144,7 +144,7 @@ function DetailView({ data }) {
         return (
           <div key={key} className="flex items-baseline gap-2">
             <span className="text-xs text-muted-foreground w-44 shrink-0 truncate" title={key}>{key}</span>
-            <span className={cn("text-xs font-mono", isHighlight && "font-bold text-indigo-400")}>{displayValue}</span>
+            <span className={cn("text-xs font-mono", isHighlight && "font-bold text-accent")}>{displayValue}</span>
           </div>
         );
       })}
@@ -179,11 +179,14 @@ export default function CreditDebug() {
   const VerdictIcon = result?.verdict ? verdictMeta[result.verdict]?.icon || HelpCircle : null;
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 space-y-6">
-      <div>
-        <h1 className="text-xl font-bold">Credit Logic Debugger</h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          Enter a customer number to step through the credit scoring logic and see exactly why they got their result.
+    <div className="mx-auto max-w-3xl px-8 py-10 space-y-6">
+      <div className="border-b border-border pb-5">
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Diagnostics</div>
+        <h1 className="font-display text-4xl leading-tight tracking-tight text-foreground">
+          Trace the <em className="text-phosphor">verdict</em>.
+        </h1>
+        <p className="text-sm text-muted-foreground mt-3">
+          Step through the credit scoring logic and see exactly why a customer got their result.
         </p>
       </div>
 

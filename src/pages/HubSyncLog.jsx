@@ -35,11 +35,15 @@ export default function HubSyncLog() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+    <div className="min-h-screen bg-background">
+    <div className="max-w-6xl mx-auto px-8 py-10 space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Sync Log</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Last 50 hub sync events</p>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Sync Log</div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            Every <em className="text-phosphor">event</em>.
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">Last 50 hub sync events</p>
         </div>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -123,6 +127,7 @@ export default function HubSyncLog() {
           </table>
         </div>
       )}
+    </div>
     </div>
   );
 }

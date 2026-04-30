@@ -36,7 +36,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
           FROM datarecord d
           LEFT JOIN collections c ON c.customer_id = d.id
           WHERE d.flag_color IN ('red', 'orange')
-          ORDER BY CAST(REPLACE(REPLACE(COALESCE(d.outstanding_balance, '0'), ',', ''), ' ', '') AS REAL) DESC,
+          ORDER BY COALESCE(d.outstanding_balance_num, 0) DESC,
                    d.customer_name ASC
         `).all();
 

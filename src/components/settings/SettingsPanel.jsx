@@ -3,6 +3,7 @@ import { applyTheme } from "@/lib/AuthContext";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { toast } from "sonner";
+import { reportClientError } from "@/lib/clientLog";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
 
@@ -265,7 +266,7 @@ const INVENTORY_FIELDS = [
 ];
 
 const MODE_BADGE = {
-  "sync":          { label: "Sync",          cls: "bg-blue-900/50 text-blue-300 border-blue-700" },
+  "sync":          { label: "Sync",          cls: "bg-accent/10 text-accent border-accent/30" },
   "sync-if-empty": { label: "Sync if empty", cls: "bg-yellow-900/50 text-yellow-300 border-yellow-700" },
   "local-only":    { label: "Local only",    cls: "bg-gray-700 text-gray-300 border-gray-600" },
 };
@@ -488,7 +489,7 @@ function AutoFlagTab({ hubMode = false }) {
 
   const { data: hubKpis } = useQuery({
     queryKey: ["hub-kpis-rules"],
-    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then((response) => response.ok ? response.json() : null).catch(() => null),
+    queryFn: () => fetch("/api/hub/kpis", { credentials: "include" }).then((response) => response.ok ? response.json() : null).catch(err => { reportClientError("SettingsPanel.hubKpis", err); return null; }),
     enabled: hubMode && canManageRules,
     retry: false,
   });
@@ -679,7 +680,7 @@ function AutoFlagTab({ hubMode = false }) {
                       className={cn(
                         "rounded-full border px-3 py-1.5 text-sm font-medium transition-colors",
                         selected
-                          ? "border-indigo-500 bg-indigo-500/15 text-indigo-300"
+                          ? "border-[var(--phosphor)] bg-accent/10 text-accent"
                           : "border-border bg-card text-muted-foreground hover:text-foreground"
                       )}
                     >
@@ -917,9 +918,9 @@ function HubMaintenanceTab() {
 
   useEffect(() => {
     fetch('/api/hub/sites', { credentials: 'include' })
-      .then(r => r.json())
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(data => setSites(Array.isArray(data) ? data : data.sites || []))
-      .catch(() => {});
+      .catch(err => { toast.error(`Couldn't load sites: ${err.message}`); reportClientError("SettingsPanel.sites", err); });
   }, []);
 
   const handleDeleteSite = async (siteId, siteName) => {
@@ -1087,7 +1088,7 @@ function UpdateTab() {
     fetch("/api/app-version-status", { credentials: "include" })
       .then(r => r.json())
       .then(d => setInfo(d))
-      .catch(() => {});
+      .catch(err => reportClientError("SettingsPanel.versionStatus", err));
   }, []);
 
   const handleCheck = async () => {
@@ -1177,7 +1178,7 @@ function UpdateTab() {
           </div>
         )}
         {status === "updating" && (
-          <div className="flex items-center gap-2 text-sm text-blue-600">
+          <div className="flex items-center gap-2 text-sm text-accent">
             <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Downloading update — service will restart shortly...
           </div>
         )}
@@ -1523,6 +1524,334 @@ function CreditLogicTab({ hubMode = false, currentUser }) {
   );
 }
 
+// ─── Reconciliation Settings Tab ──────────────────────────────────────────
+function ReconciliationSettingsTab() {
+  const [settings, setSettings] = useState({ google_vision_key: '', ocr_space_key: '' });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showGvKey, setShowGvKey] = useState(false);
+  const [showOcrKey, setShowOcrKey] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/bat/settings', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { setSettings(s => ({ ...s, ...d })); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch('/api/bat/settings', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(settings),
+      });
+      if (res.ok) toast.success('Reconciliation settings saved');
+      else toast.error('Failed to save');
+    } catch { toast.error('Network error'); }
+    finally { setSaving(false); }
+  };
+
+  const maskKey = (key) => key ? key.substring(0, 8) + '•'.repeat(Math.max(0, key.length - 12)) + key.substring(key.length - 4) : '';
+
+  if (loading) return <div className="flex items-center justify-center py-12"><div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-foreground" /></div>;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Reconciliation OCR Settings</h3>
+        <p className="text-xs text-muted-foreground">API keys for the invoice OCR extraction pipeline. Keys stored here override environment variables.</p>
+      </div>
+
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-foreground flex items-center justify-between">
+            Google Vision API Key
+            <span className="text-[10px] text-accent font-mono uppercase tracking-wider">Primary OCR</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              type={showGvKey ? 'text' : 'password'}
+              value={settings.google_vision_key || ''}
+              onChange={e => setSettings(s => ({ ...s, google_vision_key: e.target.value }))}
+              placeholder="AIzaSy..."
+              className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setShowGvKey(v => !v)}
+              className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
+            >
+              {showGvKey ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            From Google Cloud Console → APIs & Services → Credentials. Requires Cloud Vision API enabled with billing.
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-foreground flex items-center justify-between">
+            ocr.space API Key
+            <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">Fallback OCR</span>
+          </label>
+          <div className="flex gap-2">
+            <input
+              type={showOcrKey ? 'text' : 'password'}
+              value={settings.ocr_space_key || ''}
+              onChange={e => setSettings(s => ({ ...s, ocr_space_key: e.target.value }))}
+              placeholder="K890..."
+              className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+            />
+            <button
+              type="button"
+              onClick={() => setShowOcrKey(v => !v)}
+              className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
+            >
+              {showOcrKey ? 'Hide' : 'Show'}
+            </button>
+          </div>
+          <p className="text-[10px] text-muted-foreground">
+            From ocr.space → My Account → API Key. Free key has rate limits. Paid key recommended.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between pt-4 border-t border-border">
+        <p className="text-[10px] text-muted-foreground">
+          Pipeline order: Google Vision → ocr.space E1 → E3 → Tesseract → E2
+        </p>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
+          style={{
+            borderRadius: '2px',
+            borderColor: 'var(--phosphor)',
+            color: 'var(--phosphor)',
+            background: 'hsla(33, 95%, 55%, 0.08)',
+          }}
+          onMouseEnter={(e) => {
+            if (e.currentTarget.disabled) return;
+            e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.18)';
+            e.currentTarget.style.boxShadow = '0 0 12px hsla(33,95%,55%,0.35)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.08)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}
+        >
+          {saving ? 'Saving…' : 'Save Keys'}
+        </button>
+      </div>
+
+      <ReplicateSupplierTool />
+      <OcrPauseToggle />
+    </div>
+  );
+}
+
+function OcrPauseToggle() {
+  const [status, setStatus] = useState(null); // { paused, pending }
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(() => {
+    fetch('/api/bat/ocr-status', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setStatus(d); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const toggle = async () => {
+    if (!status) return;
+    const next = !status.paused;
+    setBusy(true);
+    try {
+      const r = await fetch('/api/bat/ocr-pause', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paused: next }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      setStatus((s) => ({ ...(s || {}), paused: d.paused }));
+      toast.success(d.paused ? 'OCR paused' : (d.resumed ? 'OCR resumed — worker started' : 'OCR resumed'));
+      refresh();
+    } catch (err) {
+      toast.error(`Failed: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (!status) return null;
+  const paused = !!status.paused;
+
+  return (
+    <div className="pt-6 mt-6 border-t border-border space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">OCR Worker</h3>
+        <p className="text-xs text-muted-foreground">
+          When paused, no new POD invoices will be processed and the worker won't auto-resume on server restart. The currently in-flight invoice (if any) finishes before the worker stops.
+        </p>
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-muted-foreground tabular-nums">
+          Status:{' '}
+          <span className={paused ? 'text-destructive' : 'text-[hsl(145_55%_45%)]'}>
+            {paused ? '● Paused' : '● Running'}
+          </span>
+          {' · '}
+          <span className="text-foreground">{status.pending}</span> pending invoice{status.pending === 1 ? '' : 's'}
+        </p>
+        <button
+          onClick={toggle}
+          disabled={busy}
+          className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
+          style={{
+            borderRadius: '2px',
+            borderColor: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
+            color: paused ? 'hsl(145 55% 45%)' : 'var(--phosphor)',
+            background: 'transparent',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = paused ? 'hsla(145, 55%, 45%, 0.12)' : 'hsla(33, 95%, 55%, 0.12)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          {busy ? 'Working…' : (paused ? 'Resume OCR' : 'Pause OCR')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ReplicateSupplierTool() {
+  const [stats, setStats] = useState(null);
+  const [running, setRunning] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pwd, setPwd] = useState('');
+
+  const refresh = useCallback(() => {
+    fetch('/api/bat/cardoso-invoices/overwrite-stats', { credentials: 'include' })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setStats(d); })
+      .catch(() => {});
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleRun = async (e) => {
+    e?.preventDefault?.();
+    if (!pwd) { toast.error('Admin password required'); return; }
+    setRunning(true);
+    try {
+      const r = await fetch('/api/bat/cardoso-invoices/replicate-supplier', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: pwd }),
+      });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      toast.success(`Overwrote ${d.updated} cardoso rows · ${d.totalOverwritten} total · ${d.remainingNotOverwritten} remaining`);
+      setConfirmOpen(false);
+      setPwd('');
+      refresh();
+    } catch (err) {
+      toast.error(`Overwrite failed: ${err.message}`);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return (
+    <div className="pt-6 mt-6 border-t border-border space-y-3">
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Replicate Supplier → Cardoso</h3>
+        <p className="text-xs text-muted-foreground">
+          Copies S.Pricing and S.Discount onto matching Cardoso rows (C.Pricing / C.Discount). C.DelFee is preserved. Idempotent — only touches rows that haven't been overwritten yet. <span className="text-destructive">Admin password required.</span>
+        </p>
+      </div>
+      <div className="flex items-center justify-between">
+        <p className="text-[10px] text-muted-foreground tabular-nums">
+          {stats ? `${stats.overwritten}/${stats.total} cardoso rows overwritten · ${stats.remaining} remaining` : 'Loading…'}
+        </p>
+        {!confirmOpen ? (
+          <button
+            onClick={() => setConfirmOpen(true)}
+            className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
+            style={{
+              borderRadius: '2px',
+              borderColor: 'hsl(var(--destructive))',
+              color: 'hsl(var(--destructive))',
+              background: 'hsla(0, 72%, 50%, 0.08)',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.18)';
+              e.currentTarget.style.boxShadow = '0 0 12px hsla(0, 72%, 50%, 0.35)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.08)';
+              e.currentTarget.style.boxShadow = 'none';
+            }}
+          >
+            Run overwrite
+          </button>
+        ) : (
+          <form onSubmit={handleRun} className="flex items-center gap-2">
+            <input
+              type="password"
+              autoFocus
+              autoComplete="current-password"
+              value={pwd}
+              onChange={(e) => setPwd(e.target.value)}
+              placeholder="Admin password"
+              className="rounded-[2px] border border-input bg-transparent px-3 py-2 text-xs font-mono focus:border-destructive focus:ring-1 focus:ring-destructive outline-none w-44"
+            />
+            <button
+              type="submit"
+              disabled={running || !pwd}
+              className="px-3 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
+              style={{
+                borderRadius: '2px',
+                borderColor: 'hsl(var(--destructive))',
+                color: 'hsl(var(--destructive))',
+                background: 'hsla(0, 72%, 50%, 0.08)',
+              }}
+              onMouseEnter={(e) => {
+                if (e.currentTarget.disabled) return;
+                e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.18)';
+                e.currentTarget.style.boxShadow = '0 0 12px hsla(0, 72%, 50%, 0.35)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'hsla(0, 72%, 50%, 0.08)';
+                e.currentTarget.style.boxShadow = 'none';
+              }}
+            >
+              {running ? 'Running…' : 'Confirm'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setConfirmOpen(false); setPwd(''); }}
+              disabled={running}
+              className="px-3 py-2 border border-border text-muted-foreground font-mono text-[10px] uppercase tracking-[0.2em] hover:text-foreground transition-colors"
+              style={{ borderRadius: '2px' }}
+            >
+              Cancel
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── ntopng / Network Settings Tab ────────────────────────────────────────
 function NtopngTab() {
   const queryClient = useQueryClient();
@@ -1683,6 +2012,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     hubMode && { id: "synclog", label: "Sync Log" },
     hubMode && isAdmin && { id: "hubmaintenance", label: "Maintenance" },
     hubMode && isAdmin && { id: "network", label: "Network" },
+    isAdmin && { id: "reconciliation", label: "Reconciliation" },
   ].filter(Boolean);
 
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? "theme");
@@ -1719,6 +2049,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
                 {t.id === "update"       && <UpdateTab />}
                 {t.id === "hubmaintenance" && <HubMaintenanceTab />}
                 {t.id === "network"      && <NtopngTab />}
+                {t.id === "reconciliation" && <ReconciliationSettingsTab />}
               </TabsContent>
             ))}
           </div>

@@ -26,7 +26,9 @@ export default function CustomerSearch() {
     queryFn: async () => {
       if (!currentUser) return [];
       const allConnections = await api.entities.DatabaseConnection.list();
-      return allConnections;
+      // BAT-only connections feed the BAT module's own pool — they must not
+      // appear in customer-search context (no datarecord rows are sourced from them).
+      return allConnections.filter(c => !c.is_bat_only);
     },
     enabled: !!currentUser,
   });
@@ -94,102 +96,72 @@ export default function CustomerSearch() {
 
   // FlaggedCustomersModal fetches its own records server-side
 
+  const FLAG_TILES = [
+    { key: "red",    label: "Critical",  sub: "red flagged",    count: redCount,    hue: "hsl(0 72% 50%)",   glow: "hsla(0, 72%, 50%, 0.35)",   icon: Flag },
+    { key: "orange", label: "Attention", sub: "orange flagged", count: orangeCount, hue: "var(--phosphor)", glow: "hsla(33, 95%, 55%, 0.35)", icon: AlertCircle },
+    { key: "green",  label: "Approved",  sub: "green flagged",  count: greenCount,  hue: "hsl(145 55% 45%)", glow: "hsla(145, 55%, 45%, 0.25)", icon: CheckCircle },
+  ];
+
   return (
-     <div className="min-h-screen bg-background">
-       <div className="max-w-4xl mx-auto p-6 space-y-3">
-         {/* Header */}
-         <div>
-           <h1 className="text-2xl font-bold text-foreground tracking-tight">
-             Customer Management
-           </h1>
-           <p className="text-sm text-muted-foreground mt-1">
-             Search and review customer accounts, balances, and outstanding activity
-           </p>
-         </div>
+    <div className="min-h-screen bg-background">
+      <div className="max-w-5xl mx-auto px-8 py-10 space-y-6">
+        {/* Header */}
+        <div className="border-b border-border pb-5">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+            § Customer Management
+          </div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            Search the <em className="text-phosphor">ledger</em>.
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">
+            Review customer accounts, balances, and outstanding activity.
+          </p>
+        </div>
 
-            {/* Flag Stats */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {/* Red */}
+        {/* Flag Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-border border border-border stagger-in" style={{ borderRadius: "2px" }}>
+          {FLAG_TILES.map(({ key, label, sub, count, hue, glow, icon: Icon }) => (
+            <button
+              key={key}
+              onClick={() => handleFlagClick(key)}
+              className="relative bg-card text-left px-5 py-4 transition-colors hover:bg-muted/40 group cursor-pointer"
+            >
               <div
-                onClick={() => handleFlagClick("red")}
-                className="group relative overflow-hidden rounded-xl border border-rose-500/20 bg-gradient-to-br from-rose-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-900/30 hover:-translate-y-0.5"
-              >
-                <div className="absolute inset-0 bg-rose-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-[10px] font-semibold text-rose-400/70 uppercase tracking-widest mb-2">Critical</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{redCount}</p>
-                    <p className="text-xs text-rose-300/60 mt-1.5">Red Flagged</p>
+                className="absolute left-0 top-0 bottom-0 w-[2px] transition-all"
+                style={{ background: hue, boxShadow: `0 0 12px ${glow}` }}
+              />
+              <div className="flex items-start justify-between pl-2">
+                <div className="min-w-0">
+                  <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">
+                    {label}
                   </div>
-                  <div className="p-2.5 rounded-lg bg-rose-500/15 border border-rose-500/20">
-                    <Flag className="w-4 h-4 text-rose-400" />
+                  <div className="font-display text-4xl leading-none text-foreground tabular-nums">
+                    {count.toLocaleString()}
+                  </div>
+                  <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2">
+                    {sub}
                   </div>
                 </div>
-                <div className="mt-3 h-0.5 rounded-full bg-rose-500/20">
-                  <div className="h-full rounded-full bg-rose-500/60" style={{ width: redCount > 0 ? "100%" : "0%" }} />
-                </div>
+                <Icon className="w-4 h-4 shrink-0 opacity-60 group-hover:opacity-100 transition-opacity" style={{ color: hue }} strokeWidth={1.5} />
               </div>
+            </button>
+          ))}
+        </div>
 
-              {/* Orange */}
-              <div
-                onClick={() => handleFlagClick("orange")}
-                className="group relative overflow-hidden rounded-xl border border-amber-500/20 bg-gradient-to-br from-amber-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-amber-500/50 hover:shadow-lg hover:shadow-amber-900/30 hover:-translate-y-0.5"
-              >
-                <div className="absolute inset-0 bg-amber-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-[10px] font-semibold text-amber-400/70 uppercase tracking-widest mb-2">Attention</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{orangeCount}</p>
-                    <p className="text-xs text-amber-300/60 mt-1.5">Orange Flagged</p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-amber-500/15 border border-amber-500/20">
-                    <AlertCircle className="w-4 h-4 text-amber-400" />
-                  </div>
-                </div>
-                <div className="mt-3 h-0.5 rounded-full bg-amber-500/20">
-                  <div className="h-full rounded-full bg-amber-500/60" style={{ width: orangeCount > 0 ? "100%" : "0%" }} />
-                </div>
-              </div>
-
-              {/* Green */}
-              <div
-                onClick={() => handleFlagClick("green")}
-                className="group relative overflow-hidden rounded-xl border border-emerald-500/20 bg-gradient-to-br from-emerald-950/60 via-slate-900/80 to-slate-900/60 p-4 cursor-pointer transition-all duration-200 hover:border-emerald-500/50 hover:shadow-lg hover:shadow-emerald-900/30 hover:-translate-y-0.5"
-              >
-                <div className="absolute inset-0 bg-emerald-500/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="flex items-start justify-between">
-                  <div>
-                    <p className="text-[10px] font-semibold text-emerald-400/70 uppercase tracking-widest mb-2">Approved</p>
-                    <p className="text-2xl font-extrabold text-white leading-none">{greenCount}</p>
-                    <p className="text-xs text-emerald-300/60 mt-1.5">Green Flagged</p>
-                  </div>
-                  <div className="p-2.5 rounded-lg bg-emerald-500/15 border border-emerald-500/20">
-                    <CheckCircle className="w-4 h-4 text-emerald-400" />
-                  </div>
-                </div>
-                <div className="mt-3 h-0.5 rounded-full bg-emerald-500/20">
-                  <div className="h-full rounded-full bg-emerald-500/60" style={{ width: greenCount > 0 ? "100%" : "0%" }} />
-                </div>
-              </div>
-            </div>
-
-            {/* Flagged Customers Modal */}
-            <FlaggedCustomersModal
-              flagColor={selectedFlagColor}
-              open={flagModalOpen}
-              onClose={() => setFlagModalOpen(false)}
-              onCustomerClick={handleCustomerClickFromModal}
-            />
-
-
+        {/* Flagged Customers Modal */}
+        <FlaggedCustomersModal
+          flagColor={selectedFlagColor}
+          open={flagModalOpen}
+          onClose={() => setFlagModalOpen(false)}
+          onCustomerClick={handleCustomerClickFromModal}
+        />
 
         {/* Customer Lookup + Last Sync side by side */}
-        <div className="flex flex-col sm:flex-row gap-3 items-stretch">
-          {/* Customer Lookup */}
-          <div className="flex-1 ring-1 ring-white/20 rounded-xl shadow-lg shadow-white/10 min-w-0">
-            <CustomerLookup 
+        <div className="flex flex-col sm:flex-row gap-px bg-border border border-border items-stretch" style={{ borderRadius: "2px" }}>
+          <div className="flex-1 bg-card min-w-0">
+            <CustomerLookup
               currentUser={currentUser}
-              onRecordSelect={setSelectedRecord} 
+              onRecordSelect={setSelectedRecord}
               triggerLookup={customerNumberToLookup}
               onLookupComplete={() => setCustomerNumberToLookup("")}
               selectedConnection={selectedConnection}
@@ -197,74 +169,82 @@ export default function CustomerSearch() {
             />
           </div>
 
-          {/* Last Sync Info */}
           {selectedConnection && (
-            <div className="w-full sm:flex-shrink-0 sm:w-52 rounded-xl border border-indigo-500/30 bg-gradient-to-br from-indigo-950/60 to-slate-900/80 shadow-lg shadow-indigo-900/20 flex flex-col justify-center px-4 py-3">
-              <div className="flex items-center gap-2 mb-1.5">
-                <div className="p-1.5 rounded-md bg-indigo-500/20">
-                  <RefreshCw className="w-3 h-3 text-indigo-400" />
-                </div>
-                <p className="text-[10px] font-semibold text-indigo-300 uppercase tracking-widest">Last Sync</p>
+            <div className="w-full sm:flex-shrink-0 sm:w-56 bg-card relative px-5 py-4 flex flex-col justify-center">
+              <div
+                className="absolute left-0 top-0 bottom-0 w-[2px]"
+                style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }}
+              />
+              <div className="flex items-center gap-2 mb-2 pl-2">
+                <RefreshCw className="w-3 h-3 text-accent" />
+                <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Last Sync</p>
               </div>
-              {selectedConnection.last_sync ? (
-                <>
-                  <p className="text-sm font-bold text-white leading-tight">
-                    {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
-                      timeZone: "Africa/Johannesburg",
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })}
-                  </p>
-                  <p className="text-lg font-extrabold text-indigo-300 leading-tight">
-                    {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
-                      timeZone: "Africa/Johannesburg",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: false,
-                    })}
-                  </p>
-                  <p className="text-[10px] text-indigo-400/70 mt-1">{selectedConnection.name}</p>
-                </>
-              ) : (
-                <p className="text-sm text-indigo-300/50">Never synced</p>
-              )}
+              <div className="pl-2">
+                {selectedConnection.last_sync ? (
+                  <>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
+                        timeZone: "Africa/Johannesburg",
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
+                    </p>
+                    <p className="font-display text-3xl leading-none text-foreground tabular-nums mt-1">
+                      {new Date(selectedConnection.last_sync + (selectedConnection.last_sync.endsWith("Z") ? "" : "Z")).toLocaleString("en-ZA", {
+                        timeZone: "Africa/Johannesburg",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: false,
+                      })}
+                    </p>
+                    <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">
+                      {selectedConnection.name}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Never synced</p>
+                )}
+              </div>
             </div>
           )}
         </div>
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (
-          <Card className="border-amber-500/40 bg-amber-500/10">
-            <CardContent className="p-3">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-amber-400 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-amber-400">No Active SQL Connections</h3>
-                  <p className="text-xs text-amber-300/80 mt-0.5">
-                    To enable live SQL lookups, configure an active database connection in the Dashboard.
-                    For full backend integration, enable Backend Functions in app settings.
-                  </p>
-                </div>
+          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "2px" }}>
+            <div
+              className="absolute left-0 top-0 bottom-0 w-[2px]"
+              style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }}
+            />
+            <div className="flex items-start gap-3 pl-2">
+              <AlertCircle className="w-4 h-4 text-accent mt-0.5 shrink-0" strokeWidth={1.5} />
+              <div className="flex-1">
+                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent mb-1">No Active Connections</h3>
+                <p className="text-xs text-muted-foreground">
+                  Configure a database connection in the Dashboard to enable live SQL lookups.
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
 
         {activeConnections.length > 0 && (
-          <Card className="border-blue-500/40 bg-blue-500/10">
-            <CardContent className="p-3">
-              <div className="flex items-start gap-2">
-                <Database className="w-4 h-4 text-blue-400 mt-0.5" />
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold text-blue-400">Connected to SQL Database</h3>
-                  <p className="text-xs text-blue-300/80 mt-0.5">
-                    {activeConnections[0].name} • {activeConnections[0].database_name}
-                  </p>
-                </div>
+          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "2px" }}>
+            <div
+              className="absolute left-0 top-0 bottom-0 w-[2px]"
+              style={{ background: "hsl(145 55% 45%)", boxShadow: "0 0 12px hsla(145,55%,45%,0.3)" }}
+            />
+            <div className="flex items-start gap-3 pl-2">
+              <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "hsl(145 55% 45%)" }} strokeWidth={1.5} />
+              <div className="flex-1">
+                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: "hsl(145 55% 45%)" }}>Connected</h3>
+                <p className="text-xs text-muted-foreground font-mono">
+                  {activeConnections[0].name} · {activeConnections[0].database_name}
+                </p>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         )}
       </div>
     </div>

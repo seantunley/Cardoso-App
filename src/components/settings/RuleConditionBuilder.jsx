@@ -137,7 +137,7 @@ export default function RuleConditionBuilder({ conditions = [], onConditionsChan
                     className={cn(
                       "px-4 py-1 text-xs font-bold rounded-full border tracking-widest transition-colors",
                       condition.operator === "OR"
-                        ? "bg-indigo-900/50 text-indigo-300 border-indigo-600 hover:bg-indigo-800/60"
+                        ? "bg-accent/15 text-accent border-accent/50 hover:bg-accent/25"
                         : "bg-gray-800 text-gray-300 border-gray-600 hover:bg-gray-700"
                     )}
                   >
@@ -147,7 +147,7 @@ export default function RuleConditionBuilder({ conditions = [], onConditionsChan
                   <span className={cn(
                     "px-4 py-1 text-xs font-bold rounded-full border tracking-widest",
                     condition.operator === "OR"
-                      ? "bg-indigo-900/50 text-indigo-300 border-indigo-600"
+                      ? "bg-accent/15 text-accent border-accent/50"
                       : "bg-gray-800 text-gray-300 border-gray-600"
                   )}>
                     {condition.operator ?? "AND"}

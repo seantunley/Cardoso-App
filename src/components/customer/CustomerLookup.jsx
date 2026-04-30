@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, Cell, ResponsiveContainer,
-} from "recharts";
+
+// Recharts is heavy (~100 KB). Lazy-load the chart so the default landing page
+// doesn't pull it in until the user actually selects a customer.
+const PaymentHistoryCharts = lazy(() => import("./PaymentHistoryCharts"));
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -65,35 +66,12 @@ const flagColors = {
   },
 };
 
-function PaymentHistoryCharts({ lagData, timelineData }) {
-  const barColor = (lagDays) => {
-    if (lagDays <= 7) return "#22c55e";
-    if (lagDays <= 21) return "#f59e0b";
-    return "#ef4444";
-  };
-
-  if (!lagData?.length && !timelineData?.length) return null;
-
+function PaymentHistoryChartsLazy(props) {
+  if (!props.lagData?.length && !props.timelineData?.length) return null;
   return (
-    <div className="mb-4 rounded-xl border border-border bg-muted/40 p-4">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Payment Lag History</p>
-      <ResponsiveContainer width="100%" height={120}>
-        <BarChart data={lagData} margin={{ top: 4, right: 4, left: -20, bottom: 4 }}>
-          <XAxis dataKey="label" tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: "#94a3b8" }} tickLine={false} axisLine={false} unit="d" />
-          <Tooltip
-            contentStyle={{ background: "#1e293b", border: "1px solid #334155", borderRadius: 6, fontSize: 11 }}
-            labelStyle={{ color: "#e2e8f0" }}
-            formatter={(val) => [`${val} days`, "Lag"]}
-          />
-          <Bar dataKey="lagDays" radius={[3, 3, 0, 0]}>
-            {lagData.map((entry, index) => (
-              <Cell key={index} fill={barColor(entry.lagDays)} />
-            ))}
-          </Bar>
-        </BarChart>
-      </ResponsiveContainer>
-    </div>
+    <Suspense fallback={<div className="mb-4 h-[152px] rounded-xl border border-border bg-muted/40" />}>
+      <PaymentHistoryCharts {...props} />
+    </Suspense>
   );
 }
 
@@ -781,23 +759,27 @@ export default function CustomerLookup({
               onChange={(e) => setCustomerNumber(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Customer number or name…"
-              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground focus:border-indigo-500/70 focus:ring-indigo-500/20 rounded-lg text-sm"
+              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-[var(--phosphor)]/30 text-sm font-mono"
+              style={{ borderRadius: "2px" }}
             />
             {showSuggestions && suggestions.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-lg border border-border bg-card shadow-xl overflow-hidden">
+              <div className="absolute left-0 right-0 top-full z-50 mt-1 border border-border bg-card shadow-xl overflow-hidden" style={{ borderRadius: "2px" }}>
                 {suggestions.map((s, idx) => (
                   <button
                     key={s.record.id ?? idx}
                     onClick={() => handleSuggestionClick(s)}
                     className={cn(
-                      "w-full border-b border-border/60 px-4 py-2.5 text-left last:border-0 transition-colors",
+                      "w-full border-b border-border/60 px-4 py-2.5 text-left last:border-0 transition-colors relative",
                       idx === selectedSuggestionIndex
-                        ? "bg-indigo-600/30 dark:text-white text-indigo-900"
-                        : "hover:bg-accent text-foreground"
+                        ? "bg-accent/10 text-foreground"
+                        : "hover:bg-muted text-foreground"
                     )}
                   >
+                    {idx === selectedSuggestionIndex && (
+                      <span className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.4)" }} />
+                    )}
                     <div className="text-sm font-medium">{s.customerName}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">#{s.customerNumber}</div>
+                    <div className="font-mono text-[10px] tracking-wider text-muted-foreground mt-0.5">#{s.customerNumber}</div>
                   </button>
                 ))}
               </div>
@@ -807,7 +789,8 @@ export default function CustomerLookup({
           <Button
             onClick={() => handleLookup()}
             disabled={loading}
-            className="h-11 px-5 bg-indigo-600 hover:bg-indigo-500 text-white border-0 rounded-lg shadow-md shadow-indigo-900/40 transition-all"
+            className="h-11 px-5 bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] border-0 transition-all"
+            style={{ borderRadius: "2px" }}
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -949,7 +932,7 @@ export default function CustomerLookup({
                       </UITooltip>
                     )}
                     {hasSubAccounts && (
-                      <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
+                      <Badge variant="outline" className="text-xs border-accent/50 text-accent">
                         Hub · {subAccounts.length} sub-account{subAccounts.length > 1 ? "s" : ""}
                       </Badge>
                     )}
@@ -1013,7 +996,7 @@ export default function CustomerLookup({
                   Payment History
                 </button>
                 {showPaymentLag && (
-                  <PaymentHistoryCharts
+                  <PaymentHistoryChartsLazy
                     lagData={creditAnalysis.lagData || []}
                     timelineData={creditAnalysis.timelineData || []}
                   />
@@ -1079,7 +1062,7 @@ export default function CustomerLookup({
                 <Button
                   onClick={handleApplyFlag}
                   disabled={isUpdatingFlag}
-                  className="bg-indigo-600 hover:bg-indigo-500 text-white"
+                  className="bg-foreground text-background hover:bg-[hsla(33,95%,55%,0.18)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)]"
                 >
                   {isUpdatingFlag ? (
                     <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />Applying…</>

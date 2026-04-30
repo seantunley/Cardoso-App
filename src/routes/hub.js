@@ -10,8 +10,9 @@ import bcrypt from 'bcryptjs';
 import { readdirSync, statSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
+import { logError } from '../lib/errorLog.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
@@ -121,20 +122,40 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // POST /api/hub/pull-backups-now
   // Immediately triggers a Hub backup pull from all sites (same as the nightly cron).
+  // The async pull's outcome is recorded in hub_settings so the UI can poll
+  // GET /api/hub/last-backup-pull to show success/failure after the fact.
   let backupPullInProgress = false;
+  const setHubSetting = (key, value) => {
+    try {
+      db.prepare(`INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
+    } catch {}
+  };
   router.post('/api/hub/pull-backups-now', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
     if (backupPullInProgress) {
       return res.status(409).json({ error: 'A backup pull is already in progress' });
     }
     backupPullInProgress = true;
+    setHubSetting('last_backup_pull', JSON.stringify({ status: 'running', startedAt: new Date().toISOString() }));
     res.json({ ok: true, message: 'Backup pull started' });
     try {
       await runHubBackupPull();
+      setHubSetting('last_backup_pull', JSON.stringify({ status: 'ok', completedAt: new Date().toISOString() }));
       console.log('[hub] Manual backup pull completed');
     } catch (err) {
-      console.error('[hub] Manual backup pull failed:', err.message);
+      logError('hub.manualBackupPull', err);
+      setHubSetting('last_backup_pull', JSON.stringify({ status: 'error', completedAt: new Date().toISOString(), error: err.message }));
     } finally {
       backupPullInProgress = false;
+    }
+  });
+
+  // GET /api/hub/last-backup-pull — last manual pull outcome (UI polls this)
+  router.get('/api/hub/last-backup-pull', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
+    try {
+      const row = db.prepare(`SELECT value FROM hub_settings WHERE key = 'last_backup_pull'`).get();
+      res.json(row?.value ? JSON.parse(row.value) : { status: 'idle' });
+    } catch (err) {
+      res.json({ status: 'idle' });
     }
   });
 
@@ -362,7 +383,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       }
     }
 
-    const rawSites = db.prepare('SELECT * FROM hub_sites').all();
+    // Narrow column list — UI listing only needs these fields
+    const rawSites = db.prepare(
+      'SELECT id, slug, name, url, last_seen, status, last_kpis FROM hub_sites'
+    ).all();
     const mapped = rawSites.map((s) => ({
       site_id: s.id,
       id: s.id,
@@ -399,7 +423,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let sites;
     try {
-      const allSites = db.prepare('SELECT * FROM hub_sites').all();
+      // Narrow column list — UI listing only needs these fields
+      const allSites = db.prepare(
+        'SELECT id, slug, name, url, last_seen, status, last_kpis FROM hub_sites'
+      ).all();
       if (allowedSlugs === null) {
         // No restrictions — user sees all sites
         sites = allSites;
@@ -475,7 +502,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
 
     let allSites = [];
-    try { allSites = db.prepare('SELECT * FROM hub_sites').all(); } catch {}
+    // Narrow column list — KPI aggregator only needs these fields
+    try { allSites = db.prepare('SELECT id, slug, name, status, last_seen FROM hub_sites').all(); } catch {}
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
@@ -584,6 +612,77 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   });
 
   // GET /api/hub/inventory
+  // GET /api/hub/bat-summary — cross-site BAT reconciliation rollup. Joins
+  // hub_bat_summary with hub_sites for the friendly site name + URL, computes
+  // grand totals across the network.
+  router.get('/api/hub/bat-summary', requireAuth, (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT s.id AS site_id, s.name AS site_name, s.slug AS site_slug, s.url AS site_url, s.status AS site_status, s.last_seen,
+               b.total_supplier, b.total_sage, b.total_variance,
+               b.weeks_count, b.matched_count, b.mismatch_count, b.awaiting_count,
+               b.total_exceptions, b.total_exception_amount,
+               b.last_upload_at, b.synced_at, b.last_error
+        FROM hub_sites s
+        LEFT JOIN hub_bat_summary b ON b.site_id = s.id
+        ORDER BY s.name
+      `).all();
+
+      const sites = rows.map(r => ({
+        site_id: r.site_id,
+        site_name: r.site_name,
+        site_slug: r.site_slug,
+        site_url: r.site_url,
+        site_status: r.site_status,
+        last_seen: r.last_seen,
+        total_supplier: r.total_supplier || 0,
+        total_sage: r.total_sage || 0,
+        total_variance: r.total_variance || 0,
+        weeks_count: r.weeks_count || 0,
+        matched_count: r.matched_count || 0,
+        mismatch_count: r.mismatch_count || 0,
+        awaiting_count: r.awaiting_count || 0,
+        total_exceptions: r.total_exceptions || 0,
+        total_exception_amount: r.total_exception_amount || 0,
+        last_upload_at: r.last_upload_at,
+        synced_at: r.synced_at,
+        last_error: r.last_error,
+        has_data: !!r.synced_at && !r.last_error,
+      }));
+
+      const summary = {
+        site_count: sites.length,
+        sites_with_data: sites.filter(s => s.has_data).length,
+        sites_with_errors: sites.filter(s => s.last_error).length,
+        total_supplier: sites.reduce((s, x) => s + x.total_supplier, 0),
+        total_sage: sites.reduce((s, x) => s + x.total_sage, 0),
+        total_variance: sites.reduce((s, x) => s + x.total_variance, 0),
+        total_weeks: sites.reduce((s, x) => s + x.weeks_count, 0),
+        total_matched: sites.reduce((s, x) => s + x.matched_count, 0),
+        total_mismatch: sites.reduce((s, x) => s + x.mismatch_count, 0),
+        total_awaiting: sites.reduce((s, x) => s + x.awaiting_count, 0),
+        total_exceptions: sites.reduce((s, x) => s + x.total_exceptions, 0),
+        total_exception_amount: sites.reduce((s, x) => s + x.total_exception_amount, 0),
+      };
+
+      res.json({ summary, sites, generated_at: new Date().toISOString() });
+    } catch (err) {
+      console.error('[hub/bat-summary] error:', err);
+      res.status(500).json({ error: 'Failed to fetch BAT summary' });
+    }
+  });
+
+  // POST /api/hub/bat-summary/refresh — triggers an immediate cross-site sync
+  // (uses the existing syncAllSites function which now also pulls BAT summaries).
+  router.post('/api/hub/bat-summary/refresh', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      await syncAllSites();
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/hub/inventory', requireAuth, (req, res) => {
     const { site_id, search, commodity } = req.query;
     let query = 'SELECT hi.*, COALESCE(s.name, hi.site_id) AS site_name FROM hub_inventory hi LEFT JOIN hub_sites s ON s.id = hi.site_id WHERE 1=1';
@@ -795,43 +894,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
-  // GET /api/hub/speedtest — returns speedtest results, optional ?site=slug filter
-  router.get('/api/hub/speedtest', requireAuth, requirePermission('can_access_hub_metrics'), (req, res) => {
-    const { site } = req.query;
-    try {
-      let rows;
-      if (site) {
-        rows = db.prepare('SELECT * FROM hub_speedtest WHERE site_slug = ? ORDER BY site_slug, timestamp DESC').all(site);
-      } else {
-        rows = db.prepare('SELECT * FROM hub_speedtest ORDER BY site_slug, timestamp DESC').all();
-      }
-      res.json({ results: rows });
-    } catch (err) {
-      // If table doesn't exist yet, return empty rather than crashing the page
-      if (err.message?.includes('no such table')) return res.json({ results: [] });
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // POST /api/hub/speedtest/pull — admin only, triggers immediate pull from all sites
-  router.post('/api/hub/speedtest/pull', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
-    try {
-      let pulled = 0;
-      await Promise.allSettled(HUB_SITES.map(async (site) => {
-        try {
-          await syncSpeedtest(site);
-          pulled++;
-        } catch (err) {
-          console.error(`[HUB SPEEDTEST PULL] ${site.slug}:`, err.message);
-        }
-      }));
-      console.log(`[HUB SPEEDTEST PULL] pulled from ${pulled}/${HUB_SITES.length} site(s)`);
-      res.json({ pulled });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // GET /api/hub/ping-status — latest ping result per site
   router.get('/api/hub/ping-status', requireAuth, requirePermission('can_access_hub_metrics'), (req, res) => {
     try {
@@ -926,29 +988,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       sites: results,
       attention: results.some((site) => site.health?.needs_attention),
     });
-  });
-
-  // POST /api/hub/speedtest/run-site — trigger on-demand speedtest on a specific site
-  router.post('/api/hub/speedtest/run-site', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
-    const { slug } = req.body;
-    const site = HUB_SITES.find(s => s.slug === slug);
-    if (!site) return res.status(404).json({ error: 'Site not found' });
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 120_000);
-      const r = await fetch(`${site.url}/api/speedtest/run`, {
-        method: 'POST',
-        signal: controller.signal,
-        headers: { 'x-reporting-token': site.token || '' },
-      });
-      clearTimeout(timeout);
-      if (!r.ok) return res.status(r.status).json({ error: `Site returned ${r.status}` });
-      // Pull fresh results immediately after
-      await syncSpeedtest(site);
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
   });
 
   // POST /api/hub/sync

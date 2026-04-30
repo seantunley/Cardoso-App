@@ -9,6 +9,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import { mkdirSync, writeFileSync, renameSync } from 'fs';
 import path from 'path';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
+import { logError } from '../lib/errorLog.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -188,7 +189,7 @@ async function syncSite(site) {
       const pageUrl = `${site.url}/api/reporting/records${sinceParam}${sinceParam ? '&' : '?'}offset=${offset}&limit=1000`;
       const recRes = await fetch(pageUrl, { headers, signal: ctrl3.signal });
       clearTimeout(t3);
-      if (!recRes.ok) break;
+      if (!recRes.ok) throw new Error(`Records fetch failed at offset ${offset}: HTTP ${recRes.status}`);
       const recData = await recRes.json();
       if (recData.records && recData.records.length > 0) {
         // Log first record diagnostics for account_type/sales_rep tracing
@@ -246,7 +247,7 @@ async function syncSite(site) {
       const invUrl = `${site.url}/api/reporting/inventory?offset=${invOffset}&limit=1000`;
       const invRes = await fetch(invUrl, { headers, signal: ctrlInv.signal });
       clearTimeout(tInv);
-      if (!invRes.ok) break;
+      if (!invRes.ok) throw new Error(`Inventory fetch failed at offset ${invOffset}: HTTP ${invRes.status}`);
       const invData = await invRes.json();
       if (invData.records && invData.records.length > 0) {
         insertInventory(invData.records);
@@ -263,10 +264,75 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
-    // Speedtest results
-    await syncSpeedtest(site);
-
     // Network devices: now served live from ntopng API — no ETL pull here.
+
+    // BAT Reconciliation summary — single-row pull, recorded into hub_bat_summary.
+    // Failures here are logged but don't fail the whole sync (the customer-records
+    // ETL is the primary purpose of this run).
+    try {
+      const ctrlBat = new AbortController();
+      const tBat = setTimeout(() => ctrlBat.abort(), 10000);
+      const batRes = await fetch(`${site.url}/api/reporting/bat-summary`, { headers, signal: ctrlBat.signal });
+      clearTimeout(tBat);
+      if (batRes.ok) {
+        const bat = await batRes.json();
+        db.prepare(`
+          INSERT INTO hub_bat_summary (
+            site_id, total_supplier, total_sage, total_variance,
+            weeks_count, matched_count, mismatch_count, awaiting_count,
+            total_exceptions, total_exception_amount,
+            last_upload_at, synced_at, last_error
+          ) VALUES (
+            @site_id, @total_supplier, @total_sage, @total_variance,
+            @weeks_count, @matched_count, @mismatch_count, @awaiting_count,
+            @total_exceptions, @total_exception_amount,
+            @last_upload_at, @synced_at, NULL
+          )
+          ON CONFLICT(site_id) DO UPDATE SET
+            total_supplier=excluded.total_supplier,
+            total_sage=excluded.total_sage,
+            total_variance=excluded.total_variance,
+            weeks_count=excluded.weeks_count,
+            matched_count=excluded.matched_count,
+            mismatch_count=excluded.mismatch_count,
+            awaiting_count=excluded.awaiting_count,
+            total_exceptions=excluded.total_exceptions,
+            total_exception_amount=excluded.total_exception_amount,
+            last_upload_at=excluded.last_upload_at,
+            synced_at=excluded.synced_at,
+            last_error=NULL
+        `).run({
+          site_id: site.id,
+          total_supplier: bat.total_supplier || 0,
+          total_sage: bat.total_sage || 0,
+          total_variance: bat.total_variance || 0,
+          weeks_count: bat.weeks_count || 0,
+          matched_count: bat.matched_count || 0,
+          mismatch_count: bat.mismatch_count || 0,
+          awaiting_count: bat.awaiting_count || 0,
+          total_exceptions: bat.total_exceptions || 0,
+          total_exception_amount: bat.total_exception_amount || 0,
+          last_upload_at: bat.last_upload_at || null,
+          synced_at: new Date().toISOString(),
+        });
+      } else {
+        const msg = `BAT summary HTTP ${batRes.status}`;
+        db.prepare(`
+          INSERT INTO hub_bat_summary (site_id, last_error, synced_at)
+          VALUES (?, ?, ?)
+          ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
+        `).run(site.id, msg, new Date().toISOString());
+        console.warn(`[HUB] ${site.name}: ${msg}`);
+      }
+    } catch (batErr) {
+      const msg = String(batErr.message || batErr).slice(0, 500);
+      db.prepare(`
+        INSERT INTO hub_bat_summary (site_id, last_error, synced_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
+      `).run(site.id, msg, new Date().toISOString());
+      console.warn(`[HUB] ${site.name}: BAT summary fetch failed: ${msg}`);
+    }
 
     // Update hub_sites
     db.prepare(`
@@ -276,7 +342,7 @@ async function syncSite(site) {
   } catch (err) {
     syncError = err.message;
     db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
-    console.error(`[HUB] Sync error for ${site.slug}:`, err.message);
+    logError('hub.sync', err, { site_slug: site.slug, site_id: site.id });
   }
 
   db.prepare(`
@@ -285,48 +351,6 @@ async function syncSite(site) {
   `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, syncError ? 'error' : 'ok', syncError || null);
 
   return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
-}
-
-async function syncSpeedtest(site) {
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const res = await fetch(`${site.url}/api/speedtest/results`, {
-      headers: { 'Authorization': `Bearer ${site.token}`, 'X-Reporting-Token': site.token },
-      signal: controller.signal,
-    });
-    clearTimeout(timeout);
-    if (!res.ok) {
-      console.warn(`[HUB SPEEDTEST] ${site.slug}: HTTP ${res.status}`);
-      return;
-    }
-    const data = await res.json();
-    const results = data.results || [];
-    const insert = db.prepare(`
-      INSERT OR IGNORE INTO hub_speedtest
-        (site_slug, timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location)
-      VALUES
-        (@site_slug, @timestamp, @download_mbps, @upload_mbps, @ping_ms, @isp, @server_name, @server_location)
-    `);
-    const insertMany = db.transaction((rows) => {
-      for (const r of rows) {
-        insert.run({
-          site_slug: site.slug,
-          timestamp: r.timestamp,
-          download_mbps: r.download_mbps ?? null,
-          upload_mbps: r.upload_mbps ?? null,
-          ping_ms: r.ping_ms ?? null,
-          isp: r.isp ?? null,
-          server_name: r.server_name ?? null,
-          server_location: r.server_location ?? null,
-        });
-      }
-    });
-    insertMany(results);
-    console.log(`[HUB SPEEDTEST] ${site.slug}: upserted ${results.length} result(s)`);
-  } catch (err) {
-    console.error(`[HUB SPEEDTEST] ${site.slug}: ${err.message}`);
-  }
 }
 
 async function syncAllSites() {
@@ -370,7 +394,15 @@ async function runHubBackupPull() {
           signal: controller.signal,
         });
         clearTimeout(hardTimeout);
-        if (!upstream.ok) { console.error(`[HUB BACKUP] ${site.name}: HTTP ${upstream.status}`); return; }
+        if (!upstream.ok) {
+          const msg = `HTTP ${upstream.status}`;
+          logError('hub.backupPull', new Error(msg), { site_name: site.name, site_id: site.id });
+          try {
+            db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
+              .run(site.id, '(download failed)', `pull_failed: ${msg}`);
+          } catch {}
+          return;
+        }
         const buf = Buffer.from(await upstream.arrayBuffer());
         const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
         mkdirSync(dir, { recursive: true });
@@ -380,7 +412,11 @@ async function runHubBackupPull() {
         const integrity = checkBackupIntegrity(site.id, file);
         console.log(`[HUB BACKUP] ${site.name}: saved ${buf.length} bytes -> ${integrity.finalPath} [${integrity.integrity}]`);
       } catch (err) {
-        console.error(`[HUB BACKUP] ${site.name}: ${err.message}`);
+        logError('hub.backupPull', err, { site_name: site.name, site_id: site.id });
+        try {
+          db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
+            .run(site.id, '(download failed)', `pull_failed: ${err.message || 'unknown'}`);
+        } catch {}
       }
     }));
   }
@@ -429,4 +465,4 @@ export async function pingAllSites() {
   }
 }
 
-export { initHubTables, initHubSiteRegistry, syncAllSites, syncSpeedtest, runHubBackupPull, HUB_SITES };
+export { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES };

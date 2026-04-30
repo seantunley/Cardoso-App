@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { reportClientError } from "@/lib/clientLog";
 
 function FilterPill({ active, onClick, children }) {
   return (
@@ -99,7 +100,7 @@ export default function Inventory() {
     fetch("/api/app-info")
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => { if (d?.hub_mode) setHubMode(true); })
-      .catch(() => {});
+      .catch(err => reportClientError("Inventory.appInfo", err));
   }, []);
 
   // Debounce search 200ms
@@ -256,14 +257,16 @@ export default function Inventory() {
       `}</style>
       <div className="inventory-print-scope max-w-7xl mx-auto">
         {/* Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-5 gap-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-muted">
-              <Package className="h-5 w-5 text-muted-foreground" />
+        <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 border-b border-border pb-5">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
+              <Package className="w-3 h-3 text-accent" strokeWidth={1.5} />
+              § Stock
             </div>
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              Every <em className="text-phosphor">unit</em>.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3 font-mono">
                 {(() => {
                   const subtitleParts = [];
                   subtitleParts.push(`${rows.length}${allRows.length !== rows.length ? " of " + allRows.length : ""} item${rows.length !== 1 ? "s" : ""}`);
@@ -277,8 +280,7 @@ export default function Inventory() {
                   if (highlightBelowCost) subtitleParts.push("Price \u2264 cost");
                   return subtitleParts.join(" \u00b7 ");
                 })()}
-              </p>
-            </div>
+            </p>
           </div>
           <div className="flex items-center gap-2 no-print">
             <Tooltip>

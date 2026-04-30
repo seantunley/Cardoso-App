@@ -1,10 +1,76 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useQuery } from "@tanstack/react-query";
 import { Filter, Scale } from "lucide-react";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
 import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+
+// ── Resizable columns ────────────────────────────────────────────────────
+const CB_COLUMN_DEFAULTS = {
+  idx: 40, name: 476, custId: 110, site: 60, rep: 97,
+  lastInv: 107, lastRec: 104, outstanding: 196, credit: 90,
+};
+const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v2";
+
+function useColumnWidths() {
+  const [widths, setWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(CB_COLUMN_WIDTHS_KEY) || "{}");
+      return { ...CB_COLUMN_DEFAULTS, ...saved };
+    } catch {
+      return CB_COLUMN_DEFAULTS;
+    }
+  });
+  const widthsRef = useRef(widths);
+  useEffect(() => {
+    widthsRef.current = widths;
+    try { localStorage.setItem(CB_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+  }, [widths]);
+
+  const startResize = useCallback((id) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = widthsRef.current[id] ?? CB_COLUMN_DEFAULTS[id] ?? 100;
+    const onMove = (ev) => {
+      const next = Math.max(40, startWidth + (ev.clientX - startX));
+      setWidths((w) => ({ ...w, [id]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+
+  const resetColumn = useCallback((id) => {
+    setWidths((w) => ({ ...w, [id]: CB_COLUMN_DEFAULTS[id] ?? 100 }));
+  }, []);
+
+  return { widths, startResize, resetColumn };
+}
+
+function ResizeHandle({ id, startResize, resetColumn }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          onMouseDown={startResize(id)}
+          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetColumn(id); }}
+          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/50 active:bg-accent z-30"
+          style={{ touchAction: "none" }}
+        />
+      </TooltipTrigger>
+      <TooltipContent side="right">Drag to resize · double-click to reset</TooltipContent>
+    </Tooltip>
+  );
+}
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
 function CreditBadge({ row, creditLogicConfig }) {
@@ -44,10 +110,10 @@ function getAccountTypePillClasses(accountType) {
 }
 
 const AGE_BUCKETS = [
-  { value: "all", label: "All" },
-  { value: "7-13", label: "7–13 days" },
+  { value: "all",   label: "All" },
+  { value: "7-13",  label: "7–13 days" },
   { value: "14-20", label: "14–20 days" },
-  { value: "21+", label: "21+ days" },
+  { value: "21+",   label: "21+ days" },
 ];
 
 /* ── print styles (injected once) ── */
@@ -178,10 +244,10 @@ function FilterToggle({ active, onClick, children, tooltip }) {
 }
 
 const AGE_BUCKET_TOOLTIPS = {
-  all: "Show all customers with outstanding balances",
-  "7-13": "Oldest unpaid invoice is 7–13 days old",
-  "14-20": "Oldest unpaid invoice is 14–20 days old",
-  "21+": "Oldest unpaid invoice is 21 or more days old",
+  all:     "Show all customers with outstanding balances",
+  "7-13":  "Customer has at least one unpaid invoice that's 7–13 days old",
+  "14-20": "Customer has at least one unpaid invoice that's 14–20 days old",
+  "21+":   "Customer has at least one unpaid invoice that's 21 or more days old",
 };
 
 function AgeBucketPill({ active, onClick, children, value }) {
@@ -208,13 +274,14 @@ function AgeBucketPill({ active, onClick, children, value }) {
   );
 }
 
-async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoiceMatchesBalance }) {
+async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (siteFilter && siteFilter !== "all") params.set("site", siteFilter);
   if (ageBucket && ageBucket !== "all") params.set("ageBucket", ageBucket);
+  if (salesRepFilter && salesRepFilter !== "all") params.set("salesRep", salesRepFilter);
   if (hideInvoiceMatchesBalance) params.set("hideInvoiceMatchesBalance", "1");
 
   const res = await fetch(`/api/top-balances?${params.toString()}`, { credentials: "include" });
@@ -240,12 +307,13 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, hideInvoic
   return data;
 }
 
-async function fetchAllTopBalances({ siteFilter, ageBucket, hideInvoiceMatchesBalance }) {
+async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }) {
   const firstPage = await fetchTopBalances({
     page: 1,
     limit: 200,
     siteFilter,
     ageBucket,
+    salesRepFilter,
     hideInvoiceMatchesBalance,
   });
 
@@ -258,6 +326,7 @@ async function fetchAllTopBalances({ siteFilter, ageBucket, hideInvoiceMatchesBa
       limit: 200,
       siteFilter,
       ageBucket,
+      salesRepFilter,
       hideInvoiceMatchesBalance,
     });
     allRecords.push(...(pageData.records ?? []));
@@ -289,7 +358,9 @@ export default function CustomerBalances() {
   const [page, setPage] = useState(1);
   const [siteFilter, setSiteFilter] = useState("all");
   const [ageBucket, setAgeBucket] = useState("all");
+  const [salesRepFilter, setSalesRepFilter] = useState("all");
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
+  const { widths: colWidths, startResize, resetColumn } = useColumnWidths();
   const [sortField, setSortField] = useState("outstanding_balance");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -313,8 +384,8 @@ export default function CustomerBalances() {
   }, []);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance],
-    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, hideInvoiceMatchesBalance }),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }),
     staleTime: 60_000,
     keepPreviousData: true,
   });
@@ -322,8 +393,8 @@ export default function CustomerBalances() {
   const totalRecords = data?.total ?? 0;
 
   const { data: printData } = useQuery({
-    queryKey: ["top-balances-print", siteFilter, ageBucket, hideInvoiceMatchesBalance],
-    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, hideInvoiceMatchesBalance }),
+    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance],
+    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }),
     staleTime: 60_000,
     keepPreviousData: true,
     enabled: totalRecords > PAGE_SIZE,
@@ -360,6 +431,12 @@ export default function CustomerBalances() {
         va = (a.customer_name || "").toLowerCase();
         vb = (b.customer_name || "").toLowerCase();
         return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+      } else if (sortField === "customer_number") {
+        va = String(a.customer_number || "");
+        vb = String(b.customer_number || "");
+        return sortDir === "asc"
+          ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" })
+          : vb.localeCompare(va, undefined, { numeric: true, sensitivity: "base" });
       } else if (sortField === "last_invoice_date") {
         va = parseDDMMYYYY(a.last_unpaid_invoice_1_date);
         vb = parseDDMMYYYY(b.last_unpaid_invoice_1_date);
@@ -400,6 +477,9 @@ export default function CustomerBalances() {
   const sites = useMemo(() => {
     return data?.sites ?? [];
   }, [data?.sites]);
+  const salesReps = useMemo(() => {
+    return data?.salesReps ?? [];
+  }, [data?.salesReps]);
 
   useEffect(() => {
     if (data?.page && data.page !== page) setPage(data.page);
@@ -461,12 +541,12 @@ export default function CustomerBalances() {
                   <td className="td-muted">{idx + 1}</td>
                   <td>
                     {fc && <span className={`flag-dot flag-${fc}`} title={row.flag_reason || fc} />}
-                    <strong>{row.customer_name || "—"}</strong>
                     {getVisibleAccountType(row.account_type) && (
-                      <span className={`ml-2 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
+                      <span className={`mr-2 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
                         {getVisibleAccountType(row.account_type)}
                       </span>
                     )}
+                    <strong>{row.customer_name || "—"}</strong>
                   </td>
                   <td className="td-mono td-muted">{row.customer_number || "—"}</td>
                   {sites.length > 1 && <td className="td-muted">{row.site_name || "—"}</td>}
@@ -494,29 +574,57 @@ export default function CustomerBalances() {
       <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
         <div className="max-w-7xl mx-auto">
           {/* Header */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 pb-5 border-b border-border">
             <div>
-              <h1 className="text-2xl font-bold text-foreground">Customer Balances</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">{subtitleParts.join(" · ")}</p>
+              <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+                § Financial
+              </div>
+              <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+                Customer <em className="text-phosphor">balances</em>.
+              </h1>
+              <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3">{subtitleParts.join(" · ")}</p>
             </div>
-            <div className="flex items-center gap-2">
-              {rows.length > 0 && (
-                <button
-                  onClick={() => window.print()}
-                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors cb-no-print min-h-[44px]"
-                  title="Print or save as PDF"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <polyline points="6 9 6 2 18 2 18 9"/>
-                    <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-                    <rect x="6" y="14" width="12" height="8"/>
-                  </svg>
-                  Print / PDF
-                </button>
-              )}
+            <div className="flex items-center gap-2 cb-no-print">
+              <button
+                onClick={() => window.print()}
+                disabled={rows.length === 0}
+                className="flex items-center gap-2 border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+                style={{
+                  borderRadius: "2px",
+                  borderColor: 'var(--phosphor)',
+                  color: 'var(--phosphor)',
+                  background: 'hsla(33, 95%, 55%, 0.08)',
+                }}
+                onMouseEnter={(e) => {
+                  if (e.currentTarget.disabled) return;
+                  e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.18)';
+                  e.currentTarget.style.boxShadow = '0 0 12px hsla(33,95%,55%,0.35)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.08)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+                title="Print or save as PDF"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="6 9 6 2 18 2 18 9"/>
+                  <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                  <rect x="6" y="14" width="12" height="8"/>
+                </svg>
+                Print / PDF
+              </button>
               <button
                 onClick={() => refetch()}
-                className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors min-h-[44px]"
+                className="flex items-center gap-2 border border-border bg-card px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors min-h-[40px]"
+                style={{ borderRadius: "2px" }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--phosphor)';
+                  e.currentTarget.style.color = 'var(--phosphor)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'hsl(var(--border))';
+                  e.currentTarget.style.color = 'hsl(var(--muted-foreground))';
+                }}
               >
                 <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M23 4v6h-6M1 20v-6h6"/>
@@ -569,6 +677,21 @@ export default function CustomerBalances() {
                       >
                         <option value="all">All sites</option>
                         {sites.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  )}
+
+                  {salesReps.length > 0 && (
+                    <div className="flex flex-col gap-2">
+                      <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Sales rep</label>
+                      <select
+                        value={salesRepFilter}
+                        onChange={(e) => { setSalesRepFilter(e.target.value); setPage(1); }}
+                        style={{ colorScheme }}
+                        className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        <option value="all">All reps</option>
+                        {salesReps.map((r) => <option key={r} value={r}>{r}</option>)}
                       </select>
                     </div>
                   )}
@@ -637,18 +760,29 @@ export default function CustomerBalances() {
               className="rounded-xl border border-border bg-card overflow-hidden"
               style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
             >
-              <table className="w-full text-sm">
+              <table className="text-sm" style={{ tableLayout: "fixed", width: Object.values(colWidths).reduce((s, v) => s + v, 0) }}>
+                <colgroup>
+                  <col style={{ width: colWidths.idx }} />
+                  <col style={{ width: colWidths.name }} />
+                  <col style={{ width: colWidths.custId }} />
+                  <col style={{ width: colWidths.site }} />
+                  <col style={{ width: colWidths.rep }} />
+                  <col style={{ width: colWidths.lastInv }} />
+                  <col style={{ width: colWidths.lastRec }} />
+                  <col style={{ width: colWidths.outstanding }} />
+                  <col style={{ width: colWidths.credit }} />
+                </colgroup>
                 <thead className="sticky top-0 z-20">
                   <tr className="border-b border-border bg-card">
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide w-6">#</th>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Customer Name<SortArrow field="customer_name" /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer ID</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Site</th>
-                    <th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Sales Rep</th>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_invoice_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Invoice<SortArrow field="last_invoice_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent unpaid invoice — click to sort</TooltipContent></Tooltip>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_receipt_date")} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Last Receipt<SortArrow field="last_receipt_date" /></th></TooltipTrigger><TooltipContent>Date of the most recent payment received — click to sort</TooltipContent></Tooltip>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("outstanding_balance")} className="px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Outstanding Balance<SortArrow field="outstanding_balance" /></th></TooltipTrigger><TooltipContent>Total amount currently owed — click to sort</TooltipContent></Tooltip>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("credit")} className="px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors">Credit<SortArrow field="credit" /></th></TooltipTrigger><TooltipContent>Credit verdict based on payment history and outstanding balance — click to sort</TooltipContent></Tooltip>
+                    <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">#<ResizeHandle id="idx" startResize={startResize} resetColumn={resetColumn} /></th>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer Name<SortArrow field="customer_name" /></span><ResizeHandle id="name" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_number")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer ID<SortArrow field="customer_number" /></span><ResizeHandle id="custId" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer account number — click to sort (numeric-aware)</TooltipContent></Tooltip>
+                    <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Site</span><ResizeHandle id="site" startResize={startResize} resetColumn={resetColumn} /></th>
+                    <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Sales Rep</span><ResizeHandle id="rep" startResize={startResize} resetColumn={resetColumn} /></th>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_invoice_date")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Last Invoice<SortArrow field="last_invoice_date" /></span><ResizeHandle id="lastInv" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Date of the most recent unpaid invoice — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_receipt_date")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Last Receipt<SortArrow field="last_receipt_date" /></span><ResizeHandle id="lastRec" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Date of the most recent payment received — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("outstanding_balance")} className="relative px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Outstanding Balance<SortArrow field="outstanding_balance" /></span><ResizeHandle id="outstanding" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Total amount currently owed — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("credit")} className="relative px-2 py-1.5 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Credit<SortArrow field="credit" /></span><ResizeHandle id="credit" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Credit verdict based on payment history and outstanding balance — click to sort</TooltipContent></Tooltip>
                   </tr>
                 </thead>
                 <tbody>
@@ -665,14 +799,14 @@ export default function CustomerBalances() {
                         <td className="px-2 py-1">
                           <div className="flex items-center gap-1.5">
                             <FlagDot color={row.flag_color} reason={row.flag_reason} />
-                            <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
-                              {row.customer_name || "—"}
-                            </span>
                             {getVisibleAccountType(row.account_type) && (
-                              <span className={`ml-1.5 inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
+                              <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
                                 {getVisibleAccountType(row.account_type)}
                               </span>
                             )}
+                            <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
+                              {row.customer_name || "—"}
+                            </span>
                           </div>
                         </td>
                         <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>

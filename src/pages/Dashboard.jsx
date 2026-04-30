@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
-import { FileText, Database, Flag, Clock } from "lucide-react";
+import { Database } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 function relativeTime(dateStr) {
@@ -9,29 +9,29 @@ function relativeTime(dateStr) {
   if (diff < 0) return "just now";
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins !== 1 ? "s" : ""} ago`;
+  if (mins < 60) return `${mins}m ago`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hour${hrs !== 1 ? "s" : ""} ago`;
+  if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  return `${days} day${days !== 1 ? "s" : ""} ago`;
+  return `${days}d ago`;
 }
 
-const FLAG_COLORS = {
-  red: "bg-red-500",
-  orange: "bg-orange-400",
-  green: "bg-green-500",
-  none: "bg-muted-foreground/40",
-};
+const FLAGS = [
+  { key: "red",    label: "blocked",    hue: "hsl(0 72% 50%)",   glow: "hsla(0, 72%, 50%, 0.35)" },
+  { key: "orange", label: "attention",  hue: "hsl(33 95% 55%)",  glow: "hsla(33, 95%, 55%, 0.35)" },
+  { key: "green",  label: "good",       hue: "hsl(145 55% 45%)", glow: "hsla(145, 55%, 45%, 0.25)" },
+  { key: "none",   label: "unflagged",  hue: "hsl(30 10% 42%)",  glow: "transparent" },
+];
 
 const FLAG_TOOLTIPS = {
-  red: "Red — blocked or high-risk customers",
-  orange: "Orange — caution, requires attention",
-  green: "Green — good standing",
-  none: "No flag — unflagged records",
+  red: "Blocked or high-risk — do not extend credit",
+  orange: "Caution required — review before action",
+  green: "Good standing — no concerns",
+  none: "Unflagged — not yet categorised",
 };
 
 export default function Dashboard() {
-  const { data: kpis, isError: kpisError } = useQuery({
+  const { data: kpis, isError: kpisError, isLoading } = useQuery({
     queryKey: ["kpis"],
     queryFn: () => api.kpis(),
     staleTime: 30_000,
@@ -42,23 +42,24 @@ export default function Dashboard() {
     queryFn: () => api.entities.DatabaseConnection.list(),
   });
 
-  const totalRecords = kpisError ? "--" : (kpis?.total_records?.toLocaleString("en-US") ?? "--");
+  const totalRecords = kpisError ? "—" : (kpis?.total_records?.toLocaleString("en-US") ?? "—");
   const flags = kpis?.records_by_flag ?? {};
   const lastSync = kpis?.last_sync_at ?? null;
   const activeCount = connections.filter((c) => c.status === "active").length;
+  const flaggedTotal = (flags.red || 0) + (flags.orange || 0);
+  const flaggedRatio = kpis?.total_records ? ((flaggedTotal / kpis.total_records) * 100).toFixed(1) : "—";
 
   if (connections.length === 0 && !kpis) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="max-w-7xl mx-auto p-6 lg:p-8 space-y-8">
-          <div>
-            <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
-            <p className="text-muted-foreground mt-1">Overview of your data sync system</p>
-          </div>
-          <div className="flex flex-col items-center justify-center py-20 rounded-2xl border border-border bg-card">
-            <Database className="w-12 h-12 text-muted-foreground mb-4" />
-            <h3 className="text-lg font-medium text-foreground">No connections set up yet</h3>
-            <p className="text-muted-foreground mt-1">Set up a connection to start syncing data</p>
+        <div className="max-w-7xl mx-auto px-8 py-16">
+          <Header />
+          <div className="mt-16 border border-border py-24 text-center">
+            <Database className="w-10 h-10 mx-auto mb-6 text-muted-foreground/60" strokeWidth={1} />
+            <h3 className="font-display text-3xl text-foreground mb-2">No connections configured</h3>
+            <p className="text-sm text-muted-foreground max-w-sm mx-auto">
+              Set up your first database connection to begin ledgering customer records.
+            </p>
           </div>
         </div>
       </div>
@@ -67,103 +68,167 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6 lg:p-8 space-y-8">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground tracking-tight">Dashboard</h1>
-          <p className="text-muted-foreground mt-1">Overview of your data sync system</p>
-        </div>
+      <div className="max-w-7xl mx-auto px-8 py-10 lg:py-16">
+        <Header subtitle={lastSync ? `Last sync ${relativeTime(lastSync)}` : "Awaiting first sync"} />
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* Total Records */}
+        {/* ── Hero KPI row — oversized numbers, minimal chrome ── */}
+        <div className="mt-12 grid grid-cols-1 lg:grid-cols-12 gap-px bg-border border border-border stagger-in">
+          {/* Total Records — the headline number */}
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="rounded-2xl border border-border bg-card p-6 cursor-default">
+              <div className="lg:col-span-5 bg-card px-8 py-10 flex flex-col justify-between min-h-[240px] cursor-default group">
                 <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Total Records</p>
-                    <p className="text-4xl font-bold text-foreground tracking-tight">{totalRecords}</p>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    01 · Records on file
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {activeCount}/{connections.length} active
+                  </span>
+                </div>
+                <div>
+                  <div className="font-display text-7xl lg:text-[7rem] leading-none text-foreground tracking-tight tabular-nums">
+                    {isLoading ? <span className="text-muted-foreground/40">0</span> : totalRecords}
                   </div>
-                  <div className="p-3 rounded-xl bg-muted">
-                    <FileText className="w-6 h-6 text-muted-foreground" />
-                  </div>
+                  <div className="mt-3 h-px bg-border group-hover:bg-accent transition-colors" />
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Customer records synced across all connections
+                  </p>
                 </div>
               </div>
             </TooltipTrigger>
             <TooltipContent>Total customer records synced from all active connections</TooltipContent>
           </Tooltip>
 
-          {/* Connections */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="rounded-2xl border border-border bg-card p-6 cursor-default">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Connections</p>
-                    <p className="text-4xl font-bold text-foreground tracking-tight">{connections.length}</p>
-                    <p className="text-sm text-muted-foreground">{activeCount} active</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-muted">
-                    <Database className="w-6 h-6 text-muted-foreground" />
-                  </div>
-                </div>
-              </div>
-            </TooltipTrigger>
-            <TooltipContent>Configured database connections — {activeCount} currently active and syncing</TooltipContent>
-          </Tooltip>
+          {/* Flag breakdown — the core workflow visualized */}
+          <div className="lg:col-span-4 bg-card px-8 py-10 flex flex-col justify-between">
+            <div className="flex items-start justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                02 · Flag distribution
+              </span>
+              <span className="font-mono text-[10px] text-accent">
+                {flaggedRatio}% flagged
+              </span>
+            </div>
+            <div className="space-y-3">
+              {FLAGS.map((f) => {
+                const count = flags[f.key] ?? 0;
+                const total = kpis?.total_records || 1;
+                const pct = Math.min(100, (count / total) * 100);
+                return (
+                  <Tooltip key={f.key}>
+                    <TooltipTrigger asChild>
+                      <div className="group cursor-default">
+                        <div className="flex items-baseline justify-between mb-1">
+                          <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {f.label}
+                          </span>
+                          <span className="font-mono text-sm font-medium text-foreground tabular-nums">
+                            {count.toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="h-1 bg-muted overflow-hidden">
+                          <div
+                            className="h-full transition-all duration-700 ease-out"
+                            style={{
+                              width: `${pct}%`,
+                              background: f.hue,
+                              boxShadow: `0 0 12px ${f.glow}`,
+                            }}
+                          />
+                        </div>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent>{FLAG_TOOLTIPS[f.key]}</TooltipContent>
+                  </Tooltip>
+                );
+              })}
+            </div>
+          </div>
 
-          {/* Flags */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="rounded-2xl border border-border bg-card p-6 cursor-default">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Flags</p>
-                    <div className="flex items-center gap-2 pt-1">
-                      {["red", "orange", "green", "none"].map((color) => (
-                        <Tooltip key={color}>
-                          <TooltipTrigger asChild>
-                            <div className="flex items-center gap-1 cursor-default">
-                              <span className={`inline-block h-3 w-3 rounded-full ${FLAG_COLORS[color]}`} />
-                              <span className="text-sm font-semibold text-foreground">{flags[color] ?? 0}</span>
-                            </div>
-                          </TooltipTrigger>
-                          <TooltipContent>{FLAG_TOOLTIPS[color]}</TooltipContent>
-                        </Tooltip>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="p-3 rounded-xl bg-muted">
-                    <Flag className="w-6 h-6 text-muted-foreground" />
-                  </div>
+          {/* System pulse — connections + sync status */}
+          <div className="lg:col-span-3 bg-card px-8 py-10 flex flex-col justify-between">
+            <div>
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                03 · System
+              </span>
+            </div>
+            <div className="space-y-6">
+              <div>
+                <div className="font-display text-5xl leading-none text-foreground tabular-nums">
+                  {connections.length}
+                </div>
+                <div className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  connections · <span className={activeCount > 0 ? "text-accent" : ""}>{activeCount} live</span>
                 </div>
               </div>
-            </TooltipTrigger>
-            <TooltipContent>Records broken down by flag colour — hover each dot for details</TooltipContent>
-          </Tooltip>
+              <div>
+                <div className="font-mono text-xl text-foreground tabular-nums">
+                  {relativeTime(lastSync)}
+                </div>
+                <div className="mt-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  last sync
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-          {/* Last Synced */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <div className="rounded-2xl border border-border bg-card p-6 cursor-default">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium text-muted-foreground uppercase tracking-wide">Last Synced</p>
-                    <p className="text-2xl font-bold text-foreground tracking-tight">{relativeTime(lastSync)}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-muted">
-                    <Clock className="w-6 h-6 text-muted-foreground" />
-                  </div>
+        {/* ── Flagged priority strip — only visible if flagged records exist ── */}
+        {flaggedTotal > 0 && (
+          <div className="mt-px border border-border bg-card px-8 py-5 flex items-center justify-between gap-6">
+            <div className="flex items-center gap-5">
+              <div
+                className="w-1 h-10"
+                style={{ background: "hsl(0 72% 50%)", boxShadow: "0 0 20px hsla(0, 72%, 50%, 0.5)" }}
+              />
+              <div>
+                <div className="font-display text-2xl leading-tight text-foreground">
+                  {flaggedTotal.toLocaleString()}
+                  <span className="text-muted-foreground font-sans text-base font-normal ml-2">
+                    records require attention
+                  </span>
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  <span className="font-mono text-destructive">{flags.red || 0} blocked</span>
+                  <span className="mx-2 text-border">·</span>
+                  <span className="font-mono text-accent">{flags.orange || 0} caution</span>
+                </p>
               </div>
-            </TooltipTrigger>
-            <TooltipContent>
-              {lastSync
-                ? `Last sync completed: ${new Date(lastSync).toLocaleString("en-ZA")}`
-                : "No sync has completed yet"}
-            </TooltipContent>
-          </Tooltip>
+            </div>
+          </div>
+        )}
+
+        {/* Footer signature */}
+        <div className="mt-16 pt-6 border-t border-border flex items-baseline justify-between">
+          <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+            Cardoso / Ledger
+          </span>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {new Date().toISOString().split("T")[0]}
+          </span>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Header({ subtitle }) {
+  return (
+    <div className="flex items-end justify-between gap-8 border-b border-border pb-6">
+      <div>
+        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+          § Overview
+        </div>
+        <h1 className="font-display text-5xl lg:text-6xl leading-[0.95] text-foreground tracking-tight">
+          The <em className="text-phosphor">ledger</em>,<br />
+          at a glance.
+        </h1>
+      </div>
+      {subtitle && (
+        <div className="hidden md:block font-mono text-xs text-muted-foreground pb-2 whitespace-nowrap">
+          {subtitle}
+        </div>
+      )}
     </div>
   );
 }

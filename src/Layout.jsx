@@ -67,7 +67,47 @@ const IconInventory = ({ className, style }) => (
     <line x1="6" y1="6.5" x2="14" y2="6.5" stroke="#f97316" strokeWidth="1"/>
   </svg>
 );
-import { BarChart2, PhoneCall, TrendingUp } from "lucide-react";
+
+// Reconciliation — phosphor pulse cutting through stacked ledger rows.
+// Teal rows = static records; amber waveform = live matching across them.
+const IconReports = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Document base with phosphor amber border-left */}
+    <rect x="3" y="2.5" width="13" height="15" rx="1.2" fill="hsl(33 95% 55%)" opacity="0.10"/>
+    <rect x="3" y="2.5" width="0.7" height="15" fill="hsl(33 95% 55%)"/>
+    {/* Bar chart bars in colourful palette */}
+    <rect x="5"   y="11" width="1.6" height="4.5" rx="0.2" fill="hsl(33 95% 55%)"/>
+    <rect x="7.2" y="8.5" width="1.6" height="7"   rx="0.2" fill="hsl(145 55% 45%)"/>
+    <rect x="9.4" y="10" width="1.6" height="5.5" rx="0.2" fill="hsl(200 80% 55%)"/>
+    <rect x="11.6" y="6.5" width="1.6" height="9" rx="0.2" fill="hsl(280 70% 65%)"/>
+    {/* Header lines (title bars) */}
+    <line x1="5" y1="4.5" x2="13.5" y2="4.5" stroke="hsl(var(--foreground))" strokeWidth="0.7" opacity="0.7"/>
+    <line x1="5" y1="6.2" x2="11"   y2="6.2" stroke="hsl(var(--foreground))" strokeWidth="0.5" opacity="0.4"/>
+    {/* Trend line dot */}
+    <circle cx="13.5" cy="5.5" r="0.6" fill="hsl(0 72% 50%)"/>
+  </svg>
+);
+
+const IconReconciliation = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Subtle ledger frame */}
+    <rect x="1.5" y="3" width="17" height="14" rx="1.2" fill="#0d9488" opacity="0.12"/>
+    {/* Stacked ledger rows */}
+    <line x1="3" y1="5.5"  x2="17" y2="5.5"  stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="8"    x2="17" y2="8"    stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="12"   x2="17" y2="12"   stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    <line x1="3" y1="14.5" x2="17" y2="14.5" stroke="#14b8a6" strokeWidth="0.7" opacity="0.55"/>
+    {/* Soft phosphor halo behind the pulse */}
+    <path d="M1 10 L4 10 L5.5 7 L7.5 13 L9.5 8 L11.5 12 L13.5 9.5 L19 9.5"
+          stroke="#f59e0b" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" fill="none" opacity="0.25"/>
+    {/* Phosphor pulse waveform */}
+    <path d="M1 10 L4 10 L5.5 7 L7.5 13 L9.5 8 L11.5 12 L13.5 9.5 L19 9.5"
+          stroke="#f59e0b" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Leading-edge dot */}
+    <circle cx="19" cy="9.5" r="1.1" fill="#f59e0b"/>
+  </svg>
+);
+import { BarChart2, PhoneCall, TrendingUp, FileBarChart, GitCompare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { useEffect, useState } from "react";
@@ -75,6 +115,8 @@ import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import ChangePasswordModal from "@/components/users/ChangePasswordModal";
 import SettingsPanel from "@/components/settings/SettingsPanel";
+import { toast } from "sonner";
+import { reportClientError } from "@/lib/clientLog";
 
 const APP_VERSION = "2026.3.9";
 
@@ -85,11 +127,14 @@ const navItems = [
   { name: "Collections",         icon: PhoneCall,            page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,        page: "Inventory",        permission: "can_access_inventory" },
   { name: "Network Devices",     icon: Network,              page: "NetworkDevices",   permission: "can_access_network_devices" },
+  { name: "Reconciliation",      icon: GitCompare,           page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
   { name: "Site Metrics",        icon: BarChart2,            page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
   { name: "Site Backups",        icon: IconSiteBackups,      page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: TrendingUp,           page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Hub Audit Log",       icon: ClipboardList,        page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
   { name: "Credit Debug",        icon: FlaskConical,         page: "CreditDebug",      adminOnly: true },
+  { name: "Reconciliation",      icon: GitCompare,           page: "Reconciliation",   permission: "can_access_reconciliation" },
+  { name: "Reports",             icon: FileBarChart,         page: "Reports",          permission: "can_access_reports" },
 ];
 
 export default function Layout({ children, currentPageName }) {
@@ -115,7 +160,7 @@ export default function Layout({ children, currentPageName }) {
     fetch("/api/app-info")
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(() => {});
+      .catch(err => reportClientError("Layout.appInfo", err));
   }, []);
 
   useEffect(() => {
@@ -130,7 +175,7 @@ export default function Layout({ children, currentPageName }) {
           updateAvailable: Boolean(d.updateAvailable),
         });
       })
-      .catch(() => {});
+      .catch(err => reportClientError("Layout.versionStatus", err));
     return () => { isMounted = false; };
   }, [currentUser]);
 
@@ -210,119 +255,203 @@ export default function Layout({ children, currentPageName }) {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <aside className={cn(
-        "fixed top-0 left-0 z-50 hidden h-full flex-col border-r bg-card lg:flex border-border transition-all duration-200 ease-out",
-        isCollapsed ? "w-14" : "w-56"
-      )}>
-        <div className={"border-b border-border px-3 pt-6 pb-3"}>
-          <div className={cn("flex items-center mb-0 w-full", isCollapsed ? "justify-center" : "gap-3")}>
-            <div className="rounded-lg shrink-0 overflow-hidden" style={{width:"32px",height:"32px"}}>
-              <svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="32" height="32">
-                <rect width="32" height="32" rx="7" fill="#1e293b"/>
-                <rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bc32)"/>
-                <rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/>
-                <rect x="13" y="17" width="6" height="6" rx="1.5" fill="#bfdbfe"/>
-                <path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#93c5fd" strokeWidth="2" strokeLinecap="round" fill="none"/>
-                <defs><linearGradient id="bc32" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs>
-              </svg>
-            </div>
-            <div className={cn("min-w-0 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "w-full opacity-100")}>
-                <h1 className="font-semibold text-base text-foreground leading-tight whitespace-nowrap">Cardoso Cigarettes</h1>
-                <p className="text-xs text-muted-foreground whitespace-nowrap">Business System</p>
+      <aside
+        className={cn(
+          "fixed top-0 left-0 z-50 hidden h-full flex-col lg:flex transition-all duration-300 ease-out",
+          isCollapsed ? "w-14" : "w-60"
+        )}
+        style={{
+          background: "hsl(var(--sidebar-background))",
+          color: "hsl(var(--sidebar-foreground))",
+          borderRight: "1px solid hsl(var(--sidebar-border))",
+        }}
+      >
+        {/* ── Brand block ── */}
+        <div className="px-3 pt-6 pb-5" style={{ borderBottom: "1px solid hsl(var(--sidebar-border))" }}>
+          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-3")}>
+            {/* Signature phosphor square */}
+            <div
+              className="shrink-0"
+              style={{
+                width: "22px",
+                height: "22px",
+                background: "var(--phosphor)",
+                boxShadow: "0 0 20px hsla(33, 95%, 55%, 0.5)",
+              }}
+            />
+            <div
+              className={cn(
+                "min-w-0 overflow-hidden transition-all duration-200 ease-out",
+                isCollapsed ? "w-0 opacity-0" : "w-full opacity-100"
+              )}
+            >
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[hsl(var(--sidebar-foreground))/0.6] whitespace-nowrap">
+                Cardoso
               </div>
+              <div className="font-display text-lg leading-tight text-[hsl(var(--sidebar-foreground))] whitespace-nowrap">
+                Ledger
+              </div>
+            </div>
           </div>
-          {currentUser && (
-            <div className={cn("mt-6 rounded-lg bg-muted px-2.5 py-1.5 overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0 mt-0 py-0 px-0" : "max-h-20 opacity-100")}>
-              <p className="truncate text-xs font-medium text-foreground leading-tight">{currentUser.full_name || "User"}</p>
-              <p className="truncate text-[11px] text-muted-foreground">{currentUser.email}</p>
+          {currentUser && !isCollapsed && (
+            <div className="mt-6 space-y-1">
+              <p
+                className="truncate font-mono text-[10px] uppercase tracking-[0.2em]"
+                style={{ color: "hsla(var(--sidebar-foreground), 0.5)" }}
+              >
+                Operator
+              </p>
+              <p className="truncate text-xs font-medium text-[hsl(var(--sidebar-foreground))]">
+                {currentUser.full_name || "User"}
+              </p>
+              <p className="truncate font-mono text-[10px]" style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}>
+                {currentUser.email}
+              </p>
             </div>
           )}
         </div>
-        <nav className={cn("flex-1 space-y-1", isCollapsed ? "p-2 flex flex-col items-center" : "p-3")}>
-          {visibleNavItems.map((item) => {
-            const isActive = currentPageName === item.page;
-            const showAttention = item.page === "HubBackups" && backupAttention;
-            return (
-              <Link
-                key={item.page}
-                to={`/${item.page}`}
-                title={isCollapsed ? item.name : undefined}
-                className={cn(
-                  "relative flex items-center rounded-lg text-xs font-medium transition-all duration-200",
-                  isActive
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  isCollapsed
-                    ? "justify-center w-8 h-8 mx-auto"
-                    : "gap-2.5 px-3 py-2 w-full"
-                )}
-              >
-                <item.icon className="h-5 w-5 shrink-0" />
-                {showAttention && (
-                  <span className={cn(
-                    "absolute inline-flex h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ring-card",
-                    isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
-                  )} />
-                )}
-                <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{item.name}</span>
-              </Link>
-            );
-          })}
+
+        {/* ── Nav items — terminal list with phosphor left-bar on active ── */}
+        <nav className={cn("flex-1 overflow-y-auto", isCollapsed ? "py-3 px-1 flex flex-col items-center" : "py-3 px-3")}>
+          {!isCollapsed && (
+            <div
+              className="px-2 pb-2 mb-1 font-mono text-[9px] uppercase tracking-[0.25em]"
+              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
+            >
+              § Navigation
+            </div>
+          )}
+          <div className={cn("space-y-0.5", isCollapsed && "flex flex-col items-center w-full")}>
+            {visibleNavItems.map((item) => {
+              const isActive = currentPageName === item.page;
+              const showAttention = item.page === "HubBackups" && backupAttention;
+              return (
+                <Link
+                  key={item.page}
+                  to={`/${item.page}`}
+                  title={isCollapsed ? item.name : undefined}
+                  className={cn(
+                    "relative flex items-center text-xs font-medium transition-colors duration-150 group",
+                    isCollapsed ? "justify-center w-10 h-10 mx-auto" : "gap-3 pl-4 pr-2 py-2.5 w-full text-sm"
+                  )}
+                  style={{
+                    color: isActive
+                      ? "hsl(var(--sidebar-accent-foreground))"
+                      : "hsla(var(--sidebar-foreground), 0.65)",
+                    background: isActive ? "hsl(var(--sidebar-accent))" : "transparent",
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "hsl(var(--sidebar-foreground))"; }}
+                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.65)"; }}
+                >
+                  {/* Phosphor active indicator — left bar */}
+                  {isActive && (
+                    <span
+                      className="absolute left-0 top-1 bottom-1 w-[2px]"
+                      style={{
+                        background: "var(--phosphor)",
+                        boxShadow: "0 0 12px hsla(33, 95%, 55%, 0.7)",
+                      }}
+                    />
+                  )}
+                  <item.icon className="h-6 w-6 shrink-0" />
+                  {showAttention && (
+                    <span
+                      className={cn(
+                        "absolute inline-flex h-1.5 w-1.5",
+                        isCollapsed ? "top-1.5 right-1.5" : "top-2.5 right-2.5"
+                      )}
+                      style={{
+                        background: "var(--phosphor)",
+                        boxShadow: "0 0 8px hsla(33, 95%, 55%, 0.8)",
+                      }}
+                    />
+                  )}
+                  <span
+                    className={cn(
+                      "overflow-hidden whitespace-nowrap transition-all duration-200 ease-out tracking-tight",
+                      isCollapsed ? "w-0 opacity-0" : "opacity-100"
+                    )}
+                  >
+                    {item.name}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
         </nav>
-        <div className={cn("border-t border-border", isCollapsed ? "p-2 flex flex-col items-center space-y-1" : "space-y-0.5 p-3")}>
+        <div
+          className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "space-y-0 p-3")}
+          style={{ borderTop: "1px solid hsl(var(--sidebar-border))" }}
+        >
+          {!isCollapsed && (
+            <div
+              className="px-2 pb-2 font-mono text-[9px] uppercase tracking-[0.25em]"
+              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
+            >
+              § Controls
+            </div>
+          )}
           {canSeeSettings && (
-            <button
-              onClick={() => setSettingsOpen(true)} title={isCollapsed ? "Settings" : undefined}
-              className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-              <Settings className="h-4 w-4 shrink-0" />
-              <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Settings</span>
-            </button>
+            <SidebarButton
+              onClick={() => setSettingsOpen(true)}
+              icon={Settings}
+              label="Settings"
+              collapsed={isCollapsed}
+            />
           )}
 
-          <button
+          <SidebarButton
             onClick={() => {
               const next = theme === 'dark' ? 'light' : 'dark';
               setTheme(next);
               applyTheme(next);
-              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {});
+              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
+                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+                .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
             }}
-            title={isCollapsed ? (theme === 'dark' ? 'Light Mode' : 'Dark Mode') : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            {theme === 'dark' ? <Sun className="h-4 w-4 shrink-0" /> : <Moon className="h-4 w-4 shrink-0" />}
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
-          </button>
+            icon={theme === 'dark' ? Sun : Moon}
+            label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => setChangePasswordOpen(true)} title={isCollapsed ? "Change Password" : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            <KeyRound className="h-4 w-4 shrink-0" />
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Change Password</span>
-          </button>
+          <SidebarButton
+            onClick={() => setChangePasswordOpen(true)}
+            icon={KeyRound}
+            label="Password"
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => logout(true)} title={isCollapsed ? "Logout" : undefined}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            <LogOut className="h-4 w-4 shrink-0" />
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Logout</span>
-          </button>
+          <SidebarButton
+            onClick={() => logout(true)}
+            icon={LogOut}
+            label="Logout"
+            collapsed={isCollapsed}
+          />
 
-          <button
-            onClick={() => setIsCollapsed(!isCollapsed)} title={isCollapsed ? "Expand" : "Collapse"}
-            className={cn("flex items-center rounded-lg text-xs font-medium transition-all duration-200 text-muted-foreground hover:bg-muted hover:text-foreground", isCollapsed ? "justify-center w-8 h-8" : "gap-2.5 px-3 py-2 w-full")}>
-            {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
-            <span className={cn("overflow-hidden whitespace-nowrap transition-all duration-200 ease-out", isCollapsed ? "w-0 opacity-0" : "opacity-100")}>Collapse</span>
-          </button>
+          <SidebarButton
+            onClick={() => setIsCollapsed(!isCollapsed)}
+            icon={isCollapsed ? ChevronRight : ChevronLeft}
+            label="Collapse"
+            collapsed={isCollapsed}
+          />
 
-          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-20 opacity-100")}>
+          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-24 opacity-100")}>
             <div
               className={cn(
-                "mt-1 rounded-md border px-2 py-1 text-center text-[10px] transition-colors",
-                versionStatus.updateAvailable && isAdmin
-                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300 cursor-pointer hover:bg-yellow-500/25"
-                  : versionStatus.updateAvailable
-                  ? "border-yellow-500/40 bg-yellow-500/15 text-yellow-300"
-                  : "border-transparent text-muted-foreground/50"
+                "mt-3 mx-1 px-2 py-1.5 transition-colors font-mono text-[9px] uppercase tracking-[0.2em]",
+                versionStatus.updateAvailable && isAdmin ? "cursor-pointer" : ""
               )}
+              style={{
+                borderLeft: versionStatus.updateAvailable
+                  ? "2px solid var(--phosphor)"
+                  : "2px solid transparent",
+                color: versionStatus.updateAvailable
+                  ? "var(--phosphor)"
+                  : "hsla(var(--sidebar-foreground), 0.35)",
+                background: versionStatus.updateAvailable && isAdmin
+                  ? "hsla(33, 95%, 55%, 0.05)"
+                  : "transparent",
+              }}
               title={
                 versionStatus.updateAvailable
                   ? isAdmin
@@ -334,43 +463,59 @@ export default function Layout({ children, currentPageName }) {
               }
               onClick={versionStatus.updateAvailable && isAdmin && !showUpdateConfirm ? triggerUpdate : undefined}
             >
-              <p>v{versionStatus.currentVersion}</p>
+              <div className="flex items-center justify-between">
+                <span>Build</span>
+                <span className="tabular-nums" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>
+                  v{versionStatus.currentVersion}
+                </span>
+              </div>
               {versionStatus.updateAvailable && (
                 updateInstalling
-                  ? <p className="font-medium animate-pulse">Installing…</p>
+                  ? <p className="mt-1 animate-pulse">Installing…</p>
                   : showUpdateConfirm
                   ? (
-                    <div className="mt-1 space-y-1">
-                      <p className="font-medium text-yellow-300">Install now?</p>
-                      <div className="flex gap-1 justify-center">
-                        <button
-                          onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
-                          className="px-2 py-0.5 rounded text-[10px] bg-yellow-500/30 hover:bg-yellow-500/50 text-yellow-200 font-semibold"
-                        >Install</button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
-                          className="px-2 py-0.5 rounded text-[10px] bg-muted hover:bg-muted/80 text-muted-foreground"
-                        >Cancel</button>
-                      </div>
+                    <div className="mt-1.5 flex gap-1">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
+                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] border border-current hover:bg-current hover:text-[hsl(var(--sidebar-background))] transition-colors"
+                      >Install</button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
+                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] hover:bg-[hsl(var(--sidebar-accent))] transition-colors"
+                        style={{ color: "hsla(var(--sidebar-foreground), 0.6)" }}
+                      >Cancel</button>
                     </div>
                   )
-                  : <><p className="font-medium">Update available</p><p className="font-semibold">v{versionStatus.latestVersion}{isAdmin ? " — click" : ""}</p></>
+                  : <p className="mt-1">→ v{versionStatus.latestVersion} available{isAdmin ? " · click" : ""}</p>
               )}
             </div>
-            </div>
+          </div>
         </div>
       </aside>
-      <header className="fixed left-0 right-0 top-0 z-50 flex h-16 items-center justify-between border-b border-border bg-card px-4 lg:hidden">
-        <div className="flex items-center gap-2">
-          <div className="rounded-lg overflow-hidden" style={{width:"28px",height:"28px"}}><svg viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" width="28" height="28"><rect width="32" height="32" rx="7" fill="#1e293b"/><rect x="4" y="13" width="24" height="15" rx="3" fill="#3b82f6"/><rect x="4" y="13" width="24" height="15" rx="3" fill="url(#bg)"/><rect x="4" y="19" width="24" height="2" fill="#1d4ed8"/><rect x="13" y="17" width="6" height="6" rx="1" fill="#93c5fd"/><path d="M11 13v-2a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2" stroke="#60a5fa" strokeWidth="2" strokeLinecap="round"/><defs><linearGradient id="bg" x1="4" y1="13" x2="28" y2="28" gradientUnits="userSpaceOnUse"><stop stopColor="#3b82f6"/><stop offset="1" stopColor="#6366f1"/></linearGradient></defs></svg></div>
-          <span className="font-bold text-foreground">Cardoso</span>
+      <header
+        className="fixed left-0 right-0 top-0 z-50 flex h-14 items-center justify-between px-4 lg:hidden"
+        style={{ background: "hsl(var(--sidebar-background))", borderBottom: "1px solid hsl(var(--sidebar-border))", color: "hsl(var(--sidebar-foreground))" }}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            style={{
+              width: "18px",
+              height: "18px",
+              background: "var(--phosphor)",
+              boxShadow: "0 0 16px hsla(33, 95%, 55%, 0.5)",
+            }}
+          />
+          <div className="flex flex-col leading-tight">
+            <span className="font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>Cardoso</span>
+            <span className="font-display text-base">Ledger</span>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           {canSeeSettings && (
             <Button variant="ghost" size="icon" onClick={() => setSettingsOpen(true)}><Settings className="h-5 w-5 text-amber-400" /></Button>
           )}
-          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).catch(() => {}); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
-            {theme === 'dark' ? <Sun className="h-5 w-5 text-amber-400" /> : <Moon className="h-5 w-5 text-blue-400" />}
+          <Button variant="ghost" size="icon" onClick={() => { const next = theme === 'dark' ? 'light' : 'dark'; setTheme(next); applyTheme(next); fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) }).then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); }).catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); }); }} title={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}>
+            {theme === 'dark' ? <Sun className="h-5 w-5 text-accent" /> : <Moon className="h-5 w-5 text-muted-foreground" />}
           </Button>
           <Button variant="ghost" size="icon" onClick={() => setChangePasswordOpen(true)} title="Change Password">
             <KeyRound className="h-5 w-5 text-muted-foreground" />
@@ -394,7 +539,7 @@ export default function Layout({ children, currentPageName }) {
           );
         })}
       </nav>
-      <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-16" : "lg:ml-56")}>
+      <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-14" : "lg:ml-60")}>
         {children}
       </main>
       {currentUser && (
@@ -413,5 +558,26 @@ export default function Layout({ children, currentPageName }) {
         hubMode={hubMode}
       />
     </div>
+  );
+}
+
+function SidebarButton({ onClick, icon: Icon, label, collapsed }) {
+  return (
+    <button
+      onClick={onClick}
+      title={collapsed ? label : undefined}
+      className={cn(
+        "flex items-center text-xs font-medium transition-colors duration-150 w-full",
+        collapsed ? "justify-center w-10 h-10" : "gap-3 pl-4 pr-2 py-2.5"
+      )}
+      style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}
+      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--phosphor)"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.55)"; }}
+    >
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className={cn("overflow-hidden whitespace-nowrap tracking-tight", collapsed ? "w-0 opacity-0" : "opacity-100")}>
+        {label}
+      </span>
+    </button>
   );
 }

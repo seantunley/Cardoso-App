@@ -1,51 +1,71 @@
 import { cn } from "@/lib/utils";
 
+/**
+ * Ledger-style stat card.
+ * Sharp edges, monospace label, display-serif value, optional phosphor accent bar.
+ * The `color` prop maps to accent direction: slate (neutral), emerald (good),
+ * amber (attention / signature phosphor), rose (danger), blue (info).
+ */
 export default function StatCard({ title, value, subtitle, icon: Icon, trend, color = "slate" }) {
-  const colorClasses = {
-    slate: "from-slate-500/10 to-slate-600/5 border-border",
-    emerald: "from-emerald-500/10 to-emerald-600/5 border-border",
-    amber: "from-amber-500/10 to-amber-600/5 border-border",
-    rose: "from-rose-500/10 to-rose-600/5 border-border",
-    blue: "from-blue-500/10 to-blue-600/5 border-border",
-  };
+  const accentBar = {
+    slate:   "hsl(30 10% 42%)",
+    emerald: "hsl(145 55% 45%)",
+    amber:   "var(--phosphor)",
+    rose:    "hsl(var(--destructive))",
+    blue:    "hsl(210 70% 50%)",
+  }[color] || "hsl(var(--border))";
 
-  const iconColorClasses = {
-    slate: "bg-slate-500/15 text-slate-400",
-    emerald: "bg-emerald-500/15 text-emerald-400",
-    amber: "bg-amber-500/15 text-amber-400",
-    rose: "bg-rose-500/15 text-rose-400",
-    blue: "bg-blue-500/15 text-blue-400",
-  };
+  const accentGlow = {
+    slate:   "transparent",
+    emerald: "hsla(145, 55%, 45%, 0.25)",
+    amber:   "hsla(33, 95%, 55%, 0.35)",
+    rose:    "hsla(0, 72%, 50%, 0.3)",
+    blue:    "hsla(210, 70%, 50%, 0.25)",
+  }[color] || "transparent";
 
   return (
-    <div className={cn(
-      "relative overflow-hidden rounded-2xl border bg-gradient-to-br p-6 transition-all duration-300 hover:shadow-lg hover:-translate-y-0.5",
-      colorClasses[color]
-    )}>
-      <div className="flex items-start justify-between">
-        <div className="space-y-3">
-          <p className="text-sm font-medium text-muted-foreground tracking-wide uppercase">
-            {title}
-          </p>
-          <p className="text-4xl font-bold text-foreground tracking-tight">
+    <div
+      className="relative bg-card border border-border group transition-colors hover:border-[var(--phosphor)]"
+      style={{ borderRadius: "2px" }}
+    >
+      {/* Phosphor left accent — the signature element */}
+      <div
+        className="absolute left-0 top-0 bottom-0 w-[2px] transition-all"
+        style={{ background: accentBar, boxShadow: `0 0 12px ${accentGlow}` }}
+      />
+
+      <div className="p-6 pl-7 flex items-start justify-between gap-4">
+        <div className="space-y-3 min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground truncate">
+              {title}
+            </p>
+            {trend != null && (
+              <span
+                className={cn(
+                  "font-mono text-[10px] tabular-nums",
+                  trend > 0 ? "text-[hsl(145_55%_45%)]" : "text-destructive"
+                )}
+              >
+                {trend > 0 ? "▲" : "▼"}{Math.abs(trend)}%
+              </span>
+            )}
+          </div>
+
+          <p className="font-display text-5xl leading-none text-foreground tracking-tight tabular-nums">
             {value}
           </p>
+
           {subtitle && (
-            <p className="text-sm text-muted-foreground">{subtitle}</p>
-          )}
-          {trend && (
-            <div className={cn(
-              "inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full",
-              trend > 0 ? "bg-emerald-500/15 text-emerald-400" : "bg-rose-500/15 text-rose-400"
-            )}>
-              {trend > 0 ? "↑" : "↓"} {Math.abs(trend)}%
-            </div>
+            <p className="text-xs text-muted-foreground">{subtitle}</p>
           )}
         </div>
+
         {Icon && (
-          <div className={cn("p-3 rounded-xl", iconColorClasses[color])}>
-            <Icon className="w-6 h-6" />
-          </div>
+          <Icon
+            className="w-4 h-4 shrink-0 text-muted-foreground/60 group-hover:text-[var(--phosphor)] transition-colors"
+            strokeWidth={1.5}
+          />
         )}
       </div>
     </div>

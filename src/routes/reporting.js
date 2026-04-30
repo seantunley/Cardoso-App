@@ -7,6 +7,7 @@ const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
+import { logError } from '../lib/errorLog.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
@@ -38,12 +39,14 @@ function hydrateSalesRepAndAccountType(row) {
   let parsedLocalFields = null;
   try {
     parsedData = row.data ? JSON.parse(row.data) : null;
-  } catch {
+  } catch (e) {
+    logError('reporting.parseRowData', e, { source_id: row.source_id });
     parsedData = null;
   }
   try {
     parsedLocalFields = row.local_fields ? JSON.parse(row.local_fields) : null;
-  } catch {
+  } catch (e) {
+    logError('reporting.parseLocalFields', e, { source_id: row.source_id });
     parsedLocalFields = null;
   }
 
@@ -92,11 +95,10 @@ function parseBalanceDate(value) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function getBalanceAgeDays(record) {
+function getBalanceInvoiceAges(record) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-
-  const ages = [1, 2, 3, 4, 5]
+  return [1, 2, 3, 4, 5]
     .filter((index) => {
       const amt = record?.[`last_unpaid_invoice_${index}_amount`];
       return amt !== undefined && amt !== null && amt !== '' && amt !== '0' && parseAmount(amt) > 0;
@@ -105,20 +107,27 @@ function getBalanceAgeDays(record) {
     .filter(Boolean)
     .map((date) => Math.floor((today - date) / 86400000))
     .filter((days) => Number.isFinite(days) && days >= 0);
+}
 
+// Returns the OLDEST unpaid invoice age in days. Used by the aged-debtors
+// report to bucket customers (each customer falls into one bucket = the bucket
+// of their oldest invoice).
+function getBalanceAgeDays(record) {
+  const ages = getBalanceInvoiceAges(record);
   return ages.length > 0 ? Math.max(...ages) : null;
 }
 
+// Customer matches the bucket if ANY of their unpaid invoices falls in this age
+// range. A customer with a yesterday invoice AND a 35-day invoice will appear in
+// both Current and 14-20 (overlapping is fine — buckets describe the customer's
+// active exposure rather than a single classification).
 function matchesAgeBucket(record, ageBucket) {
   if (!ageBucket || ageBucket === 'all') return true;
-
-  const ageDays = getBalanceAgeDays(record);
-  if (ageDays === null) return false;
-
-  if (ageBucket === '7-13') return ageDays > 7 && ageDays < 14;
-  if (ageBucket === '14-20') return ageDays >= 14 && ageDays < 21;
-  if (ageBucket === '21+') return ageDays >= 21;
-
+  const ages = getBalanceInvoiceAges(record);
+  if (ages.length === 0) return false;
+  if (ageBucket === '7-13')  return ages.some((d) => d >  7 && d <  14);
+  if (ageBucket === '14-20') return ages.some((d) => d >= 14 && d <  21);
+  if (ageBucket === '21+')   return ages.some((d) => d >= 21);
   return true;
 }
 
@@ -342,164 +351,598 @@ export function createReportingRouter({ requireAuth }) {
     const isHub = process.env.HUB_MODE === 'true';
     const siteFilter = String(req.query.site || 'all').trim();
     const ageBucket = String(req.query.ageBucket || 'all').trim();
+    const salesRepFilter = String(req.query.salesRep || 'all').trim();
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
 
-    // Filters that CAN be pushed to SQL
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
-    // Non-hub instances have no site_name column — site filter only applies in hub mode
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
+    // sales_rep can come from JSON blobs (data / local_fields) so we always
+    // filter it in JS after hydrateSalesRepAndAccountType has run.
+    // Same goes for age bucket / invoice-match (need parsed invoices).
+    const needsInMemoryFilter = ageBucket !== 'all' || hideInvoiceMatchesBalance || salesRepFilter !== 'all';
 
     try {
-      // Two-query strategy: one for sites list, one for paginated data + total
       let sites = [];
       let total = 0;
       let filteredTotalOutstanding = 0;
-      let pageTotalOutstanding = 0;
-      let records = [];
+      let allRecords = [];
 
       if (isHub) {
-        // Sites list from hub — lightweight
         sites = db.prepare(`
           SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
             AND r.outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            AND r.outstanding_balance_num > ?
           ORDER BY site_name`
           ).all(balanceAmountGt)
           .map(r => r.site_name)
           .filter(Boolean)
           .sort((a, b) => a.localeCompare(b));
 
-        // Count total
-        const countStmt = db.prepare(`
-          SELECT COUNT(*) as count FROM hub_records r
-          LEFT JOIN hub_sites s ON s.id = r.site_id
-          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-            AND r.outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
-        const countParams = siteFilter !== 'all'
-          ? [balanceAmountGt, siteFilter]
-          : [balanceAmountGt];
-        total = (countStmt.get(...countParams) || { count: 0 }).count;
-
-        // Paginated data with offset
-        const safeOffset = (page - 1) * limit;
-        const dataStmt = db.prepare(`
-          SELECT
-            r.customer_number, r.customer_name, r.sales_rep, r.account_type,
-            r.outstanding_balance, r.unpaid_invoices, r.receipts,
-            r.flag_color, r.flag_reason, r.auto_flagged, r.terms,
-            COALESCE(s.name, r.site_id) AS site_name
-          FROM hub_records r
-          LEFT JOIN hub_sites s ON s.id = r.site_id
-          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-            AND r.outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}
-          ORDER BY CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?`.replace(/\s+/g, ' ').trim());
-        const dataParams = siteFilter !== 'all'
-          ? [balanceAmountGt, siteFilter, limit, safeOffset]
-          : [balanceAmountGt, limit, safeOffset];
-        records = dataStmt.all(...dataParams).map(expandDataRecord);
-
-        // Sum over same WHERE (no pagination) for totals
-        const sumStmt = db.prepare(`
-          SELECT COALESCE(SUM(CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL)), 0) as total
-          FROM hub_records r
-          LEFT JOIN hub_sites s ON s.id = r.site_id
-          WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-            AND r.outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(r.outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
-        const sumParams = siteFilter !== 'all'
-          ? [balanceAmountGt, siteFilter]
-          : [balanceAmountGt];
-        filteredTotalOutstanding = parseFloat(sumStmt.get(...sumParams).total || 0);
+        const fetchSql = needsInMemoryFilter
+          ? `SELECT
+               r.customer_number, r.customer_name, r.sales_rep, r.account_type,
+               r.outstanding_balance, r.unpaid_invoices, r.receipts,
+               r.flag_color, r.flag_reason, r.auto_flagged, r.terms,
+               COALESCE(s.name, r.site_id) AS site_name
+             FROM hub_records r
+             LEFT JOIN hub_sites s ON s.id = r.site_id
+             WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+               AND r.outstanding_balance != '0'
+               AND r.outstanding_balance_num > ?
+               ${siteWhere}
+             ORDER BY r.outstanding_balance_num DESC`
+          : `SELECT
+               r.customer_number, r.customer_name, r.sales_rep, r.account_type,
+               r.outstanding_balance, r.unpaid_invoices, r.receipts,
+               r.flag_color, r.flag_reason, r.auto_flagged, r.terms,
+               COALESCE(s.name, r.site_id) AS site_name
+             FROM hub_records r
+             LEFT JOIN hub_sites s ON s.id = r.site_id
+             WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+               AND r.outstanding_balance != '0'
+               AND r.outstanding_balance_num > ?
+               ${siteWhere}
+             ORDER BY r.outstanding_balance_num DESC
+             LIMIT ? OFFSET ?`;
+        const params = siteFilter !== 'all' ? [balanceAmountGt, siteFilter] : [balanceAmountGt];
+        if (!needsInMemoryFilter) {
+          params.push(limit, (page - 1) * limit);
+          // Need a separate count for pagination metadata
+          const countStmt = db.prepare(`SELECT COUNT(*) as count FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ? ${siteWhere}`);
+          const countParams = siteFilter !== 'all' ? [balanceAmountGt, siteFilter] : [balanceAmountGt];
+          total = (countStmt.get(...countParams) || { count: 0 }).count;
+          // Sum for total outstanding across SQL-filtered set
+          const sumStmt = db.prepare(`SELECT COALESCE(SUM(r.outstanding_balance_num), 0) as total FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ? ${siteWhere}`);
+          filteredTotalOutstanding = parseFloat(sumStmt.get(...countParams).total || 0);
+        }
+        allRecords = db.prepare(fetchSql).all(...params).map(expandDataRecord);
 
       } else {
-        // Sites list — lightweight
         sites = db.prepare(`
           SELECT DISTINCT ? AS site_name FROM datarecord
           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
             AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
+            AND outstanding_balance_num > ?
           ORDER BY site_name`.trim()
         ).all(SITE_NAME, balanceAmountGt).map(r => r.site_name).filter(Boolean);
 
-        // Count total
-        const countStmt = db.prepare(`
-          SELECT COUNT(*) as count FROM datarecord
-          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
-            AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-            ${siteWhere}`.trim().replace(/\s+/g, ' ').trim());
-        total = (countStmt.get(balanceAmountGt) || { count: 0 }).count;
-
-        // Paginated data
-        const safeOffset = (page - 1) * limit;
-        const dataStmt = db.prepare(`
-          SELECT
-            customer_number, customer_name, sales_rep, account_type,
-            outstanding_balance, unpaid_invoices, receipts,
-            flag_color, flag_reason, auto_flagged, terms,
-            data, local_fields,
-            ? AS site_name
-          FROM datarecord
-          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
-            AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?
-          ORDER BY CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) DESC
-          LIMIT ? OFFSET ?`.replace(/\s+/g, ' ').trim());
-        records = dataStmt.all(SITE_NAME, balanceAmountGt, limit, safeOffset)
+        const fetchSql = needsInMemoryFilter
+          ? `SELECT customer_number, customer_name, sales_rep, account_type,
+                    outstanding_balance, unpaid_invoices, receipts,
+                    flag_color, flag_reason, auto_flagged, terms,
+                    data, local_fields,
+                    ? AS site_name
+             FROM datarecord
+             WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+               AND outstanding_balance != '0'
+               AND outstanding_balance_num > ?
+             ORDER BY outstanding_balance_num DESC`
+          : `SELECT customer_number, customer_name, sales_rep, account_type,
+                    outstanding_balance, unpaid_invoices, receipts,
+                    flag_color, flag_reason, auto_flagged, terms,
+                    data, local_fields,
+                    ? AS site_name
+             FROM datarecord
+             WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+               AND outstanding_balance != '0'
+               AND outstanding_balance_num > ?
+             ORDER BY outstanding_balance_num DESC
+             LIMIT ? OFFSET ?`;
+        const params = needsInMemoryFilter
+          ? [SITE_NAME, balanceAmountGt]
+          : [SITE_NAME, balanceAmountGt, limit, (page - 1) * limit];
+        if (!needsInMemoryFilter) {
+          const countStmt = db.prepare(`SELECT COUNT(*) as count FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`);
+          total = (countStmt.get(balanceAmountGt) || { count: 0 }).count;
+          const sumStmt = db.prepare(`SELECT COALESCE(SUM(outstanding_balance_num), 0) as total FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`);
+          filteredTotalOutstanding = parseFloat(sumStmt.get(balanceAmountGt).total || 0);
+        }
+        allRecords = db.prepare(fetchSql).all(...params)
           .map(hydrateSalesRepAndAccountType)
           .map(expandDataRecord);
-
-        // Sum for totals (same WHERE, no pagination)
-        const sumStmt = db.prepare(`
-          SELECT COALESCE(SUM(CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL)), 0) as total
-          FROM datarecord
-          WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
-            AND outstanding_balance != '0'
-            AND CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL) > ?`.trim().replace(/\s+/g, ' ').trim());
-        filteredTotalOutstanding = parseFloat(sumStmt.get(balanceAmountGt).total || 0);
       }
 
-      // pageTotalOutstanding: sum of returned page records
-      pageTotalOutstanding = records.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0);
+      // ── In-memory pagination path (age bucket / invoice-match / sales rep active) ──
+      let recordsForPage;
+      let pageTotalOutstanding;
+      if (needsInMemoryFilter) {
+        const filtered = allRecords.filter((row) => {
+          if (!matchesAgeBucket(row, ageBucket)) return false;
+          if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
+          if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
+          return true;
+        });
+        total = filtered.length;
+        filteredTotalOutstanding = filtered.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
+        const start = (page - 1) * limit;
+        recordsForPage = filtered.slice(start, start + limit);
+        console.log(`[balances-perf] ageBucket=${ageBucket} salesRep=${salesRepFilter} hideMatch=${hideInvoiceMatchesBalance} fetched=${allRecords.length} matched=${filtered.length} pageSize=${recordsForPage.length}`);
+      } else {
+        recordsForPage = allRecords;
+      }
+      pageTotalOutstanding = recordsForPage.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
+      const totalPages = Math.max(1, Math.ceil(total / limit));
 
-      // Remaining filters that require parsed fields (age bucket, invoice-match) — in-memory
-      const filtered = records.filter((row) => {
-        if (!matchesAgeBucket(row, ageBucket)) return false;
-        if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
-        return true;
-      });
-
-      // When in-memory filters (ageBucket, hideInvoiceMatchesBalance) are active,
-      // the SQL total/sum don't reflect them. Adjust the response accordingly.
-      const hasInMemoryFilters = ageBucket !== 'all' || hideInvoiceMatchesBalance;
-      const effectiveTotal = hasInMemoryFilters ? filtered.length : total;
-      const totalPages = hasInMemoryFilters ? 1 : Math.max(1, Math.ceil(total / limit));
-      const effectiveFilteredOutstanding = hasInMemoryFilters
-        ? filtered.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0)
-        : filteredTotalOutstanding;
+      // Build distinct sales-rep list for the filter dropdown. Always derive from
+      // the full record set (not the paginated page) so every rep is selectable.
+      let repSource;
+      if (needsInMemoryFilter) {
+        repSource = allRecords;
+      } else {
+        // Lightweight separate fetch — only needs the columns required to
+        // hydrate sales_rep from JSON blobs.
+        repSource = isHub
+          ? db.prepare(
+              `SELECT r.sales_rep FROM hub_records r WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ?`
+            ).all(balanceAmountGt)
+          : db.prepare(
+              `SELECT sales_rep, data, local_fields FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`
+            ).all(balanceAmountGt).map(hydrateSalesRepAndAccountType);
+      }
+      const salesReps = Array.from(new Set(repSource.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
       res.json({
-        records: filtered,
-        total: hasInMemoryFilters ? effectiveTotal : total,
-        page: hasInMemoryFilters ? 1 : page,
+        records: recordsForPage,
+        total,
+        page,
         totalPages,
-        filteredTotalOutstanding: effectiveFilteredOutstanding,
+        filteredTotalOutstanding,
         pageTotalOutstanding,
         sites,
+        salesReps,
         ageBucket,
+        salesRep: salesRepFilter,
         minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
       });
     } catch (err) {
       console.error('top-balances error', err);
       res.status(500).json({ error: 'Failed to fetch top balances' });
+    }
+  });
+
+  // GET /api/reports/aged-debtors — full (unpaginated) aged debtors report
+  // with computed aging buckets and summary totals.
+  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+    const isHub = process.env.HUB_MODE === 'true';
+    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    const salesRepFilter = String(req.query.sales_rep || 'all').trim();
+    const accountTypeFilter = String(req.query.account_type || 'all').trim();
+    const siteFilter = String(req.query.site || 'all').trim();
+
+    try {
+      let records;
+      let sites = [];
+      if (isHub) {
+        const dataParams = [minBalance];
+        let whereSite = '';
+        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; dataParams.push(siteFilter); }
+        sites = db.prepare(
+          `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+             AND r.outstanding_balance != '0'
+             AND r.outstanding_balance_num > ?
+           ORDER BY site_name`
+        ).all(minBalance).map(r => r.site_name).filter(Boolean);
+        records = db.prepare(
+          `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type, r.terms,
+                  r.outstanding_balance, r.unpaid_invoices, r.receipts,
+                  r.flag_color, r.flag_reason, r.auto_flagged,
+                  COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+             AND r.outstanding_balance != '0'
+             AND r.outstanding_balance_num > ?
+             ${whereSite}
+           ORDER BY r.outstanding_balance_num DESC`
+        ).all(...dataParams).map(expandDataRecord);
+      } else {
+        sites = [SITE_NAME];
+        records = db.prepare(
+          `SELECT customer_number, customer_name, sales_rep, account_type, terms,
+                  outstanding_balance, unpaid_invoices, receipts,
+                  flag_color, flag_reason, auto_flagged,
+                  data, local_fields,
+                  ? AS site_name
+           FROM datarecord
+           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+             AND outstanding_balance != '0'
+             AND outstanding_balance_num > ?
+           ORDER BY outstanding_balance_num DESC`
+        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
+      }
+
+      // Filter by sales rep / account type in JS (these can come from JSON blobs)
+      const filtered = records.filter(r => {
+        if (salesRepFilter !== 'all' && String(r.sales_rep || '').trim() !== salesRepFilter) return false;
+        if (accountTypeFilter !== 'all' && String(r.account_type || '').trim().toUpperCase() !== accountTypeFilter.toUpperCase()) return false;
+        return true;
+      });
+
+      const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
+      const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+      const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+      let totalOutstanding = 0;
+
+      const enriched = filtered.map(r => {
+        const balance = parseAmount(r.outstanding_balance);
+        const ageDays = getBalanceAgeDays(r);
+        let bucket;
+        if (ageDays === null) bucket = 'unknown';
+        else if (ageDays < 7) bucket = 'current';
+        else if (ageDays < 14) bucket = '7-13';
+        else if (ageDays < 21) bucket = '14-20';
+        else bucket = '21+';
+        buckets[bucket] += balance;
+        bucketCounts[bucket]++;
+        totalOutstanding += balance;
+        return { ...r, age_days: ageDays, bucket, parsed_balance: balance };
+      });
+
+      // Filter dropdowns built from the unfiltered set so the user can switch back
+      const salesReps = Array.from(new Set(records.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
+      const accountTypes = Array.from(new Set(records.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
+
+      res.json({
+        records: enriched,
+        summary: {
+          total_customers: enriched.length,
+          total_outstanding: totalOutstanding,
+          buckets,
+          bucket_counts: bucketCounts,
+        },
+        filters: { sites, sales_reps: salesReps, account_types: accountTypes },
+        generated_at: new Date().toISOString(),
+        site_name: SITE_NAME,
+        hub_mode: isHub,
+        min_balance: minBalance,
+      });
+    } catch (err) {
+      console.error('[reporting] aged-debtors error:', err);
+      res.status(500).json({ error: 'Failed to fetch aged debtors' });
+    }
+  });
+
+  // GET /api/reports/rep-exposure — total outstanding & flag mix per sales rep,
+  // with the top customers per rep for the printable detail rows.
+  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+    const isHub = process.env.HUB_MODE === 'true';
+    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    try {
+      let records;
+      if (isHub) {
+        records = db.prepare(
+          `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type,
+                  r.outstanding_balance, r.flag_color, r.unpaid_invoices,
+                  COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
+             AND r.outstanding_balance != '0'
+             AND r.outstanding_balance_num > ?`
+        ).all(minBalance).map(expandDataRecord);
+      } else {
+        records = db.prepare(
+          `SELECT customer_number, customer_name, sales_rep, account_type,
+                  outstanding_balance, flag_color, unpaid_invoices,
+                  data, local_fields,
+                  ? AS site_name
+           FROM datarecord
+           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
+             AND outstanding_balance != '0'
+             AND outstanding_balance_num > ?`
+        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
+      }
+      const repMap = new Map();
+      for (const r of records) {
+        const rep = String(r.sales_rep || '').trim() || '— Unassigned';
+        let bucket = repMap.get(rep);
+        if (!bucket) {
+          bucket = { sales_rep: rep, customer_count: 0, total_outstanding: 0, flag_counts: { red: 0, orange: 0, green: 0, none: 0 }, top_customers: [] };
+          repMap.set(rep, bucket);
+        }
+        const bal = parseAmount(r.outstanding_balance);
+        bucket.customer_count++;
+        bucket.total_outstanding += bal;
+        const fc = String(r.flag_color || 'none').toLowerCase();
+        if (fc in bucket.flag_counts) bucket.flag_counts[fc]++;
+        else bucket.flag_counts.none++;
+        bucket.top_customers.push({
+          customer_number: r.customer_number || '',
+          customer_name: r.customer_name || '',
+          outstanding_balance: bal,
+          flag_color: r.flag_color || 'none',
+          account_type: r.account_type || '',
+        });
+      }
+      const reps = Array.from(repMap.values()).map(b => {
+        b.top_customers.sort((a, c) => c.outstanding_balance - a.outstanding_balance);
+        b.top_customers = b.top_customers.slice(0, 10);
+        return b;
+      }).sort((a, b) => b.total_outstanding - a.total_outstanding);
+
+      const summary = {
+        total_reps: reps.length,
+        total_customers: records.length,
+        total_outstanding: reps.reduce((s, r) => s + r.total_outstanding, 0),
+        total_red: reps.reduce((s, r) => s + r.flag_counts.red, 0),
+        total_orange: reps.reduce((s, r) => s + r.flag_counts.orange, 0),
+      };
+
+      res.json({ reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance });
+    } catch (err) {
+      console.error('[reporting] rep-exposure error:', err);
+      res.status(500).json({ error: 'Failed to fetch rep exposure' });
+    }
+  });
+
+  // GET /api/reports/bat-weekly?year=YYYY — per-week BAT vs Sage credit-note
+  // totals + variance + extraction stats, suitable for printing as a one-pager.
+  router.get('/api/reports/bat-weekly', requireAuth, (req, res) => {
+    const year = req.query.year ? parseInt(req.query.year, 10) : null;
+    try {
+      const yearWhere = year ? 'WHERE r.year = ?' : '';
+      const params = year ? [year] : [];
+      const rows = db.prepare(
+        `SELECT r.year, r.week_number,
+                r.supplier_total, r.supplier_discount, r.supplier_delivery, r.supplier_pricing,
+                COALESCE(c.total, r.sage_total) AS sage_total,
+                COALESCE(c.discount, r.sage_discount) AS sage_discount,
+                COALESCE(c.delivery, r.sage_delivery) AS sage_delivery,
+                COALESCE(c.pricing,  r.sage_pricing)  AS sage_pricing,
+                CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END AS sage_present,
+                ext_stats.pod_count, ext_stats.found_count,
+                exc_stats.exc_count, exc_stats.exc_amount,
+                r.status
+         FROM bat_reconciliations r
+         LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
+         LEFT JOIN (
+           SELECT reconciliation_id, COUNT(*) AS pod_count,
+                  SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count
+           FROM bat_invoice_extractions GROUP BY reconciliation_id
+         ) ext_stats ON ext_stats.reconciliation_id = r.id
+         LEFT JOIN (
+           SELECT reconciliation_id, COUNT(*) AS exc_count,
+                  COALESCE(SUM(order_amount), 0) AS exc_amount
+           FROM bat_invoice_extractions WHERE is_exception = 1 GROUP BY reconciliation_id
+         ) exc_stats ON exc_stats.reconciliation_id = r.id
+         ${yearWhere}
+         ORDER BY r.year DESC, r.week_number DESC`
+      ).all(...params);
+
+      const weeks = rows.map(r => {
+        const supplier = r.supplier_total || 0;
+        const sage = r.sage_total || 0;
+        const variance = supplier - sage;
+        const ocrPct = r.pod_count > 0 ? (r.found_count / r.pod_count) * 100 : 0;
+        return {
+          year: r.year,
+          week_number: r.week_number,
+          supplier_total: supplier,
+          sage_total: sage,
+          sage_present: !!r.sage_present,
+          variance,
+          variance_abs: Math.abs(variance),
+          matched: r.sage_present && Math.abs(variance) < 0.01,
+          discount_supplier: r.supplier_discount || 0,
+          delivery_supplier: r.supplier_delivery || 0,
+          pricing_supplier:  r.supplier_pricing  || 0,
+          discount_sage:     r.sage_discount || 0,
+          delivery_sage:     r.sage_delivery || 0,
+          pricing_sage:      r.sage_pricing  || 0,
+          pod_count: r.pod_count || 0,
+          found_count: r.found_count || 0,
+          ocr_pct: ocrPct,
+          exc_count: r.exc_count || 0,
+          exc_amount: r.exc_amount || 0,
+          status: r.status,
+        };
+      });
+
+      const summary = {
+        weeks_count: weeks.length,
+        total_supplier: weeks.reduce((s, w) => s + w.supplier_total, 0),
+        total_sage:     weeks.reduce((s, w) => s + w.sage_total, 0),
+        total_variance: weeks.reduce((s, w) => s + w.variance, 0),
+        matched_count:  weeks.filter(w => w.matched).length,
+        mismatch_count: weeks.filter(w => w.sage_present && !w.matched).length,
+        awaiting_count: weeks.filter(w => !w.sage_present).length,
+        total_exceptions:        weeks.reduce((s, w) => s + w.exc_count, 0),
+        total_exception_amount:  weeks.reduce((s, w) => s + w.exc_amount, 0),
+      };
+
+      const yearsRow = db.prepare('SELECT DISTINCT year FROM bat_reconciliations ORDER BY year DESC').all();
+      res.json({ weeks, summary, year, available_years: yearsRow.map(r => r.year), generated_at: new Date().toISOString() });
+    } catch (err) {
+      console.error('[reporting] bat-weekly error:', err);
+      res.status(500).json({ error: 'Failed to fetch BAT weekly report' });
+    }
+  });
+
+  // GET /api/reports/bat-ytd?year=YYYY — YTD fee-type breakdown comparing
+  // BAT's claimed totals to Sage's posted credit-note totals.
+  router.get('/api/reports/bat-ytd', requireAuth, (req, res) => {
+    const year = req.query.year ? parseInt(req.query.year, 10) : new Date().getFullYear();
+    try {
+      const supplierAgg = db.prepare(
+        `SELECT
+           COALESCE(SUM(supplier_discount), 0) AS discount,
+           COALESCE(SUM(supplier_delivery), 0) AS delivery,
+           COALESCE(SUM(supplier_pricing),  0) AS pricing,
+           COALESCE(SUM(supplier_total),    0) AS total,
+           COUNT(*) AS week_count
+         FROM bat_reconciliations WHERE year = ?`
+      ).get(year);
+      const sageAgg = db.prepare(
+        `SELECT
+           COALESCE(SUM(discount), 0) AS discount,
+           COALESCE(SUM(delivery), 0) AS delivery,
+           COALESCE(SUM(pricing),  0) AS pricing,
+           COALESCE(SUM(total),    0) AS total
+         FROM bat_sage_week_cache WHERE year = ?`
+      ).get(year);
+
+      const fees = [
+        { fee_type: 'Discount', supplier: supplierAgg.discount, sage: sageAgg.discount },
+        { fee_type: 'Delivery', supplier: supplierAgg.delivery, sage: sageAgg.delivery },
+        { fee_type: 'Pricing',  supplier: supplierAgg.pricing,  sage: sageAgg.pricing },
+      ].map(f => {
+        const variance = f.supplier - f.sage;
+        const variancePct = f.supplier > 0 ? (variance / f.supplier) * 100 : 0;
+        return { ...f, variance, variance_pct: variancePct };
+      });
+
+      const yearsRow = db.prepare(`SELECT DISTINCT year FROM bat_reconciliations UNION SELECT DISTINCT year FROM bat_sage_week_cache ORDER BY year DESC`).all();
+      res.json({
+        year,
+        fees,
+        summary: {
+          total_supplier: supplierAgg.total,
+          total_sage: sageAgg.total,
+          total_variance: supplierAgg.total - sageAgg.total,
+          weeks_uploaded: supplierAgg.week_count,
+        },
+        available_years: yearsRow.map(r => r.year).filter(Boolean),
+        generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] bat-ytd error:', err);
+      res.status(500).json({ error: 'Failed to fetch BAT YTD report' });
+    }
+  });
+
+  // GET /api/reports/bat-exceptions?year=YYYY — total exception value, count,
+  // breakdown by reason (normalized) and by store.
+  router.get('/api/reports/bat-exceptions', requireAuth, (req, res) => {
+    const year = req.query.year ? parseInt(req.query.year, 10) : null;
+    try {
+      const yearJoin = year ? 'AND r.year = ?' : '';
+      const params = year ? [year] : [];
+      const rows = db.prepare(
+        `SELECT e.exception_reason, e.store_name, e.order_amount,
+                r.year, r.week_number
+         FROM bat_invoice_extractions e
+         LEFT JOIN bat_reconciliations r ON r.id = e.reconciliation_id
+         WHERE e.is_exception = 1 ${yearJoin}`
+      ).all(...params);
+
+      const normalize = (s) => {
+        const lower = (s || '').toLowerCase().replace(/[^\w\s]/g, ' ').replace(/\s+/g, ' ').trim();
+        if (!lower) return '';
+        const seen = new Set(); const out = [];
+        for (const w of lower.split(' ')) { if (!seen.has(w)) { seen.add(w); out.push(w); } }
+        return out.join(' ');
+      };
+      const reasonMap = new Map();
+      const storeMap = new Map();
+      let totalCount = 0, totalAmount = 0;
+      for (const r of rows) {
+        const amount = Number(r.order_amount) || 0;
+        const rawReason = (r.exception_reason || '').trim() || 'Unspecified';
+        const key = normalize(rawReason) || 'unspecified';
+        let g = reasonMap.get(key);
+        if (!g) { g = { reason: rawReason, count: 0, amount: 0 }; reasonMap.set(key, g); }
+        g.count++; g.amount += amount;
+        if (rawReason.length < g.reason.length) g.reason = rawReason;
+
+        const store = (r.store_name || '— Unknown').trim();
+        let s = storeMap.get(store);
+        if (!s) { s = { store_name: store, count: 0, amount: 0 }; storeMap.set(store, s); }
+        s.count++; s.amount += amount;
+
+        totalCount++; totalAmount += amount;
+      }
+      const byReason = Array.from(reasonMap.values()).sort((a, b) => b.amount - a.amount);
+      const byStore  = Array.from(storeMap.values()).sort((a, b) => b.amount - a.amount).slice(0, 25);
+
+      const yearsRow = db.prepare(
+        `SELECT DISTINCT r.year FROM bat_invoice_extractions e LEFT JOIN bat_reconciliations r ON r.id = e.reconciliation_id WHERE e.is_exception = 1 AND r.year IS NOT NULL ORDER BY r.year DESC`
+      ).all();
+
+      res.json({
+        year,
+        summary: { total_count: totalCount, total_amount: totalAmount, distinct_reasons: byReason.length, distinct_stores: storeMap.size },
+        by_reason: byReason,
+        by_store: byStore,
+        available_years: yearsRow.map(r => r.year).filter(Boolean),
+        generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] bat-exceptions error:', err);
+      res.status(500).json({ error: 'Failed to fetch BAT exceptions report' });
+    }
+  });
+
+  // GET /api/reports/inventory-value — total value, by-commodity breakdown,
+  // top-N items by value, slow-mover alerts.
+  router.get('/api/reports/inventory-value', requireAuth, (req, res) => {
+    const isHub = process.env.HUB_MODE === 'true';
+    const topN = Math.min(Math.max(parseInt(req.query.top, 10) || 25, 5), 200);
+    try {
+      const sql = isHub
+        ? `SELECT i.item_number, i.item_description, i.qty_on_hand, i.last_cost, i.price, i.commodity, i.inventory_value, COALESCE(s.name, i.site_id) AS site_name FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id`
+        : `SELECT item_number, item_description, qty_on_hand, last_cost, price, commodity, inventory_value, ? AS site_name FROM inventoryrecord`;
+      const rows = isHub ? db.prepare(sql).all() : db.prepare(sql).all(SITE_NAME);
+
+      const num = (v) => { const n = parseFloat(String(v ?? '').replace(/,/g, '').replace(/\s/g, '')); return Number.isFinite(n) ? n : 0; };
+      const enriched = rows.map(r => ({
+        item_number: r.item_number,
+        item_description: r.item_description,
+        qty_on_hand: num(r.qty_on_hand),
+        last_cost: num(r.last_cost),
+        price: num(r.price),
+        commodity: (r.commodity || '— Uncategorised').toString().trim() || '— Uncategorised',
+        inventory_value: num(r.inventory_value) || (num(r.qty_on_hand) * num(r.last_cost)),
+        site_name: r.site_name,
+      }));
+
+      const commodityMap = new Map();
+      let totalValue = 0;
+      for (const it of enriched) {
+        let c = commodityMap.get(it.commodity);
+        if (!c) { c = { commodity: it.commodity, item_count: 0, total_value: 0, total_qty: 0 }; commodityMap.set(it.commodity, c); }
+        c.item_count++; c.total_value += it.inventory_value; c.total_qty += it.qty_on_hand;
+        totalValue += it.inventory_value;
+      }
+      const byCommodity = Array.from(commodityMap.values()).sort((a, b) => b.total_value - a.total_value);
+      const topItems = enriched.slice().sort((a, b) => b.inventory_value - a.inventory_value).slice(0, topN);
+
+      res.json({
+        summary: {
+          total_items: enriched.length,
+          total_value: totalValue,
+          distinct_commodities: byCommodity.length,
+        },
+        by_commodity: byCommodity,
+        top_items: topItems,
+        top_n: topN,
+        generated_at: new Date().toISOString(),
+        site_name: SITE_NAME,
+      });
+    } catch (err) {
+      console.error('[reporting] inventory-value error:', err);
+      res.status(500).json({ error: 'Failed to fetch inventory report' });
     }
   });
 
@@ -646,33 +1089,65 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
-  // POST /api/speedtest/run — trigger an on-demand speed test immediately
-  router.post('/api/speedtest/run', requireReportingToken, async (req, res) => {
-    // Dynamically import and run so we don't block startup
-    import('../scheduler.js').then(({ runSpeedTestNow }) => {
-      if (typeof runSpeedTestNow !== 'function') {
-        return res.status(501).json({ error: 'runSpeedTestNow not exported' });
-      }
-      runSpeedTestNow()
-        .then(() => res.json({ ok: true }))
-        .catch(err => res.status(500).json({ error: err.message }));
-    }).catch(err => res.status(500).json({ error: err.message }));
-  });
-
-  // GET /api/speedtest/results — last 30 speed test results
-  router.get('/api/speedtest/results', reportingRateLimiter, requireReportingToken, (req, res) => {
+  // GET /api/reporting/inventory?offset=0&limit=1000
+  // GET /api/reporting/bat-summary — single-row YTD BAT reconciliation snapshot,
+  // pulled by the hub once a day. Aggregates straight off bat_reconciliations,
+  // bat_sage_week_cache and bat_invoice_extractions; no joins to Cardoso/extractions
+  // beyond a count of flagged exceptions.
+  router.get('/api/reporting/bat-summary', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
-      const results = db.prepare(
-        `SELECT id, timestamp, download_mbps, upload_mbps, ping_ms, isp, server_name, server_location, created_at
-         FROM site_speedtest ORDER BY timestamp DESC LIMIT 30`
+      // Per-week base rows (year, week) joined with sage cache so totals are always live.
+      const rows = db.prepare(
+        `SELECT r.year, r.week_number,
+                COALESCE(r.supplier_total, 0) AS supplier_total,
+                COALESCE(c.total, r.sage_total, 0) AS sage_total,
+                CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END AS sage_present,
+                r.created_at, r.upload_filename
+         FROM bat_reconciliations r
+         LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number`
       ).all();
-      res.json({ results });
+
+      let weeks_count = rows.length;
+      let total_supplier = 0, total_sage = 0;
+      let matched_count = 0, mismatch_count = 0, awaiting_count = 0;
+      let last_upload_at = null;
+      for (const r of rows) {
+        total_supplier += r.supplier_total;
+        total_sage += r.sage_total;
+        const variance = r.supplier_total - r.sage_total;
+        if (!r.sage_present) awaiting_count++;
+        else if (Math.abs(variance) < 0.01) matched_count++;
+        else mismatch_count++;
+        if (r.created_at && (!last_upload_at || r.created_at > last_upload_at)) last_upload_at = r.created_at;
+      }
+
+      const exc = db.prepare(
+        `SELECT COUNT(*) AS c, COALESCE(SUM(order_amount), 0) AS a
+         FROM bat_invoice_extractions WHERE is_exception = 1`
+      ).get();
+
+      res.json({
+        site_id: SITE_ID,
+        site_slug: SITE_SLUG,
+        site_name: SITE_NAME,
+        total_supplier,
+        total_sage,
+        total_variance: total_supplier - total_sage,
+        weeks_count,
+        matched_count,
+        mismatch_count,
+        awaiting_count,
+        total_exceptions: exc?.c || 0,
+        total_exception_amount: exc?.a || 0,
+        last_upload_at,
+        generated_at: new Date().toISOString(),
+      });
     } catch (err) {
-      console.error('[reporting] error:', err.message); res.status(500).json({ error: 'Request failed' });
+      console.error('[reporting/bat-summary] error:', err);
+      res.status(500).json({ error: 'Failed to build BAT summary' });
     }
   });
 
-  // GET /api/reporting/inventory?offset=0&limit=1000
   router.get('/api/reporting/inventory', reportingRateLimiter, requireReportingToken, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
     const offset = parseInt(req.query.offset) || 0;

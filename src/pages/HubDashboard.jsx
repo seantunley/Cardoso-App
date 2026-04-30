@@ -67,12 +67,19 @@ function SiteCard({ site, onFlagClick, onResync }) {
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
   return (
-    <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+    <div className="relative border border-border bg-card p-4 space-y-3 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "2px" }}>
+      <div
+        className="absolute left-0 top-0 bottom-0 w-[2px]"
+        style={{
+          background: isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
+          boxShadow: isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
+        }}
+      />
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between pl-2">
         <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" />
-          <span className="font-semibold text-foreground">{site.site_name || site.site_slug}</span>
+          <Building2 className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
+          <span className="font-display text-lg text-foreground leading-none">{site.site_name || site.site_slug}</span>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -321,7 +328,7 @@ function HubCustomerModal({ record, open, onClose }) {
                   {hasSubAccounts ? formatAmount(String(grandTotal)) : formatAmount(record.outstanding_balance)}
                 </span>
                 {hasSubAccounts && (
-                  <Badge variant="outline" className="text-xs border-indigo-600 text-indigo-400">
+                  <Badge variant="outline" className="text-xs border-accent/50 text-accent">
                     {subAccounts.length} sub-account{subAccounts.length !== 1 ? 's' : ''}
                   </Badge>
                 )}
@@ -419,12 +426,14 @@ function HubCustomerModal({ record, open, onClose }) {
             </div>
           </div>
 
-          {/* Hub note - keep indigo colour */}
-          <div className="mt-4 rounded-xl border border-indigo-800/40 bg-indigo-950/20 px-3 py-2">
-            <p className="text-xs text-indigo-300">
-              Hub snapshot · Changes must be made at the site directly.
+          {/* Hub note */}
+          <div className="mt-4 relative border border-border bg-card px-3 py-2" style={{ borderRadius: "2px" }}>
+            <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
+            <p className="text-xs text-muted-foreground pl-2">
+              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">Hub snapshot</span>
+              <span className="ml-2">Changes must be made at the site directly.</span>
               {(record._siteLastSeen || record.synced_at) && (
-                <span className="block mt-0.5 text-indigo-400/60">
+                <span className="block mt-0.5 font-mono text-[10px] text-muted-foreground/70">
                   Last synced: {new Date(record._siteLastSeen || record.synced_at).toLocaleString()}
                 </span>
               )}
@@ -680,12 +689,17 @@ export default function HubDashboard() {
   const sites = kpis?.sites || [];
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-7xl mx-auto px-8 py-10 space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Customer Management</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Aggregated view across all sites</p>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
+            § Hub Operations
+          </div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            All sites, <em className="text-phosphor">one view</em>.
+          </h1>
         </div>
         <div className="flex items-center gap-2">
           <Button onClick={triggerSync} disabled={syncing} variant="outline" className="gap-2">
@@ -698,16 +712,16 @@ export default function HubDashboard() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <Calendar className="h-4 w-4" />
+      <div className="flex flex-wrap items-center gap-3 border border-border bg-card px-4 py-3" style={{ borderRadius: "2px" }}>
+        <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <Calendar className="h-3 w-3" />
           KPI range
         </div>
         <select
           value={dateRange}
           onChange={(event) => setDateRange(event.target.value)}
-          style={{ colorScheme }}
-          className="min-h-[40px] rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          style={{ colorScheme, borderRadius: "2px" }}
+          className="min-h-[36px] border border-border bg-background px-3 py-1.5 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-[var(--phosphor)] focus:border-[var(--phosphor)]"
         >
           {KPI_RANGE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>{option.label}</option>
@@ -721,16 +735,16 @@ export default function HubDashboard() {
       {/* Per-site cards */}
       {sites.length > 0 ? (
         <div>
-          <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-3">Sites</h2>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-4">§ Sites · {sites.length}</div>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
             {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} onResync={resyncSite} />)}
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
-          <Network className="w-12 h-12 text-muted-foreground mb-4" />
-          <h3 className="text-lg font-medium text-foreground">No sites configured yet</h3>
-          <p className="text-sm text-muted-foreground mt-1">Add site connections to start aggregating data.</p>
+        <div className="flex flex-col items-center justify-center py-20 border border-border bg-card" style={{ borderRadius: "2px" }}>
+          <Network className="w-10 h-10 text-muted-foreground/60 mb-5" strokeWidth={1} />
+          <h3 className="font-display text-2xl text-foreground">No sites configured</h3>
+          <p className="text-sm text-muted-foreground mt-2">Add site connections to start aggregating data.</p>
         </div>
       )}
 
@@ -749,6 +763,7 @@ export default function HubDashboard() {
         open={flagDetailOpen}
         onClose={() => { setFlagDetailOpen(false); setFlagDetailRecord(null); }}
       />
+      </div>
     </div>
   );
 }

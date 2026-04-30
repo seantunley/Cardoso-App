@@ -9,6 +9,7 @@ import { createRequire } from 'module';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { getVersionStatus } from '../services/versionCheck.js';
+import { logError } from '../lib/errorLog.js';
 
 const require = createRequire(import.meta.url);
 
@@ -252,6 +253,20 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // GET /api/health — unauthenticated health check
   router.get('/api/health', (req, res) => {
     res.json({ status: 'ok' });
+  });
+
+  // POST /api/log/client-error — capture frontend errors to logs/errors.log
+  // Unauthenticated so the login page can also report failures, but field sizes are capped.
+  router.post('/api/log/client-error', (req, res) => {
+    const { scope, message, stack, meta } = req.body || {};
+    const truncate = (s, n) => (typeof s === 'string' ? s.slice(0, n) : undefined);
+    logError(`client:${truncate(scope, 60) || 'unknown'}`, { message: truncate(message, 500), stack: truncate(stack, 2000) }, {
+      user: req.currentUser?.email,
+      ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress,
+      ua: truncate(req.headers['user-agent'], 200),
+      meta: meta && typeof meta === 'object' ? Object.fromEntries(Object.entries(meta).slice(0, 10)) : undefined,
+    });
+    res.json({ ok: true });
   });
 
   // GET /api/app-info

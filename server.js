@@ -23,6 +23,9 @@ import { createSystemRouter } from './src/routes/system.js';
 import { createCreditLogicRouter } from './src/routes/creditLogic.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
+import { initBatSchema } from './src/db/batSchema.js';
+import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
+import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
@@ -89,6 +92,10 @@ app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
+// ── BAT Supplier Reconciliation (admin-only while testing) ──
+initBatSchema(db);
+app.use(createBatReconciliationRouter({ requireAuth, requireAdmin }));
+
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
   initHubSiteRegistry();
@@ -111,6 +118,10 @@ if (IS_PRODUCTION) {
 startSchedulers();
 recoverAbandonedSyncs();
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, gracefulShutdown));
+process.on('uncaughtException', (err) => { console.error('[UNCAUGHT]', err.message); });
+process.on('unhandledRejection', (err) => { console.error('[UNHANDLED]', err?.message || err); });
 ensureSeedUsers().then(() => {
   setServer(app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Local backend + SQLite running at http://0.0.0.0:${PORT}`)));
+  // Resume any paused BAT OCR extractions from a previous run
+  resumeExtractionWorker();
 }).catch((error) => { console.error('Failed to seed users:', error); process.exit(1); });
