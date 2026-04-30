@@ -600,19 +600,65 @@ export function createReportingRouter({ requireAuth }) {
       const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
       let totalOutstanding = 0;
 
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const ageToBucket = (days) => {
+        if (days === null || days === undefined) return 'unknown';
+        if (days < 7)  return 'current';
+        if (days < 14) return '7-13';
+        if (days < 21) return '14-20';
+        return '21+';
+      };
+
+      // Per-invoice aging: every known invoice line contributes its OWN amount
+      // to its OWN bucket. Anything not covered by the 5 known lines (the
+      // residual between outstanding_balance and the sum of known invoices)
+      // falls into "unknown" since we don't have a date for it.
       const enriched = filtered.map(r => {
         const balance = parseAmount(r.outstanding_balance);
-        const ageDays = getBalanceAgeDays(r);
-        let bucket;
-        if (ageDays === null) bucket = 'unknown';
-        else if (ageDays < 7) bucket = 'current';
-        else if (ageDays < 14) bucket = '7-13';
-        else if (ageDays < 21) bucket = '14-20';
-        else bucket = '21+';
-        buckets[bucket] += balance;
-        bucketCounts[bucket]++;
         totalOutstanding += balance;
-        return { ...r, age_days: ageDays, bucket, parsed_balance: balance };
+
+        const bucketAmounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+        let knownSum = 0;
+        let oldestAge = null;
+
+        for (let i = 1; i <= 5; i++) {
+          const amt = parseAmount(r[`last_unpaid_invoice_${i}_amount`]);
+          if (!(amt > 0)) continue;
+          const date = parseBalanceDate(r[`last_unpaid_invoice_${i}_date`]);
+          let ageDays = null;
+          if (date) {
+            const days = Math.floor((today - date) / 86400000);
+            if (Number.isFinite(days) && days >= 0) ageDays = days;
+          }
+          if (ageDays !== null && (oldestAge === null || ageDays > oldestAge)) {
+            oldestAge = ageDays;
+          }
+          bucketAmounts[ageToBucket(ageDays)] += amt;
+          knownSum += amt;
+        }
+
+        // Residual = portion of the outstanding balance not represented by the
+        // 5 known invoices. Could come from older invoices, credit-note math
+        // drift, or rounding. Park it in "unknown" so column totals reconcile
+        // back to the customer's total outstanding.
+        const residual = Math.max(0, balance - knownSum);
+        bucketAmounts.unknown += residual;
+
+        for (const k of bucketKeys) {
+          if (bucketAmounts[k] > 0) {
+            buckets[k] += bucketAmounts[k];
+            bucketCounts[k]++;
+          }
+        }
+
+        return {
+          ...r,
+          age_days: oldestAge,
+          bucket: ageToBucket(oldestAge),
+          parsed_balance: balance,
+          bucket_amounts: bucketAmounts,
+        };
       });
 
       // Filter dropdowns built from the unfiltered set so the user can switch back

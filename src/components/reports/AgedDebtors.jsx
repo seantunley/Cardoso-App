@@ -104,7 +104,7 @@ export default function AgedDebtors() {
     <ReportFrame
       sectionLabel="Accounts Receivable"
       title={<>Aged <em className="text-phosphor">Debtors</em>.</>}
-      subtitle="Customers with outstanding balances, bucketed by their oldest unpaid invoice."
+      subtitle="Each unpaid invoice contributes its own amount to its age bucket. Customers may appear in more than one bucket; counts are customers with at least one invoice in that bucket."
       printId="aged-debtors"
       orientation="landscape"
       onExportCsv={sortedRecords.length ? handleExportCsv : null}
