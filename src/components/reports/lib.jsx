@@ -101,10 +101,6 @@ const LEGEND_STYLE = {
 };
 
 // Common axis components — use them in every chart so styling is uniform.
-// Recharts identifies XAxis/YAxis/Legend/CartesianGrid children by their static
-// `displayName`. Wrapping them in a custom component without copying that name
-// makes Recharts skip the axis entirely (no ticks, no label) — so each wrapper
-// re-asserts the underlying displayName.
 export function ThemedXAxis({ label, ...props }) {
   return (
     <XAxis
@@ -116,7 +112,6 @@ export function ThemedXAxis({ label, ...props }) {
     />
   );
 }
-ThemedXAxis.displayName = 'XAxis';
 
 export function ThemedYAxis({ label, currency = false, percent = false, ...props }) {
   const tickFormatter = props.tickFormatter
@@ -133,7 +128,6 @@ export function ThemedYAxis({ label, currency = false, percent = false, ...props
     />
   );
 }
-ThemedYAxis.displayName = 'YAxis';
 
 export function ThemedTooltip({ formatter, ...props }) {
   return (
@@ -147,17 +141,14 @@ export function ThemedTooltip({ formatter, ...props }) {
     />
   );
 }
-ThemedTooltip.displayName = 'Tooltip';
 
 export function ThemedLegend(props) {
   return <Legend wrapperStyle={LEGEND_STYLE} iconType="square" {...props} />;
 }
-ThemedLegend.displayName = 'Legend';
 
 export function ThemedGrid() {
   return <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />;
 }
-ThemedGrid.displayName = 'CartesianGrid';
 
 // Re-export Recharts primitives so report files only import from here.
 export { ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell };
