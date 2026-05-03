@@ -1440,8 +1440,15 @@ function startExtractionWorker(reconId) {
   });
 }
 
-// Auto-resume: call on server start to pick up any pending work
+// Auto-resume: call on server start to pick up any pending work.
+// Also kicks off a fire-and-forget self-test so a fresh-install site
+// surfaces a clear "can OCR even spawn?" answer in the System Log without
+// the operator having to trigger an extraction.
 export function resumeExtractionWorker() {
+  // Run the self-test on every boot regardless of pause state — the goal
+  // is to catch broken installs early, not gate on user state.
+  runOcrSelfTest().catch(() => { /* runOcrSelfTest logs its own failures */ });
+
   if (ocrPaused) {
     console.log('[bat-ocr] Paused — skipping auto-resume on startup');
     return;
@@ -1453,6 +1460,81 @@ export function resumeExtractionWorker() {
   if (pendingRecon) {
     console.log(`[bat-ocr] Auto-resuming extraction for reconciliation ${pendingRecon.reconciliation_id}`);
     startExtractionWorker(pendingRecon.reconciliation_id);
+  }
+}
+
+// Boot-time OCR pipeline smoke test. Spawns one worker_thread, waits for
+// its 'ready' message with a 10s deadline, terminates. The result lands
+// in the System Log as bat.ocr.self_test (info on success, error on
+// failure with a clear reason). On a fresh-install site where OCR
+// silently does nothing, this is the first signal that something is
+// structurally broken — usually:
+//   - 'Worker spawn failed: …'  → native module (better-sqlite3, sharp,
+//     canvas, tesseract.js) couldn't load. Check AV quarantine / VC++
+//     redistributable / Node version mismatch.
+//   - 'Worker did not signal ready within 10s'  → worker started but is
+//     wedged before its first postMessage. Look at worker startup logs.
+//
+// Fire-and-forget: never blocks server boot.
+async function runOcrSelfTest() {
+  const startedAt = Date.now();
+  let lane;
+  try {
+    try {
+      lane = new OcrLane();
+    } catch (err) {
+      throw new Error(`Worker spawn failed: ${err.message}`);
+    }
+    // Wait for the ready message. OcrLane already wires error/exit
+    // handlers that flip `dead = true`, so we can also fail fast if the
+    // worker dies during init.
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(
+        () => reject(new Error('Worker did not signal ready within 10s')),
+        10_000,
+      );
+      const onMessage = (msg) => {
+        if (msg && msg.type === 'ready') {
+          clearTimeout(t);
+          lane.worker.off('message', onMessage);
+          resolve();
+        }
+      };
+      lane.worker.on('message', onMessage);
+      // Catch the case where the worker exits during init.
+      lane.worker.once('exit', (code) => {
+        if (lane.dead || code === 0) return;
+        clearTimeout(t);
+        reject(new Error(`Worker exited during init (code=${code})`));
+      });
+    });
+    const elapsedMs = Date.now() - startedAt;
+    try {
+      logError(
+        'bat.ocr.self_test',
+        new Error(`OCR worker pipeline OK (ready in ${elapsedMs}ms)`),
+        { ready_in_ms: elapsedMs, platform: process.platform, node_version: process.version },
+        'info',
+      );
+    } catch {}
+  } catch (err) {
+    const elapsedMs = Date.now() - startedAt;
+    try {
+      logError(
+        'bat.ocr.self_test',
+        err,
+        {
+          ready_in_ms: elapsedMs,
+          platform: process.platform,
+          node_version: process.version,
+          hint: 'OCR worker thread can not spawn or initialise. Native module corrupt, AV-quarantined, or Node version mismatch.',
+        },
+      );
+    } catch {}
+  } finally {
+    if (lane) {
+      try { await lane.terminate(); } catch {}
+    }
   }
 }
 
@@ -1722,6 +1804,30 @@ async function processQueue(reconId) {
   const N = OCR_CONCURRENCY;
   console.log(`[bat-ocr] Starting worker_threads pool (concurrency=${N}) for reconciliation ${reconId}`);
 
+  // Bootstrap env summary into the System Log. When a fresh-install site
+  // hangs silently, the first question is "is the environment even right
+  // for OCR to run?" — Node version mismatch, missing API keys (so the
+  // pipeline falls all the way through to Tesseract), wrong OCR_CONCURRENCY,
+  // missing previewDir, etc. This single log line gives an operator the
+  // answers without RDP'ing into the box.
+  try {
+    logError(
+      'bat.ocr.start',
+      new Error(`Worker pool starting for reconciliation ${reconId}`),
+      {
+        reconciliation_id: reconId,
+        concurrency: N,
+        platform: process.platform,
+        arch: process.arch,
+        node_version: process.version,
+        google_vision_key_set: !!getGoogleVisionKey(),
+        ocr_space_key_set: !!getOcrSpaceKey(),
+        preview_dir: previewDir,
+      },
+      'info',
+    );
+  } catch { /* never let observability crash a real run */ }
+
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extracted_invoice = ?, extraction_status = ?, preview_path = COALESCE(?, preview_path),
@@ -1969,6 +2075,23 @@ async function processQueue(reconId) {
     for (const [id, row] of currentlyProcessing) {
       if (row.reconciliation_id === reconId) currentlyProcessing.delete(id);
     }
+  }
+
+  // If every lane retired (recreation failed) while rows are still
+  // 'pending', the run effectively died mid-flight. Surface that to the
+  // UI as a recon-level error so the operator sees a toast/banner rather
+  // than a queue that quietly stalls. This also prevents the next
+  // workerRunning check from masking the failure.
+  const stillPending = db.prepare(
+    "SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
+  ).get(reconId)?.c || 0;
+  if (stillPending > 0) {
+    const msg = `OCR run ended with ${stillPending} row${stillPending === 1 ? '' : 's'} still pending — all lanes retired. Check the System Log for bat.ocr.lane_recreate / bat.ocr.watchdog_kill entries.`;
+    db.prepare("UPDATE bat_reconciliations SET status = 'error', last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(msg, reconId);
+    try { logError('bat.ocr.run_incomplete', new Error(msg), { reconciliation_id: reconId, pending: stillPending }); } catch {}
+    emitExtractionUpdate(reconId);
+    return;
   }
 
   normalizeInvoiceNumbers(reconId);
