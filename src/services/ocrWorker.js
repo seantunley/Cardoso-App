@@ -68,7 +68,12 @@ async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const canvas = createCanvas(viewport.width, viewport.height);
   const context = canvas.getContext('2d');
 
-  await page.render({ canvasContext: context, viewport }).promise;
+  // Pass both `canvas` and `canvasContext` so this works on pdfjs 4.8.x
+  // (which uses canvasContext) AND 4.10+ (which validates that canvasContext
+  // is a real browser context and rejects node-canvas's compatible shim with
+  // "Image or Canvas expected" — accepting `canvas` alongside satisfies the
+  // newer check). Belt-and-suspenders against any future pdfjs API tweak.
+  await page.render({ canvas, canvasContext: context, viewport }).promise;
   await pdfDoc.destroy();
 
   return canvas.toBuffer('image/png');

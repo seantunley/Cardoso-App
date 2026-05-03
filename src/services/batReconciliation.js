@@ -2048,7 +2048,9 @@ async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const viewport = page.getViewport({ scale });
   const canvas = createCanvas(viewport.width, viewport.height);
   const context = canvas.getContext('2d');
-  await page.render({ canvasContext: context, viewport }).promise;
+  // Pass both canvas + canvasContext for compatibility with pdfjs 4.10+
+  // (mirrors the same fix in src/services/ocrWorker.js).
+  await page.render({ canvas, canvasContext: context, viewport }).promise;
   await pdfDoc.destroy();
   return canvas.toBuffer('image/png');
 }
