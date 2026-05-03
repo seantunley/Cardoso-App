@@ -116,13 +116,48 @@ jobs:
           }
         shell: powershell
 
+      - name: Compute lock hash
+        id: lockhash
+        run: |
+          $hash = (Get-FileHash package-lock.json -Algorithm SHA256).Hash.ToLower()
+          echo "lock_hash=$hash" >> $env:GITHUB_OUTPUT
+          Write-Host "lock_hash=$hash"
+        shell: powershell
+
+      - name: Build delta app zip
+        # Tiny artifact (~5MB) containing everything that changes most releases:
+        # server.js, src/, dist/, scripts/, package.json. Excludes node_modules,
+        # node, nssm — those are heavy and rarely change. The in-app updater
+        # downloads this instead of the full EXE when the installed
+        # package-lock.json hash matches the new release's lock_hash.
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path windows/build/delta | Out-Null
+          Copy-Item server.js windows/build/delta/
+          Copy-Item package.json windows/build/delta/
+          Copy-Item package-lock.json windows/build/delta/
+          Copy-Item -Recurse dist windows/build/delta/dist
+          Copy-Item -Recurse src windows/build/delta/src
+          Copy-Item -Recurse scripts windows/build/delta/scripts
+          Compress-Archive -Path windows/build/delta/* -DestinationPath "app-v$version.zip" -Force
+          $zipBytes = (Get-Item "app-v$version.zip").Length
+          $appHash  = (Get-FileHash "app-v$version.zip" -Algorithm SHA256).Hash.ToLower()
+          "$appHash *app-v$version.zip" | Set-Content "app-v$version.zip.sha256" -NoNewline
+          Write-Host "app-v$version.zip = $($zipBytes / 1MB) MB · sha256=$appHash"
+        shell: powershell
+
       - name: Update version in installer
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
+          $lockHash = "${{ steps.lockhash.outputs.lock_hash }}"
           $content = Get-Content windows/installer.nsi -Raw
           $content = $content -replace 'VIProductVersion "[^"]*"', "VIProductVersion `"$version.0`""
           $content = $content -replace '"DisplayVersion" "[^"]*"', "`"DisplayVersion`" `"$version`""
           $content = $content -replace '"FileVersion" "[^"]*"', "`"FileVersion`" `"$version`""
+          # New defines so the install section can write .lock-hash and
+          # .installed-version markers to disk for the in-app delta updater.
+          $content = $content -replace '!define LOCK_HASH "[^"]*"',         "!define LOCK_HASH `"$lockHash`""
+          $content = $content -replace '!define INSTALLED_VERSION "[^"]*"', "!define INSTALLED_VERSION `"$version`""
           Set-Content windows/installer.nsi $content
         shell: powershell
 
@@ -133,6 +168,27 @@ jobs:
           Rename-Item CardosoSetup.exe "CardosoSetup-v$v.exe"
           $hash = (Get-FileHash "CardosoSetup-v$v.exe" -Algorithm SHA256).Hash.ToLower()
           "$hash *CardosoSetup-v$v.exe" | Set-Content "CardosoSetup-v$v.exe.sha256" -NoNewline
+        shell: powershell
+
+      - name: Build manifest.json
+        # Manifest tells the in-app updater whether a delta update is possible
+        # for this release. If the installed lock_hash matches manifest.lock_hash,
+        # the updater downloads app_zip (~5MB) instead of the full installer.
+        run: |
+          $v = (Get-Content package.json | ConvertFrom-Json).version
+          $appHash  = (Get-FileHash "app-v$v.zip" -Algorithm SHA256).Hash.ToLower()
+          $exeHash  = (Get-FileHash "CardosoSetup-v$v.exe" -Algorithm SHA256).Hash.ToLower()
+          $lockHash = "${{ steps.lockhash.outputs.lock_hash }}"
+          $manifest = [ordered]@{
+            version          = $v
+            lock_hash        = $lockHash
+            app_zip          = "app-v$v.zip"
+            app_zip_sha256   = $appHash
+            installer        = "CardosoSetup-v$v.exe"
+            installer_sha256 = $exeHash
+          } | ConvertTo-Json -Depth 5
+          $manifest | Set-Content -Path "manifest-v$v.json" -NoNewline
+          Write-Host $manifest
         shell: powershell
 
       - name: Get version
@@ -166,6 +222,9 @@ jobs:
           files: |
             CardosoSetup-v${{ steps.version.outputs.version }}.exe
             CardosoSetup-v${{ steps.version.outputs.version }}.exe.sha256
+            app-v${{ steps.version.outputs.version }}.zip
+            app-v${{ steps.version.outputs.version }}.zip.sha256
+            manifest-v${{ steps.version.outputs.version }}.json
           generate_release_notes: true
           make_latest: true
         env:

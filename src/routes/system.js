@@ -88,7 +88,29 @@ async function fetchReleaseMetadata() {
     throw new Error(`Checksum asset missing for ${installerAsset.name}`);
   }
 
-  return { ok: true, release, installerAsset, checksumAsset };
+  // Optional: delta update artifacts. If present, the updater will prefer the
+  // small app zip over re-downloading the full ~100MB installer.
+  const manifestAsset = release.assets.find((asset) =>
+    asset.name.startsWith('manifest-v') && asset.name.endsWith('.json'),
+  );
+  const appZipAsset = release.assets.find((asset) =>
+    asset.name.startsWith('app-v') && asset.name.endsWith('.zip'),
+  );
+
+  return { ok: true, release, installerAsset, checksumAsset, manifestAsset, appZipAsset };
+}
+
+// Read the lock-hash marker the installer writes at install time. Returns
+// `null` if the file doesn't exist (older install, or never wrote one). That
+// missing-marker case forces the updater into the full-installer fallback.
+function readInstalledLockHash() {
+  const installDir = process.env.APP_DIR || 'C:\\Cardoso Customer App';
+  try {
+    const raw = fs.readFileSync(path.join(installDir, '.lock-hash'), 'utf8');
+    return raw.trim().toLowerCase() || null;
+  } catch {
+    return null;
+  }
 }
 
 async function downloadReleaseAsset(url, destPath) {
@@ -323,6 +345,84 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // ==================== AUTO-UPDATE (WINDOWS SERVICE) ====================
   let autoUpdateRunning = false;
 
+  // Try the lightweight delta-zip update path. Returns:
+  //   { ok: true, mode: 'delta' }  → app zip downloaded + apply script spawned
+  //   { ok: false, reason: ... }   → caller should fall back to the full EXE
+  async function tryDeltaUpdate(releaseMeta) {
+    const { release, manifestAsset, appZipAsset } = releaseMeta;
+    if (!manifestAsset || !appZipAsset) {
+      return { ok: false, reason: 'no_delta_artifacts' };
+    }
+
+    // Pull manifest.json from the release. Tiny file (~200 bytes).
+    let manifest;
+    try {
+      assertTrustedAssetUrl(manifestAsset.browser_download_url);
+      const r = await fetch(manifestAsset.browser_download_url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      manifest = await r.json();
+    } catch (err) {
+      return { ok: false, reason: `manifest_fetch_failed:${err.message}` };
+    }
+
+    if (!manifest?.lock_hash || !manifest?.app_zip || !manifest?.app_zip_sha256) {
+      return { ok: false, reason: 'manifest_malformed' };
+    }
+
+    // Compare installed lock-hash against what this release was built with.
+    // If they differ, package-lock.json changed → node_modules need to update,
+    // which only the full installer can do.
+    const installedLockHash = readInstalledLockHash();
+    if (!installedLockHash) {
+      return { ok: false, reason: 'no_lock_marker' };
+    }
+    if (installedLockHash !== manifest.lock_hash.toLowerCase()) {
+      return { ok: false, reason: 'lock_changed', installed: installedLockHash, target: manifest.lock_hash };
+    }
+
+    // Confirm the apply script is on disk. It ships with the *current* install,
+    // so a brand-new site upgrading from a pre-delta version won't have it.
+    const installDir = process.env.APP_DIR || 'C:\\Cardoso Customer App';
+    const applyScript = path.join(installDir, 'scripts', 'apply-app-update.ps1');
+    if (!fs.existsSync(applyScript)) {
+      return { ok: false, reason: 'apply_script_missing' };
+    }
+
+    // Download the app zip (small — typically <10MB)
+    const tmpZip = path.join(process.env.TEMP || 'C:\\Windows\\Temp', manifest.app_zip);
+    console.log(`[AutoUpdate-delta] Downloading ${manifest.app_zip} (${(appZipAsset.size / 1024 / 1024).toFixed(1)} MB)...`);
+    try {
+      await downloadReleaseAsset(appZipAsset.browser_download_url, tmpZip);
+    } catch (err) {
+      return { ok: false, reason: `app_zip_download_failed:${err.message}` };
+    }
+
+    const actual = await sha256File(tmpZip);
+    if (actual !== manifest.app_zip_sha256.toLowerCase()) {
+      try { fs.unlinkSync(tmpZip); } catch {}
+      return { ok: false, reason: 'app_zip_sha_mismatch' };
+    }
+    console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1.');
+
+    // Detached PowerShell — the apply script stops the service, swaps files,
+    // restarts the service, and rolls back on any failure.
+    const child = spawn('powershell.exe', [
+      '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
+      '-File', applyScript,
+      '-ZipPath', tmpZip,
+      '-ExpectedSha256', manifest.app_zip_sha256,
+      '-AppDir', installDir,
+      '-NewLockHash', manifest.lock_hash,
+      '-NewVersion', String(manifest.version || ''),
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.unref();
+    return { ok: true, mode: 'delta' };
+  }
+
   async function triggerWindowsUpdate() {
     if (autoUpdateRunning) {
       console.log('[AutoUpdate] Update already in progress, skipping.');
@@ -338,6 +438,16 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         console.warn(`[AutoUpdate] GitHub API rate limited (${releaseMeta.reason.split(':')[1]}). Skipping this cycle.`);
         return { ok: false, reason: 'rate_limited' };
       }
+
+      // 1) Try the small delta zip first. Falls back to the EXE on any
+      //    "can't do delta" condition (lock changed, no marker, no manifest,
+      //    apply script missing, etc.).
+      const delta = await tryDeltaUpdate(releaseMeta);
+      if (delta.ok) {
+        console.log('[AutoUpdate] Delta update launched (app zip).');
+        return { ok: true, mode: 'delta' };
+      }
+      console.log(`[AutoUpdate] Delta path skipped (${delta.reason}). Falling back to full installer.`);
 
       const { installerAsset, checksumAsset } = releaseMeta;
       console.log(`[AutoUpdate] Downloading ${installerAsset.name} (${(installerAsset.size / 1024 / 1024).toFixed(1)} MB)...`);
