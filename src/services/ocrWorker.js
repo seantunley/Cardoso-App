@@ -380,6 +380,24 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         const invoice = findInvoiceNumber(text);
         if (invoice) return { invoice, previewPath };
       } catch (err) {
+        // Surface per-engine failures to the parent for System Log
+        // attribution. Without this, a misconfigured Google Vision (key
+        // valid but Vision API not enabled, IP-restricted, billing off,
+        // etc.) was indistinguishable from "GV ran fine, just no text" —
+        // the cascade silently moved to ocr.space and the operator never
+        // saw why. The parent translates these into bat.ocr.engine_failed
+        // System Log entries.
+        try {
+          parentPort.postMessage({
+            type: 'engine_error',
+            id: msgId,
+            engine: engine.name,
+            angle,
+            stage: stageLabel,
+            message: String(err?.message || err).slice(0, 500),
+            tierError: !!err?.tierError,
+          });
+        } catch {}
         if (err.tierError && !tierError) tierError = `${engine.name}: ${err.message}`;
         // If Tesseract crashed mid-run, surface so the main thread can rebuild this lane.
         if (engine.name.startsWith('Tesseract') && _tesseract) {

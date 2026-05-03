@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { spawn } from 'child_process';
 import fs from 'fs';
-import { createWriteStream } from 'fs';
+import { promises as fsp, createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { createRequire } from 'module';
 import bcrypt from 'bcryptjs';
@@ -148,6 +148,79 @@ async function sha256File(filePath) {
     stream.on('data', (chunk) => hash.update(chunk));
     stream.on('end', () => resolve(hash.digest('hex')));
   });
+}
+
+// Run a PowerShell script truly outside the Cardoso process tree.
+//
+// Why: when our auto-updater's spawned PowerShell runs `Stop-Service
+// CardosoCigarettes`, the service stop kills its parent (node.exe), and
+// NSSM's "kill process tree" behaviour kills every descendant — including
+// the PowerShell process that's about to install the new version. The
+// installer never runs, the service stays stopped (or gets restarted by
+// the operator at the OLD version), and the UI hangs at "Restarting
+// service" forever because `currentVersion` never flips.
+//
+// `detached: true` on Node's `spawn` is not enough on Windows in this
+// scenario. The standard fix is Task Scheduler: ask the OS to run the
+// script as a one-shot SYSTEM task in N seconds. The Task Scheduler is
+// not a child of our service, so when the service stops it has no
+// effect on the running task. The task script also cleans up after
+// itself (deletes both the task definition and the .ps1 file).
+//
+// Returns the absolute path of the .ps1 file written, for use by callers
+// that need to log it.
+async function launchViaTaskScheduler(taskName, scriptContent) {
+  const tempDir = process.env.TEMP || 'C:\\Windows\\Temp';
+  const scriptPath = path.join(tempDir, `${taskName}.ps1`);
+
+  // Append self-cleanup. Run as the very last step so anything before it
+  // — including process exit — leaves no scheduled-task or temp-script
+  // residue. Unconditional via `try/finally` so a failed install still
+  // deletes the task.
+  const wrappedScript = `
+$ErrorActionPreference = 'Continue'
+try {
+${scriptContent}
+} finally {
+  try { schtasks.exe /Delete /F /TN '${taskName}' | Out-Null } catch {}
+  try { Remove-Item -LiteralPath '${scriptPath}' -Force -ErrorAction SilentlyContinue } catch {}
+}
+`.trim();
+
+  await fsp.writeFile(scriptPath, wrappedScript, 'utf8');
+
+  // Create a one-shot task that's scheduled at a dummy time and triggered
+  // immediately via /Run. SYSTEM context, highest run-level — the same
+  // privilege the service has, so all of Stop-Service / Start-Process
+  // installer / Start-Service work without elevation prompts.
+  const run = (args) => new Promise((resolve, reject) => {
+    const child = spawn('schtasks.exe', args, { stdio: 'pipe', windowsHide: true });
+    let stderr = '';
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`schtasks ${args[0]} failed (code ${code}): ${stderr.trim()}`));
+    });
+  });
+
+  // /Create the task. /F overwrites any leftover from a prior failed
+  // attempt with the same name (we name with a timestamp so collisions
+  // are unlikely, but defensive).
+  await run([
+    '/Create', '/F',
+    '/TN', taskName,
+    '/TR', `powershell.exe -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File "${scriptPath}"`,
+    '/SC', 'ONCE',
+    '/ST', '23:59',
+    '/RL', 'HIGHEST',
+    '/RU', 'SYSTEM',
+  ]);
+  // /Run fires it immediately (the /ST is just a required-by-syntax
+  // placeholder for ONCE schedules).
+  await run(['/Run', '/TN', taskName]);
+
+  return scriptPath;
 }
 
 function dedupeCustomers({ dryRun = true } = {}) {
@@ -610,25 +683,34 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       try { fs.unlinkSync(tmpZip); } catch {}
       return { ok: false, reason: 'app_zip_sha_mismatch' };
     }
-    console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1.');
+    console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1 via Task Scheduler.');
     autoUpdatePhase = 'installing';
 
-    // Detached PowerShell — the apply script stops the service, swaps files,
-    // restarts the service, and rolls back on any failure.
-    const child = spawn('powershell.exe', [
-      '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
-      '-File', applyScript,
-      '-ZipPath', tmpZip,
-      '-ExpectedSha256', manifest.app_zip_sha256,
-      '-AppDir', installDir,
-      '-NewLockHash', manifest.lock_hash,
-      '-NewVersion', String(manifest.version || ''),
-    ], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.unref();
+    // Run the apply script via Task Scheduler so the runner survives the
+    // service stop. Previously this was a `spawn(..., { detached: true })`
+    // call, but on a service-managed Cardoso install the spawned PS is
+    // still in node's process tree — when apply-app-update.ps1 stops the
+    // service, NSSM kills the tree, the apply script dies before
+    // installing anything, and the operator sees "Restarting service"
+    // forever in the UI.
+    const taskName = `CardosoUpdater-delta-${Date.now()}`;
+    // Quote each argument for PowerShell so paths with spaces survive
+    // re-parsing inside the wrapper script.
+    const psArgs = [
+      ['-ZipPath', tmpZip],
+      ['-ExpectedSha256', manifest.app_zip_sha256],
+      ['-AppDir', installDir],
+      ['-NewLockHash', manifest.lock_hash],
+      ['-NewVersion', String(manifest.version || '')],
+    ].map(([k, v]) => `${k} '${String(v).replace(/'/g, "''")}'`).join(' ');
+    const wrapper = `& '${applyScript.replace(/'/g, "''")}' ${psArgs}`;
+    try {
+      await launchViaTaskScheduler(taskName, wrapper);
+    } catch (err) {
+      console.error('[AutoUpdate-delta] Task Scheduler launch failed:', err.message);
+      try { logError('app.update.delta', err, { phase: 'task_scheduler_launch' }); } catch {}
+      return { ok: false, reason: `task_scheduler_launch_failed:${err.message}` };
+    }
     return { ok: true, mode: 'delta' };
   }
 
@@ -679,20 +761,22 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       if (actualChecksum !== expectedChecksum) {
         throw new Error(`Installer checksum mismatch for ${installerAsset.name}`);
       }
-      console.log('[AutoUpdate] SHA-256 verified. Launching silent installer.');
+      console.log('[AutoUpdate] SHA-256 verified. Launching silent installer via Task Scheduler.');
       autoUpdatePhase = 'installing';
 
-      // Stop the Cardoso service before launching the installer so it can
-      // overwrite locked files. The installer (NSIS) will restart the service
-      // after installation completes.
+      // Run the installer via Task Scheduler so the runner is not a child
+      // of the Cardoso service process tree. Without this the script dies
+      // with the service it just stopped (NSSM kill-tree), so NSIS never
+      // executes, the operator sees "Restarting service" forever, and a
+      // manual restart brings the service back at the OLD version.
       //
-      // We run the installer with a 5-minute hard timeout. NSIS occasionally
-      // wedges (UAC prompt nobody can click, MSI lock contention, etc.) and
-      // the previous version waited forever. WaitForExit returns false on
-      // timeout; we then force-kill so the service restart still happens
-      // and the operator gets a clear failure instead of a perpetual
-      // "Downloading update" spinner.
-      const psScript = [
+      // The installer also runs with a 5-minute hard timeout. NSIS
+      // occasionally wedges (UAC prompt nobody can click, MSI lock
+      // contention, etc.) and the previous version waited forever.
+      // WaitForExit returns false on timeout; we then force-kill so the
+      // service restart still happens and the operator gets a clear
+      // failure instead of a perpetual spinner.
+      const installerScript = [
         `Stop-Service -Name 'CardosoCigarettes' -Force -ErrorAction SilentlyContinue`,
         `Start-Sleep -Seconds 3`,
         `$proc = Start-Process -FilePath '${tmpPath.replace(/'/g, "''")}' -ArgumentList '/S' -PassThru`,
@@ -707,18 +791,19 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         `if ($svc -and $svc.Status -ne 'Running') { Start-Service -Name 'CardosoCigarettes' -ErrorAction SilentlyContinue }`,
       ].join('\n');
 
-      const child = spawn('powershell.exe', [
-        '-NonInteractive',
-        '-WindowStyle', 'Hidden',
-        '-Command', psScript,
-      ], {
-        detached: true,
-        stdio: 'ignore',
-        windowsHide: true,
-      });
-      child.unref();
+      const taskName = `CardosoUpdater-full-${Date.now()}`;
+      try {
+        await launchViaTaskScheduler(taskName, installerScript);
+      } catch (err) {
+        console.error('[AutoUpdate] Task Scheduler launch failed:', err.message);
+        try { logError('app.update.full', err, { phase: 'task_scheduler_launch' }); } catch {}
+        autoUpdateRunning = false;
+        autoUpdatePhase = null;
+        autoUpdateStartedAt = null;
+        return { ok: false, reason: `task_scheduler_launch_failed:${err.message}` };
+      }
 
-      console.log('[AutoUpdate] PowerShell updater launched: stopping service, running installer, restarting.');
+      console.log('[AutoUpdate] Updater scheduled — installer will run independent of the Cardoso process tree.');
       // Once the spawned PS hands off to the installer, the service will be
       // stopped and this Node process won't see the next state change. Mark
       // 'restarting' so the UI shows the right phase right up until the
