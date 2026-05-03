@@ -1833,6 +1833,46 @@ async function processQueue(reconId) {
   }, 30_000);
   if (typeof slowMonitor.unref === 'function') slowMonitor.unref();
 
+  // Memory monitor — logs the Node process's resident-set size every 60s
+  // while OCR is running. RSS includes the main thread AND every
+  // worker_thread (they share the OS process), so this is the total
+  // memory footprint of the OCR pipeline. If RSS climbs steadily and the
+  // process then dies with no JS error, that's the OOM signature we've
+  // been hunting. Always 'info' level — these aren't errors, they're
+  // observability ticks.
+  const startedAtMs = Date.now();
+  let lastRssMb = 0;
+  const memoryMonitor = setInterval(() => {
+    try {
+      const m = process.memoryUsage();
+      const rssMb = Math.round(m.rss / 1024 / 1024);
+      const heapMb = Math.round(m.heapUsed / 1024 / 1024);
+      const heapTotalMb = Math.round(m.heapTotal / 1024 / 1024);
+      const externalMb = Math.round(m.external / 1024 / 1024);
+      const elapsedSec = Math.floor((Date.now() - startedAtMs) / 1000);
+      // Suppress when nothing has materially changed (within 5MB) to keep
+      // the log signal-to-noise high. Always log the first tick.
+      if (lastRssMb && Math.abs(rssMb - lastRssMb) < 5) return;
+      lastRssMb = rssMb;
+      logError(
+        'bat.ocr.memory',
+        new Error(`RSS ${rssMb}MB · heap ${heapMb}/${heapTotalMb}MB · native ${externalMb}MB · t+${elapsedSec}s`),
+        {
+          reconciliation_id: reconId,
+          rss_mb: rssMb,
+          heap_used_mb: heapMb,
+          heap_total_mb: heapTotalMb,
+          external_mb: externalMb,
+          elapsed_seconds: elapsedSec,
+          in_flight_count: currentlyProcessing.size,
+          concurrency: N,
+        },
+        'info',
+      );
+    } catch { /* never let observability crash a real run */ }
+  }, 60_000);
+  if (typeof memoryMonitor.unref === 'function') memoryMonitor.unref();
+
   const runLane = async (lane) => {
     while (true) {
       if (ocrPaused) {
@@ -1929,6 +1969,7 @@ async function processQueue(reconId) {
     await Promise.all(lanes.map(runLane));
   } finally {
     clearInterval(slowMonitor);
+    clearInterval(memoryMonitor);
     await Promise.all(lanes.map(l => l.worker.terminate()));
     // Defensive: drop any leftover entries from this recon. Shouldn't be
     // needed since each runLane's finally cleans up, but a worker_thread
@@ -1998,6 +2039,10 @@ function recordReconciliationError(reconId, message) {
 const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
 if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
 
+// pdfjs-dist is PINNED to 4.8.69. See the long-form comment in
+// src/services/ocrWorker.js for why — short version: pdfjs 4.10+ uses
+// ImageBitmap which node-canvas doesn't accept. Migration to a
+// Node-native PDF engine is queued in docs/plans/pdf-engine-migration.md.
 async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const { createCanvas } = await import('canvas');

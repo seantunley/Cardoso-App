@@ -22,6 +22,20 @@ jobs:
         run: npm ci
         shell: powershell
 
+      - name: Guard pdfjs-dist version (load-bearing pin)
+        # 4.10+ switched to ImageBitmap-based rendering which node-canvas
+        # doesn't accept. The pin in package.json is load-bearing — until
+        # the planned PDF-engine migration lands, this CI check fails the
+        # build if anything (including npm update) ever bumps it.
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).dependencies.'pdfjs-dist'
+          if ($version -ne '4.8.69') {
+            Write-Error "pdfjs-dist must be pinned to exactly 4.8.69 (got: $version). See src/services/ocrWorker.js for why. Migration plan: docs/plans/pdf-engine-migration.md"
+            exit 1
+          }
+          Write-Host "pdfjs-dist pin verified: $version"
+        shell: powershell
+
       - name: Lint
         run: npm run lint
         shell: powershell
