@@ -221,20 +221,25 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const tableContainerRef = useRef(null);
   const { widths, setWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
-  // Auto-fit on mount + container resize: if saved widths overflow the
-  // container, scale every column down proportionally so the table never
-  // escapes its rounded frame.
+  // Auto-fit on mount + container resize: scale every column proportionally
+  // so the columns ALWAYS fill the container exactly — no empty band on the
+  // right when total < container, no overflow when total > container. The
+  // 1px hairline reserved for the right border keeps the rounded frame from
+  // looking clipped.
   useEffect(() => {
     const el = tableContainerRef.current;
     if (!el) return;
     const fit = () => {
       const inner = el.clientWidth;
       if (!inner) return;
+      const target = inner - 1;
       const total = Object.values(widths).reduce((s, v) => s + v, 0);
-      if (total <= inner - 1) return;
-      const scale = (inner - 1) / total;
+      // 1px tolerance so we don't loop on rounding drift when the table
+      // already matches the container.
+      if (Math.abs(total - target) < 2) return;
+      const scale = target / total;
       const scaled = Object.fromEntries(
-        Object.entries(widths).map(([k, v]) => [k, Math.max(40, Math.floor(v * scale))]),
+        Object.entries(widths).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
       );
       setWidths(scaled);
     };
@@ -529,10 +534,11 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                 <Td><OcrBadge status={e.extraction_status} /></Td>
                 <Td mono>
                   <span className="inline-flex items-center gap-1.5">
-                    {e.match_status === 'matched'
-                      ? <span className="text-foreground">{e.extracted_invoice}</span>
-                      : <ManualInvoiceInput extraction={e} onSaved={onReconciliationUpdate} />
-                    }
+                    {/* Always editable — even matched rows can be wrong. The
+                        save button still pulses in and the row re-runs the
+                        match query downstream, so the user always has an
+                        override path. */}
+                    <ManualInvoiceInput extraction={e} onSaved={onReconciliationUpdate} />
                     {e.duplicate_count > 1 && (
                       <Tooltip>
                         <TooltipTrigger asChild>

@@ -260,8 +260,16 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const { invoiceNumber } = req.body;
     if (!invoiceNumber) return res.status(400).json({ error: 'invoiceNumber required' });
     // Snapshot the previous OCR result so the audit row shows what the
-    // human override changed.
-    const previous = db.prepare('SELECT extraction_id, invoice_number, store_name, extraction_status, reconciliation_id FROM bat_invoice_extractions WHERE id = ?').get(id);
+    // human override changed. Aliased to invoice_number so the audit
+    // payload below reads naturally; the schema column is extracted_invoice.
+    let previous = null;
+    try {
+      previous = db.prepare(`
+        SELECT id, extracted_invoice AS invoice_number, store_name, extraction_status, reconciliation_id
+        FROM bat_invoice_extractions WHERE id = ?
+      `).get(id);
+    } catch { /* fall through; previous stays null and we still try the override */ }
+    if (!previous) return res.status(404).json({ error: 'Extraction not found' });
     try {
       const reconId = manualSetInvoice(id, invoiceNumber.trim().toUpperCase());
       const recon = getReconciliation(reconId);
@@ -293,6 +301,28 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const recon = getReconciliation(id);
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     res.json(recon);
+  });
+
+  // Clear the per-recon last_error. Used by the toast "Dismiss" button so
+  // an operator can acknowledge a stale error after manual investigation
+  // (e.g. they ran a fresh extraction outside the standard workflow). The
+  // historical entry stays in error_log / System Log indefinitely.
+  router.post('/api/bat/reconciliation/:id/dismiss-error', ...gate, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    try {
+      const info = db.prepare(
+        "UPDATE bat_reconciliations SET last_error = NULL, last_error_at = NULL WHERE id = ?"
+      ).run(id);
+      logAudit({
+        req, action: 'bat_dismiss_recon_error', resourceType: 'system',
+        resourceId: id, resourceName: `Reconciliation ${id}`,
+        details: info.changes ? 'Cleared last_error on reconciliation' : 'Reconciliation not found or already clear',
+      });
+      res.json({ ok: true, cleared: info.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.get('/api/bat/reconciliations', ...gate, (req, res) => {

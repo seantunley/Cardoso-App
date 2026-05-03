@@ -1,9 +1,17 @@
 import React from 'react';
 import { Loader2 } from 'lucide-react';
 
+function fmtElapsed(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
 export default function ExtractionProgress({ progress }) {
   if (!progress) return null;
   const pct = progress.total > 0 ? Math.round((progress.processed / progress.total) * 100) : 0;
+  const inFlight = Array.isArray(progress.in_flight) ? progress.in_flight : [];
 
   return (
     <div
@@ -40,6 +48,34 @@ export default function ExtractionProgress({ progress }) {
           />
         </div>
       </div>
+
+      {/* Live "currently processing" list. Without this, the progress bar
+          hits 97% with the last few PDFs running and looks frozen. Showing
+          which row is in-flight (with elapsed time) makes it obvious whether
+          the worker is still chewing or actually stuck. Rows past 60s render
+          in amber, past 90s in red — operator-visible cue without needing
+          to open the System Log. */}
+      {progress.running && inFlight.length > 0 && (
+        <div className="pl-2 pt-1 space-y-1">
+          <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">
+            Currently processing · {inFlight.length}
+          </div>
+          {inFlight.map((row) => {
+            const slow  = row.elapsed_seconds >= 60;
+            const stuck = row.elapsed_seconds >= 90;
+            const color = stuck ? 'text-destructive' : slow ? 'text-amber-400' : 'text-muted-foreground';
+            return (
+              <div key={row.id} className="flex items-center justify-between font-mono text-[11px]">
+                <span className={`truncate ${color}`}>
+                  #{row.id} · {row.store_name || 'unknown'}
+                </span>
+                <span className={`tabular-nums ml-3 shrink-0 ${color}`}>{fmtElapsed(row.elapsed_seconds)}</span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {progress.error && (
         <p className="pl-2 font-mono text-xs text-destructive">Error: {progress.error}</p>
       )}

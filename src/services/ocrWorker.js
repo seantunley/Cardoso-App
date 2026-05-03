@@ -58,6 +58,22 @@ async function getCanvas() {
 
 // ── PDF render ───────────────────────────────────────────────────────────────
 
+// pdfjs-dist is PINNED to 4.8.69 in package.json. DO NOT BUMP without
+// migrating off node-canvas first.
+//
+// pdfjs 4.10+ switched its image pipeline to browser-only APIs
+// (createImageBitmap, OffscreenCanvas.transferToImageBitmap). When pdfjs
+// then calls ctx.drawImage(imgData.bitmap, 0, 0), node-canvas rejects the
+// ImageBitmap with "Image or Canvas expected" — node-canvas only accepts
+// its own Image / Canvas types. The result is every PDF that needs image
+// rendering fails to OCR.
+//
+// 4.8.69 is the last pdfjs version that uses node-canvas-compatible
+// image objects. It works reliably with this code path.
+//
+// Long-term plan: migrate to a Node-native PDF engine (pdfium-binary or
+// poppler) that doesn't depend on browser APIs. See docs/plans/pdf-engine-migration.md
+// for scope. Until that lands, this pin is load-bearing.
 async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const pdfjsLib = await getPdfjs();
   const { createCanvas } = await getCanvas();
@@ -67,7 +83,6 @@ async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const viewport = page.getViewport({ scale });
   const canvas = createCanvas(viewport.width, viewport.height);
   const context = canvas.getContext('2d');
-
   await page.render({ canvasContext: context, viewport }).promise;
   await pdfDoc.destroy();
 

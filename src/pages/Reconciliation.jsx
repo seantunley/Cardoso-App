@@ -157,13 +157,32 @@ export default function Reconciliation() {
   useEffect(() => {
     if (!selected) return;
     const seen = shownErrorsRef.current;
-    const fire = (key, message) => {
+    const fire = (key, message, opts = {}) => {
       if (!message || seen.has(key)) return;
       seen.add(key);
-      toast.error(message, { duration: 5000 });
+      toast.error(message, { duration: 5000, ...opts });
     };
+    // Recon-level errors get a Dismiss button — clears last_error on the
+    // server so the toast doesn't reappear on next page load. The original
+    // error stays in System Log forever; this just acknowledges it.
+    fire(
+      `recon:${selected.last_error}`,
+      selected.last_error && `OCR: ${selected.last_error}`,
+      {
+        action: {
+          label: 'Dismiss',
+          onClick: async () => {
+            try {
+              await fetch(`/api/bat/reconciliation/${selected.id}/dismiss-error`, {
+                method: 'POST', credentials: 'include',
+              });
+              loadReconciliation(selected.id);
+            } catch { /* no-op — toast disappears anyway */ }
+          },
+        },
+      },
+    );
     fire(`sage:${selected.sage_error}`, selected.sage_error && `Sage: ${selected.sage_error}`);
-    fire(`recon:${selected.last_error}`, selected.last_error && `OCR: ${selected.last_error}`);
     for (const ext of selected.extractions || []) {
       if (ext.extraction_error) {
         fire(`ext:${ext.id}:${ext.extraction_error}`, `OCR id ${ext.id}: ${ext.extraction_error}`);

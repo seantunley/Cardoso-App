@@ -22,6 +22,20 @@ jobs:
         run: npm ci
         shell: powershell
 
+      - name: Guard pdfjs-dist version (load-bearing pin)
+        # 4.10+ switched to ImageBitmap-based rendering which node-canvas
+        # doesn't accept. The pin in package.json is load-bearing — until
+        # the planned PDF-engine migration lands, this CI check fails the
+        # build if anything (including npm update) ever bumps it.
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).dependencies.'pdfjs-dist'
+          if ($version -ne '4.8.69') {
+            Write-Error "pdfjs-dist must be pinned to exactly 4.8.69 (got: $version). See src/services/ocrWorker.js for why. Migration plan: docs/plans/pdf-engine-migration.md"
+            exit 1
+          }
+          Write-Host "pdfjs-dist pin verified: $version"
+        shell: powershell
+
       - name: Lint
         run: npm run lint
         shell: powershell
@@ -201,7 +215,7 @@ jobs:
       - name: Delete existing release/tag if present
         continue-on-error: true
         run: |
-          $tag = "v${{ steps.version.outputs.version }}"
+          $tag = "${{ steps.version.outputs.version }}"
           $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
             -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" } `
             -ErrorAction SilentlyContinue
@@ -217,8 +231,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: "Cardoso v${{ steps.version.outputs.version }}"
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
           files: |
             CardosoSetup-v${{ steps.version.outputs.version }}.exe
             CardosoSetup-v${{ steps.version.outputs.version }}.exe.sha256

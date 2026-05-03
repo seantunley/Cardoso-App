@@ -1298,13 +1298,32 @@ export function manualSetInvoice(extractionId, invoiceNumber) {
 let workerRunning = false;
 let workerReconId = null;
 
+// Module-level registry of rows currently being processed by the worker pool.
+// Keyed by extraction id; value is { id, store_name, started_at_ms }.
+// processQueue writes to this; getExtractionProgress reads from it so the
+// frontend can show "currently processing X for 1m 30s" instead of just a
+// stuck progress bar.
+const currentlyProcessing = new Map();
+
 export function getExtractionProgress(reconId) {
   if (!reconId) return null;
   const total = db.prepare('SELECT COUNT(*) as c FROM bat_invoice_extractions WHERE reconciliation_id = ?').get(reconId)?.c || 0;
   const pending = db.prepare("SELECT COUNT(*) as c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'").get(reconId)?.c || 0;
   const processed = total - pending;
   const running = workerRunning && workerReconId === reconId;
-  return { running, processed, total, pending };
+  // Snapshot in-flight rows for this recon. Filter by reconId in case a
+  // future change ever runs cross-recon work simultaneously.
+  const now = Date.now();
+  const inFlight = [];
+  for (const row of currentlyProcessing.values()) {
+    if (row.reconciliation_id !== reconId) continue;
+    inFlight.push({
+      id: row.id,
+      store_name: row.store_name,
+      elapsed_seconds: Math.floor((now - row.started_at_ms) / 1000),
+    });
+  }
+  return { running, processed, total, pending, in_flight: inFlight };
 }
 
 export async function runInvoiceExtraction(reconId) {
@@ -1648,7 +1667,16 @@ function normalizeInvoiceNumbers(reconId) {
   }
 }
 
-const PDF_TIMEOUT = 300000; // 5 min per PDF — large scanned PDFs (20-40MB) need time to download + OCR
+// 2 min per PDF. Most PDFs OCR in 10-30s; anything past 2 minutes is almost
+// always a dead-end (corrupt PDF, network stall, engine quota). Lower timeout
+// = "stuck at 97%" turns into "completed with N failed" in 4-5 minutes
+// instead of 15-20. Trade-off: a legitimately huge scanned PDF gets cut off,
+// but those usually OCR poorly anyway and need a manual override.
+const PDF_TIMEOUT = 120000;
+// If a row has been processing for this many seconds, log a System Log entry
+// so operators can see "row X has been chewing for too long" without staring
+// at the progress bar.
+const SLOW_ROW_THRESHOLD_MS = 60_000;
 
 // Concurrency for the OCR worker pool. Default 2 — each lane is a Node
 // worker_thread that owns its own Tesseract worker, sharp pipeline and pdfjs
@@ -1779,6 +1807,72 @@ async function processQueue(reconId) {
 
   const lanes = Array.from({ length: N }, () => ({ worker: new OcrLane() }));
 
+  // Slow-row monitor: every 30s, scan currentlyProcessing and emit a System
+  // Log warning for any row past the SLOW_ROW_THRESHOLD. Tracks per-row
+  // "warned" timestamps so we don't spam — each row gets at most one warn
+  // per 60s of being stuck.
+  const lastWarnedAt = new Map();
+  const slowMonitor = setInterval(() => {
+    const now = Date.now();
+    for (const row of currentlyProcessing.values()) {
+      if (row.reconciliation_id !== reconId) continue;
+      const elapsed = now - row.started_at_ms;
+      if (elapsed < SLOW_ROW_THRESHOLD_MS) continue;
+      const lastWarn = lastWarnedAt.get(row.id) || 0;
+      if (now - lastWarn < 60_000) continue;
+      lastWarnedAt.set(row.id, now);
+      try {
+        logError(
+          'bat.ocr.row_slow',
+          new Error(`Row ${row.id} (${row.store_name || 'unknown'}) processing for ${Math.floor(elapsed / 1000)}s`),
+          { reconciliation_id: reconId, extraction_id: row.id, store_name: row.store_name, elapsed_seconds: Math.floor(elapsed / 1000) },
+          'info',
+        );
+      } catch {}
+    }
+  }, 30_000);
+  if (typeof slowMonitor.unref === 'function') slowMonitor.unref();
+
+  // Memory monitor — logs the Node process's resident-set size every 60s
+  // while OCR is running. RSS includes the main thread AND every
+  // worker_thread (they share the OS process), so this is the total
+  // memory footprint of the OCR pipeline. If RSS climbs steadily and the
+  // process then dies with no JS error, that's the OOM signature we've
+  // been hunting. Always 'info' level — these aren't errors, they're
+  // observability ticks.
+  const startedAtMs = Date.now();
+  let lastRssMb = 0;
+  const memoryMonitor = setInterval(() => {
+    try {
+      const m = process.memoryUsage();
+      const rssMb = Math.round(m.rss / 1024 / 1024);
+      const heapMb = Math.round(m.heapUsed / 1024 / 1024);
+      const heapTotalMb = Math.round(m.heapTotal / 1024 / 1024);
+      const externalMb = Math.round(m.external / 1024 / 1024);
+      const elapsedSec = Math.floor((Date.now() - startedAtMs) / 1000);
+      // Suppress when nothing has materially changed (within 5MB) to keep
+      // the log signal-to-noise high. Always log the first tick.
+      if (lastRssMb && Math.abs(rssMb - lastRssMb) < 5) return;
+      lastRssMb = rssMb;
+      logError(
+        'bat.ocr.memory',
+        new Error(`RSS ${rssMb}MB · heap ${heapMb}/${heapTotalMb}MB · native ${externalMb}MB · t+${elapsedSec}s`),
+        {
+          reconciliation_id: reconId,
+          rss_mb: rssMb,
+          heap_used_mb: heapMb,
+          heap_total_mb: heapTotalMb,
+          external_mb: externalMb,
+          elapsed_seconds: elapsedSec,
+          in_flight_count: currentlyProcessing.size,
+          concurrency: N,
+        },
+        'info',
+      );
+    } catch { /* never let observability crash a real run */ }
+  }, 60_000);
+  if (typeof memoryMonitor.unref === 'function') memoryMonitor.unref();
+
   const runLane = async (lane) => {
     while (true) {
       if (ocrPaused) {
@@ -1788,6 +1882,14 @@ async function processQueue(reconId) {
       const next = claimNext();
       if (!next) return;
 
+      // Mark this row as in-flight in the module-level registry so
+      // getExtractionProgress can report it back to the UI.
+      currentlyProcessing.set(next.id, {
+        id: next.id,
+        store_name: next.store_name,
+        reconciliation_id: reconId,
+        started_at_ms: Date.now(),
+      });
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
       try {
         try {
@@ -1857,6 +1959,8 @@ async function processQueue(reconId) {
         }
       } finally {
         inFlight.delete(next.id);
+        currentlyProcessing.delete(next.id);
+        lastWarnedAt.delete(next.id);
       }
     }
   };
@@ -1864,12 +1968,25 @@ async function processQueue(reconId) {
   try {
     await Promise.all(lanes.map(runLane));
   } finally {
+    clearInterval(slowMonitor);
+    clearInterval(memoryMonitor);
     await Promise.all(lanes.map(l => l.worker.terminate()));
+    // Defensive: drop any leftover entries from this recon. Shouldn't be
+    // needed since each runLane's finally cleans up, but a worker_thread
+    // crash mid-process could conceivably skip the finally.
+    for (const [id, row] of currentlyProcessing) {
+      if (row.reconciliation_id === reconId) currentlyProcessing.delete(id);
+    }
   }
 
   normalizeInvoiceNumbers(reconId);
   await matchExtractedInvoices(reconId);
-  db.prepare("UPDATE bat_reconciliations SET status = 'completed' WHERE id = ?").run(reconId);
+  // Clear last_error on successful completion. The recon is now in a 'completed'
+  // state so any prior failure has been superseded by this successful run —
+  // showing the old toast would be misleading. The original failure is still
+  // preserved indefinitely in error_log / System Log, so this is not a
+  // silent-failure pattern: history stays, current state reflects reality.
+  db.prepare("UPDATE bat_reconciliations SET status = 'completed', last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
 }
@@ -1922,6 +2039,10 @@ function recordReconciliationError(reconId, message) {
 const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
 if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
 
+// pdfjs-dist is PINNED to 4.8.69. See the long-form comment in
+// src/services/ocrWorker.js for why — short version: pdfjs 4.10+ uses
+// ImageBitmap which node-canvas doesn't accept. Migration to a
+// Node-native PDF engine is queued in docs/plans/pdf-engine-migration.md.
 async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const { createCanvas } = await import('canvas');
