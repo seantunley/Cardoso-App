@@ -140,13 +140,55 @@ all sites are on the new URL.
 - Tailscale ACL still reachable (confirm by hitting the URL from a
   different Tailscale node)
 
-### 8. Document (~30 min)
+### 8. Re-enable helmet security headers (~15 min)
+
+The Hub Express server currently runs `helmet()` with four
+HTTPS-dependent protections disabled because they break on HTTP:
+
+```js
+app.use(helmet({
+  hsts: false,                      // forces HTTPS — pointless on HTTP
+  contentSecurityPolicy: false,     // includes upgrade-insecure-requests
+  crossOriginOpenerPolicy: false,   // requires HTTPS for cross-origin isolation
+  originAgentCluster: false,        // same
+}));
+```
+
+Once Caddy is fronting the Hub on HTTPS, flip them back on with
+sensible policy:
+
+```js
+app.use(helmet({
+  hsts: { maxAge: 15552000, includeSubDomains: false },  // 180 days
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'upgrade-insecure-requests': [],
+      // tighten further once we know what the Hub UI actually loads
+    },
+  },
+  // crossOriginOpenerPolicy + originAgentCluster default to safe values
+}));
+```
+
+Roll this out cautiously — turn one protection back on, deploy,
+watch for breakages in the UI (fonts, images, the BAT preview
+iframe, any embedded charts), iterate. Don't ship all four at once.
+The Hub's CSP in particular will need tuning to not break the BAT
+PDF preview surface or any embedded chart libraries.
+
+This step is the security audit's headline payoff — going from "HTTP
+with safety features disabled" to "HTTPS with the standard helmet
+hardening" closes a real gap in the threat model.
+
+### 9. Document (~30 min)
 
 `docs/ops/hub-tls.md`:
 - How Caddy is configured
 - How to renew the cert (Tailscale handles it, document the manual
   fallback)
 - How to rotate the Tailscale machine name without breaking everything
+- The helmet config tightening that came with the HTTPS rollout
 
 ## Phase 1 effort
 
@@ -369,7 +411,19 @@ Three ways to handle:
 **Recommend "document the manual install"** unless we know all access
 is from the site PC alone.
 
-### 8. Testing (~1 day)
+### 8. Re-enable helmet security headers on sites (~15 min)
+
+Same step as Phase 1 step 8, applied to the site's Express server.
+Sites currently ship the same helmet config with HTTPS protections
+off. Once Caddy is fronting each site, flip them on (HSTS, CSP with
+`upgrade-insecure-requests`, COOP, OAC). Same cautious rollout —
+one at a time, watch for UI breakage, iterate.
+
+The site has fewer surfaces than the Hub so CSP tuning is simpler,
+but verify the BAT preview, customer search, and reports all still
+load before rolling to production sites.
+
+### 9. Testing (~1 day)
 
 Stand up two test sites in VMs:
 
@@ -386,7 +440,7 @@ Stand up two test sites in VMs:
 - Kill step-ca for an hour, confirm Caddy keeps serving with the old
   cert and resumes renewal when step-ca comes back
 
-### 9. Rollback path (~0.5 day)
+### 10. Rollback path (~0.5 day)
 
 Things that can go wrong and how to recover:
 
@@ -405,7 +459,7 @@ Things that can go wrong and how to recover:
   air-gapped USB), only bring it online to sign new intermediates.
   step-ca supports this workflow.
 
-### 10. Documentation (~0.5 day)
+### 11. Documentation (~0.5 day)
 
 `docs/ops/site-tls.md`:
 - Operator runbook for step-ca lifecycle
