@@ -626,20 +626,22 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     [visibleKeys, widths],
   );
 
-  // Auto-fit on mount + container resize: scale columns down proportionally
-  // so the table never exceeds its rounded frame.
+  // Auto-fit: scale visible columns proportionally so they ALWAYS fill the
+  // container exactly — no empty band on the right when total < container,
+  // no overflow when total > container.
   useEffect(() => {
     const el = parentRef.current;
     if (!el) return;
     const fit = () => {
       const inner = el.clientWidth;
       if (!inner) return;
+      const target = inner - 1;
       const total = visibleKeys.reduce((s, k) => s + (widths[k] || 100), 0);
-      if (total <= inner - 1) return;
-      const scale = (inner - 1) / total;
+      if (Math.abs(total - target) < 2) return;
+      const scale = target / total;
       setWidths((w) => {
         const next = { ...w };
-        for (const k of visibleKeys) next[k] = Math.max(40, Math.floor((w[k] || 100) * scale));
+        for (const k of visibleKeys) next[k] = Math.max(40, Math.round((w[k] || 100) * scale));
         return next;
       });
     };
