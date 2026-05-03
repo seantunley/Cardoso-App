@@ -19,7 +19,7 @@ const COLUMN_TIPS = {
   exception: 'Reason this invoice was flagged as a BAT exception',
   ocr: 'Status of automated invoice-number extraction from the POD PDF: Found, Not found, Failed, or Pending',
   invoice: 'Cardoso invoice number — extracted by OCR or entered manually. Edit the field to override.',
-  amount: 'Order amount from the BAT supplier sheet (or matched Sage amount when no BAT amount available)',
+  amount: 'Order amount from the BAT supplier sheet',
 };
 
 const COLUMN_DEFAULTS = {
@@ -85,13 +85,6 @@ function useColumnWidths(containerRef) {
   return { widths, setWidths, startResize, resetColumn };
 }
 
-const statusMeta = (status) => {
-  if (status === 'matched')   return { color: 'hsl(145 55% 45%)',     glyph: '●', label: 'Matched' };
-  if (status === 'unmatched') return { color: 'hsl(var(--destructive))', glyph: '▲', label: 'Unmatched' };
-  if (status === 'pending')   return { color: 'var(--phosphor)',   glyph: '◐', label: 'Pending' };
-  return null;
-};
-
 const ocrMeta = (status) => {
   if (status === 'found')     return { label: 'Found',     color: 'hsl(145 55% 45%)' };
   if (status === 'not_found') return { label: 'Not found', color: 'var(--phosphor)' };
@@ -111,20 +104,6 @@ function needsAttention(extraction) {
   const inv = extraction.extracted_invoice;
   if (inv && !/^IN(000\d{6}|\d{6})$/i.test(inv.trim())) return true;
   return false;
-}
-
-function StatusBadge({ status }) {
-  const m = statusMeta(status);
-  if (!m) return null;
-  return (
-    <span
-      className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-[0.15em]"
-      style={{ color: m.color }}
-    >
-      <span>{m.glyph}</span>
-      {m.label}
-    </span>
-  );
 }
 
 function OcrBadge({ status }) {
@@ -314,8 +293,6 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const filtered = useMemo(() => {
     return tabData.filter((e) => {
       if (filterStatus !== 'all') {
-        if (filterStatus === 'matched' && e.match_status !== 'matched') return false;
-        if (filterStatus === 'unmatched' && e.match_status !== 'unmatched') return false;
         if (filterStatus === 'not_found' && e.extraction_status !== 'not_found') return false;
         if (filterStatus === 'pending' && e.extraction_status !== 'pending') return false;
       }
@@ -324,8 +301,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
         return (
           (e.extracted_invoice || '').toLowerCase().includes(q) ||
           (e.order_number || '').toLowerCase().includes(q) ||
-          (e.store_name || '').toLowerCase().includes(q) ||
-          (e.sage_match_document || '').toLowerCase().includes(q)
+          (e.store_name || '').toLowerCase().includes(q)
         );
       }
       return true;
@@ -460,8 +436,6 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
         >
           <option value="all">All</option>
-          <option value="matched">Matched</option>
-          <option value="unmatched">Unmatched</option>
           <option value="not_found">OCR failed</option>
           <option value="pending">Pending</option>
         </select>
@@ -565,8 +539,8 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                     </span>
                   ) : (
                     <>
-                      {(e.order_amount != null || e.sage_match_amount != null) && <span className="text-muted-foreground/60 mr-1">R</span>}
-                      {fmt(e.order_amount ?? e.sage_match_amount)}
+                      {e.order_amount != null && <span className="text-muted-foreground/60 mr-1">R</span>}
+                      {fmt(e.order_amount)}
                     </>
                   )}
                 </Td>

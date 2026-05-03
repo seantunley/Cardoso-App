@@ -152,16 +152,7 @@ export async function resetSagePool() {
   }
   pool = null;
   poolConfigKey = null;
-  // Sage connection changed — invalidate the posted-invoices cache so the next
-  // matching pass re-fetches against the new connection.
-  _sagePostedInvoicesCache = null;
 }
-
-// 5-minute TTL cache of querySagePostedInvoices() — the BAT vendor invoice list
-// rarely changes within a single matching session and the underlying SQL
-// scans the entire APOBL table.
-let _sagePostedInvoicesCache = null; // { data, expiresAt }
-const SAGE_POSTED_INVOICES_TTL_MS = 5 * 60 * 1000;
 
 // ── Spreadsheet Parsing ──────────────────────────────────────────────────────
 
@@ -714,21 +705,6 @@ export async function querySageCreditNotes(weekNumber, year) {
         ELSE 4
       END,
       h.CNTBTCH
-  `);
-  return result.recordset || [];
-}
-
-export async function querySagePostedInvoices() {
-  const sagePool = await getSagePool();
-  const result = await sagePool.request().query(`
-    SELECT
-      LTRIM(RTRIM(IDVEND)) AS vendor_number,
-      LTRIM(RTRIM(IDINVC)) AS document_number,
-      DATEINVC AS document_date,
-      ISNULL(AMTINVCHC, 0) AS amount,
-      LTRIM(RTRIM(DESCINVC)) AS description
-    FROM APOBL
-    WHERE LTRIM(RTRIM(IDVEND)) LIKE '%BAT%'
   `);
   return result.recordset || [];
 }
@@ -1341,7 +1317,6 @@ export async function runInvoiceExtraction(reconId) {
   ).get(reconId)?.c || 0;
 
   if (pending === 0) {
-    await matchExtractedInvoices(reconId);
     return { message: 'No pending extractions', processed: 0 };
   }
 
@@ -1474,7 +1449,6 @@ async function runGoogleVisionRetryInner(reconId, rows) {
 
   console.log(`[bat-gv] Google Vision retry complete for reconciliation ${reconId}`);
   normalizeInvoiceNumbers(reconId);
-  await matchExtractedInvoices(reconId);
 }
 
 // ── OCR pause switch ───────────────────────────────────────────────────────
@@ -2024,7 +1998,13 @@ async function processQueue(reconId) {
   }
 
   normalizeInvoiceNumbers(reconId);
-  await matchExtractedInvoices(reconId);
+  // The OCR worker has zero Sage involvement by design. There used to be an
+  // `await matchExtractedInvoices(reconId)` call here that scanned APOBL —
+  // a hung Sage connection would wedge processQueue, leave workerRunning=true
+  // forever, and silently block every subsequent reconciliation from starting.
+  // That whole code path was wrong: Sage's role in a BAT recon is
+  // pulling credit notes via /refresh-sage, not cross-referencing OCR'd
+  // invoice numbers. The function is gone, this comment is its tombstone.
   // Clear last_error on successful completion. The recon is now in a 'completed'
   // state so any prior failure has been superseded by this successful run —
   // showing the old toast would be misleading. The original failure is still
@@ -2193,55 +2173,20 @@ function findInvoiceNumber(text) {
   return null;
 }
 
-// ── Invoice Matching ─────────────────────────────────────────────────────────
-
-async function matchExtractedInvoices(reconId) {
-  const foundExtractions = db.prepare(
-    `SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'found' AND match_status = 'pending'`
-  ).all(reconId);
-
-  if (foundExtractions.length === 0) return;
-
-  let sageInvoices;
-  try {
-    const now = Date.now();
-    if (_sagePostedInvoicesCache && _sagePostedInvoicesCache.expiresAt > now) {
-      sageInvoices = _sagePostedInvoicesCache.data;
-    } else {
-      sageInvoices = await querySagePostedInvoices();
-      _sagePostedInvoicesCache = { data: sageInvoices, expiresAt: now + SAGE_POSTED_INVOICES_TTL_MS };
-    }
-  } catch (err) {
-    console.error('[bat-match] Failed to query Sage invoices:', err.message);
-    return;
-  }
-
-  // Build lookup map — document_number -> invoice data
-  const sageLookup = new Map();
-  for (const inv of sageInvoices) {
-    const docNum = (inv.document_number || '').trim().toUpperCase();
-    sageLookup.set(docNum, inv);
-  }
-
-  const updateMatch = db.prepare(`
-    UPDATE bat_invoice_extractions
-    SET sage_match_document = ?, sage_match_amount = ?, match_status = ?
-    WHERE id = ?
-  `);
-
-  const tx = db.transaction((entries) => {
-    for (const ext of entries) {
-      const invoiceNum = (ext.extracted_invoice || '').trim().toUpperCase();
-      const match = sageLookup.get(invoiceNum);
-      if (match) {
-        updateMatch.run(match.document_number, match.amount, 'matched', ext.id);
-      } else {
-        updateMatch.run(null, null, 'unmatched', ext.id);
-      }
-    }
-  });
-  tx(foundExtractions);
-}
+// matchExtractedInvoices used to live here. It scanned every BAT-vendor
+// invoice in Sage's APOBL table, then for each OCR'd invoice on a recon
+// it set match_status to 'matched' / 'unmatched' and wrote sage_match_*
+// columns. That cross-reference doesn't reflect the actual workflow —
+// Sage involvement in a BAT recon is "pull credit notes for the week"
+// (see querySageCreditNotes / /api/bat/reconciliation/:id/refresh-sage),
+// not "look up every invoice number we OCR'd." Worse: the scan was an
+// unbounded MSSQL query that ran inline in the OCR worker, and a hung
+// Sage connection would wedge processQueue, leaving workerRunning=true
+// indefinitely and blocking every subsequent reconciliation from
+// extracting. The function and its callers are gone. The
+// sage_match_document / sage_match_amount / match_status columns on
+// bat_invoice_extractions are unused; left in place to avoid a
+// destructive migration.
 
 // ── Dashboard Aggregates ─────────────────────────────────────────────────────
 
