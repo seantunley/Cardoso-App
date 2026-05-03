@@ -15,7 +15,6 @@ import { logAudit } from '../lib/audit.js';
 import {
   parseSupplierSpreadsheet,
   querySageCreditNotes,
-  querySagePostedInvoices,
   querySagePaidWeeks,
   querySageWeekTotals,
   createReconciliation,
@@ -146,16 +145,6 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       res.json({ week, year, count: creditNotes.length, creditNotes });
     } catch (err) {
       console.error('[bat] Sage credit notes query failed:', err.message);
-      res.status(500).json({ error: 'Failed to query Sage 300: ' + err.message });
-    }
-  });
-
-  router.get('/api/bat/sage-invoices', ...gate, async (req, res) => {
-    try {
-      const invoices = await querySagePostedInvoices();
-      res.json({ count: invoices.length, invoices });
-    } catch (err) {
-      console.error('[bat] Sage invoices query failed:', err.message);
       res.status(500).json({ error: 'Failed to query Sage 300: ' + err.message });
     }
   });
