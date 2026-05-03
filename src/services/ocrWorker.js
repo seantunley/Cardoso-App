@@ -43,6 +43,33 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = 30_000) {
   }
 }
 
+// Generic timeout wrapper. Used to bound any promise that could hang at
+// the worker boundary — Tesseract trained-data download, native-binary
+// initialisation, individual OCR-engine calls, and the top-level extract
+// itself. The label flows into the rejection message so the operator
+// sees exactly which stage is wedged.
+function withTimeout(promise, timeoutMs, label) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error(`Timeout after ${timeoutMs}ms in stage: ${label}`)),
+      timeoutMs,
+    );
+    Promise.resolve(promise).then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+// Fire a per-stage progress message back to the parent. The parent uses
+// these to populate `currentlyProcessing[].stage`, which the UI's
+// ExtractionProgress component renders inline so an operator can see
+// which row is on which step in real time. Best-effort: a postMessage
+// failure here is non-fatal — extraction continues.
+function emitProgress(id, stage) {
+  try { parentPort.postMessage({ type: 'progress', id, stage }); } catch {}
+}
+
 let _tesseract = null;
 let _sharp = null;
 let _pdfjs = null;
@@ -51,7 +78,11 @@ let _canvas = null;
 async function getTesseract() {
   if (_tesseract) return _tesseract;
   const { createWorker } = await import('tesseract.js');
-  _tesseract = await createWorker('eng');
+  // 30s hard cap on Tesseract init. createWorker('eng') silently downloads
+  // ~10MB of trained data from tessdata.projectnaptha.com on first use.
+  // On a firewalled / AV-blocked / corporate-proxy site this hangs forever;
+  // a clear timeout error here lets the operator see exactly what's wrong.
+  _tesseract = await withTimeout(createWorker('eng'), 30_000, 'tesseract_init');
   return _tesseract;
 }
 
@@ -226,10 +257,11 @@ function findInvoiceNumber(text) {
 
 // ── Main extraction entry point ──────────────────────────────────────────────
 
-async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey) {
+async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId) {
   // Download — strict timeout. PODs are typically <2MB and live on
   // Microsoft 365 / SharePoint. A stuck connection here used to wedge a
   // whole lane until the parent's 120s backstop fired.
+  emitProgress(msgId, 'download');
   let response;
   try {
     response = await fetchWithTimeout(pdfUrl, {}, 60_000);
@@ -246,6 +278,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   const isLarge = buffer.length > 2 * 1024 * 1024;
 
   // Step 1: pdfjs text layer (no OCR needed)
+  emitProgress(msgId, 'pdf_text');
   try {
     const pdfjsLib = await getPdfjs();
     const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
@@ -267,6 +300,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   } catch { /* fall through to image render */ }
 
   // Step 2: render to image
+  emitProgress(msgId, 'render');
   let imageBuffer;
   try {
     imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
@@ -277,6 +311,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   const sharp = await getSharp();
 
   // Save preview JPEG (async — does NOT block the loop)
+  emitProgress(msgId, 'preview_save');
   let previewPath = null;
   try {
     const previewJpeg = await sharp(imageBuffer).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
@@ -329,8 +364,18 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   let tierError = null;
   for (const engine of ocrEngines) {
     for (const angle of [0, 90]) {
+      // Stage label includes engine + rotation so the operator can see e.g.
+      // "engine:Tesseract@90" in the UI when an OCR call is the slow one.
+      const stageLabel = `engine:${engine.name}@${angle}`;
+      emitProgress(msgId, stageLabel);
       try {
-        const text = await engine.run(angle);
+        // Per-engine 60s deadline. Tesseract.recognize, Google Vision and
+        // ocr.space all have failure modes where the underlying call sits
+        // forever (mostly network). The parent-side 120s PDF_TIMEOUT was
+        // historically the only backstop, but it doesn't tell us *which*
+        // engine wedged. Per-engine timeout makes the failure
+        // attributable.
+        const text = await withTimeout(engine.run(angle), 60_000, stageLabel);
         if (!text || text.trim().length < 20) continue;
         const invoice = findInvoiceNumber(text);
         if (invoice) return { invoice, previewPath };
@@ -359,14 +404,31 @@ parentPort.on('message', async (msg) => {
   if (msg.type === 'extract') {
     const { id, payload } = msg;
     try {
-      const result = await extractInvoiceFromPdf(
-        payload.pdfUrl,
-        payload.extractionId,
-        payload.googleVisionKey,
-        payload.ocrSpaceKey,
+      // Top-level 90s deadline. Even if every per-stage timeout fires
+      // sequentially you can't exceed ~90s of real work for a single
+      // PDF on a healthy site (download <60s, pdfjs text <5s, render
+      // <10s, first engine <60s, but we short-circuit on first match).
+      // 90s is the operator-visible "row time-out" — if a row is taking
+      // longer, something is broken in the environment, and that fact
+      // should reach the parent loud rather than hang for minutes.
+      const result = await withTimeout(
+        extractInvoiceFromPdf(
+          payload.pdfUrl,
+          payload.extractionId,
+          payload.googleVisionKey,
+          payload.ocrSpaceKey,
+          id,
+        ),
+        90_000,
+        'extract_total',
       );
+      emitProgress(id, 'done');
       parentPort.postMessage({ type: 'result', id, ok: true, result });
     } catch (err) {
+      // Surface the failing stage to the parent — emit a final progress
+      // message before the result so the parent's `currentlyProcessing`
+      // entry shows the failed stage on the way out.
+      emitProgress(id, 'failed');
       parentPort.postMessage({
         type: 'result', id, ok: false,
         error: { message: err.message, stack: err.stack, tierError: !!err.tierError },

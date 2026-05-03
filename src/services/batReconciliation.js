@@ -1297,6 +1297,12 @@ export function getExtractionProgress(reconId) {
       id: row.id,
       store_name: row.store_name,
       elapsed_seconds: Math.floor((now - row.started_at_ms) / 1000),
+      // Stage label from the worker's most recent progress message
+      // (e.g. "render", "engine:GoogleVision@0", "engine:Tesseract@90").
+      // Lets the UI tell "stuck on Tesseract trained-data download" apart
+      // from "still chewing through render". See ocrWorker.js emitProgress.
+      stage: row.stage || null,
+      stage_at_seconds: row.stage_at_ms ? Math.floor((now - row.stage_at_ms) / 1000) : null,
     });
   }
   return { running, processed, total, pending, in_flight: inFlight };
@@ -1685,7 +1691,20 @@ class OcrLane {
     this.nextId = 0;
     this.dead = false;
     this.worker.on('message', (msg) => {
-      if (!msg || msg.type !== 'result') return;
+      if (!msg) return;
+      // Progress messages carry the current extraction stage (download /
+      // pdf_text / render / engine:NAME@ANGLE / done / failed). The lane
+      // forwards these to the slot's onProgress callback, which the
+      // processQueue loop uses to attach `stage` to the row's entry in
+      // `currentlyProcessing`. Out-of-band — does NOT resolve/reject.
+      if (msg.type === 'progress') {
+        const slot = this.pending.get(msg.id);
+        if (slot && slot.onProgress) {
+          try { slot.onProgress(msg.stage); } catch {}
+        }
+        return;
+      }
+      if (msg.type !== 'result') return;
       const slot = this.pending.get(msg.id);
       if (!slot) return;
       this.pending.delete(msg.id);
@@ -1723,7 +1742,10 @@ class OcrLane {
     });
   }
 
-  extract(payload, timeoutMs) {
+  // `onProgress(stage)` is called for every progress message the worker
+  // emits between dispatch and the final result. Used by processQueue to
+  // expose the current OCR stage in the in-flight UI.
+  extract(payload, timeoutMs, onProgress) {
     if (this.dead) return Promise.reject(new Error('OCR lane is dead'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
@@ -1741,6 +1763,7 @@ class OcrLane {
       this.pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
+        onProgress,
       });
       try {
         this.worker.postMessage({ type: 'extract', id, payload });
@@ -1756,7 +1779,29 @@ class OcrLane {
     try { this.worker.postMessage({ type: 'shutdown' }); } catch {}
     // Give the worker a moment to flush its Tesseract handle, then force-kill.
     await new Promise(r => setTimeout(r, 500));
-    try { await this.worker.terminate(); } catch {}
+    // Race Node's worker.terminate() against a 3s hard cap.
+    //
+    // ROOT CAUSE — discovered 2026-05-03 via a remote-site System Log:
+    // when the worker thread is wedged in native code (Tesseract, sharp,
+    // canvas on a syscall the OS can't preempt), `this.worker.terminate()`
+    // returns a Promise that never resolves. The await above used to hang
+    // forever on a wedged worker, which meant the catch in
+    // processQueue.runLane never returned, the OUTER finally never fired,
+    // and `currentlyProcessing.delete(next.id)` never ran.
+    //
+    // Symptom on the site: PDF_TIMEOUT fired (we saw the log), but the
+    // row stayed in `currentlyProcessing` for 13+ minutes climbing from
+    // 120s → 810s with no new events. Watchdog couldn't unstick it
+    // because the wedge was on the parent main thread, not the worker.
+    //
+    // The worker is dead either way once we've called `terminate()`; we
+    // don't need to wait for the OS-level cleanup. Resolving the race
+    // unblocks runLane's finally → the row leaves currentlyProcessing →
+    // the queue keeps moving → app stays responsive.
+    await Promise.race([
+      this.worker.terminate().catch(() => {}),
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
     this.dead = true;
   }
 }
@@ -1833,12 +1878,14 @@ async function processQueue(reconId) {
         try {
           logError(
             'bat.ocr.watchdog_kill',
-            new Error(`Force-killing lane for row ${row.id} (${row.store_name || 'unknown'}) after ${Math.floor(elapsed / 1000)}s — internal PDF_TIMEOUT failed to fire`),
+            new Error(`Force-killing lane for row ${row.id} (${row.store_name || 'unknown'}) — stuck in stage '${row.stage || 'unknown'}' for ${Math.floor(elapsed / 1000)}s — internal PDF_TIMEOUT failed to fire`),
             {
               reconciliation_id: reconId,
               extraction_id: row.id,
               store_name: row.store_name,
               elapsed_seconds: Math.floor(elapsed / 1000),
+              stuck_stage: row.stage || null,
+              stuck_stage_for_seconds: row.stage_at_ms ? Math.floor((now - row.stage_at_ms) / 1000) : null,
               lane_dead_before: !!row.lane?.worker?.dead,
             },
           );
@@ -1907,6 +1954,8 @@ async function processQueue(reconId) {
         started_at_ms: Date.now(),
         lane,                  // ref so the watchdog can terminate the worker
         kill_attempted: false, // ensures we only fire the watchdog once per row
+        stage: 'queued',       // updated by the worker's progress messages below
+        stage_at_ms: Date.now(),
       });
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
       try {
@@ -1919,6 +1968,19 @@ async function processQueue(reconId) {
               ocrSpaceKey,
             },
             PDF_TIMEOUT,
+            // onProgress: worker emits these as it transitions between
+            // stages (download → pdf_text → render → engine:NAME@ANGLE).
+            // Update the row's entry so the UI's in-flight panel can
+            // show the current stage in real time, and we also get a
+            // breadcrumb for which stage the watchdog killed (if it
+            // does).
+            (stage) => {
+              const row = currentlyProcessing.get(next.id);
+              if (row) {
+                row.stage = stage;
+                row.stage_at_ms = Date.now();
+              }
+            },
           );
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
