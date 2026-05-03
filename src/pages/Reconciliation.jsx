@@ -92,6 +92,25 @@ export default function Reconciliation() {
       .catch(() => {});
   }, []);
   const cardosoFileRef = useRef();
+  // Active EventSource + polling timer for the in-flight extraction stream.
+  // We keep these on a ref so they survive across re-renders and so the
+  // *next* handleStartExtraction call can force-close any still-open
+  // stream from a previous run before opening a new one. Without this,
+  // every Extract click during a stuck run leaked an EventSource — and
+  // after Chrome's 6-per-origin connection limit was reached, every HTTP
+  // request from the tab blocked, requiring a full browser restart to
+  // recover.
+  const extractionStreamRef = useRef({ es: null, timer: null, stopped: false });
+  const closeExtractionStream = useCallback(() => {
+    const s = extractionStreamRef.current;
+    s.stopped = true;
+    if (s.es) { try { s.es.close(); } catch {} s.es = null; }
+    if (s.timer) { clearTimeout(s.timer); s.timer = null; }
+  }, []);
+  // Belt-and-suspenders cleanup: if this page unmounts or the user
+  // navigates away, kill any open EventSource so it can't leak even
+  // if extraction is still running on the backend.
+  useEffect(() => closeExtractionStream, [closeExtractionStream]);
 
   const loadDashboard = useCallback(async () => {
     // Per-fetch handling — a single failed endpoint must not blank the entire
@@ -365,15 +384,16 @@ export default function Reconciliation() {
       // Fall back to adaptive polling if EventSource is unsupported or errors.
       const startedAt = Date.now();
       const HARD_CAP_MS = 2 * 60 * 60 * 1000;
-      let stopped = false;
-      let es = null;
-      let timer = null;
 
-      const stop = () => {
-        stopped = true;
-        if (es) { try { es.close(); } catch {} es = null; }
-        if (timer) clearTimeout(timer);
-      };
+      // Force-close any leftover stream from a previous Extract click before
+      // opening a new one. Without this, repeatedly clicking Extract during
+      // a stuck run leaks an EventSource per click; after ~6 leaks Chrome's
+      // per-origin connection limit blocks every fetch from the tab and
+      // only a full browser restart recovers.
+      closeExtractionStream();
+      extractionStreamRef.current.stopped = false;
+
+      const stop = () => closeExtractionStream();
 
       const handleProgress = (progress) => {
         setExtractionPolling(progress);
@@ -388,14 +408,16 @@ export default function Reconciliation() {
 
       // ── SSE first ──
       try {
-        es = new EventSource(`/api/bat/extraction-status-stream/${selected.id}`, { withCredentials: true });
+        const es = new EventSource(`/api/bat/extraction-status-stream/${selected.id}`, { withCredentials: true });
+        extractionStreamRef.current.es = es;
         es.onmessage = (ev) => {
           try { handleProgress(JSON.parse(ev.data)); } catch {}
         };
         es.onerror = () => {
           // Connection dropped — close SSE and fall back to polling
-          if (es) { try { es.close(); } catch {} es = null; }
-          if (!stopped) startPolling();
+          try { es.close(); } catch {}
+          if (extractionStreamRef.current.es === es) extractionStreamRef.current.es = null;
+          if (!extractionStreamRef.current.stopped) startPolling();
         };
       } catch {
         startPolling();
@@ -407,7 +429,7 @@ export default function Reconciliation() {
         let lastProcessed = null;
         let stableCount = 0;
         const tick = async () => {
-          if (stopped) return;
+          if (extractionStreamRef.current.stopped) return;
           if (Date.now() - startedAt > HARD_CAP_MS) {
             stop(); setExtracting(false); setExtractionPolling(null); return;
           }
@@ -416,7 +438,7 @@ export default function Reconciliation() {
             if (pr.ok) {
               const progress = await pr.json();
               handleProgress(progress);
-              if (stopped) return;
+              if (extractionStreamRef.current.stopped) return;
               const proc = progress.processed ?? 0;
               if (lastProcessed !== null && proc === lastProcessed) {
                 stableCount += 1;
@@ -427,9 +449,11 @@ export default function Reconciliation() {
           } catch {
             stop(); setExtracting(false); setExtractionPolling(null); return;
           }
-          if (!stopped) timer = setTimeout(tick, pollDelay);
+          if (!extractionStreamRef.current.stopped) {
+            extractionStreamRef.current.timer = setTimeout(tick, pollDelay);
+          }
         };
-        timer = setTimeout(tick, pollDelay);
+        extractionStreamRef.current.timer = setTimeout(tick, pollDelay);
       }
     } catch (err) {
       setExtractError('Network error: ' + err.message);
