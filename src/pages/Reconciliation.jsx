@@ -382,6 +382,7 @@ export default function Reconciliation() {
           setExtractionPolling(null);
           setExtracting(false);
           loadReconciliation(selected.id);
+          loadDashboard();
         }
       };
 
