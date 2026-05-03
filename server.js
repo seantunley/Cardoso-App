@@ -43,13 +43,47 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
-// Security headers — disable HSTS and upgrade-insecure-requests so HTTP works on LAN
-app.use(helmet({
-  hsts: false,
-  contentSecurityPolicy: false,
-  crossOriginOpenerPolicy: false,
-  originAgentCluster: false,
-}));
+// TLS_FRONTING is set when there's a Caddy/nginx/etc reverse proxy in
+// front of this app terminating HTTPS. When true, helmet flips on the
+// HTTPS-only protections that were disabled for plain-HTTP LAN use:
+//   - HSTS: forces clients to re-use HTTPS for the configured window
+//   - Content-Security-Policy: includes upgrade-insecure-requests so any
+//     stray http://... subresource gets bumped to https://
+//   - Cross-Origin-Opener-Policy + Origin-Agent-Cluster: stricter
+//     isolation that requires HTTPS to function correctly
+// Defaults to false to preserve LAN-only HTTP installs (sites today).
+// See docs/plans/https-rollout.md for the rollout context.
+const TLS_FRONTING = process.env.TLS_FRONTING === 'true';
+
+if (TLS_FRONTING) {
+  app.use(helmet({
+    hsts: { maxAge: 15552000, includeSubDomains: false }, // 180 days
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        // Bump any http:// subresource to https:// — closes mixed-content gaps
+        'upgrade-insecure-requests': [],
+        // Allow inline styles for the Vite-built bundle. Tightening this
+        // further is a follow-up — needs an audit of what the UI actually loads.
+        'script-src': ["'self'"],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'img-src': ["'self'", 'data:', 'blob:'],
+        'connect-src': ["'self'"],
+      },
+    },
+    // crossOriginOpenerPolicy + originAgentCluster default to safe
+  }));
+} else {
+  // LAN-only HTTP mode: keep the HTTPS-dependent protections off so
+  // browsers don't try to upgrade plain-http subresources or insist on
+  // HSTS for a host that doesn't have a cert.
+  app.use(helmet({
+    hsts: false,
+    contentSecurityPolicy: false,
+    crossOriginOpenerPolicy: false,
+    originAgentCluster: false,
+  }));
+}
 
 // Trust proxy so X-Forwarded-For is used correctly (rate limiting, login logging)
 // On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
@@ -157,14 +191,31 @@ process.on('unhandledRejection', (err) => {
   console.error('[UNHANDLED]', err?.message || err);
   try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {}
 });
+// BIND_ADDRESS controls which network interface the server listens on.
+//   '0.0.0.0' (default) — all interfaces; LAN clients can reach the app
+//                        directly. Right setting for site installs and
+//                        Hub installs that aren't behind a reverse proxy.
+//   '127.0.0.1'         — loopback only. Right setting once Caddy is
+//                        installed in front and only Caddy should be
+//                        able to reach the Node service. Set this in
+//                        the Hub's .env after running install-hub-caddy.ps1.
+const BIND_ADDRESS = process.env.BIND_ADDRESS || '0.0.0.0';
+
 ensureSeedUsers().then(() => {
-  setServer(app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Local backend + SQLite running at http://0.0.0.0:${PORT}`);
+  setServer(app.listen(PORT, BIND_ADDRESS, () => {
+    const protocol = TLS_FRONTING ? 'https' : 'http';
+    const proxyNote = TLS_FRONTING ? ' (behind TLS-terminating proxy)' : '';
+    console.log(`🚀 Local backend + SQLite running at ${protocol}://${BIND_ADDRESS}:${PORT}${proxyNote}`);
     // Boot marker — lets operators see "OCR is paused" alongside "server
     // restarted at HH:MM" so the cause-and-effect is obvious.
     try {
-      logError('system.boot', new Error(`Server started on port ${PORT} (node ${process.version}, hub_mode=${process.env.HUB_MODE === 'true'})`), {
-        port: PORT, hub_mode: process.env.HUB_MODE === 'true', node: process.version, env: process.env.NODE_ENV || 'development',
+      logError('system.boot', new Error(`Server started on port ${PORT} (node ${process.version}, hub_mode=${process.env.HUB_MODE === 'true'}, bind=${BIND_ADDRESS}, tls_fronting=${TLS_FRONTING})`), {
+        port: PORT,
+        bind: BIND_ADDRESS,
+        tls_fronting: TLS_FRONTING,
+        hub_mode: process.env.HUB_MODE === 'true',
+        node: process.version,
+        env: process.env.NODE_ENV || 'development',
       }, 'info');
     } catch {}
   }));
