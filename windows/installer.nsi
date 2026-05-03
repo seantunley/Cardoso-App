@@ -9,6 +9,13 @@
 !define PUBLISHER "Cardoso"
 !define UNINSTALLER "Uninstall.exe"
 
+; Patched in by .github/workflows/build-windows.yml — leave the placeholder
+; values alone. The installer writes these to disk so the in-app delta updater
+; can decide whether the next release ships only the app zip (lock_hash match)
+; or the full EXE (lock_hash changed → dependencies were updated).
+!define LOCK_HASH "BUILD_LOCK_HASH_PLACEHOLDER"
+!define INSTALLED_VERSION "BUILD_VERSION_PLACEHOLDER"
+
 Name "${APP_NAME}"
 OutFile "..\${OUT_FILE}"
 InstallDir "${APP_DIR}"
@@ -104,6 +111,17 @@ Section "Install" SecInstall
   ; Create logs dir
   CreateDirectory "$INSTDIR\logs"
   CreateDirectory "$INSTDIR\database"
+
+  ; Marker files for the in-app delta updater. Future versions read these to
+  ; decide whether to download just the small app zip or the full installer.
+  Delete "$INSTDIR\.lock-hash"
+  FileOpen $0 "$INSTDIR\.lock-hash" w
+  FileWrite $0 "${LOCK_HASH}"
+  FileClose $0
+  Delete "$INSTDIR\.installed-version"
+  FileOpen $0 "$INSTDIR\.installed-version" w
+  FileWrite $0 "${INSTALLED_VERSION}"
+  FileClose $0
 
   ; Write .env only if it does not already exist (preserve existing config on upgrade)
   IfFileExists "$INSTDIR\.env" env_exists env_missing

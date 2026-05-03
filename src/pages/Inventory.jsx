@@ -1,10 +1,80 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
+
+// ── Resizable column widths (mirrors the CustomerBalances pattern) ──────────
+const INV_COLUMN_DEFAULTS = {
+  itemNumber: 140, description: 380, qty: 100, lastCost: 110,
+  price: 110, priceList: 110, uom: 80, site: 140,
+};
+const INV_COLUMN_WIDTHS_KEY = "inventory.columnWidths.v1";
+
+function useInvColumnWidths(containerRef) {
+  const [widths, setWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(INV_COLUMN_WIDTHS_KEY) || "{}");
+      return { ...INV_COLUMN_DEFAULTS, ...saved };
+    } catch { return INV_COLUMN_DEFAULTS; }
+  });
+  const widthsRef = useRef(widths);
+  useEffect(() => {
+    widthsRef.current = widths;
+    try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+  }, [widths]);
+
+  const MIN_COL = 40;
+
+  const startResize = useCallback((id, visibleKeys) => (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startWidth = widthsRef.current[id] ?? INV_COLUMN_DEFAULTS[id] ?? 100;
+    // Sum of every other *currently rendered* column at drag start.
+    const sumOthers = (visibleKeys || Object.keys(widthsRef.current))
+      .filter((k) => k !== id)
+      .reduce((s, k) => s + (widthsRef.current[k] || 0), 0);
+
+    const onMove = (ev) => {
+      const containerInner = containerRef?.current?.clientWidth ?? Infinity;
+      const maxThisCol = Math.max(MIN_COL, (containerInner - 1) - sumOthers);
+      const proposed = startWidth + (ev.clientX - startX);
+      const next = Math.max(MIN_COL, Math.min(maxThisCol, proposed));
+      setWidths((w) => ({ ...w, [id]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, [containerRef]);
+
+  const resetColumn = useCallback((id) => {
+    setWidths((w) => ({ ...w, [id]: INV_COLUMN_DEFAULTS[id] ?? 100 }));
+  }, []);
+
+  return { widths, setWidths, startResize, resetColumn };
+}
+
+function InvResizeHandle({ id, startResize, resetColumn, visibleKeys }) {
+  return (
+    <span
+      onMouseDown={startResize(id, visibleKeys)}
+      onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetColumn(id); }}
+      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/50 active:bg-accent z-30"
+      style={{ touchAction: "none" }}
+      title="Drag to resize · double-click to reset"
+    />
+  );
+}
 
 function FilterPill({ active, onClick, children }) {
   return (
@@ -535,7 +605,8 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
   }
-  const sh = "px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors";
+  // `relative` so the absolute-positioned ResizeHandle anchors correctly.
+  const sh = "relative px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors";
   const parentRef = useRef(null);
 
   const virtualizer = useVirtualizer({
@@ -544,6 +615,40 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
     estimateSize: () => ROW_HEIGHT,
     overscan: 20,
   });
+
+  const { widths, setWidths, startResize, resetColumn } = useInvColumnWidths(parentRef);
+  const visibleKeys = useMemo(
+    () => ['itemNumber', 'description', 'qty', 'lastCost', 'price', 'priceList', 'uom', ...(hubMode ? ['site'] : [])],
+    [hubMode],
+  );
+  const totalWidth = useMemo(
+    () => visibleKeys.reduce((s, k) => s + (widths[k] || 100), 0),
+    [visibleKeys, widths],
+  );
+
+  // Auto-fit on mount + container resize: scale columns down proportionally
+  // so the table never exceeds its rounded frame.
+  useEffect(() => {
+    const el = parentRef.current;
+    if (!el) return;
+    const fit = () => {
+      const inner = el.clientWidth;
+      if (!inner) return;
+      const total = visibleKeys.reduce((s, k) => s + (widths[k] || 100), 0);
+      if (total <= inner - 1) return;
+      const scale = (inner - 1) / total;
+      setWidths((w) => {
+        const next = { ...w };
+        for (const k of visibleKeys) next[k] = Math.max(40, Math.floor((w[k] || 100) * scale));
+        return next;
+      });
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleKeys.join('|')]);
 
   const items = virtualizer.getVirtualItems();
   const totalHeight = virtualizer.getTotalSize();
@@ -561,20 +666,23 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
       <div
         ref={parentRef}
         className="print-table-wrap"
-        style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
+        style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "hidden" }}
       >
-        <table className="w-full text-sm">
+        <table className="text-sm" style={{ tableLayout: "fixed", width: totalWidth }}>
+          <colgroup>
+            {visibleKeys.map((k) => <col key={k} style={{ width: widths[k] }} />)}
+          </colgroup>
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-border bg-card">
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_number")} className={`${sh} text-left`}>Item Number<SA field="item_number" /></th></TooltipTrigger><TooltipContent>Unique stock item code — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_description")} className={`${sh} text-left`}>Description<SA field="item_description" /></th></TooltipTrigger><TooltipContent>Item name or description — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("qty_on_hand")} className={`${sh} text-right`}>Qty on Hand<SA field="qty_on_hand" /></th></TooltipTrigger><TooltipContent>Current stock quantity on hand — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("last_cost")} className={`${sh} text-right`}>Last Cost<SA field="last_cost" /></th></TooltipTrigger><TooltipContent>Most recent purchase cost per unit — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price")} className={`${sh} text-right`}>Price<SA field="price" /></th></TooltipTrigger><TooltipContent>Current selling price per unit — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price_list")} className={`${sh} text-right`}>Price List<SA field="price_list" /></th></TooltipTrigger><TooltipContent>Price list this item belongs to — click to sort</TooltipContent></Tooltip>
-              <Tooltip><TooltipTrigger asChild><th className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th></TooltipTrigger><TooltipContent>Stocking unit of measure (e.g. Each, Box, Carton)</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_number")} className={`${sh} text-left`}><span className="block truncate">Item Number<SA field="item_number" /></span><InvResizeHandle id="itemNumber" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Unique stock item code — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("item_description")} className={`${sh} text-left`}><span className="block truncate">Description<SA field="item_description" /></span><InvResizeHandle id="description" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Item name or description — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("qty_on_hand")} className={`${sh} text-right`}><span className="block truncate">Qty on Hand<SA field="qty_on_hand" /></span><InvResizeHandle id="qty" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Current stock quantity on hand — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("last_cost")} className={`${sh} text-right`}><span className="block truncate">Last Cost<SA field="last_cost" /></span><InvResizeHandle id="lastCost" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Most recent purchase cost per unit — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price")} className={`${sh} text-right`}><span className="block truncate">Price<SA field="price" /></span><InvResizeHandle id="price" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Current selling price per unit — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("price_list")} className={`${sh} text-right`}><span className="block truncate">Price List<SA field="price_list" /></span><InvResizeHandle id="priceList" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Price list this item belongs to — click to sort</TooltipContent></Tooltip>
+              <Tooltip><TooltipTrigger asChild><th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">UOM</span><InvResizeHandle id="uom" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Stocking unit of measure (e.g. Each, Box, Carton)</TooltipContent></Tooltip>
               {hubMode && (
-                <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("site_name")} className={`${sh} text-left`}>Site<SA field="site_name" /></th></TooltipTrigger><TooltipContent>Site this inventory record belongs to — click to sort</TooltipContent></Tooltip>
+                <Tooltip><TooltipTrigger asChild><th onClick={() => onSort("site_name")} className={`${sh} text-left`}><span className="block truncate">Site<SA field="site_name" /></span><InvResizeHandle id="site" startResize={startResize} resetColumn={resetColumn} visibleKeys={visibleKeys} /></th></TooltipTrigger><TooltipContent>Site this inventory record belongs to — click to sort</TooltipContent></Tooltip>
               )}
             </tr>
           </thead>
@@ -586,15 +694,15 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
                   key={key}
                   className={`border-b border-border transition-colors ${highlightBelowCost && isBelowCost(row) ? "bg-red-500/10 hover:bg-red-500/15" : "hover:bg-muted/30"}`}
                 >
-                  <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap">{row.item_number || "—"}</td>
-                  <td className="px-2 py-1 text-xs text-foreground">{row.item_description || "—"}</td>
+                  <td className="px-2 py-1 text-xs font-mono text-foreground whitespace-nowrap overflow-hidden text-ellipsis">{row.item_number || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground overflow-hidden text-ellipsis">{row.item_description || "—"}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{(row.qty_on_hand === null || row.qty_on_hand === undefined || row.qty_on_hand === '') ? formatNum(0, 0) : formatNum(row.qty_on_hand, 0)}</td>
                   <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.last_cost)}</td>
                   <td className={`px-2 py-1 text-xs text-right tabular-nums ${highlightBelowCost && isBelowCost(row) ? "text-red-400 font-semibold" : "text-foreground"}`}>{formatCurrency(row.price)}</td>
                   <td className="px-2 py-1 text-xs text-right tabular-nums text-foreground">{formatNum(row.price_list)}</td>
-                  <td className="px-2 py-1 text-xs text-foreground">{row.stocking_uom || "—"}</td>
+                  <td className="px-2 py-1 text-xs text-foreground overflow-hidden text-ellipsis">{row.stocking_uom || "—"}</td>
                   {hubMode && (
-                    <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || row.site_id || "—"}</td>
+                    <td className="px-2 py-1 text-xs text-muted-foreground overflow-hidden text-ellipsis">{row.site_name || row.site_id || "—"}</td>
                   )}
                 </tr>
               );
