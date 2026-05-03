@@ -2073,10 +2073,14 @@ async function processQueue(reconId) {
           emitExtractionUpdate(reconId);
         } catch (err) {
           console.error(`[bat-ocr] id=${next.id} failed: ${err.message}`);
+          // Pull the row's last-known stage breadcrumb before we delete its
+          // currentlyProcessing entry in the finally — used to attribute
+          // "extract_total timed out — but in WHICH stage" in the row log.
+          const stuckStage = currentlyProcessing.get(next.id)?.stage || null;
           // Log everything we know about this failure so a remote operator can
           // diagnose without ssh access. Includes err.code (e.g. SQLITE_RANGE),
-          // constructor name (RangeError vs TypeError vs Error), and the lane
-          // state — useful when the same row keeps failing.
+          // constructor name (RangeError vs TypeError vs Error), the lane
+          // state, and the last stage the worker reported being in.
           try {
             logError('bat.ocr.row', err, {
               reconciliation_id: reconId,
@@ -2086,18 +2090,31 @@ async function processQueue(reconId) {
               err_code: err?.code,
               err_kind: err?.constructor?.name,
               lane_dead: !!lane.worker?.dead,
+              last_stage: stuckStage,
             });
           } catch {}
-          try {
-            updateExtraction.run(null, 'failed', null, String(err.message || 'Unknown error').slice(0, 1000), next.id);
-          } catch (writeErr) {
-            // If the row UPDATE itself fails, we MUST surface that — otherwise
-            // the lane silently fails to mark the row 'failed' and processQueue
-            // never advances.
-            try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {}
+          // Pause-aware row handling. If the operator paused mid-run,
+          // in-flight rows whose extract is racing toward an extract_total
+          // timeout aren't really "broken" — the user just wanted to stop.
+          // Don't mark them 'failed' (they should be retryable on resume),
+          // and don't recordReconciliationError (which would toast at the
+          // operator who literally just clicked Pause). Just leave the row
+          // 'pending' for the next run to pick up.
+          if (ocrPaused) {
+            console.log(`[bat-ocr] id=${next.id} interrupted by pause — leaving 'pending' for retry on resume`);
+            emitExtractionUpdate(reconId);
+          } else {
+            try {
+              updateExtraction.run(null, 'failed', null, String(err.message || 'Unknown error').slice(0, 1000), next.id);
+            } catch (writeErr) {
+              // If the row UPDATE itself fails, we MUST surface that — otherwise
+              // the lane silently fails to mark the row 'failed' and processQueue
+              // never advances.
+              try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {}
+            }
+            recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
+            emitExtractionUpdate(reconId);
           }
-          recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
-          emitExtractionUpdate(reconId);
 
           // Lane is dead (timeout or worker crash) — replace it.
           if (lane.worker.dead) {

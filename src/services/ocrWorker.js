@@ -158,7 +158,26 @@ async function ocrViaGoogleVision(imageBuffer, apiKey) {
     throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 200)}`);
   }
   const data = await res.json();
-  const annotation = data.responses?.[0]?.fullTextAnnotation;
+  // Top-level error envelope. Returned with HTTP 200 when the request itself
+  // was OK but the API rejected it for project-level reasons (key restricted,
+  // Vision API not enabled, billing off). Without this check we silently
+  // returned '' for every row and the cascade walked all the way down to
+  // ocr.space → Tesseract on every PDF.
+  if (data.error) {
+    throw new Error(`Google Vision rejected: ${data.error.message || JSON.stringify(data.error).slice(0, 200)}`);
+  }
+  // Per-request error envelope. Vision API returns HTTP 200 with
+  // `{ responses: [{ error: { code, message } }] }` for issues like quota
+  // exceeded on this specific call, image too large, image format unsupported.
+  // Same silent-empty-string trap if not surfaced.
+  const perReqError = data.responses?.[0]?.error;
+  if (perReqError) {
+    throw new Error(`Google Vision per-request error: ${perReqError.message || JSON.stringify(perReqError).slice(0, 200)}`);
+  }
+  if (!Array.isArray(data.responses)) {
+    throw new Error(`Google Vision unexpected response shape: ${JSON.stringify(data).slice(0, 200)}`);
+  }
+  const annotation = data.responses[0]?.fullTextAnnotation;
   return annotation?.text || '';
 }
 
@@ -277,40 +296,68 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
 
   const isLarge = buffer.length > 2 * 1024 * 1024;
 
-  // Step 1: pdfjs text layer (no OCR needed)
+  // Step 1: pdfjs text layer (no OCR needed). 20s hard cap — corrupt /
+  // encrypted PDFs can hang in pdfjs.getDocument(). On error we forward
+  // the message to the parent so the operator sees `bat.ocr.pdf_text_failed`
+  // rather than a silent fall-through to image render.
   emitProgress(msgId, 'pdf_text');
   try {
-    const pdfjsLib = await getPdfjs();
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-    loadingTask.onUnsupportedFeature = () => {};
-    const pdfDoc = await loadingTask.promise;
-    for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
-      const page = await pdfDoc.getPage(p);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(' ');
-      if (pageText.trim()) {
-        const invoice = findInvoiceNumber(pageText);
-        if (invoice) {
-          await pdfDoc.destroy();
-          return { invoice, previewPath: null };
+    const result = await withTimeout((async () => {
+      const pdfjsLib = await getPdfjs();
+      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+      loadingTask.onUnsupportedFeature = () => {};
+      const pdfDoc = await loadingTask.promise;
+      try {
+        for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
+          const page = await pdfDoc.getPage(p);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map(item => item.str).join(' ');
+          if (pageText.trim()) {
+            const invoice = findInvoiceNumber(pageText);
+            if (invoice) return { invoice };
+          }
         }
+        return null;
+      } finally {
+        try { await pdfDoc.destroy(); } catch {}
       }
-    }
-    await pdfDoc.destroy();
-  } catch { /* fall through to image render */ }
+    })(), 20_000, 'pdf_text');
+    if (result?.invoice) return { invoice: result.invoice, previewPath: null };
+  } catch (err) {
+    // Forward to parent — visible in System Log, doesn't abort the row
+    // (we still try image render below).
+    try {
+      parentPort.postMessage({
+        type: 'engine_error',
+        id: msgId,
+        engine: 'pdf_text',
+        angle: 0,
+        stage: 'pdf_text',
+        message: String(err?.message || err).slice(0, 500),
+        tierError: false,
+      });
+    } catch {}
+  }
 
-  // Step 2: render to image
+  // Step 2: render to image. 30s hard cap — pdfjs + node-canvas can hang
+  // forever on a malformed PDF (the page.render Promise never resolves).
+  // Without this cap, render hangs ate ~90s of the per-row budget on every
+  // bad PDF and the row only ever surfaced as a generic 'extract_total'
+  // timeout with no stage attribution.
   emitProgress(msgId, 'render');
   let imageBuffer;
   try {
-    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
+    imageBuffer = await withTimeout(pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0), 30_000, 'render');
   } catch (err) {
     return { invoice: null, previewPath: null, error: `Render failed: ${err.message}` };
   }
 
   const sharp = await getSharp();
 
-  // Save preview JPEG (async — does NOT block the loop)
+  // Save preview JPEG (best-effort — never aborts the row, but failures
+  // are now logged. Without this, a permission-denied or disk-full on
+  // previewDir broke every preview thumbnail and the operator thought
+  // it was a UI bug rather than a filesystem one).
   emitProgress(msgId, 'preview_save');
   let previewPath = null;
   try {
@@ -319,7 +366,19 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     const fullPath = path.join(previewDir, filename);
     await fsp.writeFile(fullPath, previewJpeg);
     previewPath = `/api/bat/preview/${filename}`;
-  } catch { /* preview save is best-effort */ }
+  } catch (err) {
+    try {
+      parentPort.postMessage({
+        type: 'engine_error',
+        id: msgId,
+        engine: 'preview_save',
+        angle: 0,
+        stage: 'preview_save',
+        message: String(err?.message || err).slice(0, 500),
+        tierError: false,
+      });
+    } catch {}
+  }
 
   // Step 3: multi-engine OCR pipeline
   const ocrEngines = [];
