@@ -82,7 +82,7 @@ export default function FileUpload({ onComplete }) {
       </div>
       {error && (
         <div
-          className="relative border border-border bg-card mt-3 px-4 py-2.5"
+          className="relative overflow-hidden border border-border bg-card mt-3 px-4 py-2.5"
           style={{ borderRadius: '12px' }}
         >
           <div

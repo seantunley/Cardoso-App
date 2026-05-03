@@ -351,7 +351,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       </div>
 
       {/* Category Tabs */}
-      <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '12px' }}>
+      <div className="flex gap-px overflow-hidden bg-border border border-border" style={{ borderRadius: '12px' }}>
         {tabs.map((t) => (
           <button
             key={t.id}

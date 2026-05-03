@@ -30,6 +30,7 @@ import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, m
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
 import { validateHubPostgresConfig } from './src/config/hubPostgres.js';
+import { logError } from './src/lib/errorLog.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
@@ -114,6 +115,25 @@ app.use(createReceiveUsersRouter());
 
 app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermission, checkTableAccess }));
 
+// ── Global error middleware ─────────────────────────────────────────────────
+// Safety net for anything a route handler didn't catch itself: synchronous
+// throws inside handlers without try/catch, async rejections that bubble via
+// next(err), errors thrown from upstream middleware. Explicit per-route
+// logError() calls still take precedence — those get richer context. This
+// just ensures *nothing* falls into the void.
+app.use((err, req, res, next) => {
+  try {
+    logError('http.unhandled', err, {
+      method: req.method,
+      path: req.originalUrl?.split('?')[0],
+      user: req.currentUser?.email,
+      ip: req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress,
+    });
+  } catch { /* logger itself failed — don't recurse */ }
+  if (res.headersSent) return next(err);
+  res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+});
+
 if (IS_PRODUCTION) {
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
@@ -122,11 +142,36 @@ if (IS_PRODUCTION) {
 
 startSchedulers();
 recoverAbandonedSyncs();
-['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, gracefulShutdown));
-process.on('uncaughtException', (err) => { console.error('[UNCAUGHT]', err.message); });
-process.on('unhandledRejection', (err) => { console.error('[UNHANDLED]', err?.message || err); });
+['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, (...args) => {
+  try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {}
+  gracefulShutdown(...args);
+}));
+// Process-level safety nets — anything that escapes a callback or promise
+// chain still lands in the System Log so we can correlate "X stalled" with
+// "uncaught error at Y".
+process.on('uncaughtException', (err) => {
+  console.error('[UNCAUGHT]', err.message);
+  try { logError('system.uncaught', err); } catch {}
+});
+process.on('unhandledRejection', (err) => {
+  console.error('[UNHANDLED]', err?.message || err);
+  try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {}
+});
 ensureSeedUsers().then(() => {
-  setServer(app.listen(PORT, '0.0.0.0', () => console.log(`🚀 Local backend + SQLite running at http://0.0.0.0:${PORT}`)));
+  setServer(app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 Local backend + SQLite running at http://0.0.0.0:${PORT}`);
+    // Boot marker — lets operators see "OCR is paused" alongside "server
+    // restarted at HH:MM" so the cause-and-effect is obvious.
+    try {
+      logError('system.boot', new Error(`Server started on port ${PORT} (node ${process.version}, hub_mode=${process.env.HUB_MODE === 'true'})`), {
+        port: PORT, hub_mode: process.env.HUB_MODE === 'true', node: process.version, env: process.env.NODE_ENV || 'development',
+      }, 'info');
+    } catch {}
+  }));
   // Resume any paused BAT OCR extractions from a previous run
   resumeExtractionWorker();
-}).catch((error) => { console.error('Failed to seed users:', error); process.exit(1); });
+}).catch((error) => {
+  console.error('Failed to seed users:', error);
+  try { logError('system.boot', error, { phase: 'ensureSeedUsers' }); } catch {}
+  process.exit(1);
+});

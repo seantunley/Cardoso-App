@@ -9,7 +9,7 @@ import db from '../db/index.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { buildStatements } from '../db/statements.js';
-import { expandDataRecord, getFirstNonEmptyObjectValue, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
+import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -610,54 +610,53 @@ export function createReportingRouter({ requireAuth }) {
         return '21+';
       };
 
-      // Per-invoice aging: every known invoice line contributes its OWN amount
-      // to its OWN bucket. Anything not covered by the 5 known lines (the
-      // residual between outstanding_balance and the sum of known invoices)
-      // falls into "unknown" since we don't have a date for it.
+      // Aging by OLDEST unpaid invoice age. The whole customer balance lands
+      // in one bucket (the bucket of their oldest dated unpaid invoice). This
+      // is the industry-standard aged-debtors convention.
+      //
+      // The previous implementation tried to split the balance per-invoice
+      // (each invoice amount → its own bucket). That was wrong against this
+      // data shape because `unpaid_invoices[].amount` is the running customer
+      // balance at the time of that invoice, NOT the per-invoice amount.
+      // Summing them inflated the bucket totals 3-4x.
       const enriched = filtered.map(r => {
         const balance = parseAmount(r.outstanding_balance);
         totalOutstanding += balance;
 
-        const bucketAmounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
-        let knownSum = 0;
+        // Find the oldest dated invoice across all unpaid lines.
         let oldestAge = null;
-
-        for (let i = 1; i <= 5; i++) {
-          const amt = parseAmount(r[`last_unpaid_invoice_${i}_amount`]);
-          if (!(amt > 0)) continue;
-          const date = parseBalanceDate(r[`last_unpaid_invoice_${i}_date`]);
-          let ageDays = null;
-          if (date) {
+        const invoices = Array.isArray(r.unpaid_invoices)
+          ? r.unpaid_invoices
+          : (typeof r.unpaid_invoices === 'string' ? parseJsonSafely(r.unpaid_invoices, []) : []);
+        for (const inv of invoices) {
+          const date = parseBalanceDate(inv?.date);
+          if (!date) continue;
+          const days = Math.floor((today - date) / 86400000);
+          if (!Number.isFinite(days) || days < 0) continue;
+          if (oldestAge === null || days > oldestAge) oldestAge = days;
+        }
+        // Fallback to the flat last_unpaid_invoice_*_date columns if the JSON
+        // wasn't expanded (e.g. older code paths feeding the same query).
+        if (oldestAge === null) {
+          for (let i = 1; i <= 10; i++) {
+            const date = parseBalanceDate(r[`last_unpaid_invoice_${i}_date`]);
+            if (!date) continue;
             const days = Math.floor((today - date) / 86400000);
-            if (Number.isFinite(days) && days >= 0) ageDays = days;
-          }
-          if (ageDays !== null && (oldestAge === null || ageDays > oldestAge)) {
-            oldestAge = ageDays;
-          }
-          bucketAmounts[ageToBucket(ageDays)] += amt;
-          knownSum += amt;
-        }
-
-        // Residual = portion of the outstanding balance not represented by the
-        // 5 known invoices. Could come from older invoices, credit-note math
-        // drift, or rounding. Park it in "unknown" so column totals reconcile
-        // back to the customer's total outstanding.
-        const residual = Math.max(0, balance - knownSum);
-        bucketAmounts.unknown += residual;
-
-        for (const k of bucketKeys) {
-          if (bucketAmounts[k] > 0) {
-            buckets[k] += bucketAmounts[k];
-            bucketCounts[k]++;
+            if (!Number.isFinite(days) || days < 0) continue;
+            if (oldestAge === null || days > oldestAge) oldestAge = days;
           }
         }
+
+        const bucket = ageToBucket(oldestAge);
+        buckets[bucket] += balance;
+        bucketCounts[bucket]++;
 
         return {
           ...r,
           age_days: oldestAge,
-          bucket: ageToBucket(oldestAge),
+          bucket,
           parsed_balance: balance,
-          bucket_amounts: bucketAmounts,
+          bucket_amounts: { [bucket]: balance },
         };
       });
 

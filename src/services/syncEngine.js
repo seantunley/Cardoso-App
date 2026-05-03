@@ -12,6 +12,7 @@ import { buildStatements } from '../db/statements.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
+import { logError } from '../lib/errorLog.js';
 
 // ── Statements prepared once at module level (not per-sync) ────────────────
 const stmts = buildStatements(db);
@@ -567,6 +568,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       imported: importedCount,
     };
   } catch (error) {
+    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId }); } catch {}
     try {
       db.prepare(`
         UPDATE databaseconnection

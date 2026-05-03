@@ -3,6 +3,7 @@
 // the auditlog schema CHECK to: user | connection | record | rule | system.
 
 import db from '../db/index.js';
+import { logError } from './errorLog.js';
 
 const insertAudit = db.prepare(`
   INSERT INTO auditlog (
@@ -60,45 +61,22 @@ function summarizeDiff(changes, MAX_PARTS = 6) {
   return parts.slice(0, MAX_PARTS).join('; ') + ` (+${parts.length - MAX_PARTS} more)`;
 }
 
-// In-memory queue + 250 ms flush. Audit rows piled up on the request thread
-// during sync runs (the writer slot was held by the sync transaction), pushing
-// API latency from <5 ms to 100–500 ms. Buffering lets the request return
-// immediately and the rows land in a single batched transaction soon after.
-const QUEUE = [];
-const QUEUE_HARD_CAP = 5000;        // safety: drop oldest if writer wedges
-const FLUSH_INTERVAL_MS = 250;
-let flushTimer = null;
-
-const flushBatch = db.transaction((rows) => {
-  for (const r of rows) insertAudit.run(...r);
-});
-
-function flush() {
-  if (QUEUE.length === 0) return;
-  const batch = QUEUE.splice(0, QUEUE.length);
-  try {
-    flushBatch(batch);
-  } catch (err) {
-    console.error('[audit] flush failed:', err.message, '— dropped', batch.length, 'row(s)');
-  }
-}
-
-function ensureFlushScheduled() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flush();
-  }, FLUSH_INTERVAL_MS);
-  // Don't keep the event loop alive just for this — service shutdown
-  // triggers a final flush via the SIGTERM hook below.
-  if (typeof flushTimer.unref === 'function') flushTimer.unref();
-}
-
-// Final flush on graceful shutdown so we don't lose buffered audit rows.
-const finalFlush = () => { try { if (flushTimer) clearTimeout(flushTimer); flush(); } catch {} };
-process.on('SIGTERM', finalFlush);
-process.on('SIGINT', finalFlush);
-process.on('beforeExit', finalFlush);
+// Audit rows are written synchronously. The previous batched 250ms-flush
+// implementation lost in-memory rows on hard kills (Windows taskkill /F,
+// editor "Restart server", terminal close — none of these deliver SIGTERM
+// or fire `beforeExit`), which is why the table had multi-day gaps.
+//
+// The earlier batching was introduced to mitigate 100-500ms latency spikes
+// during sync-engine runs (the sync transaction held the writer slot while
+// audit inserts queued behind it). Reverted because:
+//   1. Sync-run latency only matters when an API request happens to fire
+//      logAudit() at the exact moment a sync transaction is open. The window
+//      is small in practice.
+//   2. A full audit trail is more valuable than 100ms saved on rare overlap.
+//   3. Sync-run audits *should* land contemporaneously, not after the
+//      transaction releases.
+// If sync-run latency becomes a problem again, route those specific call
+// sites through a separate writer rather than batching everything globally.
 
 export function logAudit({
   req,
@@ -119,7 +97,7 @@ export function logAudit({
     if (!resolvedDetails && changes && (changes.before || changes.after)) {
       resolvedDetails = summarizeDiff(changes);
     }
-    QUEUE.push([
+    insertAudit.run(
       String(action || 'unknown').slice(0, 64),
       user.email || 'system',
       user.full_name || user.email || '',
@@ -130,14 +108,13 @@ export function logAudit({
       changes ? JSON.stringify(changes).slice(0, 4000) : null,
       extractIp(req),
       status === 'failure' ? 'failure' : 'success',
-    ]);
-    if (QUEUE.length > QUEUE_HARD_CAP) {
-      const dropped = QUEUE.splice(0, QUEUE.length - QUEUE_HARD_CAP);
-      console.warn(`[audit] queue overflowing — dropped ${dropped.length} oldest row(s)`);
-    }
-    ensureFlushScheduled();
+    );
   } catch (err) {
-    console.error('[audit] enqueue failed:', err.message);
+    // Last-resort: write to errorLog so the failure is visible — but never
+    // throw out of an audit call (audit failures must not break the actual
+    // operation the user is performing).
+    console.error('[audit] insert failed:', err.message);
+    try { logError('audit.insert', err, { action }); } catch {}
   }
 }
 

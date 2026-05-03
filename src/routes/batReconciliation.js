@@ -32,6 +32,8 @@ import {
   getDashboardData,
   manualSetInvoice,
   retryNotFound,
+  resetUnsuccessfulExtractions,
+  countUnsuccessfulExtractions,
   resetSagePool,
   getCachedSageWeekTotals,
   getSageCacheMeta,
@@ -408,6 +410,30 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       "SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'pending'"
     ).get();
     res.json({ paused: isOcrPaused(), pending: pendingRow?.c || 0 });
+  });
+
+  // Counts how many extractions across ALL reconciliations are not_found / failed
+  // — drives the confirmation message before re-queueing.
+  router.get('/api/bat/reset-pending-count', ...gate, (req, res) => {
+    res.json({ count: countUnsuccessfulExtractions() });
+  });
+
+  // Flips every not_found / failed extraction back to 'pending'. Successful
+  // ('found') rows are left alone so we don't redo OCR work that already
+  // matched. After this call the OCR worker (when next started or resumed)
+  // will re-process the re-queued rows.
+  router.post('/api/bat/reset-pending', ...gate, (req, res) => {
+    try {
+      const result = resetUnsuccessfulExtractions();
+      logAudit({
+        req, action: 'bat_reset_pending', resourceType: 'system',
+        resourceName: 'OCR retry queue',
+        details: `Reset ${result.reset} not_found/failed extraction(s) back to pending`,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post('/api/bat/ocr-pause', ...gate, (req, res) => {

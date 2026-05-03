@@ -53,7 +53,7 @@ export default function WeekSelector({ reconciliations, onSelect }) {
           <button
             key={r.id}
             onClick={() => onSelect(r.id)}
-            className="relative bg-card p-4 text-left transition-colors hover:bg-muted/30 group"
+            className="relative overflow-hidden bg-card p-4 text-left transition-colors hover:bg-muted/30 group"
             style={{
               border: `1px solid ${borderColor}`,
               boxShadow: borderGlow,
