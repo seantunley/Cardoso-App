@@ -526,7 +526,17 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   router.get('/api/app-version-status', requireAuth, async (req, res) => {
     try {
       const versionStatus = await getVersionStatus();
-      res.json(versionStatus);
+      // Tack on the live update-progress state so the UI can show the
+      // current phase + elapsed time instead of an indefinite spinner.
+      // Stale phase/timestamp left over from the previous run is fine —
+      // updateRunning is the gate the UI uses to decide whether to read
+      // these fields.
+      res.json({
+        ...versionStatus,
+        updateRunning: autoUpdateRunning,
+        updatePhase: autoUpdatePhase,
+        updateStartedAt: autoUpdateStartedAt,
+      });
     } catch (error) {
       console.error('Version status error:', error);
       res.status(500).json({ error: 'Failed to check app version' });
@@ -535,6 +545,11 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
 
   // ==================== AUTO-UPDATE (WINDOWS SERVICE) ====================
   let autoUpdateRunning = false;
+  // Coarse-grained phase so the UI can render "Installing (2m 18s)…"
+  // instead of a perpetual "Downloading update". Values:
+  //   'downloading' | 'verifying' | 'installing' | 'restarting' | null
+  let autoUpdatePhase = null;
+  let autoUpdateStartedAt = null;
 
   // Try the lightweight delta-zip update path. Returns:
   //   { ok: true, mode: 'delta' }  → app zip downloaded + apply script spawned
@@ -582,18 +597,21 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     // Download the app zip (small — typically <10MB)
     const tmpZip = path.join(process.env.TEMP || 'C:\\Windows\\Temp', manifest.app_zip);
     console.log(`[AutoUpdate-delta] Downloading ${manifest.app_zip} (${(appZipAsset.size / 1024 / 1024).toFixed(1)} MB)...`);
+    autoUpdatePhase = 'downloading';
     try {
       await downloadReleaseAsset(appZipAsset.browser_download_url, tmpZip);
     } catch (err) {
       return { ok: false, reason: `app_zip_download_failed:${err.message}` };
     }
 
+    autoUpdatePhase = 'verifying';
     const actual = await sha256File(tmpZip);
     if (actual !== manifest.app_zip_sha256.toLowerCase()) {
       try { fs.unlinkSync(tmpZip); } catch {}
       return { ok: false, reason: 'app_zip_sha_mismatch' };
     }
     console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1.');
+    autoUpdatePhase = 'installing';
 
     // Detached PowerShell — the apply script stops the service, swaps files,
     // restarts the service, and rolls back on any failure.
@@ -620,12 +638,16 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       return { ok: false, reason: 'already_running' };
     }
     autoUpdateRunning = true;
+    autoUpdateStartedAt = Date.now();
+    autoUpdatePhase = 'downloading';
 
     let tmpPath = null;
     try {
       const releaseMeta = await fetchReleaseMetadata();
       if (!releaseMeta.ok) {
         autoUpdateRunning = false;
+        autoUpdatePhase = null;
+        autoUpdateStartedAt = null;
         console.warn(`[AutoUpdate] GitHub API rate limited (${releaseMeta.reason.split(':')[1]}). Skipping this cycle.`);
         return { ok: false, reason: 'rate_limited' };
       }
@@ -636,6 +658,9 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const delta = await tryDeltaUpdate(releaseMeta);
       if (delta.ok) {
         console.log('[AutoUpdate] Delta update launched (app zip).');
+        // tryDeltaUpdate has set autoUpdatePhase to 'installing'. Once the
+        // detached apply-app-update.ps1 finishes its work, the service
+        // restart will reset all this state via process exit.
         return { ok: true, mode: 'delta' };
       }
       console.log(`[AutoUpdate] Delta path skipped (${delta.reason}). Falling back to full installer.`);
@@ -643,24 +668,39 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const { installerAsset, checksumAsset } = releaseMeta;
       console.log(`[AutoUpdate] Downloading ${installerAsset.name} (${(installerAsset.size / 1024 / 1024).toFixed(1)} MB)...`);
 
+      autoUpdatePhase = 'downloading';
       tmpPath = path.join(process.env.TEMP || 'C:\\Windows\\Temp', 'CardosoSetup-update.exe');
       await downloadReleaseAsset(installerAsset.browser_download_url, tmpPath);
       console.log(`[AutoUpdate] Downloaded to ${tmpPath}`);
 
+      autoUpdatePhase = 'verifying';
       const expectedChecksum = await fetchChecksum(checksumAsset.browser_download_url, installerAsset.name);
       const actualChecksum = await sha256File(tmpPath);
       if (actualChecksum !== expectedChecksum) {
         throw new Error(`Installer checksum mismatch for ${installerAsset.name}`);
       }
       console.log('[AutoUpdate] SHA-256 verified. Launching silent installer.');
+      autoUpdatePhase = 'installing';
 
       // Stop the Cardoso service before launching the installer so it can
       // overwrite locked files. The installer (NSIS) will restart the service
       // after installation completes.
+      //
+      // We run the installer with a 5-minute hard timeout. NSIS occasionally
+      // wedges (UAC prompt nobody can click, MSI lock contention, etc.) and
+      // the previous version waited forever. WaitForExit returns false on
+      // timeout; we then force-kill so the service restart still happens
+      // and the operator gets a clear failure instead of a perpetual
+      // "Downloading update" spinner.
       const psScript = [
         `Stop-Service -Name 'CardosoCigarettes' -Force -ErrorAction SilentlyContinue`,
         `Start-Sleep -Seconds 3`,
-        `Start-Process -FilePath '${tmpPath.replace(/'/g, "''")}' -ArgumentList '/S' -Wait`,
+        `$proc = Start-Process -FilePath '${tmpPath.replace(/'/g, "''")}' -ArgumentList '/S' -PassThru`,
+        `$completed = $proc.WaitForExit(300000)`,
+        `if (-not $completed) {`,
+        `  try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}`,
+        `  Write-Error "Installer timed out after 5 minutes — process killed"`,
+        `}`,
         `Start-Sleep -Seconds 5`,
         `# Installer should have restarted service; start it if not running`,
         `$svc = Get-Service -Name 'CardosoCigarettes' -ErrorAction SilentlyContinue`,
@@ -679,10 +719,17 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       child.unref();
 
       console.log('[AutoUpdate] PowerShell updater launched: stopping service, running installer, restarting.');
+      // Once the spawned PS hands off to the installer, the service will be
+      // stopped and this Node process won't see the next state change. Mark
+      // 'restarting' so the UI shows the right phase right up until the
+      // service comes back on the new version.
+      autoUpdatePhase = 'restarting';
       return { ok: true };
     } catch (err) {
       console.error('[AutoUpdate] Error:', err.message);
       autoUpdateRunning = false;
+      autoUpdatePhase = null;
+      autoUpdateStartedAt = null;
       if (tmpPath) {
         try { fs.unlinkSync(tmpPath); } catch {}
       }

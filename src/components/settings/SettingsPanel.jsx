@@ -1339,6 +1339,11 @@ function HubMaintenanceTab() {
 function UpdateTab() {
   const [status, setStatus] = useState(null);
   const [info, setInfo] = useState(null);
+  // Live in-progress state, populated from /api/app-version-status while an
+  // update is running. `tick` is just a counter that re-renders once a second
+  // so the elapsed-time string keeps updating between 4 s polls.
+  const [progress, setProgress] = useState(null); // { phase, startedAt }
+  const [tick, setTick] = useState(0);
 
   useEffect(() => {
     fetch("/api/app-version-status", { credentials: "include" })
@@ -1346,6 +1351,13 @@ function UpdateTab() {
       .then(d => setInfo(d))
       .catch(err => reportClientError("SettingsPanel.versionStatus", err));
   }, []);
+
+  // 1-Hz tick while an update is in progress so "(2m 18s)" advances visibly.
+  useEffect(() => {
+    if (status !== "updating") return;
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [status]);
 
   const handleCheck = async () => {
     setStatus("checking");
@@ -1371,16 +1383,21 @@ function UpdateTab() {
       if (r.ok && d.ok) {
         setStatus("updating");
         const note = d.mode === 'delta'
-          ? "Delta update downloading — the page will reload automatically once ready."
-          : "Update downloading — the page will reload automatically once ready.";
+          ? "Delta update started — the page will reload automatically once ready."
+          : "Update started — the page will reload automatically once ready.";
         toast.success(note);
-        // Poll until the version changes, then reload
+        // Poll until the version changes, then reload. Each poll also
+        // refreshes the live phase/startedAt so the UI message tracks where
+        // the install actually is.
         const targetVersion = info?.latestVersion;
         const poll = async () => {
           try {
             const pr = await fetch("/api/app-version-status", { credentials: "include" });
             if (!pr.ok) throw new Error("not ready");
             const pd = await pr.json();
+            if (pd.updateRunning) {
+              setProgress({ phase: pd.updatePhase, startedAt: pd.updateStartedAt });
+            }
             if (pd.currentVersion && pd.currentVersion === targetVersion) {
               window.location.reload();
               return;
@@ -1398,6 +1415,32 @@ function UpdateTab() {
       toast.error("Update request failed.");
     }
   };
+
+  // Format milliseconds since startedAt as "2m 18s". Reads `tick` only to
+  // ensure React re-runs this on every interval fire.
+  const formatElapsed = (startedAt) => {
+    void tick;
+    if (!startedAt) return null;
+    const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  };
+
+  const phaseLabel = (phase) => {
+    switch (phase) {
+      case 'downloading': return 'Downloading installer';
+      case 'verifying':   return 'Verifying SHA-256';
+      case 'installing':  return 'Installing';
+      case 'restarting':  return 'Restarting service';
+      default:            return 'Updating';
+    }
+  };
+
+  const elapsedSec = progress?.startedAt
+    ? Math.floor((Date.now() - progress.startedAt) / 1000)
+    : 0;
+  const isStuck = elapsedSec > 8 * 60; // 8 min — sanity threshold
 
   return (
     <div className="space-y-6 max-w-lg">
@@ -1441,8 +1484,30 @@ function UpdateTab() {
           </div>
         )}
         {status === "updating" && (
-          <div className="flex items-center gap-2 text-sm text-accent">
-            <RefreshCw className="h-3.5 w-3.5 animate-spin" /> Downloading update — service will restart shortly...
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-accent">
+              <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+              <span>
+                {phaseLabel(progress?.phase)}
+                {progress?.startedAt && (
+                  <span className="text-muted-foreground ml-1.5">
+                    ({formatElapsed(progress.startedAt)})
+                  </span>
+                )}
+                {!progress && <span className="text-muted-foreground ml-1.5">(starting…)</span>}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              The page will reload automatically once the new service comes back up.
+            </p>
+            {isStuck && (
+              <div className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400 mt-2 p-2 rounded border border-amber-500/30 bg-amber-500/5">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+                <span>
+                  This is taking longer than expected ({formatElapsed(progress?.startedAt)}). Typical updates finish in 2–4 minutes. Check the server log on the host (<code className="text-[11px] bg-muted px-1 py-0.5 rounded">C:\Cardoso Customer App\logs\service*.log</code>) for installer errors. If the service is genuinely wedged, restart it manually.
+                </span>
+              </div>
+            )}
           </div>
         )}
         {status === "error" && (
