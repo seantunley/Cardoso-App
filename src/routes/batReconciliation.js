@@ -303,6 +303,28 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     res.json(recon);
   });
 
+  // Clear the per-recon last_error. Used by the toast "Dismiss" button so
+  // an operator can acknowledge a stale error after manual investigation
+  // (e.g. they ran a fresh extraction outside the standard workflow). The
+  // historical entry stays in error_log / System Log indefinitely.
+  router.post('/api/bat/reconciliation/:id/dismiss-error', ...gate, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    try {
+      const info = db.prepare(
+        "UPDATE bat_reconciliations SET last_error = NULL, last_error_at = NULL WHERE id = ?"
+      ).run(id);
+      logAudit({
+        req, action: 'bat_dismiss_recon_error', resourceType: 'system',
+        resourceId: id, resourceName: `Reconciliation ${id}`,
+        details: info.changes ? 'Cleared last_error on reconciliation' : 'Reconciliation not found or already clear',
+      });
+      res.json({ ok: true, cleared: info.changes });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/bat/reconciliations', ...gate, (req, res) => {
     const t0 = Date.now();
     const reconciliations = listReconciliations();

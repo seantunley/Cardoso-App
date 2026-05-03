@@ -1869,7 +1869,12 @@ async function processQueue(reconId) {
 
   normalizeInvoiceNumbers(reconId);
   await matchExtractedInvoices(reconId);
-  db.prepare("UPDATE bat_reconciliations SET status = 'completed' WHERE id = ?").run(reconId);
+  // Clear last_error on successful completion. The recon is now in a 'completed'
+  // state so any prior failure has been superseded by this successful run —
+  // showing the old toast would be misleading. The original failure is still
+  // preserved indefinitely in error_log / System Log, so this is not a
+  // silent-failure pattern: history stays, current state reflects reality.
+  db.prepare("UPDATE bat_reconciliations SET status = 'completed', last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
 }
