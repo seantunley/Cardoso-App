@@ -64,10 +64,24 @@ export default function ExtractionProgress({ progress }) {
             const slow  = row.elapsed_seconds >= 60;
             const stuck = row.elapsed_seconds >= 90;
             const color = stuck ? 'text-destructive' : slow ? 'text-amber-400' : 'text-muted-foreground';
+            // Stage badge — same colour rules as the row, but the threshold is
+            // measured against time-in-current-stage so we surface "stuck on
+            // engine:Tesseract for 80s" even on a row that's only been alive
+            // for 90s overall. That's the signal that pinpoints what's wedged.
+            const stageStuck = row.stage_at_seconds != null && row.stage_at_seconds >= 60;
+            const stageColor = stageStuck ? 'text-destructive' : 'text-muted-foreground/70';
             return (
               <div key={row.id} className="flex items-center justify-between font-mono text-[11px]">
                 <span className={`truncate ${color}`}>
                   #{row.id} · {row.store_name || 'unknown'}
+                  {row.stage && (
+                    <span className={`ml-1.5 ${stageColor}`}>
+                      · {row.stage}
+                      {row.stage_at_seconds != null && row.stage_at_seconds >= 5 && (
+                        <span className="ml-1 opacity-70">({row.stage_at_seconds}s)</span>
+                      )}
+                    </span>
+                  )}
                 </span>
                 <span className={`tabular-nums ml-3 shrink-0 ${color}`}>{fmtElapsed(row.elapsed_seconds)}</span>
               </div>

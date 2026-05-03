@@ -1071,43 +1071,10 @@ export function getReconciliation(id) {
   return recon;
 }
 
-// Build a normalized lookup of every Cardoso invoice → amount, in JS.
-// Replaces SQL expressions like UPPER(REPLACE(ci.invoice_number, ' ', '')) which
-// can't use any index and force a full table scan per extraction row.
-//
-// Cached: dashboard / list / detail endpoints all rebuild this on every call,
-// and Cardoso invoice writes are infrequent. We invalidate on any code path
-// that mutates bat_cardoso_invoices (upload, generate, replicate, overwrite).
-let _cardosoLookupCache = null;
-let _cardosoLookupAt = 0;
-const CARDOSO_LOOKUP_TTL_MS = 60_000; // safety net — 1 min max staleness even without explicit invalidation
-export function invalidateCardosoLookup() {
-  _cardosoLookupCache = null;
-  _cardosoLookupAt = 0;
-}
-function buildCardosoLookup() {
-  const now = Date.now();
-  if (_cardosoLookupCache && (now - _cardosoLookupAt) < CARDOSO_LOOKUP_TTL_MS) {
-    return _cardosoLookupCache;
-  }
-  const rows = db.prepare('SELECT invoice_number, amount FROM bat_cardoso_invoices').all();
-  const amountByKey = new Map();
-  for (const r of rows) {
-    if (!r.invoice_number) continue;
-    const key = String(r.invoice_number).replace(/\s/g, '').toUpperCase();
-    if (!amountByKey.has(key)) amountByKey.set(key, r.amount);
-  }
-  _cardosoLookupCache = amountByKey;
-  _cardosoLookupAt = now;
-  return amountByKey;
-}
-
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals
-  // even when the per-recon refresh has never been run. Match counts (matched +
-  // exact) are computed in JS using a single Cardoso lookup map — much faster
-  // than correlated EXISTS subqueries with non-sargable string normalization.
-  const reconRows = db.prepare(`
+  // even when the per-recon refresh has never been run.
+  return db.prepare(`
     SELECT r.*,
       COALESCE(ext_stats.pod_count, 0)   AS pod_count,
       COALESCE(ext_stats.found_count, 0) AS found_count,
@@ -1127,44 +1094,6 @@ export function listReconciliations() {
     LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
     ORDER BY r.year DESC, r.week_number DESC
   `).all();
-
-  const cardosoAmounts = buildCardosoLookup();
-  const extractions = db.prepare(`
-    SELECT reconciliation_id, extracted_invoice, order_amount
-    FROM bat_invoice_extractions
-    WHERE extracted_invoice IS NOT NULL
-  `).all();
-
-  const matchByRecon = new Map(); // reconId -> { matched, exact }
-  for (const e of extractions) {
-    const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-    const cAmount = cardosoAmounts.get(key);
-    if (cAmount === undefined) continue;
-    let m = matchByRecon.get(e.reconciliation_id);
-    if (!m) { m = { matched: 0, exact: 0 }; matchByRecon.set(e.reconciliation_id, m); }
-    m.matched++;
-    if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) m.exact++;
-  }
-
-  for (const r of reconRows) {
-    const m = matchByRecon.get(r.id);
-    r.matched_count = m?.matched || 0;
-    r.exact_match_count = m?.exact || 0;
-  }
-  // Stash the per-recon match map + the all-extraction totals on the returned
-  // array so getDashboardData() can skip its own duplicate full scan of
-  // bat_invoice_extractions. Plain Array, just with two extra non-enumerable
-  // properties — JSON serialisation ignores them.
-  let totalMatched = 0, totalExactMatched = 0;
-  for (const m of matchByRecon.values()) {
-    totalMatched += m.matched;
-    totalExactMatched += m.exact;
-  }
-  Object.defineProperty(reconRows, '_matchTotals', {
-    value: { totalMatched, totalExactMatched },
-    enumerable: false,
-  });
-  return reconRows;
 }
 
 function buildFeeComparison(recon) {
@@ -1228,29 +1157,12 @@ function buildExtractionStats(extractions, reconId) {
     e.duplicate_count = k ? (counts.get(k) || 1) : 1;
   }
 
-  // matched / exactMatched derived from the cached Cardoso lookup map. Replaces
-  // two correlated EXISTS subqueries with non-sargable string normalization
-  // (each scanned the full bat_cardoso_invoices table per extraction row).
-  let matched = 0, exactMatched = 0, amountMismatch = 0;
-  try {
-    const cardosoAmounts = buildCardosoLookup();
-    for (const e of extractions) {
-      if (!e.extracted_invoice) continue;
-      const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-      const cAmount = cardosoAmounts.get(key);
-      if (cAmount === undefined) continue;
-      matched++;
-      if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) exactMatched++;
-    }
-    amountMismatch = matched - exactMatched;
-  } catch {}
-  // Anything that needs the user to look at it: OCR failed/not_found, amount
-  // mismatched, exceptions, OR duplicate invoice numbers within the recon.
+  // Anything that needs the user to look at it: OCR failed/not_found,
+  // exceptions, OR duplicate invoice numbers within the recon.
   // (exceptions counted in the single pass above)
-  const needsAttention = notFound + failed + amountMismatch + exceptions + duplicateExtractions;
-  const unmatched = found - matched;
+  const needsAttention = notFound + failed + exceptions + duplicateExtractions;
 
-  return { total, found, notFound, failed, pending, matched, exactMatched, amountMismatch, exceptions, unmatched, needsAttention, duplicateGroups, duplicateExtractions };
+  return { total, found, notFound, failed, pending, exceptions, needsAttention, duplicateGroups, duplicateExtractions };
 }
 
 export function manualSetInvoice(extractionId, invoiceNumber) {
@@ -1297,6 +1209,12 @@ export function getExtractionProgress(reconId) {
       id: row.id,
       store_name: row.store_name,
       elapsed_seconds: Math.floor((now - row.started_at_ms) / 1000),
+      // Stage label from the worker's most recent progress message
+      // (e.g. "render", "engine:GoogleVision@0", "engine:Tesseract@90").
+      // Lets the UI tell "stuck on Tesseract trained-data download" apart
+      // from "still chewing through render". See ocrWorker.js emitProgress.
+      stage: row.stage || null,
+      stage_at_seconds: row.stage_at_ms ? Math.floor((now - row.stage_at_ms) / 1000) : null,
     });
   }
   return { running, processed, total, pending, in_flight: inFlight };
@@ -1522,8 +1440,15 @@ function startExtractionWorker(reconId) {
   });
 }
 
-// Auto-resume: call on server start to pick up any pending work
+// Auto-resume: call on server start to pick up any pending work.
+// Also kicks off a fire-and-forget self-test so a fresh-install site
+// surfaces a clear "can OCR even spawn?" answer in the System Log without
+// the operator having to trigger an extraction.
 export function resumeExtractionWorker() {
+  // Run the self-test on every boot regardless of pause state — the goal
+  // is to catch broken installs early, not gate on user state.
+  runOcrSelfTest().catch(() => { /* runOcrSelfTest logs its own failures */ });
+
   if (ocrPaused) {
     console.log('[bat-ocr] Paused — skipping auto-resume on startup');
     return;
@@ -1535,6 +1460,81 @@ export function resumeExtractionWorker() {
   if (pendingRecon) {
     console.log(`[bat-ocr] Auto-resuming extraction for reconciliation ${pendingRecon.reconciliation_id}`);
     startExtractionWorker(pendingRecon.reconciliation_id);
+  }
+}
+
+// Boot-time OCR pipeline smoke test. Spawns one worker_thread, waits for
+// its 'ready' message with a 10s deadline, terminates. The result lands
+// in the System Log as bat.ocr.self_test (info on success, error on
+// failure with a clear reason). On a fresh-install site where OCR
+// silently does nothing, this is the first signal that something is
+// structurally broken — usually:
+//   - 'Worker spawn failed: …'  → native module (better-sqlite3, sharp,
+//     canvas, tesseract.js) couldn't load. Check AV quarantine / VC++
+//     redistributable / Node version mismatch.
+//   - 'Worker did not signal ready within 10s'  → worker started but is
+//     wedged before its first postMessage. Look at worker startup logs.
+//
+// Fire-and-forget: never blocks server boot.
+async function runOcrSelfTest() {
+  const startedAt = Date.now();
+  let lane;
+  try {
+    try {
+      lane = new OcrLane();
+    } catch (err) {
+      throw new Error(`Worker spawn failed: ${err.message}`);
+    }
+    // Wait for the ready message. OcrLane already wires error/exit
+    // handlers that flip `dead = true`, so we can also fail fast if the
+    // worker dies during init.
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(
+        () => reject(new Error('Worker did not signal ready within 10s')),
+        10_000,
+      );
+      const onMessage = (msg) => {
+        if (msg && msg.type === 'ready') {
+          clearTimeout(t);
+          lane.worker.off('message', onMessage);
+          resolve();
+        }
+      };
+      lane.worker.on('message', onMessage);
+      // Catch the case where the worker exits during init.
+      lane.worker.once('exit', (code) => {
+        if (lane.dead || code === 0) return;
+        clearTimeout(t);
+        reject(new Error(`Worker exited during init (code=${code})`));
+      });
+    });
+    const elapsedMs = Date.now() - startedAt;
+    try {
+      logError(
+        'bat.ocr.self_test',
+        new Error(`OCR worker pipeline OK (ready in ${elapsedMs}ms)`),
+        { ready_in_ms: elapsedMs, platform: process.platform, node_version: process.version },
+        'info',
+      );
+    } catch {}
+  } catch (err) {
+    const elapsedMs = Date.now() - startedAt;
+    try {
+      logError(
+        'bat.ocr.self_test',
+        err,
+        {
+          ready_in_ms: elapsedMs,
+          platform: process.platform,
+          node_version: process.version,
+          hint: 'OCR worker thread can not spawn or initialise. Native module corrupt, AV-quarantined, or Node version mismatch.',
+        },
+      );
+    } catch {}
+  } finally {
+    if (lane) {
+      try { await lane.terminate(); } catch {}
+    }
   }
 }
 
@@ -1685,7 +1685,20 @@ class OcrLane {
     this.nextId = 0;
     this.dead = false;
     this.worker.on('message', (msg) => {
-      if (!msg || msg.type !== 'result') return;
+      if (!msg) return;
+      // Progress messages carry the current extraction stage (download /
+      // pdf_text / render / engine:NAME@ANGLE / done / failed). The lane
+      // forwards these to the slot's onProgress callback, which the
+      // processQueue loop uses to attach `stage` to the row's entry in
+      // `currentlyProcessing`. Out-of-band — does NOT resolve/reject.
+      if (msg.type === 'progress') {
+        const slot = this.pending.get(msg.id);
+        if (slot && slot.onProgress) {
+          try { slot.onProgress(msg.stage); } catch {}
+        }
+        return;
+      }
+      if (msg.type !== 'result') return;
       const slot = this.pending.get(msg.id);
       if (!slot) return;
       this.pending.delete(msg.id);
@@ -1723,7 +1736,10 @@ class OcrLane {
     });
   }
 
-  extract(payload, timeoutMs) {
+  // `onProgress(stage)` is called for every progress message the worker
+  // emits between dispatch and the final result. Used by processQueue to
+  // expose the current OCR stage in the in-flight UI.
+  extract(payload, timeoutMs, onProgress) {
     if (this.dead) return Promise.reject(new Error('OCR lane is dead'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
@@ -1741,6 +1757,7 @@ class OcrLane {
       this.pending.set(id, {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
+        onProgress,
       });
       try {
         this.worker.postMessage({ type: 'extract', id, payload });
@@ -1756,7 +1773,29 @@ class OcrLane {
     try { this.worker.postMessage({ type: 'shutdown' }); } catch {}
     // Give the worker a moment to flush its Tesseract handle, then force-kill.
     await new Promise(r => setTimeout(r, 500));
-    try { await this.worker.terminate(); } catch {}
+    // Race Node's worker.terminate() against a 3s hard cap.
+    //
+    // ROOT CAUSE — discovered 2026-05-03 via a remote-site System Log:
+    // when the worker thread is wedged in native code (Tesseract, sharp,
+    // canvas on a syscall the OS can't preempt), `this.worker.terminate()`
+    // returns a Promise that never resolves. The await above used to hang
+    // forever on a wedged worker, which meant the catch in
+    // processQueue.runLane never returned, the OUTER finally never fired,
+    // and `currentlyProcessing.delete(next.id)` never ran.
+    //
+    // Symptom on the site: PDF_TIMEOUT fired (we saw the log), but the
+    // row stayed in `currentlyProcessing` for 13+ minutes climbing from
+    // 120s → 810s with no new events. Watchdog couldn't unstick it
+    // because the wedge was on the parent main thread, not the worker.
+    //
+    // The worker is dead either way once we've called `terminate()`; we
+    // don't need to wait for the OS-level cleanup. Resolving the race
+    // unblocks runLane's finally → the row leaves currentlyProcessing →
+    // the queue keeps moving → app stays responsive.
+    await Promise.race([
+      this.worker.terminate().catch(() => {}),
+      new Promise((r) => setTimeout(r, 3000)),
+    ]);
     this.dead = true;
   }
 }
@@ -1764,6 +1803,30 @@ class OcrLane {
 async function processQueue(reconId) {
   const N = OCR_CONCURRENCY;
   console.log(`[bat-ocr] Starting worker_threads pool (concurrency=${N}) for reconciliation ${reconId}`);
+
+  // Bootstrap env summary into the System Log. When a fresh-install site
+  // hangs silently, the first question is "is the environment even right
+  // for OCR to run?" — Node version mismatch, missing API keys (so the
+  // pipeline falls all the way through to Tesseract), wrong OCR_CONCURRENCY,
+  // missing previewDir, etc. This single log line gives an operator the
+  // answers without RDP'ing into the box.
+  try {
+    logError(
+      'bat.ocr.start',
+      new Error(`Worker pool starting for reconciliation ${reconId}`),
+      {
+        reconciliation_id: reconId,
+        concurrency: N,
+        platform: process.platform,
+        arch: process.arch,
+        node_version: process.version,
+        google_vision_key_set: !!getGoogleVisionKey(),
+        ocr_space_key_set: !!getOcrSpaceKey(),
+        preview_dir: previewDir,
+      },
+      'info',
+    );
+  } catch { /* never let observability crash a real run */ }
 
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
@@ -1833,12 +1896,14 @@ async function processQueue(reconId) {
         try {
           logError(
             'bat.ocr.watchdog_kill',
-            new Error(`Force-killing lane for row ${row.id} (${row.store_name || 'unknown'}) after ${Math.floor(elapsed / 1000)}s — internal PDF_TIMEOUT failed to fire`),
+            new Error(`Force-killing lane for row ${row.id} (${row.store_name || 'unknown'}) — stuck in stage '${row.stage || 'unknown'}' for ${Math.floor(elapsed / 1000)}s — internal PDF_TIMEOUT failed to fire`),
             {
               reconciliation_id: reconId,
               extraction_id: row.id,
               store_name: row.store_name,
               elapsed_seconds: Math.floor(elapsed / 1000),
+              stuck_stage: row.stage || null,
+              stuck_stage_for_seconds: row.stage_at_ms ? Math.floor((now - row.stage_at_ms) / 1000) : null,
               lane_dead_before: !!row.lane?.worker?.dead,
             },
           );
@@ -1907,6 +1972,8 @@ async function processQueue(reconId) {
         started_at_ms: Date.now(),
         lane,                  // ref so the watchdog can terminate the worker
         kill_attempted: false, // ensures we only fire the watchdog once per row
+        stage: 'queued',       // updated by the worker's progress messages below
+        stage_at_ms: Date.now(),
       });
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
       try {
@@ -1919,6 +1986,19 @@ async function processQueue(reconId) {
               ocrSpaceKey,
             },
             PDF_TIMEOUT,
+            // onProgress: worker emits these as it transitions between
+            // stages (download → pdf_text → render → engine:NAME@ANGLE).
+            // Update the row's entry so the UI's in-flight panel can
+            // show the current stage in real time, and we also get a
+            // breadcrumb for which stage the watchdog killed (if it
+            // does).
+            (stage) => {
+              const row = currentlyProcessing.get(next.id);
+              if (row) {
+                row.stage = stage;
+                row.stage_at_ms = Date.now();
+              }
+            },
           );
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
@@ -1995,6 +2075,23 @@ async function processQueue(reconId) {
     for (const [id, row] of currentlyProcessing) {
       if (row.reconciliation_id === reconId) currentlyProcessing.delete(id);
     }
+  }
+
+  // If every lane retired (recreation failed) while rows are still
+  // 'pending', the run effectively died mid-flight. Surface that to the
+  // UI as a recon-level error so the operator sees a toast/banner rather
+  // than a queue that quietly stalls. This also prevents the next
+  // workerRunning check from masking the failure.
+  const stillPending = db.prepare(
+    "SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
+  ).get(reconId)?.c || 0;
+  if (stillPending > 0) {
+    const msg = `OCR run ended with ${stillPending} row${stillPending === 1 ? '' : 's'} still pending — all lanes retired. Check the System Log for bat.ocr.lane_recreate / bat.ocr.watchdog_kill entries.`;
+    db.prepare("UPDATE bat_reconciliations SET status = 'error', last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(msg, reconId);
+    try { logError('bat.ocr.run_incomplete', new Error(msg), { reconciliation_id: reconId, pending: stillPending }); } catch {}
+    emitExtractionUpdate(reconId);
+    return;
   }
 
   normalizeInvoiceNumbers(reconId);
@@ -2222,24 +2319,6 @@ export function getDashboardData(year) {
   } catch {}
   const totalVariance = totalSupplier - totalSage;
 
-  // totalPods + matched + exact-matched: skip the duplicate full scan of
-  // bat_invoice_extractions — listReconciliations() already built the
-  // per-recon match map. Sum its per-row matched_count / exact_match_count
-  // (which are already year-filtered via the `reconciliations` array slice
-  // above), and pull totalPods straight from the cached pod_count column.
-  let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
-  try {
-    for (const r of reconciliations) {
-      totalPods         += r.pod_count || 0;
-      totalMatched      += r.matched_count || 0;
-      totalExactMatched += r.exact_match_count || 0;
-    }
-  } catch {}
-  // Match rate = invoices that match by BOTH number AND amount (within R 0.01)
-  // out of all PODs we attempted to extract. Mismatched amounts no longer inflate
-  // the match rate.
-  const matchRate = totalPods > 0 ? (totalExactMatched / totalPods) * 100 : 0;
-
   let totalExceptionsCount = 0, totalExceptionsAmount = 0;
   let exceptionsByReason = [];
   try {
@@ -2285,7 +2364,7 @@ export function getDashboardData(year) {
   } catch {}
 
   return {
-    summary: { totalSupplier, totalSage, totalVariance, matchRate, totalReconciliations: reconciliations.length, totalExactMatched, totalMatched, totalPods, totalExceptionsCount, totalExceptionsAmount, exceptionsByReason },
+    summary: { totalSupplier, totalSage, totalVariance, totalReconciliations: reconciliations.length, totalExceptionsCount, totalExceptionsAmount, exceptionsByReason },
     reconciliations,
     weekTrend: reconciliations.map(r => ({
       week: `W${r.week_number}`,
@@ -2519,7 +2598,6 @@ export function replicateSupplierIntoCardoso() {
 
   const totalNotOverwritten = db.prepare("SELECT COUNT(*) c FROM bat_cardoso_invoices WHERE COALESCE(c_overwritten, 0) = 0").get().c;
   const totalOverwritten   = db.prepare("SELECT COUNT(*) c FROM bat_cardoso_invoices WHERE c_overwritten = 1").get().c;
-  invalidateCardosoLookup();
   return { ok: true, updated, totalOverwritten, remainingNotOverwritten: totalNotOverwritten };
 }
 
@@ -2637,7 +2715,6 @@ export function storeCardosoInvoices(reconId, invoices, filename, duplicateMode 
   });
   tx();
   console.log(`[bat] Cardoso invoices: ${inserted} new, ${updated} updated, ${skipped} skipped (mode=${duplicateMode})`);
-  invalidateCardosoLookup();
   return { inserted, updated, skipped, duplicatesFound: updated + skipped };
 }
 
