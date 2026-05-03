@@ -1698,6 +1698,28 @@ class OcrLane {
         }
         return;
       }
+      // Per-engine error from the worker's OCR cascade. The cascade itself
+      // catches and moves on to the next engine, but it tells us which
+      // engine failed and why so we can log it to the System Log. Without
+      // this, a misconfigured Google Vision (key valid but Vision API not
+      // enabled, IP-restricted, billing off, etc.) was indistinguishable
+      // from "GV ran fine, just no text" — silent fall-through to
+      // ocr.space and the operator never saw why.
+      if (msg.type === 'engine_error') {
+        const slot = this.pending.get(msg.id);
+        if (slot && slot.onEngineError) {
+          try {
+            slot.onEngineError({
+              engine: msg.engine,
+              angle: msg.angle,
+              stage: msg.stage,
+              message: msg.message,
+              tierError: !!msg.tierError,
+            });
+          } catch {}
+        }
+        return;
+      }
       if (msg.type !== 'result') return;
       const slot = this.pending.get(msg.id);
       if (!slot) return;
@@ -1739,7 +1761,10 @@ class OcrLane {
   // `onProgress(stage)` is called for every progress message the worker
   // emits between dispatch and the final result. Used by processQueue to
   // expose the current OCR stage in the in-flight UI.
-  extract(payload, timeoutMs, onProgress) {
+  // `onEngineError({ engine, angle, stage, message, tierError })` is
+  // called for every per-engine failure inside the worker's cascade.
+  // Used by processQueue to log bat.ocr.engine_failed entries.
+  extract(payload, timeoutMs, onProgress, onEngineError) {
     if (this.dead) return Promise.reject(new Error('OCR lane is dead'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
@@ -1758,6 +1783,7 @@ class OcrLane {
         resolve: (v) => { clearTimeout(timer); resolve(v); },
         reject: (e) => { clearTimeout(timer); reject(e); },
         onProgress,
+        onEngineError,
       });
       try {
         this.worker.postMessage({ type: 'extract', id, payload });
@@ -1998,6 +2024,38 @@ async function processQueue(reconId) {
                 row.stage = stage;
                 row.stage_at_ms = Date.now();
               }
+              // Push an SSE update on every stage transition so the UI's
+              // in-flight panel reflects what's happening in real time.
+              // Without this, a row that ends in an extract_total timeout
+              // looks like 90 seconds of silence — the SSE stream only
+              // fires on row completion, so the operator sees nothing
+              // while the cascade walks through GV → ocr.space → Tesseract.
+              // Cheap (just an EventEmitter emit + the SSE handler reads
+              // currentlyProcessing); no throttle needed at this rate.
+              emitExtractionUpdate(reconId);
+            },
+            // Per-engine error logging. Fires once per engine.run() throw
+            // inside the worker's cascade. The most common signal here is
+            // "Google Vision is in scope but rejecting every call" — e.g.
+            // 403 because the Cloud Vision API isn't enabled on the project,
+            // or the key is IP-restricted. Without this log the cascade
+            // silently fell through to ocr.space → Tesseract and the
+            // operator wasted hours wondering why GV "wasn't being used".
+            (info) => {
+              try {
+                logError(
+                  'bat.ocr.engine_failed',
+                  new Error(`${info.stage}: ${info.message}`),
+                  {
+                    reconciliation_id: reconId,
+                    extraction_id: next.id,
+                    store_name: next.store_name,
+                    engine: info.engine,
+                    angle: info.angle,
+                    tier_error: info.tierError,
+                  },
+                );
+              } catch {}
             },
           );
           const invoiceNumber = result?.invoice ?? null;
