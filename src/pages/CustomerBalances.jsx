@@ -13,7 +13,7 @@ const CB_COLUMN_DEFAULTS = {
 };
 const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v3";
 
-function useColumnWidths() {
+function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(CB_COLUMN_WIDTHS_KEY) || "{}");
@@ -28,13 +28,27 @@ function useColumnWidths() {
     try { localStorage.setItem(CB_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
   }, [widths]);
 
+  const MIN_COL = 40;
+
   const startResize = useCallback((id) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const startWidth = widthsRef.current[id] ?? CB_COLUMN_DEFAULTS[id] ?? 100;
+
+    // Sum of every other column at drag start — fixed for the duration.
+    const sumOthers = Object.entries(widthsRef.current)
+      .filter(([k]) => k !== id)
+      .reduce((s, [, v]) => s + v, 0);
+
     const onMove = (ev) => {
-      const next = Math.max(40, startWidth + (ev.clientX - startX));
+      // Clamp `next` so the *table* never exceeds the container's inner width
+      // (subtract a 1px hairline so the rightmost border stays visible). This
+      // is what stops a runaway drag from pushing the table out of its frame.
+      const containerInner = containerRef?.current?.clientWidth ?? Infinity;
+      const maxThisCol = Math.max(MIN_COL, (containerInner - 1) - sumOthers);
+      const proposed = startWidth + (ev.clientX - startX);
+      const next = Math.max(MIN_COL, Math.min(maxThisCol, proposed));
       setWidths((w) => ({ ...w, [id]: next }));
     };
     const onUp = () => {
@@ -47,13 +61,13 @@ function useColumnWidths() {
     document.body.style.userSelect = "none";
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
-  }, []);
+  }, [containerRef]);
 
   const resetColumn = useCallback((id) => {
     setWidths((w) => ({ ...w, [id]: CB_COLUMN_DEFAULTS[id] ?? 100 }));
   }, []);
 
-  return { widths, startResize, resetColumn };
+  return { widths, setWidths, startResize, resetColumn };
 }
 
 function ResizeHandle({ id, startResize, resetColumn }) {
@@ -360,7 +374,32 @@ export default function CustomerBalances() {
   const [ageBucket, setAgeBucket] = useState("all");
   const [salesRepFilter, setSalesRepFilter] = useState("all");
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
-  const { widths: colWidths, startResize, resetColumn } = useColumnWidths();
+  const tableContainerRef = useRef(null);
+  const { widths: colWidths, setWidths: setColWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
+
+  // If the saved column config (from a wider monitor, say) overflows the
+  // current container, scale every column down proportionally to fit. Runs
+  // on mount and on container resize.
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    const fit = () => {
+      const inner = el.clientWidth;
+      if (!inner) return;
+      const total = Object.values(colWidths).reduce((s, v) => s + v, 0);
+      if (total <= inner - 1) return; // already fits, nothing to do
+      const scale = (inner - 1) / total;
+      const scaled = Object.fromEntries(
+        Object.entries(colWidths).map(([k, v]) => [k, Math.max(40, Math.floor(v * scale))]),
+      );
+      setColWidths(scaled);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [sortField, setSortField] = useState("outstanding_balance");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -757,8 +796,9 @@ export default function CustomerBalances() {
           )}
           {!isLoading && !isError && rows.length > 0 && (
             <div
+              ref={tableContainerRef}
               className="rounded-xl border border-border bg-card overflow-hidden"
-              style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "auto" }}
+              style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "hidden" }}
             >
               <table className="text-sm" style={{ tableLayout: "fixed", width: Object.values(colWidths).reduce((s, v) => s + v, 0) }}>
                 <colgroup>

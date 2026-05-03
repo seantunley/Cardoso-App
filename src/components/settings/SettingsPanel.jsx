@@ -571,7 +571,23 @@ function SystemLogTab() {
     refetchInterval: 30_000,
   });
 
-  const fmt = (dt) => dt ? new Date(dt + "Z").toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }) : "—";
+  const fmt = (dt) => {
+    if (!dt) return "—";
+    // logError writes ISO strings (with trailing Z), but SQLite's
+    // datetime('now') default uses space-separated UTC (no Z). Normalise:
+    // if no Z/offset, treat as UTC by appending Z so the toLocaleString
+    // call below converts to the user's display zone correctly.
+    const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(dt)
+      ? dt
+      : dt.replace(' ', 'T') + 'Z';
+    const d = new Date(normalized);
+    if (isNaN(d.getTime())) return dt; // last resort — show raw rather than "Invalid Date"
+    return d.toLocaleString("en-ZA", {
+      timeZone: "Africa/Johannesburg",
+      year: "numeric", month: "short", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+    });
+  };
   const rows = data?.rows || [];
   const sources = data?.sources || [];
 
@@ -1798,97 +1814,119 @@ function ReconciliationSettingsTab() {
   if (loading) return <div className="flex items-center justify-center py-12"><div className="h-6 w-6 animate-spin rounded-full border-2 border-border border-t-foreground" /></div>;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-semibold mb-1">Reconciliation OCR Settings</h3>
-        <p className="text-xs text-muted-foreground">API keys for the invoice OCR extraction pipeline. Keys stored here override environment variables.</p>
-      </div>
-
-      <div className="space-y-4">
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-foreground flex items-center justify-between">
-            Google Vision API Key
-            <span className="text-[10px] text-accent font-mono uppercase tracking-wider">Primary OCR</span>
-          </label>
-          <div className="flex gap-2">
-            <input
-              type={showGvKey ? 'text' : 'password'}
-              value={settings.google_vision_key || ''}
-              onChange={e => setSettings(s => ({ ...s, google_vision_key: e.target.value }))}
-              placeholder="AIzaSy..."
-              className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => setShowGvKey(v => !v)}
-              className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
-            >
-              {showGvKey ? 'Hide' : 'Show'}
-            </button>
+    <div className="space-y-8">
+      {/* ── OCR ─────────────────────────────────────────────────────────── */}
+      <section className="space-y-6">
+        <div className="flex items-baseline justify-between border-b border-border pb-2">
+          <div>
+            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">§ Section</div>
+            <h2 className="font-display text-2xl text-foreground leading-tight mt-0.5">OCR</h2>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            From Google Cloud Console → APIs & Services → Credentials. Requires Cloud Vision API enabled with billing.
+          <p className="font-mono text-[10px] text-muted-foreground">
+            Pipeline · Google Vision → ocr.space E1 → E3 → Tesseract → E2
           </p>
         </div>
 
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-foreground flex items-center justify-between">
-            ocr.space API Key
-            <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">Fallback OCR</span>
-          </label>
-          <div className="flex gap-2">
-            <input
-              type={showOcrKey ? 'text' : 'password'}
-              value={settings.ocr_space_key || ''}
-              onChange={e => setSettings(s => ({ ...s, ocr_space_key: e.target.value }))}
-              placeholder="K890..."
-              className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
-            />
-            <button
-              type="button"
-              onClick={() => setShowOcrKey(v => !v)}
-              className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
-            >
-              {showOcrKey ? 'Hide' : 'Show'}
-            </button>
+        {/* API keys */}
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">API keys</h3>
+            <p className="text-xs text-muted-foreground">Override the env-var defaults. Stored locally in <span className="font-mono">bat_settings</span>.</p>
           </div>
-          <p className="text-[10px] text-muted-foreground">
-            From ocr.space → My Account → API Key. Free key has rate limits. Paid key recommended.
-          </p>
+
+          <div className="space-y-4 pl-3 border-l-2 border-border/40">
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-foreground flex items-center justify-between">
+                Google Vision API Key
+                <span className="text-[10px] text-accent font-mono uppercase tracking-wider">Primary OCR</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type={showGvKey ? 'text' : 'password'}
+                  value={settings.google_vision_key || ''}
+                  onChange={e => setSettings(s => ({ ...s, google_vision_key: e.target.value }))}
+                  placeholder="AIzaSy..."
+                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowGvKey(v => !v)}
+                  className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
+                >
+                  {showGvKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                From Google Cloud Console → APIs &amp; Services → Credentials. Requires Cloud Vision API enabled with billing.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-foreground flex items-center justify-between">
+                ocr.space API Key
+                <span className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider">Fallback OCR</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type={showOcrKey ? 'text' : 'password'}
+                  value={settings.ocr_space_key || ''}
+                  onChange={e => setSettings(s => ({ ...s, ocr_space_key: e.target.value }))}
+                  placeholder="K890..."
+                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowOcrKey(v => !v)}
+                  className="px-3 py-2 border border-border rounded-[2px] text-xs text-muted-foreground hover:text-foreground hover:border-[var(--phosphor)] transition-colors"
+                >
+                  {showOcrKey ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                From ocr.space → My Account → API Key. Free key has rate limits. Paid key recommended.
+              </p>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
+                style={{
+                  borderRadius: '12px',
+                  borderColor: 'var(--phosphor)',
+                  color: 'var(--phosphor)',
+                  background: 'hsla(33, 95%, 55%, 0.08)',
+                }}
+                onMouseEnter={(e) => {
+                  if (e.currentTarget.disabled) return;
+                  e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.18)';
+                  e.currentTarget.style.boxShadow = '0 0 12px hsla(33,95%,55%,0.35)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.08)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                {saving ? 'Saving…' : 'Save Keys'}
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <div className="flex items-center justify-between pt-4 border-t border-border">
-        <p className="text-[10px] text-muted-foreground">
-          Pipeline order: Google Vision → ocr.space E1 → E3 → Tesseract → E2
-        </p>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
-          style={{
-            borderRadius: '12px',
-            borderColor: 'var(--phosphor)',
-            color: 'var(--phosphor)',
-            background: 'hsla(33, 95%, 55%, 0.08)',
-          }}
-          onMouseEnter={(e) => {
-            if (e.currentTarget.disabled) return;
-            e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.18)';
-            e.currentTarget.style.boxShadow = '0 0 12px hsla(33,95%,55%,0.35)';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.08)';
-            e.currentTarget.style.boxShadow = 'none';
-          }}
-        >
-          {saving ? 'Saving…' : 'Save Keys'}
-        </button>
-      </div>
+        {/* Worker + Re-queue — share the same section as API keys since they
+            all configure the OCR pipeline. The components handle their own
+            internal layout; the wrapper just gives them consistent indentation. */}
+        <div className="space-y-6">
+          <OcrPauseToggle embedded />
+          <ResetPendingOcrTool embedded />
+        </div>
+      </section>
 
-      <ReplicateSupplierTool />
-      <OcrPauseToggle />
-      <ResetPendingOcrTool />
+      {/* ── Cardoso replication (not OCR — separate concern) ────────────── */}
+      <section>
+        <ReplicateSupplierTool embedded />
+      </section>
     </div>
   );
 }
@@ -1896,7 +1934,7 @@ function ReconciliationSettingsTab() {
 // Re-queues every "not_found" / "failed" OCR row back to "pending" so the
 // next worker run re-attempts them. Already-matched ("found") rows are left
 // alone — no risk of redoing successful extractions.
-function ResetPendingOcrTool() {
+function ResetPendingOcrTool({ embedded = false }) {
   const [count, setCount] = useState(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -1926,7 +1964,7 @@ function ResetPendingOcrTool() {
   };
 
   return (
-    <div className="pt-4 border-t border-border space-y-3">
+    <div className={`space-y-3 ${embedded ? '' : 'pt-4 border-t border-border'}`}>
       <div>
         <h3 className="text-sm font-semibold mb-1">Re-queue failed OCRs</h3>
         <p className="text-xs text-muted-foreground">
@@ -1963,7 +2001,7 @@ function ResetPendingOcrTool() {
   );
 }
 
-function OcrPauseToggle() {
+function OcrPauseToggle({ embedded = false }) {
   const [status, setStatus] = useState(null); // { paused, pending }
   const [busy, setBusy] = useState(false);
 
@@ -2002,9 +2040,9 @@ function OcrPauseToggle() {
   const paused = !!status.paused;
 
   return (
-    <div className="pt-6 mt-6 border-t border-border space-y-3">
+    <div className={`space-y-3 ${embedded ? '' : 'pt-6 mt-6 border-t border-border'}`}>
       <div>
-        <h3 className="text-sm font-semibold mb-1">OCR Worker</h3>
+        <h3 className="text-sm font-semibold mb-1">Worker</h3>
         <p className="text-xs text-muted-foreground">
           When paused, no new POD invoices will be processed and the worker won't auto-resume on server restart. The currently in-flight invoice (if any) finishes before the worker stops.
         </p>
@@ -2042,7 +2080,7 @@ function OcrPauseToggle() {
   );
 }
 
-function ReplicateSupplierTool() {
+function ReplicateSupplierTool({ embedded = false }) {
   const [stats, setStats] = useState(null);
   const [running, setRunning] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -2081,8 +2119,14 @@ function ReplicateSupplierTool() {
   };
 
   return (
-    <div className="pt-6 mt-6 border-t border-border space-y-3">
-      <div>
+    <div className={`space-y-6 ${embedded ? '' : 'pt-6 mt-6 border-t border-border'}`}>
+      <div className="flex items-baseline justify-between border-b border-border pb-2">
+        <div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">§ Section</div>
+          <h2 className="font-display text-2xl text-foreground leading-tight mt-0.5">Cardoso replication</h2>
+        </div>
+      </div>
+      <div className="space-y-3">
         <h3 className="text-sm font-semibold mb-1">Replicate Supplier → Cardoso</h3>
         <p className="text-xs text-muted-foreground">
           Copies S.Pricing and S.Discount onto matching Cardoso rows (C.Pricing / C.Discount). C.DelFee is preserved. Idempotent — only touches rows that haven't been overwritten yet. <span className="text-destructive">Admin password required.</span>

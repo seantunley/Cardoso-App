@@ -1650,11 +1650,14 @@ function normalizeInvoiceNumbers(reconId) {
 
 const PDF_TIMEOUT = 300000; // 5 min per PDF — large scanned PDFs (20-40MB) need time to download + OCR
 
-// Concurrency for the OCR worker pool. Default 4 — small enough to stay below
-// ocr.space / Google Vision per-IP rate limits but big enough that 90% of the
-// wall time is the slowest in-flight network call instead of waiting.
-// Override via OCR_CONCURRENCY env var (set to "1" to revert to sequential).
-const OCR_CONCURRENCY = Math.max(1, parseInt(process.env.OCR_CONCURRENCY || '4', 10));
+// Concurrency for the OCR worker pool. Default 2 — each lane is a Node
+// worker_thread that owns its own Tesseract worker, sharp pipeline and pdfjs
+// render. On a constrained Windows site, 4 parallel lanes saturate every CPU
+// core and the main API thread starves for context-switch slots even though
+// it isn't directly blocked. 2 keeps OCR throughput roughly the same (most
+// time is in network calls to Google Vision / ocr.space) while leaving CPU
+// headroom for the rest of the app. Override via OCR_CONCURRENCY env var.
+const OCR_CONCURRENCY = Math.max(1, parseInt(process.env.OCR_CONCURRENCY || '2', 10));
 
 // ── Worker thread lane ───────────────────────────────────────────────────────
 // Each lane = one worker_thread that owns its own Tesseract worker. Extraction
@@ -1812,8 +1815,29 @@ async function processQueue(reconId) {
           emitExtractionUpdate(reconId);
         } catch (err) {
           console.error(`[bat-ocr] id=${next.id} failed: ${err.message}`);
-          try { logError('bat.ocr.row', err, { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url }); } catch {}
-          updateExtraction.run(null, 'failed', null, err.message, next.id);
+          // Log everything we know about this failure so a remote operator can
+          // diagnose without ssh access. Includes err.code (e.g. SQLITE_RANGE),
+          // constructor name (RangeError vs TypeError vs Error), and the lane
+          // state — useful when the same row keeps failing.
+          try {
+            logError('bat.ocr.row', err, {
+              reconciliation_id: reconId,
+              extraction_id: next.id,
+              store_name: next.store_name,
+              pdf_url: next.pdf_url,
+              err_code: err?.code,
+              err_kind: err?.constructor?.name,
+              lane_dead: !!lane.worker?.dead,
+            });
+          } catch {}
+          try {
+            updateExtraction.run(null, 'failed', null, String(err.message || 'Unknown error').slice(0, 1000), next.id);
+          } catch (writeErr) {
+            // If the row UPDATE itself fails, we MUST surface that — otherwise
+            // the lane silently fails to mark the row 'failed' and processQueue
+            // never advances.
+            try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {}
+          }
           recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
           emitExtractionUpdate(reconId);
 
@@ -1824,6 +1848,7 @@ async function processQueue(reconId) {
               lane.worker = new OcrLane();
             } catch (e) {
               console.error('[bat-ocr] Lane recreation failed:', e.message);
+              try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId }); } catch {}
               recordReconciliationError(reconId, `OCR lane crashed: ${e.message}`);
               inFlight.delete(next.id);
               return; // lane retires

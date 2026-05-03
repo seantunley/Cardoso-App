@@ -30,7 +30,7 @@ const COLUMN_DEFAULTS = {
 };
 const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v3';
 
-function useColumnWidths() {
+function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(COLUMN_WIDTHS_KEY) || '{}');
@@ -45,13 +45,25 @@ function useColumnWidths() {
     try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
   }, [widths]);
 
+  const MIN_COL = 40;
+
   const startResize = useCallback((id) => (e) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
     const startWidth = widthsRef.current[id] ?? COLUMN_DEFAULTS[id] ?? 100;
+    // Snapshot of every other column at drag start — fixed for the duration.
+    const sumOthers = Object.entries(widthsRef.current)
+      .filter(([k]) => k !== id)
+      .reduce((s, [, v]) => s + v, 0);
+
     const onMove = (ev) => {
-      const next = Math.max(40, startWidth + (ev.clientX - startX));
+      // Hard cap so the table never exceeds the container's inner width
+      // (1px hairline reserved for the right border).
+      const containerInner = containerRef?.current?.clientWidth ?? Infinity;
+      const maxThisCol = Math.max(MIN_COL, (containerInner - 1) - sumOthers);
+      const proposed = startWidth + (ev.clientX - startX);
+      const next = Math.max(MIN_COL, Math.min(maxThisCol, proposed));
       setWidths((w) => ({ ...w, [id]: next }));
     };
     const onUp = () => {
@@ -64,13 +76,13 @@ function useColumnWidths() {
     document.body.style.userSelect = 'none';
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
-  }, []);
+  }, [containerRef]);
 
   const resetColumn = useCallback((id) => {
     setWidths((w) => ({ ...w, [id]: COLUMN_DEFAULTS[id] ?? 100 }));
   }, []);
 
-  return { widths, startResize, resetColumn };
+  return { widths, setWidths, startResize, resetColumn };
 }
 
 const statusMeta = (status) => {
@@ -206,7 +218,32 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
-  const { widths, startResize, resetColumn } = useColumnWidths();
+  const tableContainerRef = useRef(null);
+  const { widths, setWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
+
+  // Auto-fit on mount + container resize: if saved widths overflow the
+  // container, scale every column down proportionally so the table never
+  // escapes its rounded frame.
+  useEffect(() => {
+    const el = tableContainerRef.current;
+    if (!el) return;
+    const fit = () => {
+      const inner = el.clientWidth;
+      if (!inner) return;
+      const total = Object.values(widths).reduce((s, v) => s + v, 0);
+      if (total <= inner - 1) return;
+      const scale = (inner - 1) / total;
+      const scaled = Object.fromEntries(
+        Object.entries(widths).map(([k, v]) => [k, Math.max(40, Math.floor(v * scale))]),
+      );
+      setWidths(scaled);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleRetry = async () => {
     if (!reconciliationId) return;
@@ -427,7 +464,8 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
 
       {/* Table */}
       <div
-        className="border overflow-auto max-h-[28rem]"
+        ref={tableContainerRef}
+        className="border overflow-y-auto overflow-x-hidden max-h-[28rem]"
         style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
       >
         {(() => {
