@@ -534,10 +534,11 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                 <Td><OcrBadge status={e.extraction_status} /></Td>
                 <Td mono>
                   <span className="inline-flex items-center gap-1.5">
-                    {e.match_status === 'matched'
-                      ? <span className="text-foreground">{e.extracted_invoice}</span>
-                      : <ManualInvoiceInput extraction={e} onSaved={onReconciliationUpdate} />
-                    }
+                    {/* Always editable — even matched rows can be wrong. The
+                        save button still pulses in and the row re-runs the
+                        match query downstream, so the user always has an
+                        override path. */}
+                    <ManualInvoiceInput extraction={e} onSaved={onReconciliationUpdate} />
                     {e.duplicate_count > 1 && (
                       <Tooltip>
                         <TooltipTrigger asChild>
