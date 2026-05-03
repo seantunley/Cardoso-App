@@ -377,20 +377,22 @@ export default function CustomerBalances() {
   const tableContainerRef = useRef(null);
   const { widths: colWidths, setWidths: setColWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
-  // If the saved column config (from a wider monitor, say) overflows the
-  // current container, scale every column down proportionally to fit. Runs
-  // on mount and on container resize.
+  // Auto-fit: scale columns proportionally so they ALWAYS fill the container
+  // exactly — no empty band on the right when total < container, no overflow
+  // when total > container. The 1px hairline reserved for the right border
+  // keeps the rounded frame from looking clipped.
   useEffect(() => {
     const el = tableContainerRef.current;
     if (!el) return;
     const fit = () => {
       const inner = el.clientWidth;
       if (!inner) return;
+      const target = inner - 1;
       const total = Object.values(colWidths).reduce((s, v) => s + v, 0);
-      if (total <= inner - 1) return; // already fits, nothing to do
-      const scale = (inner - 1) / total;
+      if (Math.abs(total - target) < 2) return;
+      const scale = target / total;
       const scaled = Object.fromEntries(
-        Object.entries(colWidths).map(([k, v]) => [k, Math.max(40, Math.floor(v * scale))]),
+        Object.entries(colWidths).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
       );
       setColWidths(scaled);
     };

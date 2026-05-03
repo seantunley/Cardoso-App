@@ -201,7 +201,7 @@ jobs:
       - name: Delete existing release/tag if present
         continue-on-error: true
         run: |
-          $tag = "v${{ steps.version.outputs.version }}"
+          $tag = "${{ steps.version.outputs.version }}"
           $resp = Invoke-RestMethod -Uri "https://api.github.com/repos/${{ github.repository }}/releases/tags/$tag" `
             -Headers @{ Authorization="Bearer ${{ secrets.GITHUB_TOKEN }}"; Accept="application/vnd.github+json" } `
             -ErrorAction SilentlyContinue
@@ -217,8 +217,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: "Cardoso v${{ steps.version.outputs.version }}"
+          tag_name: ${{ steps.version.outputs.version }}
+          name: ${{ steps.version.outputs.version }}
           files: |
             CardosoSetup-v${{ steps.version.outputs.version }}.exe
             CardosoSetup-v${{ steps.version.outputs.version }}.exe.sha256

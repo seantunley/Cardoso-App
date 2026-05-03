@@ -1363,9 +1363,16 @@ function UpdateTab() {
     try {
       const r = await fetch("/api/app-update-trigger", { method: "POST", credentials: "include" });
       const d = await r.json();
-      if (d.success || d.message?.toLowerCase().includes("download")) {
+      // Backend returns { ok: true, message, mode? } on success, { ok: false, error }
+      // on failure (status 500). Older check was looking for d.success or
+      // d.message containing "download" — neither matches the actual response,
+      // which made every successful update look like a failure in the UI.
+      if (r.ok && d.ok) {
         setStatus("updating");
-        toast.success("Update downloading — the page will reload automatically once ready.");
+        const note = d.mode === 'delta'
+          ? "Delta update downloading — the page will reload automatically once ready."
+          : "Update downloading — the page will reload automatically once ready.";
+        toast.success(note);
         // Poll until the version changes, then reload
         const targetVersion = info?.latestVersion;
         const poll = async () => {
@@ -1383,7 +1390,7 @@ function UpdateTab() {
         setTimeout(poll, 8000); // give it 8s before first check
       } else {
         setStatus("error");
-        toast.error(d.error || "Update failed.");
+        toast.error(d.error || d.reason || "Update failed.");
       }
     } catch {
       setStatus("error");
