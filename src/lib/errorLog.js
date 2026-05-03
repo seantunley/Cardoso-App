@@ -17,17 +17,19 @@ function rotateIfNeeded() {
   } catch {}
 }
 
-// ── SQLite mirror (batched) ──────────────────────────────────────────────────
-// Same batching pattern as audit.js — keep request-thread overhead minimal so
-// noisy error sites (e.g. an OCR worker crashing 200 times) don't dog-pile.
-const QUEUE = [];
-const QUEUE_HARD_CAP = 5000;
-const FLUSH_INTERVAL_MS = 250;
-let flushTimer = null;
+// ── SQLite mirror (synchronous) ──────────────────────────────────────────────
+// Errors are written synchronously, not batched. The previous batched-flush
+// implementation (250ms timer) lost in-memory rows when the OCR pipeline
+// crashed the process (native addon segfault in canvas/sharp/pdfjs takes
+// down the whole node executable — no chance to flush). Synchronous writes
+// guarantee the row is on disk before we return, so the post-mortem stack
+// always survives. logError is infrequent enough that sync-write overhead
+// is irrelevant.
 let insertStmt = null;
 
 function getInsertStmt() {
-  // Lazy-prepare so the table-not-yet-migrated case is forgiven
+  // Lazy-prepare so a logError() call before migrations have finished
+  // doesn't crash — first writes are dropped silently, file log still fires.
   if (insertStmt) return insertStmt;
   try {
     insertStmt = db.prepare(`
@@ -37,41 +39,6 @@ function getInsertStmt() {
   } catch { /* migration hasn't run yet */ }
   return insertStmt;
 }
-
-const flushBatch = (rows) => {
-  const stmt = getInsertStmt();
-  if (!stmt) return; // table not ready; drop silently — file log + stderr still fired
-  const tx = db.transaction((batch) => {
-    for (const r of batch) stmt.run(...r);
-  });
-  tx(rows);
-};
-
-function flush() {
-  if (QUEUE.length === 0) return;
-  const batch = QUEUE.splice(0, QUEUE.length);
-  try {
-    flushBatch(batch);
-  } catch (err) {
-    // Last-resort: write to stderr only. Don't recurse into logError or we
-    // could loop on a persistently failing DB.
-    process.stderr.write(`[errorLog] sqlite flush failed: ${err.message} — dropped ${batch.length} row(s)\n`);
-  }
-}
-
-function ensureFlushScheduled() {
-  if (flushTimer) return;
-  flushTimer = setTimeout(() => {
-    flushTimer = null;
-    flush();
-  }, FLUSH_INTERVAL_MS);
-  if (typeof flushTimer.unref === 'function') flushTimer.unref();
-}
-
-const finalFlush = () => { try { if (flushTimer) clearTimeout(flushTimer); flush(); } catch {} };
-process.on('SIGTERM', finalFlush);
-process.on('SIGINT', finalFlush);
-process.on('beforeExit', finalFlush);
 
 export function logError(scope, err, meta = {}, level = 'error') {
   const ts = new Date().toISOString();
@@ -87,20 +54,28 @@ export function logError(scope, err, meta = {}, level = 'error') {
     process.stderr.write(`[errorLog] failed to write file: ${e.message}\n`);
   }
 
-  // 2) SQLite mirror (new — feeds the in-app System Log viewer)
-  QUEUE.push([
-    String(scope || 'unknown').slice(0, 80),
-    level,
-    String(message).slice(0, 2000),
-    stack ? String(stack).slice(0, 8000) : null,
-    Object.keys(meta).length ? JSON.stringify(meta).slice(0, 4000) : null,
-    ts,
-  ]);
-  if (QUEUE.length > QUEUE_HARD_CAP) {
-    const dropped = QUEUE.splice(0, QUEUE.length - QUEUE_HARD_CAP);
-    process.stderr.write(`[errorLog] queue overflowing — dropped ${dropped.length} oldest row(s)\n`);
+  // 2) SQLite mirror — synchronous so it survives a process crash
+  try {
+    const stmt = getInsertStmt();
+    if (stmt) {
+      let serializedMeta = null;
+      if (Object.keys(meta).length) {
+        try { serializedMeta = JSON.stringify(meta).slice(0, 4000); } catch { serializedMeta = '[unserializable meta]'; }
+      }
+      stmt.run(
+        String(scope || 'unknown').slice(0, 80),
+        level,
+        String(message).slice(0, 2000),
+        stack ? String(stack).slice(0, 8000) : null,
+        serializedMeta,
+        ts,
+      );
+    }
+  } catch (e) {
+    // Last-resort stderr — don't recurse into logError or we could loop on
+    // a persistently failing DB.
+    process.stderr.write(`[errorLog] sqlite insert failed: ${e.message}\n`);
   }
-  ensureFlushScheduled();
 
   // 3) Mirror to stderr so devs see it in the terminal too
   process.stderr.write(`[${entry.scope}] ${entry.message}\n`);
