@@ -72,12 +72,6 @@ export default function DashboardOverview({ data }) {
           glow={matched ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.3)'}
           tip="Total BAT − Total Sage. Positive = BAT is claiming more than Sage has captured. Negative = Sage has captured more than BAT claimed."
         />
-        <Tile
-          label="Invoice Match Rate"
-          value={<>{(summary.matchRate || 0).toFixed(1)}<span className="text-muted-foreground/60 text-3xl ml-1">%</span></>}
-          sub={`${summary.totalExactMatched || 0}/${summary.totalPods || 0} exact match · ${(summary.totalMatched || 0) - (summary.totalExactMatched || 0)} amount mismatch`}
-          tip="Percentage of POD invoices we extracted that match a Cardoso invoice on BOTH number AND amount (within R 0.01). Number-only matches with the wrong amount are excluded."
-        />
       </div>
 
     </div>

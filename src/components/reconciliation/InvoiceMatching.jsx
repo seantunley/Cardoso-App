@@ -332,10 +332,6 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           </h3>
         </div>
         <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.15em]">
-          <span style={{ color: 'hsl(145 55% 45%)' }}>● {stats?.matched || 0} matched</span>
-          <span className="text-border">·</span>
-          <span className="text-destructive">▲ {stats?.unmatched || 0} unmatched</span>
-          <span className="text-border">·</span>
           <span className="text-accent">◐ {stats?.notFound || 0} OCR failed</span>
           {(stats?.notFound > 0 || stats?.failed > 0) && (
             <Tooltip>
