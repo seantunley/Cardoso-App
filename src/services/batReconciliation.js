@@ -1071,43 +1071,10 @@ export function getReconciliation(id) {
   return recon;
 }
 
-// Build a normalized lookup of every Cardoso invoice → amount, in JS.
-// Replaces SQL expressions like UPPER(REPLACE(ci.invoice_number, ' ', '')) which
-// can't use any index and force a full table scan per extraction row.
-//
-// Cached: dashboard / list / detail endpoints all rebuild this on every call,
-// and Cardoso invoice writes are infrequent. We invalidate on any code path
-// that mutates bat_cardoso_invoices (upload, generate, replicate, overwrite).
-let _cardosoLookupCache = null;
-let _cardosoLookupAt = 0;
-const CARDOSO_LOOKUP_TTL_MS = 60_000; // safety net — 1 min max staleness even without explicit invalidation
-export function invalidateCardosoLookup() {
-  _cardosoLookupCache = null;
-  _cardosoLookupAt = 0;
-}
-function buildCardosoLookup() {
-  const now = Date.now();
-  if (_cardosoLookupCache && (now - _cardosoLookupAt) < CARDOSO_LOOKUP_TTL_MS) {
-    return _cardosoLookupCache;
-  }
-  const rows = db.prepare('SELECT invoice_number, amount FROM bat_cardoso_invoices').all();
-  const amountByKey = new Map();
-  for (const r of rows) {
-    if (!r.invoice_number) continue;
-    const key = String(r.invoice_number).replace(/\s/g, '').toUpperCase();
-    if (!amountByKey.has(key)) amountByKey.set(key, r.amount);
-  }
-  _cardosoLookupCache = amountByKey;
-  _cardosoLookupAt = now;
-  return amountByKey;
-}
-
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals
-  // even when the per-recon refresh has never been run. Match counts (matched +
-  // exact) are computed in JS using a single Cardoso lookup map — much faster
-  // than correlated EXISTS subqueries with non-sargable string normalization.
-  const reconRows = db.prepare(`
+  // even when the per-recon refresh has never been run.
+  return db.prepare(`
     SELECT r.*,
       COALESCE(ext_stats.pod_count, 0)   AS pod_count,
       COALESCE(ext_stats.found_count, 0) AS found_count,
@@ -1127,44 +1094,6 @@ export function listReconciliations() {
     LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
     ORDER BY r.year DESC, r.week_number DESC
   `).all();
-
-  const cardosoAmounts = buildCardosoLookup();
-  const extractions = db.prepare(`
-    SELECT reconciliation_id, extracted_invoice, order_amount
-    FROM bat_invoice_extractions
-    WHERE extracted_invoice IS NOT NULL
-  `).all();
-
-  const matchByRecon = new Map(); // reconId -> { matched, exact }
-  for (const e of extractions) {
-    const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-    const cAmount = cardosoAmounts.get(key);
-    if (cAmount === undefined) continue;
-    let m = matchByRecon.get(e.reconciliation_id);
-    if (!m) { m = { matched: 0, exact: 0 }; matchByRecon.set(e.reconciliation_id, m); }
-    m.matched++;
-    if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) m.exact++;
-  }
-
-  for (const r of reconRows) {
-    const m = matchByRecon.get(r.id);
-    r.matched_count = m?.matched || 0;
-    r.exact_match_count = m?.exact || 0;
-  }
-  // Stash the per-recon match map + the all-extraction totals on the returned
-  // array so getDashboardData() can skip its own duplicate full scan of
-  // bat_invoice_extractions. Plain Array, just with two extra non-enumerable
-  // properties — JSON serialisation ignores them.
-  let totalMatched = 0, totalExactMatched = 0;
-  for (const m of matchByRecon.values()) {
-    totalMatched += m.matched;
-    totalExactMatched += m.exact;
-  }
-  Object.defineProperty(reconRows, '_matchTotals', {
-    value: { totalMatched, totalExactMatched },
-    enumerable: false,
-  });
-  return reconRows;
 }
 
 function buildFeeComparison(recon) {
@@ -1228,29 +1157,12 @@ function buildExtractionStats(extractions, reconId) {
     e.duplicate_count = k ? (counts.get(k) || 1) : 1;
   }
 
-  // matched / exactMatched derived from the cached Cardoso lookup map. Replaces
-  // two correlated EXISTS subqueries with non-sargable string normalization
-  // (each scanned the full bat_cardoso_invoices table per extraction row).
-  let matched = 0, exactMatched = 0, amountMismatch = 0;
-  try {
-    const cardosoAmounts = buildCardosoLookup();
-    for (const e of extractions) {
-      if (!e.extracted_invoice) continue;
-      const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-      const cAmount = cardosoAmounts.get(key);
-      if (cAmount === undefined) continue;
-      matched++;
-      if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) exactMatched++;
-    }
-    amountMismatch = matched - exactMatched;
-  } catch {}
-  // Anything that needs the user to look at it: OCR failed/not_found, amount
-  // mismatched, exceptions, OR duplicate invoice numbers within the recon.
+  // Anything that needs the user to look at it: OCR failed/not_found,
+  // exceptions, OR duplicate invoice numbers within the recon.
   // (exceptions counted in the single pass above)
-  const needsAttention = notFound + failed + amountMismatch + exceptions + duplicateExtractions;
-  const unmatched = found - matched;
+  const needsAttention = notFound + failed + exceptions + duplicateExtractions;
 
-  return { total, found, notFound, failed, pending, matched, exactMatched, amountMismatch, exceptions, unmatched, needsAttention, duplicateGroups, duplicateExtractions };
+  return { total, found, notFound, failed, pending, exceptions, needsAttention, duplicateGroups, duplicateExtractions };
 }
 
 export function manualSetInvoice(extractionId, invoiceNumber) {
@@ -2284,24 +2196,6 @@ export function getDashboardData(year) {
   } catch {}
   const totalVariance = totalSupplier - totalSage;
 
-  // totalPods + matched + exact-matched: skip the duplicate full scan of
-  // bat_invoice_extractions — listReconciliations() already built the
-  // per-recon match map. Sum its per-row matched_count / exact_match_count
-  // (which are already year-filtered via the `reconciliations` array slice
-  // above), and pull totalPods straight from the cached pod_count column.
-  let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
-  try {
-    for (const r of reconciliations) {
-      totalPods         += r.pod_count || 0;
-      totalMatched      += r.matched_count || 0;
-      totalExactMatched += r.exact_match_count || 0;
-    }
-  } catch {}
-  // Match rate = invoices that match by BOTH number AND amount (within R 0.01)
-  // out of all PODs we attempted to extract. Mismatched amounts no longer inflate
-  // the match rate.
-  const matchRate = totalPods > 0 ? (totalExactMatched / totalPods) * 100 : 0;
-
   let totalExceptionsCount = 0, totalExceptionsAmount = 0;
   let exceptionsByReason = [];
   try {
@@ -2347,7 +2241,7 @@ export function getDashboardData(year) {
   } catch {}
 
   return {
-    summary: { totalSupplier, totalSage, totalVariance, matchRate, totalReconciliations: reconciliations.length, totalExactMatched, totalMatched, totalPods, totalExceptionsCount, totalExceptionsAmount, exceptionsByReason },
+    summary: { totalSupplier, totalSage, totalVariance, totalReconciliations: reconciliations.length, totalExceptionsCount, totalExceptionsAmount, exceptionsByReason },
     reconciliations,
     weekTrend: reconciliations.map(r => ({
       week: `W${r.week_number}`,
@@ -2581,7 +2475,6 @@ export function replicateSupplierIntoCardoso() {
 
   const totalNotOverwritten = db.prepare("SELECT COUNT(*) c FROM bat_cardoso_invoices WHERE COALESCE(c_overwritten, 0) = 0").get().c;
   const totalOverwritten   = db.prepare("SELECT COUNT(*) c FROM bat_cardoso_invoices WHERE c_overwritten = 1").get().c;
-  invalidateCardosoLookup();
   return { ok: true, updated, totalOverwritten, remainingNotOverwritten: totalNotOverwritten };
 }
 
@@ -2699,7 +2592,6 @@ export function storeCardosoInvoices(reconId, invoices, filename, duplicateMode 
   });
   tx();
   console.log(`[bat] Cardoso invoices: ${inserted} new, ${updated} updated, ${skipped} skipped (mode=${duplicateMode})`);
-  invalidateCardosoLookup();
   return { inserted, updated, skipped, duplicatesFound: updated + skipped };
 }
 
