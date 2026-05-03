@@ -260,8 +260,16 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     const { invoiceNumber } = req.body;
     if (!invoiceNumber) return res.status(400).json({ error: 'invoiceNumber required' });
     // Snapshot the previous OCR result so the audit row shows what the
-    // human override changed.
-    const previous = db.prepare('SELECT extraction_id, invoice_number, store_name, extraction_status, reconciliation_id FROM bat_invoice_extractions WHERE id = ?').get(id);
+    // human override changed. Aliased to invoice_number so the audit
+    // payload below reads naturally; the schema column is extracted_invoice.
+    let previous = null;
+    try {
+      previous = db.prepare(`
+        SELECT id, extracted_invoice AS invoice_number, store_name, extraction_status, reconciliation_id
+        FROM bat_invoice_extractions WHERE id = ?
+      `).get(id);
+    } catch { /* fall through; previous stays null and we still try the override */ }
+    if (!previous) return res.status(404).json({ error: 'Extraction not found' });
     try {
       const reconId = manualSetInvoice(id, invoiceNumber.trim().toUpperCase());
       const recon = getReconciliation(reconId);
