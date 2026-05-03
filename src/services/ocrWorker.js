@@ -26,6 +26,23 @@ import { Buffer } from 'buffer';
 
 const { previewDir } = workerData || {};
 
+// Per-network-call timeout. Without this, a hung S3/CDN connection or a
+// stalled OCR-engine response would await forever inside the worker — the
+// parent's PDF_TIMEOUT (120s) is supposed to back it up, but it relies on
+// the worker eventually responding to the postMessage round-trip and a few
+// edge cases (worker terminate races) have left lanes hung at 9+ minutes.
+// These per-call abort signals are the real fix; the parent timeout stays
+// as a backstop.
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 30_000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 let _tesseract = null;
 let _sharp = null;
 let _pdfjs = null;
@@ -100,11 +117,11 @@ async function ocrViaGoogleVision(imageBuffer, apiKey) {
       features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
     }],
   };
-  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+  const res = await fetchWithTimeout(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }, 45_000);
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 200)}`);
@@ -128,11 +145,11 @@ async function ocrViaOcrSpaceEngine(imageBuffer, engine = '2', apiKey, retries =
     formData.append('isTable', 'true');
     formData.append('detectOrientation', 'true');
 
-    const res = await fetch('https://api.ocr.space/parse/image', {
+    const res = await fetchWithTimeout('https://api.ocr.space/parse/image', {
       method: 'POST',
       headers: { apikey: apiKey },
       body: formData,
-    });
+    }, 60_000);
 
     if (!res.ok) {
       const body = await res.text();
@@ -210,10 +227,12 @@ function findInvoiceNumber(text) {
 // ── Main extraction entry point ──────────────────────────────────────────────
 
 async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey) {
-  // Download
+  // Download — strict timeout. PODs are typically <2MB and live on
+  // Microsoft 365 / SharePoint. A stuck connection here used to wedge a
+  // whole lane until the parent's 120s backstop fired.
   let response;
   try {
-    response = await fetch(pdfUrl);
+    response = await fetchWithTimeout(pdfUrl, {}, 60_000);
   } catch (err) {
     throw new Error(`Download failed: ${err.message}`);
   }
