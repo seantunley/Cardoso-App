@@ -355,7 +355,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
                     <button
                       key={`${m.customer_number}-${i}`}
                       onClick={() => { onPickCustomer(m.customer_number); onClose(); }}
-                      className="w-full relative bg-card border border-border p-3 text-left hover:bg-muted/30 transition-colors"
+                      className="w-full relative overflow-hidden bg-card border border-border p-3 text-left hover:bg-muted/30 transition-colors"
                       style={{ borderRadius: "12px" }}
                     >
                       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 8px hsla(33,95%,55%,0.4)" }} />
@@ -768,7 +768,7 @@ export default function CustomerSearch() {
 
         {/* Connection Status Banner */}
         {activeConnections.length === 0 && (
-          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "12px" }}>
+          <div className="border border-border bg-card relative overflow-hidden px-5 py-3" style={{ borderRadius: "12px" }}>
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
               style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }}
@@ -786,7 +786,7 @@ export default function CustomerSearch() {
         )}
 
         {activeConnections.length > 0 && (
-          <div className="border border-border bg-card relative px-5 py-3" style={{ borderRadius: "12px" }}>
+          <div className="border border-border bg-card relative overflow-hidden px-5 py-3" style={{ borderRadius: "12px" }}>
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
               style={{ background: "hsl(145 55% 45%)", boxShadow: "0 0 12px hsla(145,55%,45%,0.3)" }}

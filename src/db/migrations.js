@@ -1276,6 +1276,132 @@ function buildMigrations(db) {
         ensureColumn(db, 'user', 'can_access_hub_reconciliation', 'INTEGER DEFAULT 0');
       },
     },
+    {
+      version: 50,
+      name: 'perf_indexes_audit_and_bat_extractions',
+      up() {
+        // Audit-log lookups by (resource_type, resource_id) — used by the
+        // record-history endpoint and credit-debug — were doing a full table
+        // scan + sort. Composite index covers the WHERE and the ORDER BY.
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_auditlog_resource
+                 ON auditlog(resource_type, resource_id, created_date DESC)`);
+        // BAT OCR claimNext() filters on (reconciliation_id, extraction_status)
+        // and orders by id. The existing single-column status index forced a
+        // re-sort on every claim during a 200-PDF extraction.
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_extractions_recon_status
+                 ON bat_invoice_extractions(reconciliation_id, extraction_status, id)`);
+      },
+    },
+    {
+      version: 51,
+      name: 'normalise_unpaid_invoice_numbers',
+      up() {
+        // Backed-by column that holds the unpaid invoice numbers as a single
+        // uppercase space-joined TEXT. Lets `customer-by-invoice` filter
+        // against ~50-200 chars per row instead of LIKE-scanning the 1–3 KB
+        // JSON blob in `unpaid_invoices`. SQLite triggers maintain it on
+        // every insert/update of unpaid_invoices, no app-code changes needed.
+        const sql = (table) => `
+          UPDATE ${table}
+             SET unpaid_invoice_numbers = (
+               SELECT COALESCE(GROUP_CONCAT(UPPER(json_extract(value, '$.number')), ' '), '')
+                 FROM json_each(${table}.unpaid_invoices)
+                WHERE json_extract(value, '$.number') IS NOT NULL
+             )
+           WHERE unpaid_invoices IS NOT NULL
+             AND unpaid_invoices != ''
+             AND unpaid_invoices != '[]'
+        `;
+        const trigger = (table, suffix, when) => `
+          CREATE TRIGGER IF NOT EXISTS ${table}_unpaid_invoice_numbers_${suffix}
+          AFTER ${when} ON ${table}
+          ${when === 'INSERT' ? 'WHEN NEW.unpaid_invoices IS NOT NULL' : ''}
+          BEGIN
+            UPDATE ${table}
+               SET unpaid_invoice_numbers = COALESCE((
+                 SELECT GROUP_CONCAT(UPPER(json_extract(value, '$.number')), ' ')
+                   FROM json_each(NEW.unpaid_invoices)
+                  WHERE json_extract(value, '$.number') IS NOT NULL
+               ), '')
+             WHERE id = NEW.id;
+          END
+        `;
+
+        // datarecord
+        const drCols = db.prepare('PRAGMA table_info(datarecord)').all().map(c => c.name);
+        if (!drCols.includes('unpaid_invoice_numbers')) {
+          db.exec('ALTER TABLE datarecord ADD COLUMN unpaid_invoice_numbers TEXT');
+        }
+        db.exec(sql('datarecord'));
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_datarecord_unpaid_invoice_numbers
+                 ON datarecord(unpaid_invoice_numbers)`);
+        db.exec(trigger('datarecord', 'ai', 'INSERT'));
+        db.exec(trigger('datarecord', 'au', 'UPDATE OF unpaid_invoices'));
+
+        // hub_records is created in schema.js AFTER runMigrations on hub
+        // installs, so the column + index + triggers for it live there
+        // (mirrored at src/db/schema.js, search for unpaid_invoice_numbers).
+      },
+    },
+    {
+      version: 52,
+      name: 'connection_role',
+      up() {
+        // Explicit module-to-connection routing. Replaces the implicit "first
+        // active non-BAT connection" auto-pick in customerSqlPool, which broke
+        // when sites had multiple non-BAT connections (customer module ended up
+        // hitting the inventory connection by id order). Each row maps a known
+        // module identifier to the connection it should use; loaders fall back
+        // to the legacy auto-pick when a role is unset.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS connection_role (
+            role TEXT PRIMARY KEY,
+            connection_id INTEGER NOT NULL REFERENCES databaseconnection(id) ON DELETE CASCADE,
+            updated_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+        // Migrate the existing BAT/Sage pick into the new table so operators
+        // don't lose their saved selection on upgrade.
+        try {
+          const row = db.prepare("SELECT value FROM bat_settings WHERE key = 'sage_connection_id'").get();
+          const id = row?.value ? parseInt(row.value, 10) : null;
+          if (Number.isFinite(id) && id > 0) {
+            const exists = db.prepare('SELECT 1 FROM databaseconnection WHERE id = ?').get(id);
+            if (exists) {
+              db.prepare(`
+                INSERT OR REPLACE INTO connection_role (role, connection_id, updated_at)
+                VALUES ('bat_sage', ?, datetime('now'))
+              `).run(id);
+            }
+          }
+        } catch { /* bat_settings may not exist yet on a fresh install */ }
+      },
+    },
+    {
+      version: 53,
+      name: 'error_log',
+      up() {
+        // Centralised error journal — one row per error from anywhere in the
+        // app (BAT/OCR, Sage pool, sync engine, audit-log flush, browser-side
+        // errors via /api/log/client-error, unhandled promise rejections).
+        // Surfaces a user-facing "System log" page so off-site operators can
+        // see what failed without grepping logs/errors.log.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS error_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source TEXT NOT NULL,
+            level TEXT NOT NULL DEFAULT 'error',
+            message TEXT NOT NULL,
+            stack TEXT,
+            context TEXT,
+            occurred_at TEXT NOT NULL DEFAULT (datetime('now'))
+          )
+        `);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_occurred ON error_log(occurred_at DESC)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_source ON error_log(source, occurred_at DESC)`);
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_level ON error_log(level, occurred_at DESC)`);
+      },
+    },
   ];
 }
 

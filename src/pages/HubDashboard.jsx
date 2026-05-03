@@ -430,7 +430,7 @@ function HubCustomerModal({ record, open, onClose }) {
           </div>
 
           {/* Hub note */}
-          <div className="mt-4 relative border border-border bg-card px-3 py-2" style={{ borderRadius: "12px" }}>
+          <div className="mt-4 relative overflow-hidden border border-border bg-card px-3 py-2" style={{ borderRadius: "12px" }}>
             <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 10px hsla(33,95%,55%,0.3)" }} />
             <p className="text-xs text-muted-foreground pl-2">
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">Hub snapshot</span>

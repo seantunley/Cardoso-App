@@ -454,7 +454,7 @@ export function ChartCard({ title, sub, children, height = 260 }) {
 export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big = false, width = '1fr' }) {
   return (
     <div
-      className="report-print-tile relative bg-card p-4 min-h-[100px]"
+      className="report-print-tile relative overflow-hidden bg-card p-4 min-h-[100px]"
       style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px', gridColumn: width }}
     >
       <div

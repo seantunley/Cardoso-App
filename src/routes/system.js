@@ -256,6 +256,37 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     res.json({ status: 'ok' });
   });
 
+  // GET /api/error-log — recent rows from the error_log table (admin only).
+  // Powers the System Log page so off-site operators can see what failed
+  // without needing terminal/file access.
+  router.get('/api/error-log', requireAuth, requireAdmin, (req, res) => {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const source = typeof req.query.source === 'string' && req.query.source.trim() ? req.query.source.trim() : null;
+    const sinceHours = Math.min(Math.max(parseInt(req.query.sinceHours, 10) || 24 * 7, 1), 24 * 90);
+    try {
+      const where = ["occurred_at >= datetime('now', ?)"];
+      const args = [`-${sinceHours} hours`];
+      if (source) { where.push('source = ?'); args.push(source); }
+      const rows = db.prepare(`
+        SELECT id, source, level, message, stack, context, occurred_at
+        FROM error_log
+        WHERE ${where.join(' AND ')}
+        ORDER BY occurred_at DESC
+        LIMIT ?
+      `).all(...args, limit);
+      const sources = db.prepare(`
+        SELECT source, COUNT(*) AS n
+        FROM error_log
+        WHERE occurred_at >= datetime('now', ?)
+        GROUP BY source
+        ORDER BY n DESC
+      `).all(`-${sinceHours} hours`);
+      res.json({ rows, sources, limit, sinceHours });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // POST /api/log/client-error — capture frontend errors to logs/errors.log
   // Unauthenticated so the login page can also report failures, but field sizes are capped.
   router.post('/api/log/client-error', (req, res) => {

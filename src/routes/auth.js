@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 
 /**
  * Creates the auth and user routes router.
@@ -85,6 +86,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       });
     } catch (error) {
       console.error('Login error:', error);
+      try { logError('auth.login', error, { email: req.body?.email }); } catch {}
       res.status(500).json({ error: 'Login failed' });
     }
   });
@@ -143,6 +145,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       res.json({ success: true, user: sanitizeUser(user) });
     } catch (err) {
       console.error('[hub-token-login] error:', err);
+      try { logError('auth.hub_token_login', err); } catch {}
       res.status(500).json({ error: 'Hub login failed' });
     }
   });

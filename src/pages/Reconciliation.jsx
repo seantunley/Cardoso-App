@@ -73,7 +73,9 @@ export default function Reconciliation() {
   // picked up without a hard reload.
   useEffect(() => {
     if (view !== 'detail') return;
-    fetch('/api/bat/ocr-pause', { credentials: 'include' })
+    // GET /api/bat/ocr-status reads the pause flag (the matching /ocr-pause
+    // endpoint is POST-only).
+    fetch('/api/bat/ocr-status', { credentials: 'include' })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setOcrPausedState(!!d.paused); })
       .catch(() => {});
@@ -840,7 +842,7 @@ export default function Reconciliation() {
             })()}
 
             {/* Dashboard tabs */}
-            <div className="flex gap-px bg-border border border-border" style={{ borderRadius: '12px' }}>
+            <div className="flex gap-px overflow-hidden bg-border border border-border" style={{ borderRadius: '12px' }}>
               {[
                 { id: 'archive', label: 'Reconciliations', count: reconciliations.length },
                 { id: 'crossref', label: 'Cross-Reference' },
@@ -891,7 +893,7 @@ export default function Reconciliation() {
               return (
                 <section className="space-y-4">
                   <div
-                    className="relative bg-card px-6 py-4"
+                    className="relative overflow-hidden bg-card px-6 py-4"
                     style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}
                   >
                     <div
@@ -990,7 +992,7 @@ export default function Reconciliation() {
                 </p>
 
                 {cardosoError && (
-                  <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
+                  <div className="relative overflow-hidden border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                     <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'hsl(var(--destructive))' }} />
                     <p className="font-mono text-xs text-destructive pl-2">{cardosoError}</p>
                   </div>
@@ -998,7 +1000,7 @@ export default function Reconciliation() {
 
                 {/* Duplicate prompt */}
                 {showDupePrompt && pendingCardosoFile && (
-                  <div className="relative border border-border bg-card px-5 py-4" style={{ borderRadius: '12px' }}>
+                  <div className="relative overflow-hidden border border-border bg-card px-5 py-4" style={{ borderRadius: '12px' }}>
                     <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'var(--phosphor)', boxShadow: '0 0 12px hsla(33,95%,55%,0.35)' }} />
                     <div className="pl-2 space-y-3">
                       <div>
@@ -1219,7 +1221,7 @@ export default function Reconciliation() {
         {view === 'detail' && selected && (
           <>
             {backfillMsg && (
-              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
+              <div className="relative overflow-hidden border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                 <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: 'var(--phosphor)', boxShadow: '0 0 12px hsla(33,95%,55%,0.35)' }} />
                 <p className="font-mono text-xs text-accent pl-2">{backfillMsg}</p>
               </div>
@@ -1256,7 +1258,7 @@ export default function Reconciliation() {
             </div>
 
             {extractError && (
-              <div className="relative border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
+              <div className="relative overflow-hidden border border-border bg-card px-4 py-3" style={{ borderRadius: '12px' }}>
                 <div
                   className="absolute left-0 top-0 bottom-0 w-[2px]"
                   style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}

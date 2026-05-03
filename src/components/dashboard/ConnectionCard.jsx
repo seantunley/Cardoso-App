@@ -27,7 +27,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
   }[connection.status] || "transparent";
 
   return (
-    <div className="group relative bg-card border border-border p-6 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "12px" }}>
+    <div className="group relative overflow-hidden bg-card border border-border p-6 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "12px" }}>
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"
         style={{ background: accentBar, boxShadow: `0 0 12px ${accentGlow}` }}

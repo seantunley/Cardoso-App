@@ -12,6 +12,7 @@ import { buildStatements } from '../db/statements.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
+import { logError } from '../lib/errorLog.js';
 
 // ── Statements prepared once at module level (not per-sync) ────────────────
 const stmts = buildStatements(db);
@@ -210,10 +211,9 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       writeInventory(rows);
     };
 
-    const insertSnapshot = db.prepare(`
-      INSERT INTO record_snapshots (connection_id, customer_number, snapshot_data, synced_at)
-      VALUES (?, ?, ?, ?)
-    `);
+    // record_snapshots writes were dropped — the table had no readers and was
+    // adding ~600 MB/month of dead JSON to cardoso.db. The table itself is
+    // kept around (no destructive migration) but is no longer written to.
 
     // Shared write-rows helper used by both query mode and legacy table mode
     const runWriteRows = (rows, sourceName, mappings, indexField) => {
@@ -223,6 +223,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         .filter(Boolean);
 
       const existingMap = new Map();
+      const customerNumberMap = new Map();
       if (incomingIds.length > 0) {
         // Deduplicate incoming IDs to avoid excessive SQL placeholders
         const uniqueIds = [...new Set(incomingIds)];
@@ -233,9 +234,17 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  note, local_fields, flag_color, flag_reason, flag_created_by, data,
                  outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
           FROM datarecord
-          WHERE source_table = ? AND TRIM(source_id) IN (${placeholders})
-        `).all(sourceName, ...uniqueIds);
-        for (const r of keyedRows) existingMap.set(`${r.source_table}::${r.source_id.trim()}`, r);
+          WHERE source_table = ? AND (
+            TRIM(source_id) IN (${placeholders})
+            OR TRIM(customer_number) IN (${placeholders})
+          )
+        `).all(sourceName, ...uniqueIds, ...uniqueIds);
+        for (const r of keyedRows) {
+          // Index by both keys so the per-row fallbacks below become Map
+          // hits instead of full table scans (TRIM(...) is non-sargable).
+          if (r.source_id) existingMap.set(`${r.source_table}::${String(r.source_id).trim()}`, r);
+          if (r.customer_number) customerNumberMap.set(String(r.customer_number).trim(), r);
+        }
       }
 
       const syncTimestamp = new Date().toISOString();
@@ -280,26 +289,12 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           seenSourceIds.add(sourceId);
 
           let existing = existingMap.get(`${sourceName}::${sourceId}`);
-          // Fallback: if source_id lookup missed (e.g. whitespace mismatch from older data),
-          // try to find by customer_number + source_table directly
+          // Fallbacks now hit the in-memory customerNumberMap built once
+          // up-front, instead of two non-sargable TRIM(...) full table scans
+          // per row. The original initial SELECT was extended to fetch the
+          // customer_number variants in the same pass.
           if (!existing && sourceId) {
-            existing = db.prepare(
-              `SELECT id, source_id, source_table, customer_number, customer_name,
-                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
-                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
-                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
-               FROM datarecord WHERE source_table = ? AND TRIM(source_id) = ? LIMIT 1`
-            ).get(sourceName, sourceId) || null;
-          }
-          // Last resort: match by customer_number column directly
-          if (!existing && sourceId) {
-            existing = db.prepare(
-              `SELECT id, source_id, source_table, customer_number, customer_name,
-                      age_analysis, age_current, age_7_days, age_14_days, age_21_days,
-                      note, local_fields, flag_color, flag_reason, flag_created_by, data,
-                      outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
-               FROM datarecord WHERE source_table = ? AND TRIM(customer_number) = ? LIMIT 1`
-            ).get(sourceName, sourceId) || null;
+            existing = customerNumberMap.get(sourceId) || null;
           }
           const mappedPatch = buildFieldPatch(existing, row, mappings, indexField);
           const dynamicLocalFieldsPatch = buildDynamicLocalFieldsPatch(existing, row, mappings);
@@ -381,18 +376,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                  updateRecordFlag.run(null, null, 0, existing.id);
                }
              }
-            // Snapshot the post-update state — merge base data over existing to reflect what was written
-            try {
-              const postUpdateRecord = { ...existing, ...baseRecordData, id: existing.id, updated_date: syncTimestamp };
-              insertSnapshot.run(
-                String(connectionId),
-                String(existing.customer_number || ''),
-                JSON.stringify(postUpdateRecord),
-                syncTimestamp
-              );
-            } catch (snapshotErr) {
-              console.error('[snapshot] Failed to insert snapshot for record', existing.id, ':', snapshotErr.message);
-            }
           } else {
             syncInserted++;
             const insertResult = insertNewRecord.run(
@@ -443,17 +426,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               if (autoFlag) {
                 updateRecordFlag.run(autoFlag.flag_color, autoFlag.flag_reason, 1, newRecord.id);
               }
-            }
-            // Snapshot from in-memory newRecord already in scope — no extra SELECT
-            try {
-              insertSnapshot.run(
-                String(connectionId),
-                String(baseRecordData.customer_number || ''),
-                JSON.stringify(newRecord),
-                syncTimestamp
-              );
-            } catch (snapshotErr) {
-              console.error('[snapshot] Failed to insert snapshot for new record:', snapshotErr.message);
             }
           }
         }
@@ -596,6 +568,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       imported: importedCount,
     };
   } catch (error) {
+    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId }); } catch {}
     try {
       db.prepare(`
         UPDATE databaseconnection

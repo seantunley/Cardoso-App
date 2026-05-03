@@ -3,6 +3,7 @@
 // the auditlog schema CHECK to: user | connection | record | rule | system.
 
 import db from '../db/index.js';
+import { logError } from './errorLog.js';
 
 const insertAudit = db.prepare(`
   INSERT INTO auditlog (
@@ -60,6 +61,23 @@ function summarizeDiff(changes, MAX_PARTS = 6) {
   return parts.slice(0, MAX_PARTS).join('; ') + ` (+${parts.length - MAX_PARTS} more)`;
 }
 
+// Audit rows are written synchronously. The previous batched 250ms-flush
+// implementation lost in-memory rows on hard kills (Windows taskkill /F,
+// editor "Restart server", terminal close — none of these deliver SIGTERM
+// or fire `beforeExit`), which is why the table had multi-day gaps.
+//
+// The earlier batching was introduced to mitigate 100-500ms latency spikes
+// during sync-engine runs (the sync transaction held the writer slot while
+// audit inserts queued behind it). Reverted because:
+//   1. Sync-run latency only matters when an API request happens to fire
+//      logAudit() at the exact moment a sync transaction is open. The window
+//      is small in practice.
+//   2. A full audit trail is more valuable than 100ms saved on rare overlap.
+//   3. Sync-run audits *should* land contemporaneously, not after the
+//      transaction releases.
+// If sync-run latency becomes a problem again, route those specific call
+// sites through a separate writer rather than batching everything globally.
+
 export function logAudit({
   req,
   action,
@@ -92,7 +110,11 @@ export function logAudit({
       status === 'failure' ? 'failure' : 'success',
     );
   } catch (err) {
+    // Last-resort: write to errorLog so the failure is visible — but never
+    // throw out of an audit call (audit failures must not break the actual
+    // operation the user is performing).
     console.error('[audit] insert failed:', err.message);
+    try { logError('audit.insert', err, { action }); } catch {}
   }
 }
 

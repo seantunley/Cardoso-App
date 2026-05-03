@@ -3,9 +3,11 @@ import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
 import { EventEmitter } from 'events';
-import { createWorker } from 'tesseract.js';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
 import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
+import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
 
 // Status emitter for the SSE-based extraction-status stream. Worker emits
@@ -23,12 +25,17 @@ let pool = null;
 let poolConfigKey = null; // tracks which config the current pool was opened with
 
 // Picks the Sage MSSQL config in this order:
-//   1. The databaseconnection row whose id matches bat_settings.sage_connection_id
-//   2. The first active databaseconnection whose name matches /sage/i
-//   3. SAGE_* environment variables (legacy)
+//   1. The connection pinned to role 'bat_sage' in connection_role
+//      (set via Settings → Connections → Module routing).
+//   2. The databaseconnection row whose id matches bat_settings.sage_connection_id
+//      (legacy — pre-dates the connection_role table).
+//   3. The first active databaseconnection whose name matches /sage/i
+//   4. SAGE_* environment variables (legacy)
 function loadSageConfig() {
-  // 1) Explicit pick from bat_settings
+  // 1) Module-routing assignment, then 2) legacy bat_settings setting
   const pickedId = (() => {
+    const fromRole = getRoleConnectionId('bat_sage');
+    if (fromRole) return fromRole;
     try {
       const row = db.prepare(`SELECT value FROM bat_settings WHERE key = 'sage_connection_id'`).get();
       return row?.value ? parseInt(row.value, 10) : null;
@@ -107,7 +114,15 @@ async function getSagePool() {
 
   if (pool) return pool;
   console.log(`[bat-sage] Opening Sage pool from ${loaded.source}`);
-  pool = await sql.connect(loaded.config);
+  try {
+    pool = await sql.connect(loaded.config);
+  } catch (err) {
+    // A Sage pool failure stalls every BAT operation that needs Sage data
+    // (week-status, credit notes, dashboards). Surface it in System Log so
+    // a remote operator doesn't have to ssh in to diagnose.
+    try { logError('bat.sage.pool', err, { source: loaded.source }); } catch {}
+    throw err;
+  }
   poolConfigKey = loaded.key;
   return pool;
 }
@@ -120,11 +135,13 @@ async function runSageQuery(sqlText) {
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[bat-sage] Pool dropped, reopening and retrying once');
+      try { logError('bat.sage.query', err, { phase: 'pool_dropped_retrying' }, 'info'); } catch {}
       try { await p.close(); } catch {}
       pool = null;
       p = await getSagePool();
       return await p.request().query(sqlText);
     }
+    try { logError('bat.sage.query', err); } catch {}
     throw err;
   }
 }
@@ -951,8 +968,7 @@ function insertPodEntries(reconId, podUrls) {
       reconciliation_id, pdf_url, order_number, branch_name, store_name,
       week, order_day, delivery_day, lead_time, delivery_date, pod_uploaded_date, validate, order_amount, is_exception, target_days, compliance_status, exception_reason, supplier_discount, supplier_del_fee, supplier_pricing
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(pdf_url) DO UPDATE SET
-      reconciliation_id = excluded.reconciliation_id,
+    ON CONFLICT(reconciliation_id, pdf_url) DO UPDATE SET
       order_number = COALESCE(excluded.order_number, bat_invoice_extractions.order_number),
       branch_name = COALESCE(excluded.branch_name, bat_invoice_extractions.branch_name),
       store_name = COALESCE(excluded.store_name, bat_invoice_extractions.store_name),
@@ -1159,6 +1175,19 @@ export function listReconciliations() {
     r.matched_count = m?.matched || 0;
     r.exact_match_count = m?.exact || 0;
   }
+  // Stash the per-recon match map + the all-extraction totals on the returned
+  // array so getDashboardData() can skip its own duplicate full scan of
+  // bat_invoice_extractions. Plain Array, just with two extra non-enumerable
+  // properties — JSON serialisation ignores them.
+  let totalMatched = 0, totalExactMatched = 0;
+  for (const m of matchByRecon.values()) {
+    totalMatched += m.matched;
+    totalExactMatched += m.exact;
+  }
+  Object.defineProperty(reconRows, '_matchTotals', {
+    value: { totalMatched, totalExactMatched },
+    enumerable: false,
+  });
   return reconRows;
 }
 
@@ -1303,6 +1332,31 @@ export async function runInvoiceExtraction(reconId) {
   return { message: 'Extraction started', total: pending };
 }
 
+// Reset every "not_found" or "failed" extraction back to "pending" across all
+// reconciliations. Rows that succeeded ("found") are left alone. Used by the
+// Settings → Reconciliation "Re-queue failed OCRs" button so an operator can
+// re-OCR everything that hasn't yet been matched without re-doing successful
+// extractions.
+export function resetUnsuccessfulExtractions() {
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extraction_error = NULL,
+        extraction_attempts = 0
+    WHERE extraction_status IN ('not_found', 'failed')
+  `).run();
+  return { reset: info.changes };
+}
+
+export function countUnsuccessfulExtractions() {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS c
+    FROM bat_invoice_extractions
+    WHERE extraction_status IN ('not_found', 'failed')
+  `).get();
+  return row?.c || 0;
+}
+
 export function retryNotFound(reconId) {
   const rows = db.prepare(
     "SELECT id, pdf_url, store_name FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status IN ('not_found', 'failed')"
@@ -1337,9 +1391,15 @@ async function runGoogleVisionRetryInner(reconId, rows) {
   const sharp = (await import('sharp')).default;
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
-    SET extracted_invoice = ?, extraction_status = ?, extraction_attempts = extraction_attempts + 1
+    SET extracted_invoice = ?, extraction_status = ?,
+        extraction_attempts = extraction_attempts + 1, extraction_error = ?
     WHERE id = ?
   `);
+
+  // Wipe stale extraction_error on rows being requeued so the per-row toast
+  // doesn't keep firing after a successful retry.
+  const clearErrorStmt = db.prepare("UPDATE bat_invoice_extractions SET extraction_error = NULL WHERE id = ?");
+  for (const r of rows) clearErrorStmt.run(r.id);
 
   console.log(`[bat-gv] Google Vision retry: ${rows.length} items`);
 
@@ -1348,10 +1408,10 @@ async function runGoogleVisionRetryInner(reconId, rows) {
       console.log(`[bat-gv] Processing id=${row.id} ${row.store_name || ''}`);
 
       const response = await fetch(row.pdf_url);
-      if (!response.ok) { updateExtraction.run(null, 'failed', row.id); continue; }
+      if (!response.ok) { updateExtraction.run(null, 'failed', `HTTP ${response.status} downloading PDF`, row.id); continue; }
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
-        updateExtraction.run(null, 'failed', row.id); continue;
+        updateExtraction.run(null, 'failed', 'Downloaded file is not a valid PDF', row.id); continue;
       }
 
       // Render PDF to image
@@ -1361,7 +1421,7 @@ async function runGoogleVisionRetryInner(reconId, rows) {
         imageBuffer = await pdfPageToImage(buffer, 1, scale);
       } catch (err) {
         console.error(`[bat-gv] Render failed id=${row.id}: ${err.message}`);
-        updateExtraction.run(null, 'failed', row.id); continue;
+        updateExtraction.run(null, 'failed', `Render failed: ${err.message}`, row.id); continue;
       }
 
       // Send to Google Vision — try upright first, then rotated
@@ -1382,14 +1442,14 @@ async function runGoogleVisionRetryInner(reconId, rows) {
       }
 
       if (invoice) {
-        updateExtraction.run(invoice, 'found', row.id);
+        updateExtraction.run(invoice, 'found', null, row.id);
       } else {
-        updateExtraction.run(null, 'not_found', row.id);
+        updateExtraction.run(null, 'not_found', null, row.id);
         console.log(`[bat-gv] id=${row.id} — not found`);
       }
     } catch (err) {
       console.error(`[bat-gv] id=${row.id} failed: ${err.message}`);
-      updateExtraction.run(null, 'failed', row.id);
+      updateExtraction.run(null, 'failed', err.message, row.id);
     }
   }
 
@@ -1399,12 +1459,38 @@ async function runGoogleVisionRetryInner(reconId, rows) {
 }
 
 // ── OCR pause switch ───────────────────────────────────────────────────────
-// Flip to `false` to resume. While paused: no new workers start, auto-resume
-// on server boot is skipped, and the in-flight processQueue loop exits cleanly
+// Persisted in bat_settings (key: 'ocr_paused', value: '0' | '1') so restarts
+// don't silently reset the operator's choice. Default-paused on a fresh DB
+// (no setting row) so a brand-new install doesn't burn OCR credits before
+// keys are configured. While paused: no new workers start, auto-resume on
+// server boot is skipped, and the in-flight processQueue loop exits cleanly
 // after its current invoice finishes (so we don't lose work mid-flight).
-let ocrPaused = true;
+function loadInitialOcrPaused() {
+  try {
+    const row = db.prepare("SELECT value FROM bat_settings WHERE key = 'ocr_paused'").get();
+    if (row && row.value != null) return row.value !== '0' && row.value !== 'false';
+  } catch { /* table may not exist on first boot */ }
+  return true; // default: paused
+}
+let ocrPaused = loadInitialOcrPaused();
 export function isOcrPaused() { return ocrPaused; }
-export function setOcrPaused(v) { ocrPaused = !!v; }
+export function setOcrPaused(v) {
+  const next = !!v;
+  if (next === ocrPaused) return;
+  ocrPaused = next;
+  try {
+    db.prepare(`
+      INSERT INTO bat_settings (key, value, updated_at) VALUES ('ocr_paused', ?, datetime('now'))
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `).run(next ? '1' : '0');
+  } catch (err) {
+    console.error('[bat-ocr] Failed to persist pause state:', err.message);
+    try { logError('bat-ocr.pause', err, { paused: next }); } catch {}
+  }
+  try {
+    logError('bat-ocr.pause', new Error(next ? 'OCR worker paused' : 'OCR worker resumed'), { paused: next }, 'info');
+  } catch {}
+}
 
 function startExtractionWorker(reconId) {
   if (ocrPaused) {
@@ -1417,11 +1503,27 @@ function startExtractionWorker(reconId) {
   }
   workerRunning = true;
   workerReconId = reconId;
+  try { logError('bat-ocr.worker', new Error(`Worker started for reconciliation ${reconId}`), { reconciliation_id: reconId }, 'info'); } catch {}
 
   processQueue(reconId).catch(err => {
     console.error('[bat-ocr] Worker crashed:', err.message);
+    try { logError('bat-ocr.worker', err, { reconciliation_id: reconId, phase: 'crash' }); } catch {}
     recordReconciliationError(reconId, `Worker crashed: ${err.message}`);
   }).finally(() => {
+    // Capture *why* we stopped so an operator looking at the System Log can
+    // tell "queue drained" from "operator paused mid-run".
+    let stopReason = 'queue drained';
+    try {
+      if (ocrPaused) {
+        stopReason = 'paused mid-run';
+      } else {
+        const pendingRow = db.prepare(
+          "SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
+        ).get(reconId);
+        if (pendingRow?.c > 0) stopReason = `stopped with ${pendingRow.c} pending`;
+      }
+      logError('bat-ocr.worker', new Error(`Worker stopped (${stopReason}) for reconciliation ${reconId}`), { reconciliation_id: reconId, stop_reason: stopReason }, 'info');
+    } catch {}
     workerRunning = false;
     workerReconId = null;
   });
@@ -1554,12 +1656,95 @@ const PDF_TIMEOUT = 300000; // 5 min per PDF — large scanned PDFs (20-40MB) ne
 // Override via OCR_CONCURRENCY env var (set to "1" to revert to sequential).
 const OCR_CONCURRENCY = Math.max(1, parseInt(process.env.OCR_CONCURRENCY || '4', 10));
 
+// ── Worker thread lane ───────────────────────────────────────────────────────
+// Each lane = one worker_thread that owns its own Tesseract worker. Extraction
+// payloads are dispatched via postMessage and matched by id. The main thread
+// stays responsive — pdfjs render, sharp processing, and Tesseract recognition
+// all happen off-loop.
+
+const OCR_WORKER_URL = new URL('./ocrWorker.js', import.meta.url);
+
+class OcrLane {
+  constructor() {
+    this.worker = new Worker(fileURLToPath(OCR_WORKER_URL), {
+      workerData: { previewDir: previewDir },
+    });
+    this.pending = new Map();
+    this.nextId = 0;
+    this.dead = false;
+    this.worker.on('message', (msg) => {
+      if (!msg || msg.type !== 'result') return;
+      const slot = this.pending.get(msg.id);
+      if (!slot) return;
+      this.pending.delete(msg.id);
+      if (msg.ok) {
+        slot.resolve(msg.result);
+      } else {
+        const err = new Error(msg.error?.message || 'Unknown OCR worker error');
+        if (msg.error?.stack) err.stack = msg.error.stack;
+        if (msg.error?.tierError) err.tierError = true;
+        slot.reject(err);
+      }
+    });
+    const failAll = (err) => {
+      if (this.dead) return;
+      this.dead = true;
+      for (const [, slot] of this.pending) slot.reject(err);
+      this.pending.clear();
+    };
+    this.worker.on('error', (err) => {
+      try { logError('bat.ocr.worker_thread', err, { phase: 'error' }); } catch {}
+      failAll(err);
+    });
+    this.worker.on('exit', (code) => {
+      if (code === 0 || this.dead) return;
+      const err = new Error(`OCR worker exited unexpectedly (code=${code})`);
+      try { logError('bat.ocr.worker_thread', err, { phase: 'exit', code }); } catch {}
+      failAll(err);
+    });
+  }
+
+  extract(payload, timeoutMs) {
+    if (this.dead) return Promise.reject(new Error('OCR lane is dead'));
+    const id = ++this.nextId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pending.has(id)) {
+          this.pending.delete(id);
+          // Timing out a worker_thread call doesn't kill the worker; the
+          // extraction inside may still finish. We mark this lane dead so it
+          // gets recreated rather than reused with a stuck call.
+          this.dead = true;
+          try { this.worker.terminate(); } catch {}
+          reject(new Error('PDF timeout'));
+        }
+      }, timeoutMs);
+      this.pending.set(id, {
+        resolve: (v) => { clearTimeout(timer); resolve(v); },
+        reject: (e) => { clearTimeout(timer); reject(e); },
+      });
+      try {
+        this.worker.postMessage({ type: 'extract', id, payload });
+      } catch (err) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(err);
+      }
+    });
+  }
+
+  async terminate() {
+    try { this.worker.postMessage({ type: 'shutdown' }); } catch {}
+    // Give the worker a moment to flush its Tesseract handle, then force-kill.
+    await new Promise(r => setTimeout(r, 500));
+    try { await this.worker.terminate(); } catch {}
+    this.dead = true;
+  }
+}
+
 async function processQueue(reconId) {
   const N = OCR_CONCURRENCY;
-  console.log(`[bat-ocr] Starting worker pool (concurrency=${N}) for reconciliation ${reconId}`);
-
-  // Pre-init N Tesseract workers — creation is ~500 ms each, so do it once.
-  const workers = await Promise.all(Array.from({ length: N }, () => createWorker('eng')));
+  console.log(`[bat-ocr] Starting worker_threads pool (concurrency=${N}) for reconciliation ${reconId}`);
 
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
@@ -1569,13 +1754,13 @@ async function processQueue(reconId) {
   `);
   // Pull the next pending row that ISN'T already being processed by another
   // lane. The in-memory `inFlight` Set is the source of truth for "claimed by
-  // a lane this run". Avoids changing the SQL schema or status values that
-  // the UI checks against.
+  // a lane this run". Backed by idx_bat_extractions_recon_status (migration v50).
+  const claimNextStmt = db.prepare(
+    "SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending' ORDER BY id LIMIT ?"
+  );
   const inFlight = new Set();
   const claimNext = () => {
-    const candidates = db.prepare(
-      "SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending' ORDER BY id LIMIT ?"
-    ).all(reconId, OCR_CONCURRENCY * 4);
+    const candidates = claimNextStmt.all(reconId, OCR_CONCURRENCY * 4);
     for (const row of candidates) {
       if (!inFlight.has(row.id)) { inFlight.add(row.id); return row; }
     }
@@ -1584,7 +1769,12 @@ async function processQueue(reconId) {
 
   db.prepare("UPDATE bat_reconciliations SET last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
 
-  const lanes = workers.map((w) => ({ worker: w }));
+  // API keys are read once and passed to the worker per-task — the worker thread
+  // has no DB access and shouldn't need any.
+  const googleVisionKey = getGoogleVisionKey();
+  const ocrSpaceKey = getOcrSpaceKey();
+
+  const lanes = Array.from({ length: N }, () => ({ worker: new OcrLane() }));
 
   const runLane = async (lane) => {
     while (true) {
@@ -1598,11 +1788,16 @@ async function processQueue(reconId) {
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
       try {
         try {
-          const result = await Promise.race([
-            extractInvoiceFromPdf(lane.worker, next.pdf_url, next.id),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('PDF timeout')), PDF_TIMEOUT)),
-          ]);
-          const invoiceNumber = result?.invoice ?? result;
+          const result = await lane.worker.extract(
+            {
+              pdfUrl: next.pdf_url,
+              extractionId: next.id,
+              googleVisionKey,
+              ocrSpaceKey,
+            },
+            PDF_TIMEOUT,
+          );
+          const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
           const engineError = result?.error ?? null;
 
@@ -1617,19 +1812,22 @@ async function processQueue(reconId) {
           emitExtractionUpdate(reconId);
         } catch (err) {
           console.error(`[bat-ocr] id=${next.id} failed: ${err.message}`);
+          try { logError('bat.ocr.row', err, { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url }); } catch {}
           updateExtraction.run(null, 'failed', null, err.message, next.id);
           recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
           emitExtractionUpdate(reconId);
 
-          // Recreate the lane's Tesseract worker — assumed dead on uncaught error.
-          try {
-            await lane.worker.terminate().catch(() => {});
-            lane.worker = await createWorker('eng');
-          } catch (e) {
-            console.error('[bat-ocr] Worker recreation failed:', e.message);
-            recordReconciliationError(reconId, `Tesseract worker crashed: ${e.message}`);
-            inFlight.delete(next.id);
-            return; // lane retires
+          // Lane is dead (timeout or worker crash) — replace it.
+          if (lane.worker.dead) {
+            try { await lane.worker.terminate(); } catch {}
+            try {
+              lane.worker = new OcrLane();
+            } catch (e) {
+              console.error('[bat-ocr] Lane recreation failed:', e.message);
+              recordReconciliationError(reconId, `OCR lane crashed: ${e.message}`);
+              inFlight.delete(next.id);
+              return; // lane retires
+            }
           }
         }
       } finally {
@@ -1641,7 +1839,7 @@ async function processQueue(reconId) {
   try {
     await Promise.all(lanes.map(runLane));
   } finally {
-    await Promise.all(lanes.map(l => l.worker.terminate().catch(() => {})));
+    await Promise.all(lanes.map(l => l.worker.terminate()));
   }
 
   normalizeInvoiceNumbers(reconId);
@@ -1649,22 +1847,6 @@ async function processQueue(reconId) {
   db.prepare("UPDATE bat_reconciliations SET status = 'completed' WHERE id = ?").run(reconId);
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
-}
-
-async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { createCanvas } = await import('canvas');
-
-  const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
-  const canvas = createCanvas(viewport.width, viewport.height);
-  const context = canvas.getContext('2d');
-
-  await page.render({ canvasContext: context, viewport }).promise;
-  await pdfDoc.destroy();
-
-  return canvas.toBuffer('image/png');
 }
 
 function getBatSetting(key) {
@@ -1692,6 +1874,9 @@ function getOcrSpaceKey() {
 
 function recordReconciliationError(reconId, message) {
   if (!reconId || !message) return;
+  // Mirror to the global error_log so off-site operators can see it in the
+  // System Log page without needing to drill into a specific reconciliation.
+  try { logError('bat.recon', new Error(String(message)), { reconciliation_id: reconId }); } catch {}
   try {
     db.prepare(
       "UPDATE bat_reconciliations SET last_error = ?, last_error_at = datetime('now') WHERE id = ?"
@@ -1701,10 +1886,34 @@ function recordReconciliationError(reconId, message) {
   }
 }
 
+// The full multi-engine OCR pipeline (extractInvoiceFromPdf) lives in
+// src/services/ocrWorker.js now and runs off the main thread. The two helpers
+// below stay on the main thread because they're only used by the
+// "retry not_found with Google Vision" path (operator-triggered, infrequent),
+// and moving that path to the worker pool too is a follow-up.
+
+// Preview storage directory — created on the main thread so it's guaranteed
+// to exist before any worker tries to write to it.
+const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
+if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
+
+async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
+  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { createCanvas } = await import('canvas');
+
+  const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+  const page = await pdfDoc.getPage(pageNum);
+  const viewport = page.getViewport({ scale });
+  const canvas = createCanvas(viewport.width, viewport.height);
+  const context = canvas.getContext('2d');
+  await page.render({ canvasContext: context, viewport }).promise;
+  await pdfDoc.destroy();
+  return canvas.toBuffer('image/png');
+}
+
 async function ocrViaGoogleVision(imageBuffer) {
   const apiKey = getGoogleVisionKey();
   if (!apiKey) throw new Error('GOOGLE_VISION_KEY not set');
-
   const base64 = imageBuffer.toString('base64');
   const body = {
     requests: [{
@@ -1712,229 +1921,18 @@ async function ocrViaGoogleVision(imageBuffer) {
       features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
     }],
   };
-
   const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 200)}`);
   }
-
   const data = await res.json();
   const annotation = data.responses?.[0]?.fullTextAnnotation;
   return annotation?.text || '';
-}
-
-async function ocrViaOcrSpaceEngine(imageBuffer, engine = '2', retries = 1) {
-  const apiKey = getOcrSpaceKey();
-  if (!apiKey) throw new Error('OCR_SPACE_KEY not set — configure in BAT settings or env');
-  const base64 = `data:image/jpeg;base64,${imageBuffer.toString('base64')}`;
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const formData = new URLSearchParams();
-    formData.append('base64Image', base64);
-    formData.append('language', 'eng');
-    formData.append('isOverlayRequired', 'false');
-    formData.append('OCREngine', engine);
-    formData.append('scale', 'true');
-    formData.append('isTable', 'true');
-    formData.append('detectOrientation', 'true');
-
-    const res = await fetch('https://api.ocr.space/parse/image', {
-      method: 'POST',
-      headers: { apikey: apiKey },
-      body: formData,
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      // 413 = file too large; 403 = quota/key issues — both are tier-level problems worth surfacing
-      const tier = res.status === 413 || res.status === 403;
-      const err = new Error(`ocr.space HTTP ${res.status}: ${body.substring(0, 200)}`);
-      if (tier) err.tierError = true;
-      throw err;
-    }
-    const data = await res.json();
-
-    if (data.IsErroredOnProcessing) {
-      const errMsg = Array.isArray(data.ErrorMessage) ? data.ErrorMessage.join('; ') : (data.ErrorMessage || 'unknown');
-      if (errMsg.includes('E101') && attempt < retries) {
-        console.log(`[bat-ocr] ocr.space E${engine} E101 timeout, retry ${attempt + 1}/${retries} in 8s...`);
-        await new Promise(r => setTimeout(r, 8000));
-        continue;
-      }
-      const err = new Error(`ocr.space error: ${errMsg}`);
-      // E556 = file too large (free-tier 1.5MB cap), E102/E103 = key/quota issues
-      if (/E556|E102|E103|too large|Plan|quota|limit/i.test(errMsg)) err.tierError = true;
-      throw err;
-    }
-
-    return (data.ParsedResults || []).map(r => r.ParsedText || '').join('\n');
-  }
-}
-
-// Backward compat alias
-async function ocrViaOcrSpaceBase64(imageBuffer) {
-  return ocrViaOcrSpaceEngine(imageBuffer, '2');
-}
-
-// Preview storage directory
-const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
-if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
-
-async function extractInvoiceFromPdf(worker, pdfUrl, extractionId) {
-  // Download the PDF
-  let response;
-  try {
-    response = await fetch(pdfUrl);
-  } catch (err) {
-    throw new Error(`Download failed: ${err.message}`);
-  }
-  if (!response.ok) throw new Error(`Failed to download PDF: ${response.status}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
-
-  if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
-    console.log(`[bat-ocr] Not a valid PDF (${buffer.length} bytes)`);
-    return { invoice: null, previewPath: null };
-  }
-
-  const isLarge = buffer.length > 2 * 1024 * 1024; // > 2MB
-  console.log(`[bat-ocr] PDF ${(buffer.length / 1024 / 1024).toFixed(1)}MB — using ${isLarge ? 'ocr.space' : 'Tesseract'}`);
-
-  // Step 1: Try pdfjs text extraction (no OCR needed)
-  try {
-    const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-    loadingTask.onUnsupportedFeature = () => {};
-    const pdfDoc = await loadingTask.promise;
-
-    for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
-      const page = await pdfDoc.getPage(p);
-      const textContent = await page.getTextContent();
-      const pageText = textContent.items.map(item => item.str).join(' ');
-      if (pageText.trim()) {
-        const invoice = findInvoiceNumber(pageText);
-        if (invoice) {
-          await pdfDoc.destroy();
-          console.log(`[bat-ocr] Found via text layer: ${invoice}`);
-          return { invoice, previewPath: null };
-        }
-      }
-    }
-    await pdfDoc.destroy();
-  } catch (err) {
-    console.log(`[bat-ocr] Text extraction failed: ${err.message}`);
-  }
-
-  // Step 2: Render to image
-  let imageBuffer;
-  try {
-    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
-  } catch (err) {
-    console.error(`[bat-ocr] Render failed: ${err.message}`);
-    return { invoice: null, previewPath: null };
-  }
-
-  const sharp = (await import('sharp')).default;
-
-  // Save a lightweight JPEG preview for the UI
-  let previewPath = null;
-  try {
-    const previewJpeg = await sharp(imageBuffer).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
-    const filename = `${extractionId}.jpg`;
-    const fullPath = path.join(previewDir, filename);
-    fs.writeFileSync(fullPath, previewJpeg);
-    previewPath = `/api/bat/preview/${filename}`;
-  } catch (err) {
-    console.log(`[bat-ocr] Preview save failed: ${err.message}`);
-  }
-
-  // ── Multi-engine OCR pipeline ──────────────────────────────────────────────
-  // Try every available engine in order of reliability until one finds the invoice.
-  // Each engine gets both rotations (0° then 90°) before moving to the next.
-
-  const ocrEngines = [];
-
-  // Google Vision first — fastest and most accurate
-  if (getGoogleVisionKey()) {
-    ocrEngines.push({
-      name: 'GoogleVision',
-      run: async (angle) => {
-        const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2400 }).jpeg({ quality: 85 }).toBuffer();
-        console.log(`[bat-ocr] Google Vision rot ${angle} (${jpeg.length} bytes)`);
-        return await ocrViaGoogleVision(jpeg);
-      },
-    });
-  }
-
-  ocrEngines.push(
-    {
-      name: 'ocr.space/e1',
-      run: async (angle) => {
-        const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 80 }).toBuffer();
-        console.log(`[bat-ocr] ocr.space E1 rot ${angle} (${jpeg.length} bytes)`);
-        return await ocrViaOcrSpaceEngine(jpeg, '1');
-      },
-    },
-    {
-      name: 'ocr.space/e3',
-      run: async (angle) => {
-        const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 85 }).toBuffer();
-        console.log(`[bat-ocr] ocr.space E3 rot ${angle} (${jpeg.length} bytes)`);
-        return await ocrViaOcrSpaceEngine(jpeg, '3');
-      },
-    },
-    {
-      name: 'Tesseract',
-      run: async (angle) => {
-        const processed = await sharp(imageBuffer)
-          .rotate(angle).greyscale().normalise().sharpen({ sigma: 2 }).threshold(140).png().toBuffer();
-        const { data: { text } } = await worker.recognize(processed);
-        return text;
-      },
-    },
-    {
-      name: 'Tesseract-noThresh',
-      run: async (angle) => {
-        const processed = await sharp(imageBuffer)
-          .rotate(angle).greyscale().normalise().sharpen({ sigma: 3 }).png().toBuffer();
-        const { data: { text } } = await worker.recognize(processed);
-        return text;
-      },
-    },
-    {
-      name: 'ocr.space/e2',
-      run: async (angle) => {
-        const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 80 }).toBuffer();
-        console.log(`[bat-ocr] ocr.space E2 rot ${angle} (${jpeg.length} bytes)`);
-        return await ocrViaOcrSpaceEngine(jpeg, '2');
-    },
-  });
-
-  let tierError = null;
-  for (const engine of ocrEngines) {
-    for (const angle of [0, 90]) {
-      try {
-        const text = await engine.run(angle);
-        if (!text || text.trim().length < 20) continue;
-        console.log(`[bat-ocr] ${engine.name} rot ${angle}: ${text.length} chars`);
-        const invoice = findInvoiceNumber(text);
-        if (invoice) {
-          console.log(`[bat-ocr] Found via ${engine.name} (rot ${angle}): ${invoice}`);
-          return { invoice, previewPath };
-        }
-      } catch (err) {
-        console.log(`[bat-ocr] ${engine.name} rot ${angle} failed: ${err.message}`);
-        if (err.tierError && !tierError) tierError = `${engine.name}: ${err.message}`;
-      }
-    }
-  }
-
-  return { invoice: null, previewPath, error: tierError };
 }
 
 function findInvoiceNumber(text) {
@@ -2063,13 +2061,6 @@ export function getDashboardData(year) {
   const yr = Number.parseInt(year, 10);
   const scoped = Number.isFinite(yr) && yr > 1900 && yr < 9999 ? yr : null;
   const yearWhere = scoped ? 'WHERE year = ?' : '';
-  const yearJoin = scoped
-    ? `WHERE EXISTS (
-         SELECT 1 FROM bat_reconciliations r
-         WHERE r.id = bat_invoice_extractions.reconciliation_id
-           AND r.year = ?
-       )`
-    : '';
   const yearArg = scoped ? [scoped] : [];
 
   const reconciliations = listReconciliations()
@@ -2096,28 +2087,17 @@ export function getDashboardData(year) {
   } catch {}
   const totalVariance = totalSupplier - totalSage;
 
-  // totalPods + matched + exact-matched: pod_count is a cheap COUNT(*); matched
-  // counts are computed in JS via a single Cardoso lookup map. Replaces two
-  // correlated EXISTS subqueries with non-sargable string normalization.
+  // totalPods + matched + exact-matched: skip the duplicate full scan of
+  // bat_invoice_extractions — listReconciliations() already built the
+  // per-recon match map. Sum its per-row matched_count / exact_match_count
+  // (which are already year-filtered via the `reconciliations` array slice
+  // above), and pull totalPods straight from the cached pod_count column.
   let totalPods = 0, totalMatched = 0, totalExactMatched = 0;
   try {
-    const podRow = db.prepare(
-      `SELECT COUNT(*) AS c FROM bat_invoice_extractions ${yearJoin}`
-    ).get(...yearArg);
-    totalPods = podRow?.c || 0;
-    const cardosoAmounts = buildCardosoLookup();
-    const extRows = db.prepare(
-      `SELECT extracted_invoice, order_amount
-         FROM bat_invoice_extractions
-        WHERE extracted_invoice IS NOT NULL
-        ${scoped ? `AND EXISTS (SELECT 1 FROM bat_reconciliations r WHERE r.id = bat_invoice_extractions.reconciliation_id AND r.year = ?)` : ''}`
-    ).all(...yearArg);
-    for (const e of extRows) {
-      const key = String(e.extracted_invoice).replace(/\s/g, '').toUpperCase();
-      const cAmount = cardosoAmounts.get(key);
-      if (cAmount === undefined) continue;
-      totalMatched++;
-      if (Math.abs((e.order_amount || 0) - (cAmount || 0)) < 0.01) totalExactMatched++;
+    for (const r of reconciliations) {
+      totalPods         += r.pod_count || 0;
+      totalMatched      += r.matched_count || 0;
+      totalExactMatched += r.exact_match_count || 0;
     }
   } catch {}
   // Match rate = invoices that match by BOTH number AND amount (within R 0.01)

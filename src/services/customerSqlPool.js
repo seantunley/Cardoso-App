@@ -1,29 +1,47 @@
 // MSSQL pool for live customer-module queries.
-// Picks the first active databaseconnection that is NOT marked is_bat_only —
-// i.e. the same connection the sync engine uses to import customer data into
-// the local datarecord table. The BAT module has its own dedicated pool in
-// batReconciliation.js (getSagePool) and must NOT be used here, even though
-// they may technically point to the same Sage 300 server.
+// Resolution order:
+//   1. The connection pinned to the 'customer_lookup' role in connection_role
+//      (set via Settings → Connections → Module routing).
+//   2. Legacy auto-pick: first active databaseconnection that is NOT marked
+//      is_bat_only, ordered by id. Kept as fallback so installs that haven't
+//      configured routing yet still work.
+// The BAT module has its own dedicated pool in batReconciliation.js
+// (getSagePool) and must NOT be used here, even though both may technically
+// point to the same Sage 300 server.
 
 import sql from 'mssql';
 import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
 import { buildSqlServerConfig } from './mssqlSecurity.js';
+import { getRoleConnectionId } from './connectionRoles.js';
+import { logError } from '../lib/errorLog.js';
 
 let pool = null;
 let poolKey = null;
 
 function loadCustomerSqlConfig() {
-  // Pick the first active, non-BAT-only connection. Order by id so behaviour
-  // is deterministic when multiple match.
-  const row = db.prepare(`
+  const selectCols = `
     SELECT id, name, host, port, database_name, username, encrypted_password, use_encryption
     FROM databaseconnection
-    WHERE status = 'active'
-      AND COALESCE(is_bat_only, 0) = 0
-    ORDER BY id
-    LIMIT 1
-  `).get();
+  `;
+
+  // 1) Explicit role assignment
+  let row = null;
+  const assignedId = getRoleConnectionId('customer_lookup');
+  if (assignedId) {
+    row = db.prepare(`${selectCols} WHERE id = ? AND status = 'active'`).get(assignedId);
+  }
+
+  // 2) Fallback: first active, non-BAT-only connection (legacy behaviour)
+  if (!row) {
+    row = db.prepare(`
+      ${selectCols}
+      WHERE status = 'active'
+        AND COALESCE(is_bat_only, 0) = 0
+      ORDER BY id
+      LIMIT 1
+    `).get();
+  }
 
   if (!row) return null;
 
@@ -57,7 +75,12 @@ async function getCustomerSqlPool() {
   }
   if (pool) return pool;
   console.log(`[customer-sql] Opening pool from ${loaded.source}`);
-  pool = await sql.connect(loaded.config);
+  try {
+    pool = await sql.connect(loaded.config);
+  } catch (err) {
+    try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {}
+    throw err;
+  }
   poolKey = loaded.key;
   return pool;
 }
@@ -70,11 +93,13 @@ export async function runCustomerSqlQuery(sqlText) {
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[customer-sql] Pool dropped, reopening and retrying once');
+      try { logError('customer.sql.query', err, { phase: 'pool_dropped_retrying' }, 'info'); } catch {}
       try { await p.close(); } catch {}
       pool = null;
       p = await getCustomerSqlPool();
       return await p.request().query(sqlText);
     }
+    try { logError('customer.sql.query', err); } catch {}
     throw err;
   }
 }

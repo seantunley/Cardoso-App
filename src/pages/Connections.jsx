@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
-import { Database, Plus, RefreshCw } from "lucide-react";
+import { Database, Plus, RefreshCw, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
@@ -75,6 +75,109 @@ async function deleteLocalConnection(id) {
   }
 
   return result;
+}
+
+async function fetchConnectionRoles() {
+  const response = await fetch("/api/connection-roles", { credentials: "include" });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Failed to load module routing");
+  return result; // { roles: [{id,label}], assigned: { roleId: connId } }
+}
+
+async function setConnectionRole(role, connectionId) {
+  const response = await fetch(`/api/connection-roles/${role}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({ connection_id: connectionId }),
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Failed to update module routing");
+  return result;
+}
+
+function ModuleRoutingCard({ connections, isAdmin }) {
+  const queryClient = useQueryClient();
+  const { data: routing, isLoading, error } = useQuery({
+    queryKey: ["connection-roles"],
+    queryFn: fetchConnectionRoles,
+    staleTime: 60_000,
+  });
+
+  const mutation = useMutation({
+    mutationFn: ({ role, connectionId }) => setConnectionRole(role, connectionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["connection-roles"] });
+      toast.success("Module routing updated");
+    },
+    onError: (err) => toast.error(err.message || "Update failed"),
+  });
+
+  if (error) {
+    return (
+      <Card className="border-rose-700 bg-rose-900/20">
+        <CardContent className="p-4">
+          <p className="text-sm text-rose-300">
+            Module routing unavailable: {error.message || "unknown error"}
+          </p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const handleChange = (role, value) => {
+    const id = value === "" ? null : Number(value);
+    mutation.mutate({ role, connectionId: id });
+  };
+
+  return (
+    <Card className="border-border bg-card">
+      <CardContent className="p-5 space-y-4">
+        <div className="flex items-center gap-2 border-b border-border pb-3">
+          <Workflow className="w-4 h-4 text-muted-foreground" />
+          <h2 className="text-sm font-medium text-foreground">Module routing</h2>
+          <span className="text-xs text-muted-foreground">
+            Pin each module to a specific connection. Leave on "Auto-pick" to use the default selection logic.
+          </span>
+        </div>
+        {isLoading || !routing ? (
+          <p className="text-xs text-muted-foreground">Loading routing settings…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {routing.roles.map((role) => {
+                const value = routing.assigned[role.id] ?? "";
+                return (
+                  <div key={role.id} className="space-y-1.5">
+                    <label htmlFor={`role-${role.id}`} className="text-xs font-medium text-muted-foreground">
+                      {role.label}
+                    </label>
+                    <select
+                      id={`role-${role.id}`}
+                      value={value}
+                      disabled={!isAdmin || mutation.isPending}
+                      onChange={(e) => handleChange(role.id, e.target.value)}
+                      className="w-full h-9 px-3 rounded-md border border-border bg-background text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+                    >
+                      <option value="">Auto-pick (default)</option>
+                      {connections.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} — {c.host}/{c.database_name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+            {!isAdmin && (
+              <p className="text-xs text-muted-foreground">Read-only — only admins can change module routing.</p>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 async function runLocalImport(connectionId) {
@@ -285,6 +388,8 @@ export default function Connections() {
             </CardContent>
           </Card>
         )}
+
+        <ModuleRoutingCard connections={connections} isAdmin={isAdmin} />
 
         {loadingConnections ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

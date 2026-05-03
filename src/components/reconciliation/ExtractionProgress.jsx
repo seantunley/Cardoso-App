@@ -7,7 +7,7 @@ export default function ExtractionProgress({ progress }) {
 
   return (
     <div
-      className="relative border border-border bg-card p-5 space-y-3"
+      className="relative overflow-hidden border border-border bg-card p-5 space-y-3"
       style={{ borderRadius: '12px' }}
     >
       <div

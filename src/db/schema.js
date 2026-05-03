@@ -310,6 +310,56 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id);
     `);
+
+    // Normalised invoice-numbers column + maintenance triggers for hub_records.
+    // The matching column on datarecord is created by migration v51, but
+    // hub_records is created here AFTER runMigrations on hub installs, so we
+    // mirror the same setup inline. Kept idempotent (IF NOT EXISTS guards).
+    const hrCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
+    if (!hrCols.includes('unpaid_invoice_numbers')) {
+      db.exec('ALTER TABLE hub_records ADD COLUMN unpaid_invoice_numbers TEXT');
+    }
+    db.exec(`
+      UPDATE hub_records
+         SET unpaid_invoice_numbers = (
+           SELECT COALESCE(GROUP_CONCAT(UPPER(json_extract(value, '$.number')), ' '), '')
+             FROM json_each(hub_records.unpaid_invoices)
+            WHERE json_extract(value, '$.number') IS NOT NULL
+         )
+       WHERE unpaid_invoices IS NOT NULL
+         AND unpaid_invoices != ''
+         AND unpaid_invoices != '[]'
+         AND (unpaid_invoice_numbers IS NULL OR unpaid_invoice_numbers = '')
+    `);
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_unpaid_invoice_numbers
+             ON hub_records(unpaid_invoice_numbers)`);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS hub_records_unpaid_invoice_numbers_ai
+      AFTER INSERT ON hub_records
+      WHEN NEW.unpaid_invoices IS NOT NULL
+      BEGIN
+        UPDATE hub_records
+           SET unpaid_invoice_numbers = COALESCE((
+             SELECT GROUP_CONCAT(UPPER(json_extract(value, '$.number')), ' ')
+               FROM json_each(NEW.unpaid_invoices)
+              WHERE json_extract(value, '$.number') IS NOT NULL
+           ), '')
+         WHERE id = NEW.id;
+      END
+    `);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS hub_records_unpaid_invoice_numbers_au
+      AFTER UPDATE OF unpaid_invoices ON hub_records
+      BEGIN
+        UPDATE hub_records
+           SET unpaid_invoice_numbers = COALESCE((
+             SELECT GROUP_CONCAT(UPPER(json_extract(value, '$.number')), ' ')
+               FROM json_each(NEW.unpaid_invoices)
+              WHERE json_extract(value, '$.number') IS NOT NULL
+           ), '')
+         WHERE id = NEW.id;
+      END
+    `);
   }
 }
 

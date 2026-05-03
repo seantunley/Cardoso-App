@@ -80,7 +80,7 @@ export function initBatSchema(db) {
       compliance_status TEXT,
       exception_reason TEXT,
       created_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(pdf_url)
+      UNIQUE(reconciliation_id, pdf_url)
     )
   `);
 
@@ -148,4 +148,73 @@ export function initBatSchema(db) {
   if (!reconHas('last_error'))    db.exec("ALTER TABLE bat_reconciliations ADD COLUMN last_error TEXT");
   if (!reconHas('last_error_at')) db.exec("ALTER TABLE bat_reconciliations ADD COLUMN last_error_at TEXT");
   if (!reconHas('sage_error'))    db.exec("ALTER TABLE bat_reconciliations ADD COLUMN sage_error TEXT");
+
+  // Migration: replace UNIQUE(pdf_url) with UNIQUE(reconciliation_id, pdf_url).
+  // Old constraint silently re-pointed any re-uploaded POD URL at the new recon
+  // while keeping its previous extraction_status, leaving fresh weekly uploads
+  // with zero pending rows to OCR.
+  const idxList = db.prepare("PRAGMA index_list(bat_invoice_extractions)").all();
+  const hasOldUnique = idxList.some((idx) => {
+    if (!idx.unique) return false;
+    const cols = db.prepare(`PRAGMA index_info("${idx.name}")`).all();
+    return cols.length === 1 && cols[0].name === 'pdf_url';
+  });
+  if (hasOldUnique) {
+    db.exec("PRAGMA foreign_keys = OFF");
+    const rebuild = db.transaction(() => {
+      db.exec(`
+        CREATE TABLE bat_invoice_extractions_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          reconciliation_id INTEGER REFERENCES bat_reconciliations(id) ON DELETE CASCADE,
+          pdf_url TEXT NOT NULL,
+          order_number TEXT,
+          branch_name TEXT,
+          store_name TEXT,
+          week TEXT,
+          order_day TEXT,
+          delivery_day TEXT,
+          lead_time INTEGER,
+          delivery_date TEXT,
+          pod_uploaded_date TEXT,
+          validate TEXT,
+          extracted_invoice TEXT,
+          extraction_status TEXT DEFAULT 'pending',
+          extraction_attempts INTEGER DEFAULT 0,
+          extraction_error TEXT,
+          sage_match_document TEXT,
+          sage_match_amount REAL,
+          match_status TEXT DEFAULT 'pending',
+          preview_path TEXT,
+          order_amount REAL,
+          is_exception INTEGER DEFAULT 0,
+          target_days INTEGER,
+          compliance_status TEXT,
+          exception_reason TEXT,
+          supplier_discount REAL,
+          supplier_del_fee REAL,
+          supplier_pricing REAL,
+          manual_override INTEGER DEFAULT 0,
+          created_at TEXT DEFAULT (datetime('now')),
+          UNIQUE(reconciliation_id, pdf_url)
+        )
+      `);
+      // Copy by intersection so any column drift between old/new shapes is tolerated
+      const oldNames = db.prepare("PRAGMA table_info(bat_invoice_extractions)").all().map(c => c.name);
+      const newNames = db.prepare("PRAGMA table_info(bat_invoice_extractions_new)").all().map(c => c.name);
+      const shared = oldNames.filter(c => newNames.includes(c));
+      const colList = shared.map(c => `"${c}"`).join(', ');
+      db.exec(`INSERT INTO bat_invoice_extractions_new (${colList}) SELECT ${colList} FROM bat_invoice_extractions`);
+      db.exec("DROP TABLE bat_invoice_extractions");
+      db.exec("ALTER TABLE bat_invoice_extractions_new RENAME TO bat_invoice_extractions");
+      // DROP TABLE removed every index along with the old table — recreate
+      // both the schema-level indexes and the ones added by later migrations.
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_extractions_recon ON bat_invoice_extractions(reconciliation_id)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_extractions_status ON bat_invoice_extractions(extraction_status)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_extractions_recon_status ON bat_invoice_extractions(reconciliation_id, extraction_status, id)`);
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_extractions_invoice ON bat_invoice_extractions(extracted_invoice) WHERE extracted_invoice IS NOT NULL`);
+    });
+    rebuild();
+    db.exec("PRAGMA foreign_keys = ON");
+    console.log('[bat-schema] Migrated bat_invoice_extractions: UNIQUE(pdf_url) -> UNIQUE(reconciliation_id, pdf_url)');
+  }
 }

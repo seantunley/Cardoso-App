@@ -9,7 +9,9 @@ import sql from 'mssql';
 import { decryptPassword } from '../services/encryption.js';
 import { buildSqlServerConfig } from '../services/mssqlSecurity.js';
 import { runConnectionImport } from '../services/syncEngine.js';
+import { KNOWN_ROLES, listConnectionRoles, setRoleConnection } from '../services/connectionRoles.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 
 export function createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) {
   const router = Router();
@@ -77,6 +79,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         });
       } catch (error) {
         console.error('Test connection error:', error);
+        try { logError('connection.test', error, { connection_id: req.body?.connectionId, host: req.body?.host }); } catch {}
         res.status(500).json({
           error: error.message || 'Failed to connect to SQL Server',
         });
@@ -155,9 +158,50 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         });
       } catch (error) {
         console.error('Test query error:', error);
+        try { logError('connection.test_query', error, { connection_id: req.body?.connectionId }); } catch {}
         res.status(500).json({ error: error.message || 'Query failed' });
       } finally {
         if (pool) { try { await pool.close(); } catch {} }
+      }
+    }
+  );
+
+  // ==================== MODULE → CONNECTION ROUTING ====================
+  // Each known module ("role") can be pinned to a specific connection. Roles
+  // without an assignment fall back to the legacy auto-pick in the consuming
+  // module's loader.
+  router.get(
+    '/api/connection-roles',
+    requireAuth,
+    requirePermission('can_access_connections'),
+    (req, res) => {
+      const assigned = Object.fromEntries(
+        listConnectionRoles().map(r => [r.role, r.connection_id])
+      );
+      res.json({ roles: KNOWN_ROLES, assigned });
+    }
+  );
+
+  router.put(
+    '/api/connection-roles/:role',
+    requireAuth,
+    requirePermission('can_access_connections'),
+    (req, res) => {
+      const { role } = req.params;
+      const raw = req.body?.connection_id;
+      const connectionId = raw == null || raw === '' ? null : Number(raw);
+      try {
+        setRoleConnection(role, connectionId);
+        logAudit({
+          req, action: 'connection_role_set', resourceType: 'connection',
+          resourceId: connectionId, resourceName: role,
+          details: connectionId == null
+            ? `Cleared module routing: ${role}`
+            : `Routed module ${role} -> connection #${connectionId}`,
+        });
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(400).json({ error: err.message });
       }
     }
   );
@@ -184,6 +228,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         });
         res.json(result);
       } catch (error) {
+        try { logError('connection.import', error, { connection_id: req.params.connectionId, name: conn?.name }); } catch {}
         logAudit({
           req, action: 'manual_import', resourceType: 'connection',
           resourceId: req.params.connectionId,
