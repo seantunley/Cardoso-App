@@ -1673,6 +1673,13 @@ function normalizeInvoiceNumbers(reconId) {
 // instead of 15-20. Trade-off: a legitimately huge scanned PDF gets cut off,
 // but those usually OCR poorly anyway and need a manual override.
 const PDF_TIMEOUT = 120000;
+// Backstop hard kill: if a row is still in_flight this far past PDF_TIMEOUT,
+// the lane's internal setTimeout(reject) has somehow failed to land and the
+// whole queue is wedged. The watchdog in processQueue terminates the
+// worker_thread directly so the lane can be replaced and the run can
+// continue. Without this, observed real-world hangs grew to 15+ minutes per
+// row before users noticed and restarted the server.
+const HARD_KILL_THRESHOLD_MS = PDF_TIMEOUT + 60_000;
 // If a row has been processing for this many seconds, log a System Log entry
 // so operators can see "row X has been chewing for too long" without staring
 // at the progress bar.
@@ -1717,8 +1724,12 @@ class OcrLane {
         slot.reject(err);
       }
     });
+    // Reject every pending slot. Idempotent — safe to call multiple times,
+    // since after the first call `this.pending` is empty. The previous
+    // version returned early when `this.dead` was already true, which left
+    // the await in runLane orphaned whenever terminate() was invoked
+    // externally (e.g. by the watchdog) before any error/exit fired.
     const failAll = (err) => {
-      if (this.dead) return;
       this.dead = true;
       for (const [, slot] of this.pending) slot.reject(err);
       this.pending.clear();
@@ -1728,9 +1739,12 @@ class OcrLane {
       failAll(err);
     });
     this.worker.on('exit', (code) => {
-      if (code === 0 || this.dead) return;
-      const err = new Error(`OCR worker exited unexpectedly (code=${code})`);
-      try { logError('bat.ocr.worker_thread', err, { phase: 'exit', code }); } catch {}
+      // Always wake any pending awaits — even on a clean exit, an external
+      // terminate() leaves slots stranded otherwise.
+      const err = new Error(`OCR worker exited (code=${code})`);
+      if (code !== 0) {
+        try { logError('bat.ocr.worker_thread', err, { phase: 'exit', code }); } catch {}
+      }
       failAll(err);
     });
   }
@@ -1819,16 +1833,44 @@ async function processQueue(reconId) {
       const elapsed = now - row.started_at_ms;
       if (elapsed < SLOW_ROW_THRESHOLD_MS) continue;
       const lastWarn = lastWarnedAt.get(row.id) || 0;
-      if (now - lastWarn < 60_000) continue;
-      lastWarnedAt.set(row.id, now);
-      try {
-        logError(
-          'bat.ocr.row_slow',
-          new Error(`Row ${row.id} (${row.store_name || 'unknown'}) processing for ${Math.floor(elapsed / 1000)}s`),
-          { reconciliation_id: reconId, extraction_id: row.id, store_name: row.store_name, elapsed_seconds: Math.floor(elapsed / 1000) },
-          'info',
-        );
-      } catch {}
+      if (now - lastWarn >= 60_000) {
+        lastWarnedAt.set(row.id, now);
+        try {
+          logError(
+            'bat.ocr.row_slow',
+            new Error(`Row ${row.id} (${row.store_name || 'unknown'}) processing for ${Math.floor(elapsed / 1000)}s`),
+            { reconciliation_id: reconId, extraction_id: row.id, store_name: row.store_name, elapsed_seconds: Math.floor(elapsed / 1000) },
+            'info',
+          );
+        } catch {}
+      }
+
+      // Backstop watchdog. The lane's internal PDF_TIMEOUT (120s) should
+      // already have rejected this extract — but real-world traces show
+      // rows stuck for 9-15+ minutes, meaning that timer's reject path
+      // sometimes fails to unblock the await. Force-terminating the
+      // worker_thread here triggers the OcrLane's `exit` handler, which
+      // calls failAll() to reject every pending slot — that wakes the
+      // await in runLane, the catch+finally clean up the row, and the
+      // lane is replaced. We only fire once per row so a stuck OS-level
+      // terminate doesn't loop.
+      if (elapsed >= HARD_KILL_THRESHOLD_MS && !row.kill_attempted) {
+        row.kill_attempted = true;
+        try {
+          logError(
+            'bat.ocr.watchdog_kill',
+            new Error(`Force-killing lane for row ${row.id} (${row.store_name || 'unknown'}) after ${Math.floor(elapsed / 1000)}s — internal PDF_TIMEOUT failed to fire`),
+            {
+              reconciliation_id: reconId,
+              extraction_id: row.id,
+              store_name: row.store_name,
+              elapsed_seconds: Math.floor(elapsed / 1000),
+              lane_dead_before: !!row.lane?.worker?.dead,
+            },
+          );
+        } catch {}
+        try { row.lane?.worker?.terminate(); } catch {}
+      }
     }
   }, 30_000);
   if (typeof slowMonitor.unref === 'function') slowMonitor.unref();
@@ -1889,6 +1931,8 @@ async function processQueue(reconId) {
         store_name: next.store_name,
         reconciliation_id: reconId,
         started_at_ms: Date.now(),
+        lane,                  // ref so the watchdog can terminate the worker
+        kill_attempted: false, // ensures we only fire the watchdog once per row
       });
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
       try {

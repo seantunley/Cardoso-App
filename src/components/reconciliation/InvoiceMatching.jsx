@@ -202,7 +202,7 @@ function ManualInvoiceInput({ extraction, onSaved }) {
           <button
             onClick={handleSave}
             disabled={saving || !value.trim()}
-            className="flex-shrink-0 p-1 transition-colors disabled:opacity-30"
+            className="flex-shrink-0 p-1 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
             style={{ color: 'hsl(145 55% 45%)' }}
           >
             <Save className="h-3.5 w-3.5" />
