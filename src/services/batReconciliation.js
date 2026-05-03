@@ -2039,6 +2039,10 @@ function recordReconciliationError(reconId, message) {
 const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
 if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
 
+// pdfjs-dist is PINNED to 4.8.69. See the long-form comment in
+// src/services/ocrWorker.js for why — short version: pdfjs 4.10+ uses
+// ImageBitmap which node-canvas doesn't accept. Migration to a
+// Node-native PDF engine is queued in docs/plans/pdf-engine-migration.md.
 async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const { createCanvas } = await import('canvas');
@@ -2048,9 +2052,7 @@ async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
   const viewport = page.getViewport({ scale });
   const canvas = createCanvas(viewport.width, viewport.height);
   const context = canvas.getContext('2d');
-  // Pass both canvas + canvasContext for compatibility with pdfjs 4.10+
-  // (mirrors the same fix in src/services/ocrWorker.js).
-  await page.render({ canvas, canvasContext: context, viewport }).promise;
+  await page.render({ canvasContext: context, viewport }).promise;
   await pdfDoc.destroy();
   return canvas.toBuffer('image/png');
 }
