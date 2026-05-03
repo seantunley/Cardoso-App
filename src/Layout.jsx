@@ -267,7 +267,7 @@ const navItems = [
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Hub Audit Log",       icon: IconHubAuditLog,           page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
-  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation" },
+  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
 ];
 
