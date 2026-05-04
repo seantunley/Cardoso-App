@@ -29,15 +29,18 @@ const COLUMN_TIPS = {
 // actual container width, so the absolute numbers below are seed values —
 // it's the proportions that matter.
 const COLUMN_DEFAULTS = {
-  idx: 44, order: 185, store: 78, custNo: 99, cust: 240,
+  idx: 44, order: 185, store: 78, custNo: 125, cust: 240,
   week: 60, orderDay: 84, deliveryDay: 100, leadTime: 60,
   delivery: 95, podUploaded: 110, target: 80, exception: 180,
   ocr: 56, invoice: 218, amount: 95,
 };
-// Bumped from v3 → v4 to invalidate localStorage entries under the
-// previous header-clipping defaults. Existing users get the new defaults
-// once on first visit; subsequent custom resizes save under v4.
-const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v4';
+// Bumped to v5 because the auto-fit useEffect saves SCALED widths to
+// localStorage on every change — once v4 had scaled values cached, any
+// subsequent default-tweak in the source was silently overridden by the
+// saved values. Bumping the key invalidates the cache so existing users
+// pick up the new custNo width (was 99 → header "CUSTOMER NO." truncated;
+// now 125 fits comfortably).
+const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v5';
 
 function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
