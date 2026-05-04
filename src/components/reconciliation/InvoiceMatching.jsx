@@ -210,6 +210,23 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
   const tableContainerRef = useRef(null);
+  // Holds the "Retry Not Found" status-poll interval so we can kill it on
+  // unmount or when the user navigates to a different recon. Without this,
+  // the interval was leaked into a local closure inside handleRetry — every
+  // retry click that didn't reach pending=0 before unmount kept ticking
+  // forever, polling /api/bat/extraction-status every 3s in the background.
+  // After a week of OCR sessions the operator had accumulated enough zombie
+  // pollers that the only fix was closing+reopening the browser tab.
+  const retryPollRef = useRef(null);
+  const clearRetryPoll = useCallback(() => {
+    if (retryPollRef.current) {
+      clearInterval(retryPollRef.current);
+      retryPollRef.current = null;
+    }
+  }, []);
+  // Kill the poll on unmount AND whenever the recon changes — a stale poll
+  // from recon A would otherwise keep firing while the user is on recon B.
+  useEffect(() => clearRetryPoll, [reconciliationId, clearRetryPoll]);
   const { widths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
   // No more auto-fit useEffect — we now use percentage widths on
@@ -225,6 +242,9 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
 
   const handleRetry = async () => {
     if (!reconciliationId) return;
+    // A retry click while a previous poll is still running would leak the
+    // old interval. Clear first.
+    clearRetryPoll();
     setRetrying(true);
     try {
       const res = await fetch('/api/bat/retry-extraction', {
@@ -236,17 +256,27 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       if (res.ok) {
         const data = await res.json();
         if (data.requeued > 0) {
-          const poll = setInterval(async () => {
+          // Hard cap so a wedged worker (status.running stays true forever)
+          // can't leak the poll past 30 minutes even if the user stays on
+          // the page — the cleanup useEffect handles the navigate-away case.
+          const startedAt = Date.now();
+          const HARD_CAP_MS = 30 * 60 * 1000;
+          retryPollRef.current = setInterval(async () => {
+            if (Date.now() - startedAt > HARD_CAP_MS) {
+              clearRetryPoll();
+              setRetrying(false);
+              return;
+            }
             try {
               const statusRes = await fetch(`/api/bat/extraction-status/${reconciliationId}`, { credentials: 'include' });
               const status = await statusRes.json();
               if (!status.running && status.pending === 0) {
-                clearInterval(poll);
+                clearRetryPoll();
                 const reconRes = await fetch(`/api/bat/reconciliation/${reconciliationId}`, { credentials: 'include' });
                 if (reconRes.ok) onReconciliationUpdate(await reconRes.json());
                 setRetrying(false);
               }
-            } catch { clearInterval(poll); setRetrying(false); }
+            } catch { clearRetryPoll(); setRetrying(false); }
           }, 3000);
         } else {
           setRetrying(false);

@@ -11,7 +11,12 @@ const CB_COLUMN_DEFAULTS = {
   idx: 40, name: 476, custId: 105, site: 54, rep: 83,
   lastInv: 107, lastRec: 104, outstanding: 132, credit: 90,
 };
-const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v3";
+// v4: switched table from absolute-pixel widths + JS auto-fit to a CSS
+// width:100% + percentage <col> layout. Existing v3 saves are scaled
+// pixel values left over from the broken auto-fit and would render with
+// the same off-balance proportions; bumping the key gives operators a
+// clean default that fills the container.
+const CB_COLUMN_WIDTHS_KEY = "customerBalances.columnWidths.v4";
 
 function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
@@ -377,31 +382,13 @@ export default function CustomerBalances() {
   const tableContainerRef = useRef(null);
   const { widths: colWidths, setWidths: setColWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
-  // Auto-fit: scale columns proportionally so they ALWAYS fill the container
-  // exactly — no empty band on the right when total < container, no overflow
-  // when total > container. The 1px hairline reserved for the right border
-  // keeps the rounded frame from looking clipped.
-  useEffect(() => {
-    const el = tableContainerRef.current;
-    if (!el) return;
-    const fit = () => {
-      const inner = el.clientWidth;
-      if (!inner) return;
-      const target = inner - 1;
-      const total = Object.values(colWidths).reduce((s, v) => s + v, 0);
-      if (Math.abs(total - target) < 2) return;
-      const scale = target / total;
-      const scaled = Object.fromEntries(
-        Object.entries(colWidths).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
-      );
-      setColWidths(scaled);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Container fill is now handled by CSS (table width: 100% + percentage
+  // <col> widths below) instead of a JS auto-fit loop. The previous
+  // ResizeObserver-based scaler captured colWidths in a closure with an
+  // empty deps array, so setColWidths(scaled) wrote stale values back —
+  // and the Math.max(40, ...) floor introduced drift on every save to
+  // localStorage, eventually leaving an empty band to the right of the
+  // table that operators couldn't recover from without clearing storage.
   const [sortField, setSortField] = useState("outstanding_balance");
   const [sortDir, setSortDir] = useState("desc");
 
@@ -802,17 +789,21 @@ export default function CustomerBalances() {
               className="rounded-xl border border-border bg-card overflow-hidden"
               style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "hidden" }}
             >
-              <table className="text-sm" style={{ tableLayout: "fixed", width: Object.values(colWidths).reduce((s, v) => s + v, 0) }}>
+              {(() => {
+                const totalWidth = Object.values(colWidths).reduce((s, v) => s + v, 0) || 1;
+                const pct = (id) => `${((colWidths[id] || 100) / totalWidth) * 100}%`;
+                return (
+              <table className="text-sm w-full" style={{ tableLayout: "fixed" }}>
                 <colgroup>
-                  <col style={{ width: colWidths.idx }} />
-                  <col style={{ width: colWidths.name }} />
-                  <col style={{ width: colWidths.custId }} />
-                  <col style={{ width: colWidths.site }} />
-                  <col style={{ width: colWidths.rep }} />
-                  <col style={{ width: colWidths.lastInv }} />
-                  <col style={{ width: colWidths.lastRec }} />
-                  <col style={{ width: colWidths.outstanding }} />
-                  <col style={{ width: colWidths.credit }} />
+                  <col style={{ width: pct("idx") }} />
+                  <col style={{ width: pct("name") }} />
+                  <col style={{ width: pct("custId") }} />
+                  <col style={{ width: pct("site") }} />
+                  <col style={{ width: pct("rep") }} />
+                  <col style={{ width: pct("lastInv") }} />
+                  <col style={{ width: pct("lastRec") }} />
+                  <col style={{ width: pct("outstanding") }} />
+                  <col style={{ width: pct("credit") }} />
                 </colgroup>
                 <thead className="sticky top-0 z-20">
                   <tr className="border-b border-border bg-card">
@@ -877,6 +868,8 @@ export default function CustomerBalances() {
                   })}
                 </tbody>
               </table>
+                );
+              })()}
             </div>
           )}
 

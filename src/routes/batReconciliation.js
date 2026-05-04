@@ -215,17 +215,38 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
 
+    // Cap concurrent SSE listeners per recon. Without this, every browser tab
+    // opened against the same recon — including zombie connections that
+    // didn't fire `req.on('close')` cleanly on tab teardown — adds another
+    // listener that the worker has to fan out to on every progress emit.
+    // After enough sessions the main thread spent so much time running the
+    // per-listener send() (which does sync SQLite reads + a response write)
+    // that other requests stalled hard enough to hit Chrome's 6-per-origin
+    // connection limit. We close the OLDEST listener so the operator's
+    // current tab always wins; the closed tab will fall back to its
+    // adaptive-polling loop transparently.
+    const SSE_MAX_PER_RECON = 4;
+    const channel = `update:${id}`;
+    if (extractionEvents.listenerCount(channel) >= SSE_MAX_PER_RECON) {
+      const oldest = extractionEvents.listeners(channel)[0];
+      if (oldest) {
+        extractionEvents.off(channel, oldest);
+        try { oldest.__sseRes?.end(); } catch {}
+      }
+    }
+
     // Initial snapshot, then push on every worker emit.
     send();
     const onUpdate = () => send();
-    extractionEvents.on(`update:${id}`, onUpdate);
+    onUpdate.__sseRes = res; // eviction hook above uses this to end the response
+    extractionEvents.on(channel, onUpdate);
 
     // Heartbeat every 25 s so proxies / load balancers don't kill the connection.
     const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25_000);
 
     req.on('close', () => {
       clearInterval(heartbeat);
-      extractionEvents.off(`update:${id}`, onUpdate);
+      extractionEvents.off(channel, onUpdate);
     });
   });
 
@@ -285,10 +306,50 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     }
   });
 
-  router.get('/api/bat/reconciliation/:id', ...gate, (req, res) => {
+  // Per-recon last-refresh timestamps for the auto Sage pull below. Throttles
+  // re-pulls so the adaptive polling loop (5–15s tick during OCR) doesn't
+  // fire a Sage round-trip on every tick. Cleared on process restart, which
+  // is the cheap retry mechanism.
+  const lastCreditNotesPullAt = new Map(); // reconId -> ms timestamp
+  const CREDIT_NOTES_PULL_THROTTLE_MS = 60_000;
+
+  router.get('/api/bat/reconciliation/:id', ...gate, async (req, res) => {
     const id = parseInt(req.params.id, 10);
-    const recon = getReconciliation(id);
+    let recon = getReconciliation(id);
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
+
+    // Auto-refresh per-recon Sage credit-note detail when the recon screen
+    // is opened. Without this, the "Sage Credit Note Details" panel only
+    // appeared if the recon was created with Sage already active, or the
+    // operator manually clicked the "Refresh Sage" toolbar button — every
+    // other recon silently showed correct Sage totals (from the cache)
+    // but no per-line breakdown. Throttled per-recon so the page's
+    // adaptive polling loop doesn't hammer Sage.
+    const now = Date.now();
+    const lastPull = lastCreditNotesPullAt.get(id) || 0;
+    const empty = !recon.creditNotes || recon.creditNotes.length === 0;
+    const hasSageData = (recon.sage_total || 0) > 0;
+    // Pull when the panel is empty (first open) OR when enough time has
+    // elapsed that this is plausibly a fresh page navigation. Skip if
+    // the cache says there's no Sage data for this week — no point
+    // querying for nothing.
+    if (hasSageData && (empty || now - lastPull >= CREDIT_NOTES_PULL_THROTTLE_MS)) {
+      lastCreditNotesPullAt.set(id, now);
+      try {
+        const creditNotes = await querySageCreditNotes(recon.week_number, recon.year);
+        if (creditNotes) {
+          db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
+          if (creditNotes.length > 0) storeSageCreditNotes(id, creditNotes);
+          recon = getReconciliation(id);
+        }
+      } catch (err) {
+        // Don't fail the whole request — the totals are still useful even
+        // without per-line detail. Log so an operator can see why the
+        // detail panel still isn't showing.
+        console.error(`[bat] Auto credit-note pull failed for recon ${id}:`, err.message);
+      }
+    }
+
     res.json(recon);
   });
 
