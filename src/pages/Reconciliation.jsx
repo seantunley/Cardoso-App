@@ -166,6 +166,20 @@ export default function Reconciliation() {
   const selectedIdRef = useRef(null);
   useEffect(() => { selectedIdRef.current = selected?.id; }, [selected?.id]);
 
+  // Cross-recon stale-state cleanup. When the operator navigates from one
+  // recon to another, force-close any leftover extraction stream and reset
+  // `extracting` to false. Without this, if the previous recon's run
+  // wedged before its handleProgress saw `running: false` (e.g. SSE stream
+  // silently dropped, or the final emit was missed), the `extracting`
+  // gate stayed stuck true at the page level — clicking Extract on the
+  // new recon was silently swallowed by `if (extracting) return;` and the
+  // operator had to close+reopen the browser tab to recover.
+  useEffect(() => {
+    closeExtractionStream();
+    setExtracting(false);
+    setExtractionPolling(null);
+  }, [selected?.id, closeExtractionStream]);
+
   // De-dupe toasted errors per reconciliation so polling doesn't spam
   const shownErrorsRef = useRef(new Set());
   useEffect(() => {
