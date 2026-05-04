@@ -1313,6 +1313,10 @@ function UpdateTab() {
   // so the elapsed-time string keeps updating between 4 s polls.
   const [progress, setProgress] = useState(null); // { phase, startedAt }
   const [tick, setTick] = useState(0);
+  // Update-log viewer state. Populated on demand by clicking "View update log"
+  // (cheap to fetch, but ~100 lines so we don't preload it on mount).
+  const [logLines, setLogLines] = useState(null);
+  const [logLoading, setLogLoading] = useState(false);
 
   useEffect(() => {
     fetch("/api/app-version-status", { credentials: "include" })
@@ -1320,6 +1324,19 @@ function UpdateTab() {
       .then(d => setInfo(d))
       .catch(err => reportClientError("SettingsPanel.versionStatus", err));
   }, []);
+
+  const fetchUpdateLog = async () => {
+    setLogLoading(true);
+    try {
+      const r = await fetch("/api/app-update-log", { credentials: "include" });
+      const d = await r.json();
+      setLogLines(d.lines || []);
+    } catch (err) {
+      toast.error(`Couldn't load update log: ${err.message}`);
+    } finally {
+      setLogLoading(false);
+    }
+  };
 
   // 1-Hz tick while an update is in progress so "(2m 18s)" advances visibly.
   useEffect(() => {
@@ -1359,6 +1376,8 @@ function UpdateTab() {
         // refreshes the live phase/startedAt so the UI message tracks where
         // the install actually is.
         const targetVersion = info?.latestVersion;
+        const pollStartedAt = Date.now();
+        const POLL_HARD_CAP_MS = 12 * 60 * 1000; // give up after 12 min total
         const poll = async () => {
           try {
             const pr = await fetch("/api/app-version-status", { credentials: "include" });
@@ -1367,11 +1386,34 @@ function UpdateTab() {
             if (pd.updateRunning) {
               setProgress({ phase: pd.updatePhase, startedAt: pd.updateStartedAt });
             }
+            // Update landed — reload to pick up the new bundle.
             if (pd.currentVersion && pd.currentVersion === targetVersion) {
               window.location.reload();
               return;
             }
+            // Marker says the update finished but didn't land (rollback or
+            // hard fail). Stop polling and surface the error — previously
+            // the UI just span forever in this state until the user gave up.
+            if (pd.lastUpdateFailed) {
+              setInfo(pd);
+              setStatus("error");
+              toast.error(pd.lastUpdateError
+                ? `Update failed: ${String(pd.lastUpdateError).slice(0, 200)}`
+                : 'Update finished but did not land. View the log for details.');
+              return;
+            }
           } catch { /* service still restarting */ }
+          if (Date.now() - pollStartedAt > POLL_HARD_CAP_MS) {
+            setStatus("error");
+            toast.error('Update did not complete within 12 minutes. Check the update log.');
+            // Force a fresh fetch so the failure banner appears if the marker
+            // has been written by now.
+            try {
+              const r = await fetch("/api/app-version-status", { credentials: "include" });
+              if (r.ok) setInfo(await r.json());
+            } catch {}
+            return;
+          }
           setTimeout(poll, 4000);
         };
         setTimeout(poll, 8000); // give it 8s before first check
@@ -1421,6 +1463,48 @@ function UpdateTab() {
             <span className="ml-3 text-amber-500 font-medium">Latest: {info.latestVersion}</span>
           )}
         </p>
+
+        {/* Sticky failure banner. Surfaces partial-update failures that the
+            in-app updater previously swallowed — e.g. file lock during the
+            file swap that triggered a rollback, leaving the service running
+            on the OLD version while the UI showed "Update successful". */}
+        {info?.lastUpdateFailed && (
+          <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 space-y-2">
+            <div className="flex items-start gap-2 text-sm text-destructive">
+              <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+              <div className="space-y-1">
+                <div className="font-medium">
+                  Last update did not land
+                  {info.lastUpdateExpectedVersion && (
+                    <span className="font-mono text-xs ml-1.5 opacity-80">
+                      (tried {info.lastUpdateExpectedVersion}, still on {info.currentVersion})
+                    </span>
+                  )}
+                </div>
+                <div className="text-xs opacity-90">
+                  State: <span className="font-mono">{info.lastUpdateState || 'unknown'}</span>
+                  {info.lastUpdateError && (
+                    <span className="block mt-1 break-words">{info.lastUpdateError}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" onClick={fetchUpdateLog} disabled={logLoading}>
+              <RefreshCw className={cn("h-3.5 w-3.5 mr-1.5", logLoading && "animate-spin")} />
+              {logLoading ? 'Loading log…' : 'View update log'}
+            </Button>
+          </div>
+        )}
+
+        {/* Inline log viewer — shown after clicking "View update log" from
+            either the failure banner above or the standalone button below. */}
+        {logLines && (
+          <div className="mb-4 rounded-md border border-border bg-muted/30 max-h-64 overflow-auto p-2">
+            <pre className="text-[10px] font-mono leading-relaxed whitespace-pre-wrap">
+              {logLines.length === 0 ? '(empty)' : logLines.join('\n')}
+            </pre>
+          </div>
+        )}
 
         {status === null && (
           <Button variant="outline" size="sm" onClick={handleCheck}>

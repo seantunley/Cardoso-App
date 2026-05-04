@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Install Caddy as a reverse proxy in front of the Cardoso Hub, with TLS
   certificates issued by Tailscale (Let's Encrypt, DNS-01 challenge —
@@ -43,6 +43,11 @@
 param(
   [Parameter(Mandatory=$true)][string]$Hostname,
   [Parameter()][int]$BackendPort = 3001,
+  # Public TLS port Caddy listens on. Default 443. Override (e.g. 8443) when
+  # the box is also running IIS / Sage 300 Web API / Certificate Services
+  # which already own port 443 via HTTP.sys reservations — Caddy cannot
+  # bind there even with no active listener (WSAEACCES).
+  [Parameter()][int]$ListenPort = 443,
   [Parameter()][string]$CaddyDir = "C:\Caddy",
   [Parameter()][string]$AppDir = "C:\Cardoso Customer App",
   [Parameter()][string]$ServiceName = "CardosoCaddy",
@@ -109,8 +114,23 @@ Write-Host "[2/7] Installing Caddy..."
 if ((-not $SkipDownload) -or (-not (Test-Path "$CaddyDir\caddy.exe"))) {
   New-Item -ItemType Directory -Force -Path $CaddyDir | Out-Null
   $caddyZip = Join-Path $env:TEMP "caddy.zip"
-  $caddyUrl = "https://github.com/caddyserver/caddy/releases/latest/download/caddy_windows_amd64.zip"
-  Write-Host "  Downloading from $caddyUrl..."
+  # PowerShell 5.1 defaults to TLS 1.0 which github.com no longer accepts.
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # Caddy's release assets embed the version in the filename
+  # (caddy_2.X.Y_windows_amd64.zip), so the old
+  # /releases/latest/download/caddy_windows_amd64.zip alias 404s. Query
+  # the GitHub API to find the actual current asset URL instead.
+  Write-Host "  Resolving latest Caddy release via GitHub API..."
+  $caddyApi = "https://api.github.com/repos/caddyserver/caddy/releases/latest"
+  $caddyHeaders = @{ 'User-Agent' = 'Cardoso-Hub-Installer'; 'Accept' = 'application/vnd.github+json' }
+  $caddyMeta = Invoke-RestMethod -Uri $caddyApi -Headers $caddyHeaders -UseBasicParsing
+  $caddyAsset = $caddyMeta.assets | Where-Object { $_.name -match '^caddy_[\d\.]+_windows_amd64\.zip$' } | Select-Object -First 1
+  if (-not $caddyAsset) {
+    Write-Error "Couldn't find a windows_amd64.zip asset in Caddy release $($caddyMeta.tag_name)."
+    exit 1
+  }
+  $caddyUrl = $caddyAsset.browser_download_url
+  Write-Host "  Downloading $($caddyAsset.name) ($([math]::Round($caddyAsset.size / 1MB, 1)) MB) from $caddyUrl..."
   Invoke-WebRequest -Uri $caddyUrl -OutFile $caddyZip -UseBasicParsing
   Expand-Archive -Path $caddyZip -DestinationPath $CaddyDir -Force
   Remove-Item $caddyZip -Force
@@ -158,7 +178,17 @@ $caddyfile = @"
 # overwritten. Customize via the script's parameters or fork the
 # template at windows/Caddyfile.template if you need long-term changes.
 
-$Hostname {
+# Disable Caddy's automatic HTTP→HTTPS redirect on port 80. Without this,
+# Caddy ALSO tries to bind :80, which fails with "forbidden by its access
+# permissions" on hub boxes that share the host with IIS / Sage 300 Web
+# API (HTTP.sys reserves :80 even when no app is listening). The hub is
+# internal-tailnet only and operators always type https://, so the 80→443
+# redirect adds no value here.
+{
+    auto_https disable_redirects
+}
+
+${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) {
     # TLS cert issued by Tailscale (Let's Encrypt under the hood).
     # Renew with: tailscale cert $Hostname
     # Renewal is automatic ~30 days before expiry as long as the
@@ -247,11 +277,11 @@ if ($svc.Status -ne 'Running') {
 
 Write-Host "[7/7] Smoke testing..."
 try {
-  $resp = Invoke-WebRequest -Uri "https://$Hostname/api/health" -UseBasicParsing -TimeoutSec 10
+  $resp = Invoke-WebRequest -Uri "https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health" -UseBasicParsing -TimeoutSec 10
   if ($resp.StatusCode -eq 200) {
-    Write-Host "  https://$Hostname/api/health -> 200 OK"
+    Write-Host "  https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health -> 200 OK"
   } else {
-    Write-Warning "  https://$Hostname/api/health -> $($resp.StatusCode) (Caddy is up but the backend response is unexpected)"
+    Write-Warning "  https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health -> $($resp.StatusCode) (Caddy is up but the backend response is unexpected)"
   }
 } catch {
   Write-Warning "  Smoke test failed: $_"
@@ -260,14 +290,14 @@ try {
 
 Write-Host ""
 Write-Host "================================================================"
-Write-Host " Done. Caddy is serving the Hub on https://$Hostname"
+Write-Host " Done. Caddy is serving the Hub on https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })"
 Write-Host "================================================================"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Open https://$Hostname in a browser. Should show the Hub UI"
+Write-Host "  1. Open https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) in a browser. Should show the Hub UI"
 Write-Host "     with a valid TLS cert and no warnings."
 Write-Host ""
-Write-Host "  2. Update each site's HUB_URL config to use https://$Hostname"
+Write-Host "  2. Update each site's HUB_URL config to use https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })"
 Write-Host "     (was http://$Hostname`:$BackendPort or similar)."
 Write-Host ""
 Write-Host "  3. Once all sites are migrated, lock the Hub Node service to"

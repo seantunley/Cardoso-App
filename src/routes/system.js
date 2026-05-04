@@ -595,6 +595,23 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // Read the .last-update-status.json marker that apply-app-update.ps1
+  // writes on every exit (success AND failure). This is the only way
+  // the Node side can tell whether the in-app update actually landed —
+  // the script runs detached via Task Scheduler, so its exit code is
+  // unreachable. Returns null if the marker is missing or unreadable.
+  function readLastUpdateStatus() {
+    try {
+      const installDir = process.env.APP_DIR || 'C:\\Cardoso Customer App';
+      const statusPath = path.join(installDir, '.last-update-status.json');
+      if (!fs.existsSync(statusPath)) return null;
+      const raw = fs.readFileSync(statusPath, 'utf8');
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   // GET /api/app-version-status
   router.get('/api/app-version-status', requireAuth, async (req, res) => {
     try {
@@ -604,15 +621,59 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       // Stale phase/timestamp left over from the previous run is fine —
       // updateRunning is the gate the UI uses to decide whether to read
       // these fields.
+      //
+      // Also surface the last-update-status marker so the UI can warn
+      // when the previous update partially failed (e.g. file lock during
+      // file swap → rollback → service restarted at the OLD version,
+      // which previously showed "Update successful" because the script's
+      // exit code was unreachable from here).
+      const lastUpdate = readLastUpdateStatus();
+      const lastUpdateFailed = !!(
+        lastUpdate &&
+        lastUpdate.state &&
+        lastUpdate.state !== 'ok' &&
+        // Only flag if the marker was for THIS version's update attempt;
+        // an old failed marker from a previous version's botched update
+        // shouldn't keep nagging after a successful manual reinstall.
+        lastUpdate.expected_version &&
+        versionStatus.currentVersion &&
+        lastUpdate.expected_version !== versionStatus.currentVersion
+      );
       res.json({
         ...versionStatus,
         updateRunning: autoUpdateRunning,
         updatePhase: autoUpdatePhase,
         updateStartedAt: autoUpdateStartedAt,
+        lastUpdateFailed,
+        lastUpdateState: lastUpdate?.state ?? null,
+        lastUpdateError: lastUpdateFailed ? (lastUpdate?.error ?? null) : null,
+        lastUpdateAt: lastUpdate?.finished_at ?? null,
+        lastUpdateExpectedVersion: lastUpdate?.expected_version ?? null,
       });
     } catch (error) {
       console.error('Version status error:', error);
       res.status(500).json({ error: 'Failed to check app version' });
+    }
+  });
+
+  // GET /api/app-update-log
+  // Returns the tail of update.log so an operator can see WHY an update
+  // failed without RDP'ing into the box. Only the last ~100 lines so we
+  // don't dump megabytes. Admin-only since update logs can contain paths
+  // and details about the install layout.
+  router.get('/api/app-update-log', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const installDir = process.env.APP_DIR || 'C:\\Cardoso Customer App';
+      const logPath = path.join(installDir, 'logs', 'update.log');
+      if (!fs.existsSync(logPath)) {
+        return res.json({ ok: true, lines: [], note: 'no update log on disk yet' });
+      }
+      const raw = fs.readFileSync(logPath, 'utf8');
+      const lines = raw.split(/\r?\n/).filter(Boolean);
+      const tail = lines.slice(-100);
+      res.json({ ok: true, lines: tail, status: readLastUpdateStatus() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
     }
   });
 

@@ -1,4 +1,4 @@
-# backup.ps1 - Cardoso Cigarettes local database backup
+﻿# backup.ps1 - Cardoso Cigarettes local database backup
 # Copies the live SQLite database to a timestamped file in the backups folder.
 # Keeps the last 30 daily backups and deletes older ones automatically.
 #

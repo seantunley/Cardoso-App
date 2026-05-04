@@ -106,7 +106,27 @@ export default function HubReconciliation() {
                 accent={Math.abs(summary.total_variance) < 1 ? REPORT_COLORS.secondary : REPORT_COLORS.danger}
                 big
               />
-              <SummaryTile label="Exceptions" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_exception_amount)}</>} sub={`${fmtCount(summary.total_exceptions)} flagged`} accent={REPORT_COLORS.warning} />
+              {(() => {
+                // Current ISO 8601 week — same algorithm as /api/bat/week-status
+                // on the site. Naive dayOfYear/7 would be wrong on weeks
+                // straddling Jan 1, so shift to the week's Thursday and
+                // count from the ISO year start.
+                const now = new Date();
+                const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+                const dayNum = d.getUTCDay() || 7;
+                d.setUTCDate(d.getUTCDate() + 4 - dayNum);
+                const isoYear = d.getUTCFullYear();
+                const yearStart = new Date(Date.UTC(isoYear, 0, 1));
+                const currentWeek = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+                return (
+                  <SummaryTile
+                    label="Current Week"
+                    value={<><span className="text-muted-foreground/60 mr-1">W</span>{currentWeek}</>}
+                    sub={`${isoYear}`}
+                    accent={REPORT_COLORS.info}
+                  />
+                );
+              })()}
             </div>
 
             {/* Cross-site bar chart */}
@@ -190,7 +210,15 @@ function SiteCard({ site }) {
             <div className="pt-2 border-t border-border grid grid-cols-3 gap-2">
               <Stat label="Weeks" value={fmtCount(site.weeks_count)} />
               <Stat label="Mismatch" value={fmtCount(site.mismatch_count)} color={site.mismatch_count > 0 ? 'hsl(var(--destructive))' : undefined} />
-              <Stat label="Exc." value={fmtCount(site.total_exceptions)} color={site.total_exceptions > 0 ? 'var(--phosphor)' : undefined} />
+              {/* Weeks where Sage has posted credit notes but no BAT recon
+                  has been uploaded yet — i.e. the site is behind on data
+                  entry. Highlighted in phosphor when > 0 so an operator
+                  scanning the network can spot stragglers immediately. */}
+              <Stat
+                label="Missing"
+                value={fmtCount(site.missing_weeks_count)}
+                color={site.missing_weeks_count > 0 ? 'var(--phosphor)' : undefined}
+              />
             </div>
           </>
         )}
