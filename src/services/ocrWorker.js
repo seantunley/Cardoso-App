@@ -260,7 +260,16 @@ function findInvoiceNumber(text) {
     const m = cleaned.match(p);
     if (m) {
       const full = 'IN000' + m[1];
-      if (full.length >= 12 && full.length <= 14) return full;
+      // Length range covers BAT's two known invoice formats:
+      //   IN<9 digits>  → 11 chars (e.g. IN000422238 — pre-rollover)
+      //   IN<10 digits> → 12 chars (e.g. IN0004225236 — post-rollover)
+      // Pre-fix the lower bound was 12, which silently dropped every
+      // 9-digit invoice the partial pattern caught — those rows then
+      // fell all the way through the cascade to extract_total. Operator
+      // sent us a real ENGEN KABOKWENI POD where GV correctly returned
+      // "WNVOICE NO\n000422238" and we ignored it because IN000422238
+      // is 11 chars. Now accepts 11-14.
+      if (full.length >= 11 && full.length <= 14) return full;
     }
   }
 
