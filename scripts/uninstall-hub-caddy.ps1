@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Remove the Caddy Windows service installed by install-hub-caddy.ps1.
   Caddy binary, config, certs, and logs stay on disk so you can restore

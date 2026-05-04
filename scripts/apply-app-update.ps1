@@ -1,4 +1,4 @@
-# Apply an "app delta" update — extracts an app-vX.zip over the install dir,
+﻿# Apply an "app delta" update — extracts an app-vX.zip over the install dir,
 # preserving node_modules, the bundled node runtime, nssm, the database, the
 # .env file, and the logs directory. Used by the in-app auto-updater when the
 # new release's lock_hash matches the installed lock_hash (i.e. dependencies
@@ -26,12 +26,53 @@ $ErrorActionPreference = 'Stop'
 
 $logDir = Join-Path $AppDir "logs"
 $logFile = Join-Path $logDir "update.log"
+$statusFile = Join-Path $AppDir ".last-update-status.json"
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Force -Path $logDir | Out-Null }
 
 function Log($msg) {
   $line = "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $msg"
   try { Add-Content -Path $logFile -Value $line -ErrorAction SilentlyContinue } catch {}
   Write-Host $line
+}
+
+# Always-write status marker so the Node side can detect partial failures
+# even when the script exits cleanly. Without this, a Move-Item that hit
+# a file lock would silently roll back, the script would exit 1, but the
+# in-app UI showed "Update successful" because nothing read the exit code.
+function WriteStatus($state, $errorMessage) {
+  try {
+    $payload = @{
+      ok               = ($state -eq 'ok')
+      state            = $state           # 'ok' | 'failed' | 'rolled_back'
+      expected_version = $NewVersion
+      finished_at      = (Get-Date -Format 'o')
+      error            = $errorMessage
+    } | ConvertTo-Json -Compress
+    Set-Content -Path $statusFile -Value $payload -Encoding ASCII -ErrorAction SilentlyContinue
+  } catch {}
+}
+
+# Move-Item with retry. Newly-stopped Node sometimes leaves *.js / app.asar
+# briefly locked (sub-second) by lingering file handles, antivirus scanners,
+# or the search indexer. A single Move-Item -Force fails immediately in
+# those cases; retrying with backoff almost always succeeds within 5s and
+# turns "update broken until reinstall" into "update finished, slightly
+# slower". Falls through to throw on persistent failure so the catch
+# block can rollback.
+function Move-WithRetry($src, $dst, $maxAttempts = 6) {
+  for ($i = 1; $i -le $maxAttempts; $i++) {
+    try {
+      Move-Item -Path $src -Destination $dst -Force -ErrorAction Stop
+      return
+    } catch {
+      if ($i -eq $maxAttempts) {
+        throw "Move-Item failed after $maxAttempts attempts: $($_.Exception.Message) (src=$src dst=$dst)"
+      }
+      $delayMs = [Math]::Min(2000, 200 * [Math]::Pow(2, $i - 1))
+      Log "  Move-Item attempt $i failed ($($_.Exception.Message)); retrying in ${delayMs}ms"
+      Start-Sleep -Milliseconds $delayMs
+    }
+  }
 }
 
 $backupDir = $null
@@ -83,10 +124,10 @@ try {
     $backupTarget = Join-Path $backupDir $item.Name
     if (Test-Path $target) {
       Log "Backup: $target -> $backupTarget"
-      Move-Item -Path $target -Destination $backupTarget -Force
+      Move-WithRetry $target $backupTarget
     }
     Log "Apply: $($item.FullName) -> $target"
-    Move-Item -Path $item.FullName -Destination $target -Force
+    Move-WithRetry $item.FullName $target
   }
 
   Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
@@ -122,9 +163,13 @@ try {
   # Clean up the dropped zip
   try { Remove-Item -Force $ZipPath -ErrorAction SilentlyContinue } catch {}
 
+  WriteStatus 'ok' $null
   exit 0
 } catch {
-  Log "ERROR: $_"
+  $primaryError = "$_"
+  Log "ERROR: $primaryError"
+  $rollbackOk = $true
+  $rollbackError = $null
   if ($backupDir -and (Test-Path $backupDir)) {
     Log "Rolling back from $backupDir..."
     try {
@@ -135,8 +180,13 @@ try {
       }
       Log "Rollback complete."
     } catch {
-      Log "Rollback ALSO failed: $_  Backup files left at $backupDir for manual recovery."
+      $rollbackOk = $false
+      $rollbackError = "$_"
+      Log "Rollback ALSO failed: $rollbackError  Backup files left at $backupDir for manual recovery."
     }
+  } else {
+    $rollbackOk = $false
+    $rollbackError = 'no_backup_to_restore'
   }
   if ($stagingDir -and (Test-Path $stagingDir)) {
     Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
@@ -152,5 +202,10 @@ try {
     }
   } catch {}
 
+  if ($rollbackOk) {
+    WriteStatus 'rolled_back' $primaryError
+  } else {
+    WriteStatus 'failed' "$primaryError | rollback: $rollbackError"
+  }
   exit 1
 }

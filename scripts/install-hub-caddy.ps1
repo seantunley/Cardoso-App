@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Install Caddy as a reverse proxy in front of the Cardoso Hub, with TLS
   certificates issued by Tailscale (Let's Encrypt, DNS-01 challenge —
@@ -109,8 +109,23 @@ Write-Host "[2/7] Installing Caddy..."
 if ((-not $SkipDownload) -or (-not (Test-Path "$CaddyDir\caddy.exe"))) {
   New-Item -ItemType Directory -Force -Path $CaddyDir | Out-Null
   $caddyZip = Join-Path $env:TEMP "caddy.zip"
-  $caddyUrl = "https://github.com/caddyserver/caddy/releases/latest/download/caddy_windows_amd64.zip"
-  Write-Host "  Downloading from $caddyUrl..."
+  # PowerShell 5.1 defaults to TLS 1.0 which github.com no longer accepts.
+  [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+  # Caddy's release assets embed the version in the filename
+  # (caddy_2.X.Y_windows_amd64.zip), so the old
+  # /releases/latest/download/caddy_windows_amd64.zip alias 404s. Query
+  # the GitHub API to find the actual current asset URL instead.
+  Write-Host "  Resolving latest Caddy release via GitHub API..."
+  $caddyApi = "https://api.github.com/repos/caddyserver/caddy/releases/latest"
+  $caddyHeaders = @{ 'User-Agent' = 'Cardoso-Hub-Installer'; 'Accept' = 'application/vnd.github+json' }
+  $caddyMeta = Invoke-RestMethod -Uri $caddyApi -Headers $caddyHeaders -UseBasicParsing
+  $caddyAsset = $caddyMeta.assets | Where-Object { $_.name -match '^caddy_[\d\.]+_windows_amd64\.zip$' } | Select-Object -First 1
+  if (-not $caddyAsset) {
+    Write-Error "Couldn't find a windows_amd64.zip asset in Caddy release $($caddyMeta.tag_name)."
+    exit 1
+  }
+  $caddyUrl = $caddyAsset.browser_download_url
+  Write-Host "  Downloading $($caddyAsset.name) ($([math]::Round($caddyAsset.size / 1MB, 1)) MB) from $caddyUrl..."
   Invoke-WebRequest -Uri $caddyUrl -OutFile $caddyZip -UseBasicParsing
   Expand-Archive -Path $caddyZip -DestinationPath $CaddyDir -Force
   Remove-Item $caddyZip -Force

@@ -1,4 +1,4 @@
-# hub-pull-backups.ps1 — Pull database backups from all sites via the Hub
+﻿# hub-pull-backups.ps1 — Pull database backups from all sites via the Hub
 # -------------------------------------------------------------------------
 # Runs on the Head Office machine. Loops through each registered site,
 # calls GET /api/backup/download on each site's API URL, and saves the
