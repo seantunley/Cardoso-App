@@ -43,6 +43,11 @@
 param(
   [Parameter(Mandatory=$true)][string]$Hostname,
   [Parameter()][int]$BackendPort = 3001,
+  # Public TLS port Caddy listens on. Default 443. Override (e.g. 8443) when
+  # the box is also running IIS / Sage 300 Web API / Certificate Services
+  # which already own port 443 via HTTP.sys reservations — Caddy cannot
+  # bind there even with no active listener (WSAEACCES).
+  [Parameter()][int]$ListenPort = 443,
   [Parameter()][string]$CaddyDir = "C:\Caddy",
   [Parameter()][string]$AppDir = "C:\Cardoso Customer App",
   [Parameter()][string]$ServiceName = "CardosoCaddy",
@@ -173,7 +178,7 @@ $caddyfile = @"
 # overwritten. Customize via the script's parameters or fork the
 # template at windows/Caddyfile.template if you need long-term changes.
 
-$Hostname {
+${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) {
     # TLS cert issued by Tailscale (Let's Encrypt under the hood).
     # Renew with: tailscale cert $Hostname
     # Renewal is automatic ~30 days before expiry as long as the
@@ -262,11 +267,11 @@ if ($svc.Status -ne 'Running') {
 
 Write-Host "[7/7] Smoke testing..."
 try {
-  $resp = Invoke-WebRequest -Uri "https://$Hostname/api/health" -UseBasicParsing -TimeoutSec 10
+  $resp = Invoke-WebRequest -Uri "https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health" -UseBasicParsing -TimeoutSec 10
   if ($resp.StatusCode -eq 200) {
-    Write-Host "  https://$Hostname/api/health -> 200 OK"
+    Write-Host "  https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health -> 200 OK"
   } else {
-    Write-Warning "  https://$Hostname/api/health -> $($resp.StatusCode) (Caddy is up but the backend response is unexpected)"
+    Write-Warning "  https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })/api/health -> $($resp.StatusCode) (Caddy is up but the backend response is unexpected)"
   }
 } catch {
   Write-Warning "  Smoke test failed: $_"
@@ -275,14 +280,14 @@ try {
 
 Write-Host ""
 Write-Host "================================================================"
-Write-Host " Done. Caddy is serving the Hub on https://$Hostname"
+Write-Host " Done. Caddy is serving the Hub on https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })"
 Write-Host "================================================================"
 Write-Host ""
 Write-Host "Next steps:"
-Write-Host "  1. Open https://$Hostname in a browser. Should show the Hub UI"
+Write-Host "  1. Open https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) in a browser. Should show the Hub UI"
 Write-Host "     with a valid TLS cert and no warnings."
 Write-Host ""
-Write-Host "  2. Update each site's HUB_URL config to use https://$Hostname"
+Write-Host "  2. Update each site's HUB_URL config to use https://${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" })"
 Write-Host "     (was http://$Hostname`:$BackendPort or similar)."
 Write-Host ""
 Write-Host "  3. Once all sites are migrated, lock the Hub Node service to"
