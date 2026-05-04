@@ -178,6 +178,16 @@ $caddyfile = @"
 # overwritten. Customize via the script's parameters or fork the
 # template at windows/Caddyfile.template if you need long-term changes.
 
+# Disable Caddy's automatic HTTP→HTTPS redirect on port 80. Without this,
+# Caddy ALSO tries to bind :80, which fails with "forbidden by its access
+# permissions" on hub boxes that share the host with IIS / Sage 300 Web
+# API (HTTP.sys reserves :80 even when no app is listening). The hub is
+# internal-tailnet only and operators always type https://, so the 80→443
+# redirect adds no value here.
+{
+    auto_https disable_redirects
+}
+
 ${Hostname}$(if ($ListenPort -ne 443) { ":$ListenPort" }) {
     # TLS cert issued by Tailscale (Let's Encrypt under the hood).
     # Renew with: tailscale cert $Hostname
