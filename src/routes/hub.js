@@ -632,6 +632,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         SELECT s.id AS site_id, s.name AS site_name, s.slug AS site_slug, s.url AS site_url, s.status AS site_status, s.last_seen,
                b.total_supplier, b.total_sage, b.total_variance,
                b.weeks_count, b.matched_count, b.mismatch_count, b.awaiting_count,
+               b.missing_weeks_count,
                b.total_exceptions, b.total_exception_amount,
                b.last_upload_at, b.synced_at, b.last_error
         FROM hub_sites s
@@ -653,6 +654,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         matched_count: r.matched_count || 0,
         mismatch_count: r.mismatch_count || 0,
         awaiting_count: r.awaiting_count || 0,
+        missing_weeks_count: r.missing_weeks_count || 0,
         total_exceptions: r.total_exceptions || 0,
         total_exception_amount: r.total_exception_amount || 0,
         last_upload_at: r.last_upload_at,
@@ -672,6 +674,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         total_matched: sites.reduce((s, x) => s + x.matched_count, 0),
         total_mismatch: sites.reduce((s, x) => s + x.mismatch_count, 0),
         total_awaiting: sites.reduce((s, x) => s + x.awaiting_count, 0),
+        total_missing_weeks: sites.reduce((s, x) => s + x.missing_weeks_count, 0),
         total_exceptions: sites.reduce((s, x) => s + x.total_exceptions, 0),
         total_exception_amount: sites.reduce((s, x) => s + x.total_exception_amount, 0),
       };

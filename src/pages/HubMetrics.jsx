@@ -377,7 +377,7 @@ export default function HubMetrics() {
 
   return (
     <div className="min-h-screen p-6 bg-background">
-      <div className="max-w-6xl mx-auto">
+      <div className="max-w-[1600px] mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 pb-5 border-b border-border">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">

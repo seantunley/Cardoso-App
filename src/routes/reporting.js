@@ -1222,6 +1222,21 @@ export function createReportingRouter({ requireAuth }) {
          FROM bat_invoice_extractions WHERE is_exception = 1`
       ).get();
 
+      // Missing weeks = weeks where Sage has posted credit notes (i.e. they
+      // exist in bat_sage_week_cache) but no BAT reconciliation has been
+      // uploaded yet. This is what the Hub Reconciliation per-site card
+      // surfaces so operators can see which sites are behind on data entry.
+      // Distinct from awaiting_count, which is the inverse direction.
+      const missingWeeksRow = prep(
+        `SELECT COUNT(*) AS c
+         FROM bat_sage_week_cache c
+         WHERE NOT EXISTS (
+           SELECT 1 FROM bat_reconciliations r
+            WHERE r.year = c.year AND r.week_number = c.week_number
+         )`
+      ).get();
+      const missing_weeks_count = missingWeeksRow?.c || 0;
+
       res.json({
         site_id: SITE_ID,
         site_slug: SITE_SLUG,
@@ -1233,6 +1248,7 @@ export function createReportingRouter({ requireAuth }) {
         matched_count,
         mismatch_count,
         awaiting_count,
+        missing_weeks_count,
         total_exceptions: exc?.c || 0,
         total_exception_amount: exc?.a || 0,
         last_upload_at,
