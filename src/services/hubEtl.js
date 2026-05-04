@@ -16,34 +16,56 @@ import { logError } from '../lib/errorLog.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
-function checkBackupIntegrity(siteId, filePath) {
-  let backupDb = null;
+async function checkBackupIntegrity(siteId, filePath) {
   let finalPath = filePath;
   let resultText = 'unchecked';
+  let needsCorruptRename = false;
 
+  // Open + integrity-check + close in a tight scope. The previous version
+  // attempted renameSync(filePath, '...corrupt') while the SQLite handle
+  // was STILL OPEN inside the same try block (close only happened in
+  // finally), so on Windows the rename failed with EBUSY for every
+  // corrupt-or-failing snapshot — the backup got recorded as
+  // "EBUSY: resource busy or locked, rename ..." instead of the actual
+  // integrity result, and the operator couldn't tell whether the file
+  // was corrupt, locked, or both.
+  let backupDb = null;
   try {
     backupDb = new BetterSqlite3(filePath, { readonly: true, fileMustExist: true });
     const rows = backupDb.prepare('PRAGMA integrity_check').all();
     const values = rows.map((row) => String(Object.values(row)[0] ?? '').trim()).filter(Boolean);
     const ok = values.length > 0 && values.every((value) => value.toLowerCase() === 'ok');
     resultText = ok ? 'ok' : JSON.stringify(values);
-
-    if (!ok) {
-      finalPath = `${filePath}.corrupt`;
-      renameSync(filePath, finalPath);
-      console.warn(`[HUB BACKUP] ${siteId}: integrity check failed, renamed to ${path.basename(finalPath)}`);
-    }
+    needsCorruptRename = !ok;
   } catch (err) {
     resultText = err.message || 'integrity_check_failed';
-    try {
-      finalPath = `${filePath}.corrupt`;
-      renameSync(filePath, finalPath);
-    } catch (_) {
-      finalPath = filePath;
-    }
-    console.warn(`[HUB BACKUP] ${siteId}: integrity check error: ${resultText}`);
+    needsCorruptRename = true;
   } finally {
     try { backupDb?.close(); } catch (_) {}
+    backupDb = null;
+  }
+
+  // Rename AFTER close. If the rename still fails (antivirus / search
+  // indexer briefly holding a handle on the just-closed file), retry with
+  // exponential backoff — most Windows file-lock races resolve within ~1s.
+  if (needsCorruptRename) {
+    const corruptPath = `${filePath}.corrupt`;
+    let renamed = false;
+    for (let attempt = 1; attempt <= 5 && !renamed; attempt++) {
+      try {
+        renameSync(filePath, corruptPath);
+        renamed = true;
+        finalPath = corruptPath;
+        console.warn(`[HUB BACKUP] ${siteId}: integrity check failed (${resultText}), renamed to ${path.basename(corruptPath)}`);
+      } catch (err) {
+        if (attempt === 5) {
+          resultText = `${resultText} | rename_failed: ${err.message || 'unknown'}`;
+          console.warn(`[HUB BACKUP] ${siteId}: rename to .corrupt failed after retries: ${err.message}`);
+        } else {
+          await new Promise((r) => setTimeout(r, 200 * Math.pow(2, attempt - 1)));
+        }
+      }
+    }
   }
 
   try {
@@ -282,11 +304,13 @@ async function syncSite(site) {
           INSERT INTO hub_bat_summary (
             site_id, total_supplier, total_sage, total_variance,
             weeks_count, matched_count, mismatch_count, awaiting_count,
+            missing_weeks_count,
             total_exceptions, total_exception_amount,
             last_upload_at, synced_at, last_error
           ) VALUES (
             @site_id, @total_supplier, @total_sage, @total_variance,
             @weeks_count, @matched_count, @mismatch_count, @awaiting_count,
+            @missing_weeks_count,
             @total_exceptions, @total_exception_amount,
             @last_upload_at, @synced_at, NULL
           )
@@ -298,6 +322,7 @@ async function syncSite(site) {
             matched_count=excluded.matched_count,
             mismatch_count=excluded.mismatch_count,
             awaiting_count=excluded.awaiting_count,
+            missing_weeks_count=excluded.missing_weeks_count,
             total_exceptions=excluded.total_exceptions,
             total_exception_amount=excluded.total_exception_amount,
             last_upload_at=excluded.last_upload_at,
@@ -312,6 +337,9 @@ async function syncSite(site) {
           matched_count: bat.matched_count || 0,
           mismatch_count: bat.mismatch_count || 0,
           awaiting_count: bat.awaiting_count || 0,
+          // Sites running an older version that doesn't return this field
+          // will arrive as undefined; default to 0 so the column writes cleanly.
+          missing_weeks_count: bat.missing_weeks_count || 0,
           total_exceptions: bat.total_exceptions || 0,
           total_exception_amount: bat.total_exception_amount || 0,
           last_upload_at: bat.last_upload_at || null,
@@ -415,7 +443,7 @@ async function runHubBackupPull() {
         // whole DB in memory. A 200 MB site DB used to spike RSS by 200 MB
         // and block the event loop during the sync writeFileSync.
         await pipeline(Readable.fromWeb(upstream.body), createWriteStream(file));
-        const integrity = checkBackupIntegrity(site.id, file);
+        const integrity = await checkBackupIntegrity(site.id, file);
         console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
 
         // Also pull the site's .env config alongside the db so disaster
