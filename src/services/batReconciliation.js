@@ -1720,6 +1720,29 @@ class OcrLane {
         }
         return;
       }
+      // Engine returned but produced no usable invoice number. Two flavours:
+      // 'short_text' (< 20 chars — engine basically gave us nothing) and
+      // 'no_regex_match' (engine returned plenty of text but
+      // findInvoiceNumber couldn't pull an invoice out of it). The latter
+      // is the actual root cause when "everything times out at extract_total
+      // and no engine throws" — GV is reading the page fine, the page
+      // formatting just doesn't match the regex.
+      if (msg.type === 'engine_no_match') {
+        const slot = this.pending.get(msg.id);
+        if (slot && slot.onEngineNoMatch) {
+          try {
+            slot.onEngineNoMatch({
+              engine: msg.engine,
+              angle: msg.angle,
+              stage: msg.stage,
+              reason: msg.reason,
+              textLength: msg.text_length,
+              textPreview: msg.text_preview,
+            });
+          } catch {}
+        }
+        return;
+      }
       if (msg.type !== 'result') return;
       const slot = this.pending.get(msg.id);
       if (!slot) return;
@@ -1764,7 +1787,11 @@ class OcrLane {
   // `onEngineError({ engine, angle, stage, message, tierError })` is
   // called for every per-engine failure inside the worker's cascade.
   // Used by processQueue to log bat.ocr.engine_failed entries.
-  extract(payload, timeoutMs, onProgress, onEngineError) {
+  // `onEngineNoMatch({ engine, angle, stage, reason, textLength, textPreview })`
+  // is called when an engine returned text but it was either too short
+  // OR didn't match the invoice-number regex. Used to log
+  // bat.ocr.engine_no_match entries so silent fall-throughs are visible.
+  extract(payload, timeoutMs, onProgress, onEngineError, onEngineNoMatch) {
     if (this.dead) return Promise.reject(new Error('OCR lane is dead'));
     const id = ++this.nextId;
     return new Promise((resolve, reject) => {
@@ -1784,6 +1811,7 @@ class OcrLane {
         reject: (e) => { clearTimeout(timer); reject(e); },
         onProgress,
         onEngineError,
+        onEngineNoMatch,
       });
       try {
         this.worker.postMessage({ type: 'extract', id, payload });
@@ -2054,6 +2082,31 @@ async function processQueue(reconId) {
                     angle: info.angle,
                     tier_error: info.tierError,
                   },
+                );
+              } catch {}
+            },
+            // Engine returned text but produced no usable invoice. The
+            // text_preview field shows the first 200-300 chars so an
+            // operator can see WHY the regex didn't match — common cases
+            // are an unexpected invoice-number format, a foreign language,
+            // a logo-only page, or text that GV reads correctly but in a
+            // way findInvoiceNumber doesn't expect.
+            (info) => {
+              try {
+                logError(
+                  'bat.ocr.engine_no_match',
+                  new Error(`${info.stage}: ${info.reason} (${info.textLength} chars)`),
+                  {
+                    reconciliation_id: reconId,
+                    extraction_id: next.id,
+                    store_name: next.store_name,
+                    engine: info.engine,
+                    angle: info.angle,
+                    reason: info.reason,
+                    text_length: info.textLength,
+                    text_preview: info.textPreview,
+                  },
+                  'info',
                 );
               } catch {}
             },

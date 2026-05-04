@@ -435,9 +435,51 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         // engine wedged. Per-engine timeout makes the failure
         // attributable.
         const text = await withTimeout(engine.run(angle), 60_000, stageLabel);
-        if (!text || text.trim().length < 20) continue;
+        // Two silent fall-throughs that bit us hard in production: the
+        // engine returned text but it was either too short to be useful
+        // OR the invoice-number regex didn't match. Both used to silently
+        // `continue` to the next engine with no log entry — so a row that
+        // walked all 12 engine slots without a single throw and then hit
+        // extract_total looked like "everything is broken" instead of
+        // "GV+ocr.space+Tesseract all returned text but findInvoiceNumber
+        // didn't recognise the format". Now both cases emit
+        // bat.ocr.engine_no_match so the operator can see the actual text
+        // each engine returned.
+        if (!text || text.trim().length < 20) {
+          try {
+            parentPort.postMessage({
+              type: 'engine_no_match',
+              id: msgId,
+              engine: engine.name,
+              angle,
+              stage: stageLabel,
+              reason: 'short_text',
+              text_length: (text || '').length,
+              text_preview: (text || '').slice(0, 200),
+            });
+          } catch {}
+          continue;
+        }
         const invoice = findInvoiceNumber(text);
         if (invoice) return { invoice, previewPath };
+        // Text was returned but findInvoiceNumber couldn't parse an invoice
+        // number out of it. This is the most-likely cause of "everything
+        // times out at extract_total" on a site where OCR is configured
+        // correctly: GV reads the page fine, but the page formatting is
+        // unfamiliar to the regex and the cascade walks every engine
+        // without finding a match.
+        try {
+          parentPort.postMessage({
+            type: 'engine_no_match',
+            id: msgId,
+            engine: engine.name,
+            angle,
+            stage: stageLabel,
+            reason: 'no_regex_match',
+            text_length: text.length,
+            text_preview: text.slice(0, 300),
+          });
+        } catch {}
       } catch (err) {
         // Surface per-engine failures to the parent for System Log
         // attribution. Without this, a misconfigured Google Vision (key
