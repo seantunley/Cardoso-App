@@ -22,13 +22,22 @@ const COLUMN_TIPS = {
   amount: 'Order amount from the BAT supplier sheet',
 };
 
+// Defaults are sized to fit the HEADER label at 10pt mono uppercase
+// tracking-[0.15em] without truncation. Earlier values were sized to data
+// only (e.g. store=52 fit "JHB" but clipped the "STORE" header to "STO…").
+// The auto-fit useEffect below scales these proportionally to match the
+// actual container width, so the absolute numbers below are seed values —
+// it's the proportions that matter.
 const COLUMN_DEFAULTS = {
-  idx: 44, order: 185, store: 52, custNo: 99, cust: 276,
-  week: 60, orderDay: 84, deliveryDay: 76, leadTime: 46,
-  delivery: 86, podUploaded: 94, target: 64, exception: 180,
-  ocr: 51, invoice: 218, amount: 89,
+  idx: 44, order: 185, store: 78, custNo: 99, cust: 240,
+  week: 60, orderDay: 84, deliveryDay: 100, leadTime: 60,
+  delivery: 95, podUploaded: 110, target: 80, exception: 180,
+  ocr: 56, invoice: 218, amount: 95,
 };
-const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v3';
+// Bumped from v3 → v4 to invalidate localStorage entries under the
+// previous header-clipping defaults. Existing users get the new defaults
+// once on first visit; subsequent custom resizes save under v4.
+const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v4';
 
 function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
@@ -205,6 +214,14 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   // right when total < container, no overflow when total > container. The
   // 1px hairline reserved for the right border keeps the rounded frame from
   // looking clipped.
+  //
+  // The `widths` snapshot is read via `setWidths(prev => …)` inside `fit()`
+  // (functional update), so the ResizeObserver always sees the CURRENT
+  // state instead of whatever was captured in the closure at mount. The
+  // earlier version had `[]` deps + direct read of `widths`, which meant
+  // the very first fit ran fine but every subsequent ResizeObserver
+  // callback used stale widths — the table either failed to fill on
+  // re-layout or fought against user resizes.
   useEffect(() => {
     const el = tableContainerRef.current;
     if (!el) return;
@@ -212,22 +229,22 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       const inner = el.clientWidth;
       if (!inner) return;
       const target = inner - 1;
-      const total = Object.values(widths).reduce((s, v) => s + v, 0);
-      // 1px tolerance so we don't loop on rounding drift when the table
-      // already matches the container.
-      if (Math.abs(total - target) < 2) return;
-      const scale = target / total;
-      const scaled = Object.fromEntries(
-        Object.entries(widths).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
-      );
-      setWidths(scaled);
+      setWidths((prev) => {
+        const total = Object.values(prev).reduce((s, v) => s + v, 0);
+        // 1px tolerance so we don't loop on rounding drift when the
+        // table already matches the container.
+        if (Math.abs(total - target) < 2) return prev;
+        const scale = target / total;
+        return Object.fromEntries(
+          Object.entries(prev).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
+        );
+      });
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
     return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [setWidths]);
 
   const handleRetry = async () => {
     if (!reconciliationId) return;
