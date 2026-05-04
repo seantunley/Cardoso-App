@@ -57,7 +57,7 @@ export default function HubAuditLog() {
 
   return (
     <div className="min-h-screen bg-background p-6 text-foreground">
-      <div className="mx-auto max-w-7xl space-y-4">
+      <div className="mx-auto max-w-[1600px] space-y-4">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5 mb-2">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Hub Audit</div>

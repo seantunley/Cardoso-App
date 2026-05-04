@@ -325,7 +325,7 @@ export default function Inventory() {
           tr { page-break-inside: avoid; }
         }
       `}</style>
-      <div className="inventory-print-scope max-w-7xl mx-auto">
+      <div className="inventory-print-scope max-w-[1600px] mx-auto">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 border-b border-border pb-5">
           <div>

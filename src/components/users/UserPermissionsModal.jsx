@@ -107,7 +107,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
         {user?.role === "admin" && (
           <div className="mx-1 mb-2 rounded-lg border border-amber-700/50 bg-amber-900/20 px-3 py-2">
             <p className="text-xs text-amber-400">
-              Admins have full access by default. Per-permission toggles apply only to users with the <strong>User</strong> role.
+              Admins have full access by default, but individual modules can be turned off here (e.g. a BAT-only admin who shouldn't see Network Devices).
             </p>
           </div>
         )}

@@ -109,7 +109,7 @@ export default function HubTrends() {
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
-      <div className="mx-auto max-w-7xl space-y-6">
+      <div className="mx-auto max-w-[1600px] space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Trends</div>

@@ -52,7 +52,7 @@ export default function Dashboard() {
   if (connections.length === 0 && !kpis) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="max-w-7xl mx-auto px-8 py-16">
+        <div className="max-w-[1600px] mx-auto px-8 py-16">
           <Header />
           <div className="mt-16 border border-border py-24 text-center">
             <Database className="w-10 h-10 mx-auto mb-6 text-muted-foreground/60" strokeWidth={1} />
@@ -68,7 +68,7 @@ export default function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-8 py-10 lg:py-16">
+      <div className="max-w-[1600px] mx-auto px-8 py-10 lg:py-16">
         <Header subtitle={lastSync ? `Last sync ${relativeTime(lastSync)}` : "Awaiting first sync"} />
 
         {/* ── Hero KPI row — oversized numbers, minimal chrome ── */}

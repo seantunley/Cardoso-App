@@ -97,7 +97,7 @@ export default function AuditLog() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-7xl space-y-6 p-6 lg:p-8">
+      <div className="mx-auto max-w-[1600px] space-y-6 p-6 lg:p-8">
 
         <div className="border-b border-border pb-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Audit</div>

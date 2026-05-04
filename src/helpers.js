@@ -194,6 +194,8 @@ export function defaultPermissionsForRole(role) {
       can_access_records: true,
       can_access_reports: true,
       can_access_connections: true,
+      can_access_reconciliation: true,
+      can_access_hub_reconciliation: true,
       can_access_settings: true,
       can_manage_users: true,
       can_manage_rules: true,
@@ -215,6 +217,8 @@ export function defaultPermissionsForRole(role) {
     can_access_records: false,
     can_access_reports: false,
     can_access_connections: false,
+    can_access_reconciliation: false,
+    can_access_hub_reconciliation: false,
     can_access_settings: false,
     can_manage_users: false,
     can_manage_rules: false,
@@ -246,9 +250,19 @@ export function sanitizeUser(user) {
     can_access_records: boolFromRow(user.can_access_records, false),
     can_access_reports: boolFromRow(user.can_access_reports, false),
     can_access_connections: boolFromRow(user.can_access_connections, false),
+    can_access_reconciliation: boolFromRow(user.can_access_reconciliation, false),
+    can_access_hub_reconciliation: boolFromRow(user.can_access_hub_reconciliation, false),
     can_access_settings: boolFromRow(user.can_access_settings, false),
     can_manage_users: boolFromRow(user.can_manage_users, false),
-    can_manage_rules: user.role === 'admin' ? true : boolFromRow(user.can_manage_rules, false),
+    // Used to be `user.role === 'admin' ? true : boolFromRow(...)` which made
+    // admins ALWAYS get can_manage_rules regardless of the DB. That broke the
+    // new "turn off modules for specific admins" feature: an operator could
+    // toggle off Rule Management for an admin and the value was correctly
+    // saved to DB, but sanitizeUser kept reporting it as true so the admin
+    // still saw the rules editor. Now respects the DB value uniformly; the
+    // admin bypass for module visibility lives in lib/permissions.js where
+    // it can be overridden cleanly.
+    can_manage_rules: boolFromRow(user.can_manage_rules, false),
     can_edit_records: boolFromRow(user.can_edit_records, true),
     can_flag_records: boolFromRow(user.can_flag_records, true),
     created_date: user.created_date,

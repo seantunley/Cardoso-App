@@ -354,6 +354,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_records',
       'can_access_reports',
       'can_access_connections',
+      'can_access_reconciliation',
+      'can_access_hub_reconciliation',
       'can_access_settings',
       'can_manage_users',
       'can_manage_rules',

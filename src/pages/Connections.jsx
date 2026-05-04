@@ -340,7 +340,7 @@ export default function Connections() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto p-6 space-y-5">
+      <div className="max-w-[1600px] mx-auto p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Connections</div>

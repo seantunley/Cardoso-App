@@ -260,7 +260,16 @@ function findInvoiceNumber(text) {
     const m = cleaned.match(p);
     if (m) {
       const full = 'IN000' + m[1];
-      if (full.length >= 12 && full.length <= 14) return full;
+      // Length range covers BAT's two known invoice formats:
+      //   IN<9 digits>  → 11 chars (e.g. IN000422238 — pre-rollover)
+      //   IN<10 digits> → 12 chars (e.g. IN0004225236 — post-rollover)
+      // Pre-fix the lower bound was 12, which silently dropped every
+      // 9-digit invoice the partial pattern caught — those rows then
+      // fell all the way through the cascade to extract_total. Operator
+      // sent us a real ENGEN KABOKWENI POD where GV correctly returned
+      // "WNVOICE NO\n000422238" and we ignored it because IN000422238
+      // is 11 chars. Now accepts 11-14.
+      if (full.length >= 11 && full.length <= 14) return full;
     }
   }
 
@@ -563,6 +572,33 @@ parentPort.on('message', async (msg) => {
         type: 'result', id, ok: false,
         error: { message: err.message, stack: err.stack, tierError: !!err.tierError },
       });
+      // Self-terminate after any timeout-class error.
+      //
+      // Why: Node's worker_threads can't preempt synchronous native code.
+      // When extract_total / per-engine / tesseract_init timeouts fire,
+      // the await rejects but the underlying Tesseract.recognize / sharp
+      // / canvas call is still occupying the worker's V8 thread. The
+      // worker postMessages the error back to the parent and looks
+      // "free" from the JS side, but the next 'extract' message can't
+      // be processed until the native code naturally completes. Memory
+      // stays held, the worker thread stays busy, the queue effectively
+      // stops moving — exactly the "timeout → workers stuck → only a
+      // restart frees them" pattern operators have been hitting.
+      //
+      // process.exit kills the worker thread cleanly. The parent's
+      // OcrLane.exit handler fires, failAll wakes any pending slot, the
+      // catch in runLane sees lane.worker.dead and recreates the lane
+      // with a fresh worker. Memory freed, native handles released,
+      // queue keeps moving.
+      //
+      // setImmediate gives postMessage above a tick to flush before we
+      // exit, so the parent reliably gets the result message.
+      const msg = String(err?.message || '');
+      const isTimeoutKind =
+        /Timeout in stage:|extract_total|tesseract_init|engine:/.test(msg);
+      if (isTimeoutKind) {
+        setImmediate(() => process.exit(1));
+      }
     }
   }
 });

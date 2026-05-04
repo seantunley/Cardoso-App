@@ -1212,6 +1212,16 @@ function buildMigrations(db) {
               END
             `);
             db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_balance_num ON hub_records(outstanding_balance_num)`);
+            // hub_records uses a composite primary key (site_id, record_id),
+            // not a single `id` column. The earlier version of this trigger
+            // had `WHERE id = NEW.id` (copy-pasted from the datarecord
+            // trigger) which makes SQLite refuse to prepare ANY insert/update
+            // against hub_records with "no such column: id" — the Hub's
+            // entire customer-records ETL silently fails as a result.
+            //
+            // Migration 54 below repairs already-broken Hubs by dropping +
+            // recreating these triggers with the correct composite-key
+            // WHERE clause.
             db.exec(`
               CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_ins
               AFTER INSERT ON hub_records
@@ -1220,7 +1230,7 @@ function buildMigrations(db) {
                   WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
                     THEN NULL
                   ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
-                END WHERE id = NEW.id;
+                END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
               END
             `);
             db.exec(`
@@ -1231,7 +1241,7 @@ function buildMigrations(db) {
                   WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
                     THEN NULL
                   ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
-                END WHERE id = NEW.id;
+                END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
               END
             `);
           }
@@ -1400,6 +1410,111 @@ function buildMigrations(db) {
         db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_occurred ON error_log(occurred_at DESC)`);
         db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_source ON error_log(source, occurred_at DESC)`);
         db.exec(`CREATE INDEX IF NOT EXISTS idx_error_log_level ON error_log(level, occurred_at DESC)`);
+      },
+    },
+    {
+      version: 55,
+      name: 'admin_module_visibility',
+      up() {
+        // Existing admins were assumed to have implicit access to every
+        // module via the `if (user.role === 'admin') return true` bypass
+        // in lib/permissions.js. That bypass now respects an explicit `0`
+        // on a permission column, enabling per-admin module visibility
+        // (e.g., a BAT-only admin who shouldn't see Network Devices).
+        //
+        // Existing admins may have permission columns at 0 (the
+        // `ensureColumn DEFAULT 0` migration default for any column added
+        // after the user row was created). Without this migration they'd
+        // suddenly lose access to those modules under the new logic.
+        //
+        // Set every admin's permission columns to 1 to preserve current
+        // "admins see everything" default. From here on, an operator can
+        // explicitly turn OFF specific modules per admin via the User
+        // Management modal.
+        try {
+          const cols = [
+            'can_access_customer_search',
+            'can_access_customer_balances',
+            'can_access_collections',
+            'can_access_inventory',
+            'can_access_network_devices',
+            'can_access_hub_metrics',
+            'can_access_hub_backups',
+            'can_access_hub_trends',
+            'can_access_hub_audit_log',
+            'can_access_records',
+            'can_access_reports',
+            'can_access_connections',
+            'can_access_reconciliation',
+            'can_access_hub_reconciliation',
+            'can_access_settings',
+            'can_manage_users',
+            'can_manage_rules',
+            'can_edit_records',
+            'can_flag_records',
+          ];
+          // Filter to columns that actually exist on this DB (older sites
+          // may not have every permission column yet — ensureColumn
+          // migrations earlier add them lazily).
+          const userCols = db.prepare("PRAGMA table_info(\"user\")").all().map(c => c.name);
+          const present = cols.filter(c => userCols.includes(c));
+          if (present.length > 0) {
+            const setClause = present.map(c => `${c} = 1`).join(', ');
+            db.prepare(`UPDATE "user" SET ${setClause} WHERE role = 'admin'`).run();
+          }
+        } catch (err) {
+          console.error('[migration 55] admin permission backfill failed:', err.message);
+        }
+      },
+    },
+    {
+      version: 54,
+      name: 'fix_hub_records_balance_num_triggers',
+      up() {
+        // Repair the broken triggers from migration 47. Hub_records has a
+        // composite PK (site_id, record_id), but the earlier trigger body
+        // referenced `id` (copy-pasted from the datarecord trigger). Every
+        // INSERT/UPDATE against hub_records on a migrated Hub fails to even
+        // prepare with "no such column: id", silently breaking the entire
+        // customer-records ETL — the Hub Reconciliation page shows
+        // "Awaiting data" forever for those sites.
+        //
+        // Drop both triggers if present and re-create with the correct
+        // composite-key WHERE clause. Idempotent + safe on Hubs that never
+        // had hub_records (the inner CREATE silently no-ops because the
+        // column-existence guard above only fires when the table exists).
+        try {
+          const hubExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_records'`).get();
+          if (!hubExists) return;
+          const hubCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
+          if (!hubCols.includes('outstanding_balance_num')) return;
+          db.exec(`DROP TRIGGER IF EXISTS trg_hub_records_balance_num_ins`);
+          db.exec(`DROP TRIGGER IF EXISTS trg_hub_records_balance_num_upd`);
+          db.exec(`
+            CREATE TRIGGER trg_hub_records_balance_num_ins
+            AFTER INSERT ON hub_records
+            BEGIN
+              UPDATE hub_records SET outstanding_balance_num = CASE
+                WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                  THEN NULL
+                ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+              END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+            END
+          `);
+          db.exec(`
+            CREATE TRIGGER trg_hub_records_balance_num_upd
+            AFTER UPDATE OF outstanding_balance ON hub_records
+            BEGIN
+              UPDATE hub_records SET outstanding_balance_num = CASE
+                WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+                  THEN NULL
+                ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+              END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+            END
+          `);
+        } catch (err) {
+          console.error('[migration 54] hub_records trigger repair failed:', err.message);
+        }
       },
     },
   ];

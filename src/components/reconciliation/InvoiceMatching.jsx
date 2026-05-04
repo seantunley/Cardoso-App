@@ -22,13 +22,25 @@ const COLUMN_TIPS = {
   amount: 'Order amount from the BAT supplier sheet',
 };
 
+// Defaults are sized to fit the HEADER label at 10pt mono uppercase
+// tracking-[0.15em] without truncation. Earlier values were sized to data
+// only (e.g. store=52 fit "JHB" but clipped the "STORE" header to "STO…").
+// The auto-fit useEffect below scales these proportionally to match the
+// actual container width, so the absolute numbers below are seed values —
+// it's the proportions that matter.
 const COLUMN_DEFAULTS = {
-  idx: 44, order: 185, store: 52, custNo: 99, cust: 276,
-  week: 60, orderDay: 84, deliveryDay: 76, leadTime: 46,
-  delivery: 86, podUploaded: 94, target: 64, exception: 180,
-  ocr: 51, invoice: 218, amount: 89,
+  idx: 44, order: 185, store: 78, custNo: 125, cust: 240,
+  week: 60, orderDay: 84, deliveryDay: 100, leadTime: 60,
+  delivery: 95, podUploaded: 110, target: 80, exception: 180,
+  ocr: 56, invoice: 218, amount: 95,
 };
-const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v3';
+// Bumped to v5 because the auto-fit useEffect saves SCALED widths to
+// localStorage on every change — once v4 had scaled values cached, any
+// subsequent default-tweak in the source was silently overridden by the
+// saved values. Bumping the key invalidates the cache so existing users
+// pick up the new custNo width (was 99 → header "CUSTOMER NO." truncated;
+// now 125 fits comfortably).
+const COLUMN_WIDTHS_KEY = 'bat.invoiceMatching.columnWidths.v5';
 
 function useColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
@@ -198,36 +210,18 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
   const tableContainerRef = useRef(null);
-  const { widths, setWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
+  const { widths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
-  // Auto-fit on mount + container resize: scale every column proportionally
-  // so the columns ALWAYS fill the container exactly — no empty band on the
-  // right when total < container, no overflow when total > container. The
-  // 1px hairline reserved for the right border keeps the rounded frame from
-  // looking clipped.
-  useEffect(() => {
-    const el = tableContainerRef.current;
-    if (!el) return;
-    const fit = () => {
-      const inner = el.clientWidth;
-      if (!inner) return;
-      const target = inner - 1;
-      const total = Object.values(widths).reduce((s, v) => s + v, 0);
-      // 1px tolerance so we don't loop on rounding drift when the table
-      // already matches the container.
-      if (Math.abs(total - target) < 2) return;
-      const scale = target / total;
-      const scaled = Object.fromEntries(
-        Object.entries(widths).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
-      );
-      setWidths(scaled);
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    return () => ro.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // No more auto-fit useEffect — we now use percentage widths on
+  // <col> elements and width:100% on the table itself, so the
+  // browser fills the container natively. The pixel values in
+  // `widths` state are only used as ratios for proportional
+  // distribution. See the table render below.
+  //
+  // The previous setWidths-based auto-fit was fragile: it relied
+  // on ResizeObserver firing reliably on mount, on closures
+  // capturing fresh state, and on Math.round not introducing
+  // drift across saves to localStorage. Easier to let CSS do it.
 
   const handleRetry = async () => {
     if (!reconciliationId) return;
@@ -452,9 +446,19 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           ];
           const totalWidth = colOrder.reduce((s, id) => s + (widths[id] || 100), 0);
           return (
-        <table className="text-xs" style={{ tableLayout: 'fixed', width: totalWidth }}>
+        // Table is 100% of container; column percentages are
+        // computed from the pixel ratios in `widths` state. The
+        // browser handles "fill the container" — no JS-side
+        // auto-fit logic to get wrong. Resize handlers still
+        // operate in pixels (relative to current container width)
+        // and persist to localStorage, but on render we always
+        // re-derive percentages so the proportions are honoured
+        // regardless of container size.
+        <table className="text-xs w-full" style={{ tableLayout: 'fixed' }}>
           <colgroup>
-            {colOrder.map((id) => <col key={id} style={{ width: widths[id] }} />)}
+            {colOrder.map((id) => (
+              <col key={id} style={{ width: `${((widths[id] || 100) / totalWidth) * 100}%` }} />
+            ))}
           </colgroup>
           <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
             <tr>
