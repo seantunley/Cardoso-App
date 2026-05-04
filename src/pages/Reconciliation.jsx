@@ -658,8 +658,11 @@ export default function Reconciliation() {
             {weekStatus?.weekComparison?.length > 0 && (() => {
               const fmt = (v) => Math.abs(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const ragColor = (sup, sage) => {
-                const d = Math.abs((sup || 0) - (sage || 0));
+                const signed = (sup || 0) - (sage || 0);
+                const d = Math.abs(signed);
                 if (d < 0.01) return 'hsl(145 55% 45%)';
+                // Credit notes exceeding BAT is not a shortfall — show green.
+                if (signed < 0) return 'hsl(145 55% 45%)';
                 if (d < 100) return 'var(--phosphor)';
                 return 'hsl(var(--destructive))';
               };
@@ -782,12 +785,14 @@ export default function Reconciliation() {
                           const sageTotal = cells.reduce((s, c) => s + (row[c.sage] || 0), 0);
                           const totalDiff = supTotal - sageTotal;
                           const worst = Math.max(...feeDiffs.map(Math.abs));
-                          const headerColor = worst < 0.01
+                          // Credit notes covering or exceeding BAT is not a shortfall.
+                          const creditCoversBat = totalDiff <= 0.01;
+                          const headerColor = worst < 0.01 || creditCoversBat
                             ? 'hsl(145 55% 45%)'
                             : worst < 100
                               ? 'var(--phosphor)'
                               : 'hsl(var(--destructive))';
-                          const headerGlyph = worst < 0.01 ? '●' : worst < 100 ? '◐' : '▲';
+                          const headerGlyph = worst < 0.01 || creditCoversBat ? '●' : worst < 100 ? '◐' : '▲';
                           const toggle = () => setExpandedWeeks((prev) => {
                             const next = new Set(prev);
                             if (next.has(key)) next.delete(key); else next.add(key);
