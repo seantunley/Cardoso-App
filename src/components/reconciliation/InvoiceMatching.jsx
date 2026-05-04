@@ -210,44 +210,18 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
   const tableContainerRef = useRef(null);
-  const { widths, setWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
+  const { widths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
-  // Auto-fit on mount + container resize: scale every column proportionally
-  // so the columns ALWAYS fill the container exactly — no empty band on the
-  // right when total < container, no overflow when total > container. The
-  // 1px hairline reserved for the right border keeps the rounded frame from
-  // looking clipped.
+  // No more auto-fit useEffect — we now use percentage widths on
+  // <col> elements and width:100% on the table itself, so the
+  // browser fills the container natively. The pixel values in
+  // `widths` state are only used as ratios for proportional
+  // distribution. See the table render below.
   //
-  // The `widths` snapshot is read via `setWidths(prev => …)` inside `fit()`
-  // (functional update), so the ResizeObserver always sees the CURRENT
-  // state instead of whatever was captured in the closure at mount. The
-  // earlier version had `[]` deps + direct read of `widths`, which meant
-  // the very first fit ran fine but every subsequent ResizeObserver
-  // callback used stale widths — the table either failed to fill on
-  // re-layout or fought against user resizes.
-  useEffect(() => {
-    const el = tableContainerRef.current;
-    if (!el) return;
-    const fit = () => {
-      const inner = el.clientWidth;
-      if (!inner) return;
-      const target = inner - 1;
-      setWidths((prev) => {
-        const total = Object.values(prev).reduce((s, v) => s + v, 0);
-        // 1px tolerance so we don't loop on rounding drift when the
-        // table already matches the container.
-        if (Math.abs(total - target) < 2) return prev;
-        const scale = target / total;
-        return Object.fromEntries(
-          Object.entries(prev).map(([k, v]) => [k, Math.max(40, Math.round(v * scale))]),
-        );
-      });
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [setWidths]);
+  // The previous setWidths-based auto-fit was fragile: it relied
+  // on ResizeObserver firing reliably on mount, on closures
+  // capturing fresh state, and on Math.round not introducing
+  // drift across saves to localStorage. Easier to let CSS do it.
 
   const handleRetry = async () => {
     if (!reconciliationId) return;
@@ -472,9 +446,19 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           ];
           const totalWidth = colOrder.reduce((s, id) => s + (widths[id] || 100), 0);
           return (
-        <table className="text-xs" style={{ tableLayout: 'fixed', width: totalWidth }}>
+        // Table is 100% of container; column percentages are
+        // computed from the pixel ratios in `widths` state. The
+        // browser handles "fill the container" — no JS-side
+        // auto-fit logic to get wrong. Resize handlers still
+        // operate in pixels (relative to current container width)
+        // and persist to localStorage, but on render we always
+        // re-derive percentages so the proportions are honoured
+        // regardless of container size.
+        <table className="text-xs w-full" style={{ tableLayout: 'fixed' }}>
           <colgroup>
-            {colOrder.map((id) => <col key={id} style={{ width: widths[id] }} />)}
+            {colOrder.map((id) => (
+              <col key={id} style={{ width: `${((widths[id] || 100) / totalWidth) * 100}%` }} />
+            ))}
           </colgroup>
           <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
             <tr>
