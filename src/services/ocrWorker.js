@@ -235,10 +235,17 @@ function findInvoiceNumber(text) {
     .replace(/[{}[\]()]/g, '')
     .replace(/[—–-]{2,}/g, ' ');
 
-  const longMatch = cleaned.match(/\b(18\d{8,9})\b/);
+  // Long-form numeric invoice (legacy "18000xxxxxx" format and the new
+  // "1800042xxxxx" 11-12 digit form). Without the wider {8,10} range the
+  // 10-digit-after-IN format that BAT rolled out recently was never
+  // matched, every row hit no_regex_match, and the cascade walked the
+  // whole engine list before timing out at extract_total.
+  const longMatch = cleaned.match(/\b(18\d{8,10})\b/);
   if (longMatch) return 'IN' + longMatch[1].substring(2);
 
-  const inLongMatch = cleaned.match(/\bIN\s*(\d{8,9})\b/i);
+  // IN-prefixed long. Range widened from {8,9} to {8,10} for the same
+  // reason. 8 → padded to 9 (legacy); 9 and 10 returned as-is.
+  const inLongMatch = cleaned.match(/\bIN\s*(\d{8,10})\b/i);
   if (inLongMatch) {
     let digits = inLongMatch[1];
     if (digits.length === 8) digits = '0' + digits;
@@ -455,7 +462,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
               stage: stageLabel,
               reason: 'short_text',
               text_length: (text || '').length,
-              text_preview: (text || '').slice(0, 200),
+              text_preview: (text || '').slice(0, 1000),
             });
           } catch {}
           continue;
@@ -477,7 +484,11 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
             stage: stageLabel,
             reason: 'no_regex_match',
             text_length: text.length,
-            text_preview: text.slice(0, 300),
+            // Bumped from 300 → 1500 so the operator can see whether the
+            // invoice number is actually anywhere in the engine's output.
+            // Without enough context "no_regex_match" was indistinguishable
+            // from "engine missed the invoice region of the page entirely".
+            text_preview: text.slice(0, 1500),
           });
         } catch {}
       } catch (err) {
