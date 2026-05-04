@@ -86,14 +86,21 @@ export function startSchedulers() {
   cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle));
   cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
 
-  // BAT Sage week-totals cache — refresh every 3h on weekdays at 7/10/13/16
-  cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', () => {
-    refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] scheduled refresh failed:', e.message));
-  }));
-  // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
-  setTimeout(() => {
-    refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] boot refresh failed:', e.message));
-  }, 15000);
+  // BAT Sage week-totals cache — refresh every 3h on weekdays at 7/10/13/16.
+  // Site-only: the Hub doesn't have a Sage connection (it aggregates data
+  // pulled from sites via /api/reporting/bat-summary, not by querying Sage
+  // directly). Without this gate the Hub fired refreshSageWeekTotalsCache
+  // on every cron tick and on every boot, each call throwing "No Sage
+  // connection configured" into the System Log.
+  if (process.env.HUB_MODE !== 'true') {
+    cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', () => {
+      refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] scheduled refresh failed:', e.message));
+    }));
+    // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
+    setTimeout(() => {
+      refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] boot refresh failed:', e.message));
+    }, 15000);
+  }
 
   if (process.env.HUB_MODE !== 'true') {
     // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
