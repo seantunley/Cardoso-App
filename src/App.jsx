@@ -9,6 +9,7 @@ import { pagesConfig } from "./pages.config";
 import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from "react-router-dom";
 import PageNotFound from "./lib/PageNotFound";
 import { useAuth } from "@/lib/AuthContext";
+import { hasPermission } from "@/lib/permissions";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
@@ -28,6 +29,7 @@ const pagePermissions = {
   HubTrends: "can_access_hub_trends",
   HubAuditLog: "can_access_hub_audit_log",
   Records: "can_access_records",
+  Reconciliation: "can_access_reconciliation",
   Reports: "can_access_reports",
   Connections: "can_access_connections",
 };
@@ -58,6 +60,35 @@ const ProtectedPage = ({ children, currentPageName }) => {
   }
 
   return <LayoutWrapper currentPageName={currentPageName}>{children}</LayoutWrapper>;
+};
+
+// Resolves the user's landing page on `/`. If they have access to the
+// configured mainPage (or are in hubMode), render its children. Otherwise
+// redirect to the first page in pagePermissions they DO have access to —
+// stops users with limited permissions (e.g. "BAT only") landing on a
+// dead-end "Access denied" wall just because their default page is one
+// they can't open.
+//
+// Order matters: pagePermissions is iterated in insertion order, so the
+// fall-back follows the same priority as the sidebar nav. Settings /
+// admin-only routes aren't in the map, so they're never auto-targeted.
+const RootRedirect = ({ children, hubMode }) => {
+  const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  if (isLoadingAuth || !isAuthenticated) return children;
+  // Hub mode opens HubDashboard for everyone — no redirect needed.
+  if (hubMode) return children;
+  const mainPerm = pagePermissions[mainPageKey];
+  if (!mainPerm || hasPermission(user, mainPerm)) return children;
+  // User has no access to the default page. Find the first allowed one.
+  for (const [path, perm] of Object.entries(pagePermissions)) {
+    if (hasPermission(user, perm)) {
+      return <Navigate to={`/${path}`} replace />;
+    }
+  }
+  // No accessible pages at all — fall through to the existing
+  // "Access denied" state on the configured main page so the user sees
+  // SOMETHING rather than a blank screen.
+  return children;
 };
 
 const AuthenticatedApp = () => {
@@ -93,11 +124,11 @@ const AuthenticatedApp = () => {
       <Route
         path="/"
         element={
-          <ProtectedPage currentPageName={hubMode ? "HubDashboard" : mainPageKey}>
-            <ProtectedRoute permission={hubMode ? undefined : pagePermissions[mainPageKey]}>
+          <RootRedirect hubMode={hubMode}>
+            <ProtectedPage currentPageName={hubMode ? "HubDashboard" : mainPageKey}>
               {hubMode ? <HubDashboard /> : <MainPage />}
-            </ProtectedRoute>
-          </ProtectedPage>
+            </ProtectedPage>
+          </RootRedirect>
         }
       />
 
