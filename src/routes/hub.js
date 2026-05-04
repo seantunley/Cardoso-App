@@ -754,11 +754,31 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   });
 
   // GET /api/hub/sync-log
+  // Joins hub_sites so the UI gets the human-readable slug instead of the
+  // opaque site_id, and aliases `error` → `error_message` to match what the
+  // HubSyncLog page renders. Without this join + alias, every row in the
+  // page showed an empty SITE column and "—" in NOTE — the actual errors
+  // were captured in DB but invisible to the operator, which is exactly
+  // why "the hub isn't syncing" went undiagnosed.
   router.get('/api/hub/sync-log', requireAuth, (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 200);
-    const rows = db.prepare(
-      'SELECT * FROM hub_sync_log ORDER BY started_at DESC LIMIT ?'
-    ).all(limit);
+    const rows = db.prepare(`
+      SELECT
+        l.id,
+        l.site_id,
+        COALESCE(s.slug, l.site_id) AS site_slug,
+        s.name AS site_name,
+        l.started_at,
+        l.completed_at,
+        l.records_fetched,
+        l.status,
+        l.error,
+        l.error AS error_message
+      FROM hub_sync_log l
+      LEFT JOIN hub_sites s ON s.id = l.site_id
+      ORDER BY l.started_at DESC
+      LIMIT ?
+    `).all(limit);
     res.json(rows);
   });
 

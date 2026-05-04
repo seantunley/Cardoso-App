@@ -344,7 +344,7 @@ function initSchema(db) {
                FROM json_each(NEW.unpaid_invoices)
               WHERE json_extract(value, '$.number') IS NOT NULL
            ), '')
-         WHERE id = NEW.id;
+         WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
       END
     `);
     db.exec(`
@@ -357,7 +357,7 @@ function initSchema(db) {
                FROM json_each(NEW.unpaid_invoices)
               WHERE json_extract(value, '$.number') IS NOT NULL
            ), '')
-         WHERE id = NEW.id;
+         WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
       END
     `);
   }
