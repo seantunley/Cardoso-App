@@ -40,6 +40,10 @@ export default function ReconciliationSummary({ recon }) {
   const stats = recon.extractionStats || {};
   const needsAttention = stats.needsAttention || 0;
   const attentionRate = stats.total > 0 ? ((needsAttention / stats.total) * 100).toFixed(1) : '0.0';
+  // When zero invoices need attention, the literal "0.0%" reads like a
+  // completion progress bar (where 0% would be bad). Show an explicit
+  // all-clear instead so the healthy state isn't misread as broken.
+  const allClear = needsAttention === 0 && (stats.total || 0) > 0;
 
   return (
     <section>
@@ -68,8 +72,12 @@ export default function ReconciliationSummary({ recon }) {
         />
         <Tile
           label="Needs Attention"
-          value={<>{attentionRate}<span className="text-muted-foreground/60 text-3xl ml-1">%</span></>}
-          sub={`${needsAttention}/${stats.total || 0} invoices · ${(stats.notFound || 0) + (stats.failed || 0)} OCR fail · ${stats.duplicateExtractions || 0} dup`}
+          value={allClear
+            ? <>All clear<span className="text-muted-foreground/60 text-3xl ml-1">✓</span></>
+            : <>{attentionRate}<span className="text-muted-foreground/60 text-3xl ml-1">%</span></>}
+          sub={allClear
+            ? `${stats.total || 0}/${stats.total || 0} invoices OK · 0 OCR fail · 0 dup`
+            : `${needsAttention}/${stats.total || 0} invoices · ${(stats.notFound || 0) + (stats.failed || 0)} OCR fail · ${stats.duplicateExtractions || 0} dup`}
           accent={needsAttention > 0 ? 'hsl(var(--destructive))' : 'hsl(145 55% 45%)'}
           glow={needsAttention > 0 ? 'hsla(0, 72%, 50%, 0.3)' : 'hsla(145, 55%, 45%, 0.25)'}
         />

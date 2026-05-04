@@ -15,8 +15,37 @@ import { logError } from '../lib/errorLog.js';
 // handlers) translate that into Server-Sent Events to push to the browser.
 export const extractionEvents = new EventEmitter();
 extractionEvents.setMaxListeners(50); // multiple browser tabs can subscribe
+
+// Throttle emits to at most one per THROTTLE_MS per recon. Without this,
+// each OCR row produces 5–10 progress messages and each emit triggers
+// every connected SSE listener to run getExtractionProgress() (2 sync
+// SQLite SELECTs) and write JSON to its response. With multiple tabs /
+// zombie listeners this saturated the main thread enough to stall
+// unrelated requests (JPEG previews, etc.) until they hit Chrome's
+// 6-per-origin connection limit and the operator had to close+reopen
+// the tab to recover. Trailing-edge fire so the final "done" event
+// always lands even if it arrives mid-throttle window.
+const EMIT_THROTTLE_MS = 250;
+const _emitState = new Map(); // reconId -> { lastFiredAt, pending }
 function emitExtractionUpdate(reconId) {
-  try { extractionEvents.emit(`update:${reconId}`); } catch {}
+  if (!reconId) return;
+  const now = Date.now();
+  const state = _emitState.get(reconId) || { lastFiredAt: 0, pending: null };
+  const sinceLast = now - state.lastFiredAt;
+  if (sinceLast >= EMIT_THROTTLE_MS) {
+    state.lastFiredAt = now;
+    _emitState.set(reconId, state);
+    try { extractionEvents.emit(`update:${reconId}`); } catch {}
+    return;
+  }
+  if (state.pending) return; // a trailing emit is already scheduled
+  state.pending = setTimeout(() => {
+    state.pending = null;
+    state.lastFiredAt = Date.now();
+    try { extractionEvents.emit(`update:${reconId}`); } catch {}
+  }, EMIT_THROTTLE_MS - sinceLast);
+  if (typeof state.pending.unref === 'function') state.pending.unref();
+  _emitState.set(reconId, state);
 }
 
 // ── MSSQL Connection ─────────────────────────────────────────────────────────

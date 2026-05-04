@@ -67,6 +67,9 @@ export default function Reconciliation() {
   const [generating, setGenerating] = useState(false);
   const [tg1Rate, setTg1Rate] = useState('0.0009');
   const [tg2Rate, setTg2Rate] = useState('0.0001');
+  // Company-wide VAT %, used by the H1/H2 weekly comparison "Missing VAT"
+  // detector. Editable by an admin in Settings → Accounting; default 15.
+  const [vatPercent, setVatPercent] = useState(15);
   const [ocrPaused, setOcrPausedState] = useState(false);
   // Reflect the global OCR pause switch in the Extract button. Re-checked
   // whenever a reconciliation is opened so toggling pause in Settings is
@@ -88,6 +91,10 @@ export default function Reconciliation() {
       .then(s => {
         if (s?.tg1_rate) setTg1Rate(String(s.tg1_rate));
         if (s?.tg2_rate) setTg2Rate(String(s.tg2_rate));
+        if (s?.vat_percent !== undefined && s?.vat_percent !== null && s?.vat_percent !== '') {
+          const v = Number(s.vat_percent);
+          if (Number.isFinite(v)) setVatPercent(v);
+        }
       })
       .catch(() => {});
   }, []);
@@ -478,16 +485,18 @@ export default function Reconciliation() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
-        {/* Page header */}
-        <div className="flex items-end justify-between gap-6 border-b border-border pb-5">
+        {/* Page header — pinned in both views so the year picker / upload
+            actions (dashboard) and the back button + week title (detail)
+            stay visible while the operator scrolls the long tables below. */}
+        <div className="flex items-end justify-between gap-6 border-b border-border pb-5 sticky top-0 z-30 bg-background pt-5 -mt-5 shadow-[0_8px_16px_-12px_hsla(0,0%,0%,0.6)]">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-3">
+            <div className="font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-3">
               {view === 'detail' && (
                 <button
                   onClick={() => { setView('dashboard'); setSelected(null); loadDashboard(); }}
                   className="inline-flex items-center gap-1.5 hover:text-accent transition-colors"
                 >
-                  <ChevronLeft className="h-3 w-3" /> Index
+                  <ChevronLeft className="h-3.5 w-3.5" /> All Weeks
                 </button>
               )}
               {view === 'detail' && <span className="text-border">·</span>}
@@ -793,6 +802,17 @@ export default function Reconciliation() {
                               ? 'var(--phosphor)'
                               : 'hsl(var(--destructive))';
                           const headerGlyph = worst < 0.01 || creditCoversBat ? '●' : worst < 100 ? '◐' : '▲';
+                          // VAT-shaped variance detector. BAT is excl. VAT;
+                          // if the absolute weekly variance equals VAT % of
+                          // BAT (within R0.50 to absorb rounding), the most
+                          // likely cause is one side having included VAT
+                          // and the other not. Surfaced as "Missing VAT"
+                          // under the All Fees cell so an operator can see
+                          // why a week looks "out by exactly the VAT".
+                          const vatExpected = supTotal * (Number(vatPercent) / 100);
+                          const missingVat = supTotal > 0 &&
+                            vatExpected > 0.01 &&
+                            Math.abs(Math.abs(totalDiff) - vatExpected) < 0.5;
                           const toggle = () => setExpandedWeeks((prev) => {
                             const next = new Set(prev);
                             if (next.has(key)) next.delete(key); else next.add(key);
@@ -815,7 +835,22 @@ export default function Reconciliation() {
                                     {row.sage_present ? `${row.batch_count} batch${row.batch_count !== 1 ? 'es' : ''}` : 'no sage'}
                                   </div>
                                 </td>
-                                <td className="px-3 py-2 text-muted-foreground/70 font-mono text-[10px] uppercase tracking-[0.15em]">All fees</td>
+                                <td className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.15em]">
+                                  <div className="text-muted-foreground/70">All fees</div>
+                                  {missingVat && (
+                                    <div
+                                      className="mt-0.5 inline-block px-1.5 py-0.5 rounded-sm"
+                                      style={{
+                                        color: 'var(--phosphor)',
+                                        background: 'hsla(33, 95%, 55%, 0.12)',
+                                        border: '1px solid hsla(33, 95%, 55%, 0.4)',
+                                      }}
+                                      title={`Variance R${fmt(Math.abs(totalDiff))} ≈ ${vatPercent}% of BAT (R${fmt(vatExpected)}) — likely VAT mismatch`}
+                                    >
+                                      missing VAT
+                                    </div>
+                                  )}
+                                </td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums text-foreground">
                                   {supTotal ? <><span className="text-muted-foreground/60 mr-0.5">R</span>{fmt(supTotal)}</> : '—'}
                                 </td>
