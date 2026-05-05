@@ -308,25 +308,55 @@ export default function Reconciliation() {
     slot.latestId = id;
     setView('detail');
 
-    // Fire both in parallel. Previously sequential, which doubled wall time
-    // for every click; the cardoso-match call doesn't need the recon body.
-    const [reconRes, matchRes] = await Promise.allSettled([
-      fetch(`/api/bat/reconciliation/${id}`, { credentials: 'include', signal: ctrl.signal }),
-      fetch(`/api/bat/cardoso-match/${id}`, { credentials: 'include', signal: ctrl.signal }),
-    ]);
+    // Fire both fetches in parallel, but DO NOT block the page render on
+    // cardoso-match. That endpoint runs a heavy fuzzy match across every
+    // extraction in the recon (116+ rows × the Cardoso invoice table) and
+    // can hang or take many seconds on a busy site. The previous
+    // Promise.allSettled([recon, match]) waited for BOTH to settle, so a
+    // hung cardoso-match left setSelected unfired and the page blank with
+    // no error in console — the recon body had returned 200 and parsed
+    // fine, but the React function was still awaiting allSettled.
+    //
+    // Now: recon body is the only thing the page render needs. Block on
+    // it, set state as soon as it lands. cardoso-match fires concurrently
+    // but its result populates the cross-reference panel whenever it
+    // returns (or never, if it errors / hangs — page is usable either way).
 
-    // Stale-response guard: a slower earlier click resolving after a faster
-    // later one would otherwise overwrite `selected` with the wrong recon.
-    if (slot.latestId !== id || ctrl.signal.aborted) return;
-
-    if (reconRes.status === 'fulfilled' && reconRes.value.ok) {
-      try { setSelected(await reconRes.value.json()); } catch {}
-    }
-    if (matchRes.status === 'fulfilled' && matchRes.value.ok) {
+    // Cardoso match — fire-and-forget. Errors are logged but don't block
+    // the page. The stale-id guard inside ensures a slow response from a
+    // previous click can't overwrite state for the current selection.
+    (async () => {
       try {
-        const md = await matchRes.value.json();
-        setCardosoMatch(md.cardosoCount > 0 ? md.matching : null);
-      } catch {}
+        const mr = await fetch(`/api/bat/cardoso-match/${id}`, { credentials: 'include', signal: ctrl.signal });
+        if (slot.latestId !== id || ctrl.signal.aborted) return;
+        if (mr.ok) {
+          const md = await mr.json();
+          if (slot.latestId !== id) return;
+          setCardosoMatch(md.cardosoCount > 0 ? md.matching : null);
+        }
+      } catch (err) {
+        if (err?.name !== 'AbortError') {
+          console.warn('[loadReconciliation] cardoso-match failed (non-blocking):', err?.message || err);
+        }
+      }
+    })();
+
+    // Recon body — required for the page to render. Block on this only.
+    try {
+      const r = await fetch(`/api/bat/reconciliation/${id}`, { credentials: 'include', signal: ctrl.signal });
+      // Stale-response guard: a slower earlier click resolving after a
+      // faster later one would otherwise overwrite `selected` with the
+      // wrong recon.
+      if (slot.latestId !== id || ctrl.signal.aborted) return;
+      if (r.ok) {
+        const data = await r.json();
+        if (slot.latestId !== id) return;
+        setSelected(data);
+      }
+    } catch (err) {
+      if (err?.name !== 'AbortError') {
+        console.error('[loadReconciliation] recon fetch failed:', err?.message || err);
+      }
     }
   };
 
