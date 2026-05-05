@@ -187,7 +187,18 @@ ${scriptContent}
 }
 `.trim();
 
-  await fsp.writeFile(scriptPath, wrappedScript, 'utf8');
+  // Prepend a UTF-8 BOM so PowerShell 5.1 reads the file as UTF-8 instead
+  // of the default cp1252. Without the BOM, any multi-byte UTF-8 character
+  // anywhere in the script (em-dashes, smart quotes, etc.) gets mis-decoded
+  // mid-string and breaks the parser. We've been bitten by this twice now
+  // (install-hub-caddy.ps1 + this file's installerScript with the em-dash
+  // in "timed out — process killed"). The BOM is 3 bytes; cheap insurance.
+  // Written as the explicit Buffer-prefixed bytes \xEF\xBB\xBF so editor
+  // round-trips, copy/paste, or stray normalisation can't silently strip
+  // a literal U+FEFF character.
+  const BOM = Buffer.from([0xEF, 0xBB, 0xBF]);
+  const body = Buffer.from(wrappedScript, 'utf8');
+  await fsp.writeFile(scriptPath, Buffer.concat([BOM, body]));
 
   // Create a one-shot task that's scheduled at a dummy time and triggered
   // immediately via /Run. SYSTEM context, highest run-level — the same
@@ -882,7 +893,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         `$completed = $proc.WaitForExit(300000)`,
         `if (-not $completed) {`,
         `  try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch {}`,
-        `  Write-Error "Installer timed out after 5 minutes — process killed"`,
+        `  Write-Error "Installer timed out after 5 minutes - process killed"`,
         `}`,
         `Start-Sleep -Seconds 5`,
         `# Installer should have restarted service; start it if not running`,
