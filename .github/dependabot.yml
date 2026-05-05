@@ -1,0 +1,71 @@
+# Dependabot config — weekly updates with sane grouping.
+#
+# Patches and minors are grouped into one PR per week each (less noise,
+# easier review). Major version bumps come as separate PRs so they get
+# their own conversation. Packages on the Tier 3 hold list (see
+# docs/plans/tech-debt.md) are ignored at the major level so Dependabot
+# stops nagging — minor/patch updates within those still get through.
+
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: "Africa/Johannesburg"
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+    groups:
+      patch-updates:
+        update-types:
+          - patch
+      minor-updates:
+        update-types:
+          - minor
+
+    ignore:
+      # pdfjs-dist is a load-bearing pin. The CI guard fails the build if
+      # this changes. See docs/plans/pdf-engine-migration.md.
+      - dependency-name: pdfjs-dist
+
+      # Tier 3 deferrals — major versions only. See tech-debt.md.
+      # Minor/patch within the current major still gets PR'd.
+      - dependency-name: tailwindcss
+        update-types: [version-update:semver-major]
+      - dependency-name: recharts
+        update-types: [version-update:semver-major]
+      - dependency-name: framer-motion
+        update-types: [version-update:semver-major]
+      - dependency-name: react-router-dom
+        update-types: [version-update:semver-major]
+      - dependency-name: tesseract.js
+        update-types: [version-update:semver-major]
+      - dependency-name: date-fns
+        update-types: [version-update:semver-major]
+      - dependency-name: zod
+        update-types: [version-update:semver-major]
+      - dependency-name: better-sqlite3
+        update-types: [version-update:semver-major]
+      - dependency-name: eslint
+        update-types: [version-update:semver-major]
+      - dependency-name: "@eslint/js"
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: "Africa/Johannesburg"
+    labels:
+      - dependencies
+      - github-actions
+    groups:
+      github-actions:
+        patterns:
+          - "*"
