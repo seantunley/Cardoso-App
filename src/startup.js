@@ -52,31 +52,23 @@ function autoHealSessionSecret() {
   }
 }
 
-export function validateSessionSecret(secret) {
+/**
+ * Production-only auto-repair for SESSION_SECRET. Call BEFORE the zod
+ * validator (`validateEnvOrExit` in src/config/env.js) so the parser sees
+ * the healed value. In dev/test the validator handles the missing/short
+ * secret as a hard error so the developer notices misconfiguration.
+ *
+ * Extracted from the old `validateSessionSecret` so that the zod schema
+ * remains the single source of truth for length/format checks while this
+ * keeps the production self-repair behaviour.
+ */
+export function autoHealSessionSecretIfNeeded() {
+  if (process.env.NODE_ENV !== 'production') return;
+  const secret = process.env.SESSION_SECRET;
   const isPlaceholder = !secret || SESSION_SECRET_PLACEHOLDERS.has(secret);
   const isTooShort = secret && secret.length < 32;
-
   if (isPlaceholder || isTooShort) {
-    // In production: auto-heal so the service keeps running (installer default is a known short placeholder)
-    // In dev: hard fail so developers notice misconfiguration
-    if (process.env.NODE_ENV === 'production') {
-      autoHealSessionSecret();
-    } else {
-      console.error('FATAL: SESSION_SECRET must be at least 32 characters long. Set a proper value in .env.');
-      process.exit(1);
-    }
-  }
-}
-
-export function validateHubTokenSecret(secret) {
-  // HUB_TOKEN_SECRET is optional — only required if hub_redirect silent login is used
-  if (!secret) {
-    console.warn('[startup] HUB_TOKEN_SECRET not set — hub_redirect silent login disabled');
-    return;
-  }
-  if (secret.length < 32) {
-    console.warn('[startup] HUB_TOKEN_SECRET is too short (< 32 chars) — hub_redirect silent login disabled');
-    return;
+    autoHealSessionSecret();
   }
 }
 
