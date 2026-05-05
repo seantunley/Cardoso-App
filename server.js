@@ -108,14 +108,43 @@ app.use(express.json());
 // in 6 high-severity transitive vulns through node-gyp + tar). Sessions live
 // in their own DB file alongside the main app DB so a session table corruption
 // can't take the main app offline.
-//
-// Side-effect: the new store creates its own `sessions` table layout, so any
-// existing sessions on disk are dropped on first boot — every user has to
-// log in once after the upgrade.
 const Database = require('better-sqlite3');
 const SqliteStore = require('better-sqlite3-session-store')(session);
 const sessionsDbDir = path.dirname(process.env.DB_PATH || './database/cardoso.db');
 const sessionsDb = new Database(path.join(sessionsDbDir, 'sessions.db'));
+
+// Migrate from the old connect-sqlite3 schema if present.
+//
+// connect-sqlite3 created `sessions(sid, expired, sess)`. better-sqlite3-session-store
+// expects `sessions(sid, expire, sess)` — note `expire` not `expired`. On any
+// site upgrading from < v2026.4.18, the old table sits on disk and the first
+// session lookup (e.g. POST /api/auth/login → save session) hits the new
+// store's INSERT path, which fails with `no such column: expire` and bubbles
+// up to the UI as `{"error":"no such column: expire"}`.
+//
+// Detect the old shape by checking column names. If the table exists but
+// lacks `expire`, drop it — the store will recreate it with the new shape on
+// first use. All existing sessions are invalidated; users have to log in once
+// after the upgrade. (We can't preserve them across the schema break — the
+// `sess` blob format is also slightly different between the two libraries.)
+try {
+  const tableExists = sessionsDb
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'")
+    .get();
+  if (tableExists) {
+    const cols = sessionsDb.prepare("PRAGMA table_info(sessions)").all();
+    const hasExpire = cols.some(c => c.name === 'expire');
+    if (!hasExpire) {
+      console.log('[session-store] Detected old connect-sqlite3 schema, dropping legacy sessions table — users will need to log in again.');
+      sessionsDb.exec('DROP TABLE sessions');
+    }
+  }
+} catch (err) {
+  // Don't crash boot on a schema-detect failure — the store will surface
+  // the real error on first request if migration was actually needed.
+  console.error('[session-store] Schema detection failed:', err.message);
+}
+
 app.use(session({
   store: new SqliteStore({
     client: sessionsDb,
