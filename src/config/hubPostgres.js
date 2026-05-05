@@ -46,21 +46,7 @@ export function getHubPostgresConfig(env = process.env) {
   };
 }
 
-export function validateHubPostgresConfig(env = process.env) {
-  const config = getHubPostgresConfig(env);
-
-  if (!config.requested) return config;
-
-  if (!config.hubMode) {
-    console.warn('[hub-storage] HUB_POSTGRES_ENABLED is set, but HUB_MODE is not true. Postgres scaffold will stay disabled.');
-    return config;
-  }
-
-  if (!config.validation.ok) {
-    console.error(`[hub-storage] HUB_POSTGRES_ENABLED=true but required config is missing: ${config.validation.missing.join(', ')}`);
-    process.exit(1);
-  }
-
-  console.log('[hub-storage] Hub Postgres scaffold enabled. SQLite remains the active live data path.');
-  return config;
-}
+// validateHubPostgresConfig was removed in v2026.4.21 — its validation is now
+// part of the consolidated zod schema in src/config/env.js (single boot pass,
+// aggregated error reporting). getHubPostgresConfig stays because hub
+// storage init still needs the richer { enabled, reason, ... } object.
