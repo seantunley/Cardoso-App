@@ -185,31 +185,85 @@ export async function resetSagePool() {
 
 // ── Spreadsheet Parsing ──────────────────────────────────────────────────────
 
-export function parseSupplierSpreadsheet(filePath, originalFilename) {
-  const workbook = XLSX.readFile(filePath);
+// Custom error class so the route can distinguish "spreadsheet was rejected
+// for documented reasons" (400 with diagnostic list) from "the parser itself
+// crashed unexpectedly" (500). Carries an array of human-readable reason
+// strings the UI can list verbatim in the rejection modal.
+export class SpreadsheetValidationError extends Error {
+  constructor(reasons, fileName) {
+    super(`Spreadsheet rejected (${reasons.length} issue${reasons.length !== 1 ? 's' : ''}): ${reasons.join(' | ')}`);
+    this.name = 'SpreadsheetValidationError';
+    this.reasons = reasons;
+    this.fileName = fileName;
+  }
+}
 
-  // Detect week number from filename
+export function parseSupplierSpreadsheet(filePath, originalFilename) {
+  // Collect every problem we find before throwing — the operator gets the
+  // full picture in one go instead of fixing one issue, retrying, fixing
+  // the next, retrying again.
+  const errors = [];
+
+  // Detect week number from filename FIRST (cheap check, no file read needed)
   const weekMatch = originalFilename.match(/Week[_\s]*(\d{1,2})/i);
   const weekNumber = weekMatch ? parseInt(weekMatch[1], 10) : null;
+  if (!weekNumber) {
+    errors.push(`Could not detect week number from filename "${originalFilename}". Expected format like "Week_19_..." or "Week 19 ...".`);
+  }
 
-  // Parse Overview sheet
+  let workbook;
+  try {
+    workbook = XLSX.readFile(filePath);
+  } catch (err) {
+    // File itself is unreadable — no point continuing with other checks.
+    throw new SpreadsheetValidationError(
+      [`Could not open file as a spreadsheet: ${err.message}. The file may be corrupt or not a valid .xlsx/.xls.`],
+      originalFilename,
+    );
+  }
+
+  // Required sheets
   const overviewSheet = workbook.Sheets['Overview'];
-  if (!overviewSheet) throw new Error('Overview sheet not found in spreadsheet');
-  const overviewData = XLSX.utils.sheet_to_json(overviewSheet, { header: 1, defval: '' });
+  if (!overviewSheet) {
+    errors.push(`Required sheet "Overview" is missing. Found sheets: ${workbook.SheetNames.join(', ') || '(none)'}.`);
+  }
+  const podSheet = workbook.Sheets['Delivery POD'];
+  if (!podSheet) {
+    errors.push(`Required sheet "Delivery POD" is missing. Found sheets: ${workbook.SheetNames.join(', ') || '(none)'}.`);
+  }
 
+  // If either required sheet is missing, we can't extract anything else
+  // meaningfully — fail fast with what we already have.
+  if (!overviewSheet || !podSheet) {
+    throw new SpreadsheetValidationError(errors, originalFilename);
+  }
+
+  const overviewData = XLSX.utils.sheet_to_json(overviewSheet, { header: 1, defval: '' });
   const fees = extractFees(overviewData);
   let storeName = extractStoreName(overviewData);
   const orderAmounts = extractOrderAmounts(overviewData);
 
-  // Parse Delivery POD sheet
-  const podSheet = workbook.Sheets['Delivery POD'];
+  const podData = XLSX.utils.sheet_to_json(podSheet, { header: 1, defval: '' });
   const podUrls = [];
-  let detectedYear = null;
-  if (podSheet) {
-    const podData = XLSX.utils.sheet_to_json(podSheet, { header: 1, defval: '' });
-    detectedYear = extractPodUrls(podData, podUrls);
-    // Fallback: try Delivery POD sheet if not found in Overview
-    if (!storeName) storeName = extractStoreName(podData);
+  const detectedYear = extractPodUrls(podData, podUrls);
+  if (!storeName) storeName = extractStoreName(podData);
+
+  // Structural checks: zero ODR rows or zero PODs means the spreadsheet
+  // looks structurally wrong (parser found no order numbers in the
+  // Overview pivot, or no PDF links in the Delivery POD sheet). Saving
+  // this would create an empty recon that the operator could never use.
+  // Note: per the user's strictness setting, all-zero fees alone is NOT
+  // a hard fail (some weeks legitimately have zero pricing adjustment
+  // etc.) — only flagged when accompanied by zero ODRs / zero PODs.
+  if (orderAmounts.size === 0) {
+    errors.push(`No order rows (ODR-...) found in the "Overview" sheet pivot table. The fees + order-amount extractor couldn't locate any data — the layout may have changed, or the wrong sheet is named "Overview".`);
+  }
+  if (podUrls.length === 0) {
+    errors.push(`No POD URLs (PDF links) found in the "Delivery POD" sheet. Without PDFs the OCR pipeline has nothing to process.`);
+  }
+
+  if (errors.length > 0) {
+    throw new SpreadsheetValidationError(errors, originalFilename);
   }
 
   // Fallback: if per-row branch wasn't found, use overview-level store name
