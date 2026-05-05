@@ -456,6 +456,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_manage_rules',
       'can_edit_records',
       'can_flag_records',
+      // hub_redirect is editable in UserPermissionsModal so the diagnostic
+      // must explain it too. Initially missed; PR review caught it. The
+      // explainPermission logic handles non-perm boolean columns the same
+      // way as perms (read user[key], compare to 1/true) — semantics for
+      // hub_redirect are slightly different (controls login redirect, not
+      // page access) but the "is this value 1?" answer is still useful.
+      'hub_redirect',
     ];
 
     const requestedKey = typeof req.query.key === 'string' ? req.query.key : null;
