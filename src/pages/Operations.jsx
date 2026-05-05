@@ -58,14 +58,14 @@ export default function Operations() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-8">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground mb-3">
+          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
             § Operations
           </div>
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
-            What the system is doing
+            What the system is <em className="text-phosphor">doing</em>.
           </h1>
-          <p className="text-sm text-muted-foreground mt-2">
-            Background jobs, system errors, deploy history{hubMode && ", and per-site sync runs"}.
+          <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3">
+            Background jobs · System errors · Deploy history{hubMode && " · Hub sync"}
           </p>
         </div>
 
