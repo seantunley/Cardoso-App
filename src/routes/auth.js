@@ -2,6 +2,7 @@ import express from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { sanitizeUser, defaultPermissionsForRole } from '../helpers.js';
+import { explainPermission } from '../lib/permissions.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 
@@ -415,6 +416,68 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       console.error('Update permissions error:', error);
       res.status(500).json({ error: 'Failed to update permissions' });
     }
+  });
+
+  // GET /api/users/:id/permission-explain[?key=can_access_X]
+  //
+  // Diagnostic endpoint that explains how a user's effective permissions
+  // are derived. Backs the "Why denied?" admin tool — when an operator
+  // can't figure out why a user can't see a page, they hit this and see
+  // exactly which rule produced the answer (admin default, explicit
+  // user grant, explicit deny, etc.).
+  //
+  // Same allowed list as PUT /api/users/:id/permissions — keeps the
+  // diagnostic in lockstep with what's actually settable.
+  router.get('/api/users/:id/permission-explain', requireAuth, requireAdmin, (req, res) => {
+    const { id } = req.params;
+    const target = getUserById(id);
+    if (!target) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const sanitized = sanitizeUser(target);
+
+    const allowed = [
+      'can_access_customer_search',
+      'can_access_customer_balances',
+      'can_access_collections',
+      'can_access_inventory',
+      'can_access_network_devices',
+      'can_access_hub_metrics',
+      'can_access_hub_backups',
+      'can_access_hub_trends',
+      'can_access_hub_audit_log',
+      'can_access_records',
+      'can_access_reports',
+      'can_access_connections',
+      'can_access_reconciliation',
+      'can_access_hub_reconciliation',
+      'can_access_settings',
+      'can_manage_users',
+      'can_manage_rules',
+      'can_edit_records',
+      'can_flag_records',
+    ];
+
+    const requestedKey = typeof req.query.key === 'string' ? req.query.key : null;
+    if (requestedKey) {
+      if (!allowed.includes(requestedKey)) {
+        return res.status(400).json({ error: `Unknown permission key: ${requestedKey}` });
+      }
+      return res.json({
+        user: { id: sanitized.id, email: sanitized.email, role: sanitized.role },
+        permissions: { [requestedKey]: explainPermission(sanitized, requestedKey) },
+      });
+    }
+
+    const explanations = {};
+    for (const key of allowed) {
+      explanations[key] = explainPermission(sanitized, key);
+    }
+
+    res.json({
+      user: { id: sanitized.id, email: sanitized.email, role: sanitized.role },
+      permissions: explanations,
+    });
   });
 
   router.put('/api/users/:id/profile', requireAuth, requireAdmin, async (req, res) => {

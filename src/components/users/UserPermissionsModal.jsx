@@ -9,7 +9,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Shield } from "lucide-react";
+import { Loader2, Shield, HelpCircle } from "lucide-react";
 
 const permissionGroups = [
   {
@@ -54,6 +54,13 @@ const permissionGroups = [
 
 export default function UserPermissionsModal({ user, open, onClose, onSave, isSaving }) {
   const [permissionState, setPermissionState] = useState({});
+  // "Why denied?" diagnostic — populated when the operator clicks the
+  // help icon next to a permission. Maps key → { allowed, reason, source }
+  // straight from GET /api/users/:id/permission-explain. Cleared whenever
+  // the modal reopens so we never show stale info from a previous user.
+  const [explanations, setExplanations] = useState({});
+  const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState(null);
 
   useEffect(() => {
     if (user) {
@@ -68,6 +75,8 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
       });
 
       setPermissionState(newState);
+      setExplanations({});
+      setExplainError(null);
     }
   }, [user, open]);
 
@@ -81,6 +90,27 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
       ...prev,
       [key]: !prev[key]
     }));
+  };
+
+  const loadExplanations = async () => {
+    if (!user || explainLoading) return;
+    setExplainLoading(true);
+    setExplainError(null);
+    try {
+      const res = await fetch(`/api/users/${user.id}/permission-explain`, {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setExplanations(data.permissions || {});
+    } catch (err) {
+      setExplainError(err.message);
+    } finally {
+      setExplainLoading(false);
+    }
   };
 
   return (
@@ -110,6 +140,37 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
               Admins have full access by default, but individual modules can be turned off here (e.g. a BAT-only admin who shouldn't see Network Devices).
             </p>
           </div>
+        )}
+
+        {/* "Why denied?" diagnostic toggle. Calls /api/users/:id/permission-explain
+            and renders the per-permission reason inline below each switch.
+            Useful when an admin can't figure out why a user can't see a page —
+            instead of mentally tracing the rule chain, they see the source
+            (admin_default / admin_explicit_off / user_grant / user_deny). */}
+        <div className="mx-1 mb-2 flex items-center justify-between gap-2">
+          <button
+            type="button"
+            onClick={loadExplanations}
+            disabled={explainLoading}
+            className="inline-flex items-center gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-50"
+          >
+            {explainLoading
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <HelpCircle className="w-3.5 h-3.5" />}
+            <span>{Object.keys(explanations).length > 0 ? "Refresh diagnostic" : "Diagnose: why is each permission allowed/denied?"}</span>
+          </button>
+          {Object.keys(explanations).length > 0 && (
+            <button
+              type="button"
+              onClick={() => setExplanations({})}
+              className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              Hide
+            </button>
+          )}
+        </div>
+        {explainError && (
+          <p className="mx-1 mb-2 text-xs text-red-400">Diagnostic failed: {explainError}</p>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6 py-4 max-h-[60vh] overflow-y-auto">
@@ -146,25 +207,42 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
                 <p className="text-xs text-[var(--text-secondary)] mt-0.5">{group.description}</p>
               </div>
               <div className="space-y-3 pl-2">
-                {group.permissions.map((perm) => (
-                  <div
-                    key={perm.key}
-                    className="flex items-start justify-between gap-3 p-2 hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <Label htmlFor={perm.key} className="text-sm font-medium text-[var(--text-primary)] cursor-pointer block">
-                        {perm.label}
-                      </Label>
-                      <p className="text-xs text-[var(--text-secondary)] mt-0.5">{perm.description}</p>
+                {group.permissions.map((perm) => {
+                  const explanation = explanations[perm.key];
+                  return (
+                    <div
+                      key={perm.key}
+                      className="flex flex-col gap-1 p-2 hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <Label htmlFor={perm.key} className="text-sm font-medium text-[var(--text-primary)] cursor-pointer block">
+                            {perm.label}
+                          </Label>
+                          <p className="text-xs text-[var(--text-secondary)] mt-0.5">{perm.description}</p>
+                        </div>
+                        <Switch
+                          id={perm.key}
+                          checked={permissionState[perm.key] || false}
+                          onCheckedChange={() => togglePermission(perm.key)}
+                          className="mt-0.5"
+                        />
+                      </div>
+                      {explanation && (
+                        <p
+                          className={
+                            "text-[11px] leading-snug pl-0.5 " +
+                            (explanation.allowed ? "text-emerald-400" : "text-amber-400")
+                          }
+                        >
+                          {explanation.allowed ? "✓ allowed" : "✗ denied"}
+                          <span className="text-[var(--text-secondary)]"> · </span>
+                          {explanation.reason}
+                        </p>
+                      )}
                     </div>
-                    <Switch
-                      id={perm.key}
-                      checked={permissionState[perm.key] || false}
-                      onCheckedChange={() => togglePermission(perm.key)}
-                      className="mt-0.5"
-                    />
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}
