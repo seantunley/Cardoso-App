@@ -264,8 +264,18 @@ export function startSchedulers() {
     try { pruneResolvedAlerts(30); } catch (err) { console.error('[alertEngine] prune failed:', err.message); }
   }));
 
-  intervals.push(setInterval(async () => {
-    try {
+  // Auto-sync interval — wrapped in track() so each invocation lands in
+  // job_runs as 'auto-sync-cycle' with a context blob recording how many
+  // connections were considered and how many were due. The track helper
+  // (scheduler.js:track) handles the catch + lifecycle write; the inner
+  // async fn just does the work and returns the context object.
+  //
+  // (Merge of #178 + #180 mangled this block — #180's plain setInterval
+  // body and #178's track-wrapped form combined into a `try {}` with no
+  // catch/finally and a stray `(r) => r)` argument fragment. Restoring
+  // the #178 form, which is what was intended.)
+  intervals.push(setInterval(
+    track('auto-sync-cycle', async () => {
       const conns = db.prepare(
         "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
       ).all();
