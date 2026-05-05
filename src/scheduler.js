@@ -175,8 +175,11 @@ export async function runLocalBackup() {
 // the lifecycle row gets written but a thrown error doesn't escape into
 // node-cron / setInterval (which would crash the next tick). Each call
 // site previously had its own .catch — this centralises the pattern.
-function track(name, fn, contextFn) {
-  return () => recordJob(name, fn, contextFn).catch((err) => {
+// `opts` is forwarded to recordJob — most importantly `successCheck`,
+// for jobs (like verifyLatestBackup) that signal failure by returning
+// `{ ok: false }` rather than throwing.
+function track(name, fn, contextFn, opts) {
+  return () => recordJob(name, fn, contextFn, opts).catch((err) => {
     console.error(`[${name}] failed:`, err.message);
   });
 }
@@ -223,6 +226,13 @@ export function startSchedulers() {
       // dashboard can show "ok / which file / how stale / row counts"
       // without an extra log scrape.
       (result) => result,
+      // verifyLatestBackup signals failure by returning { ok: false, ... }
+      // instead of throwing. Without this hook, recordJob would persist
+      // the row as 'succeeded' and the dashboard / alerts would miss
+      // real backup failures (stale, corrupt, missing). The hook tells
+      // recordJob to record 'failed' when ok===false; the failure
+      // reason from the result is captured in error_message.
+      { successCheck: (r) => r?.ok !== false },
     )));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
     setTimeout(

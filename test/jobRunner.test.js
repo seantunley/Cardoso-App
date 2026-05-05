@@ -125,6 +125,56 @@ describe('getJobsSummary', () => {
   });
 });
 
+describe('recordJob — soft failure (successCheck)', () => {
+  it('persists `{ ok: false }` returns as failed when successCheck rejects', async () => {
+    // Mirrors the verifyLatestBackup contract: returns instead of throws.
+    // Without successCheck, jobRunner would store this as succeeded and
+    // the dashboard / alert engine would miss the failure.
+    const result = await recordJob(
+      'soft-fail',
+      async () => ({ ok: false, reason: 'stale_latest', file: 'old.db' }),
+      (r) => r,
+      { successCheck: (r) => r?.ok !== false },
+    );
+
+    // Function still returns the result (no throw — the soft failure
+    // contract is "return, don't throw").
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe('stale_latest');
+
+    // But the row is recorded as failed with the reason.
+    const row = memDb.prepare('SELECT * FROM job_runs').get();
+    expect(row.status).toBe('failed');
+    expect(row.error_message).toBe('stale_latest');
+    // Context should still be captured (so the dashboard can render it).
+    expect(JSON.parse(row.context)).toMatchObject({ ok: false, reason: 'stale_latest' });
+  });
+
+  it('persists `{ ok: true }` as succeeded when successCheck accepts', async () => {
+    await recordJob(
+      'soft-success',
+      async () => ({ ok: true, file: 'good.db', counts: { user: 5 } }),
+      (r) => r,
+      { successCheck: (r) => r?.ok !== false },
+    );
+    const row = memDb.prepare('SELECT * FROM job_runs').get();
+    expect(row.status).toBe('succeeded');
+    expect(row.error_message).toBeNull();
+  });
+
+  it('treats a broken successCheck as success (logs but doesn\'t lie)', async () => {
+    await recordJob(
+      'broken-check',
+      async () => ({ ok: false }),
+      null,
+      { successCheck: () => { throw new Error('check broke'); } },
+    );
+    // Without a working check we can't know — default to success.
+    const row = memDb.prepare('SELECT * FROM job_runs').get();
+    expect(row.status).toBe('succeeded');
+  });
+});
+
 describe('pruneOldJobRuns', () => {
   it('deletes rows older than the cutoff', () => {
     memDb.prepare(`
