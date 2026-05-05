@@ -23,11 +23,28 @@ const SESSION_SECRET_PLACEHOLDERS = new Set([
   'change-me-to-a-long-random-string',
 ]);
 
-// Coerce common boolean-ish env strings ('true', '1', 'yes', 'on') to
-// real booleans. Anything else → false.
-const TRUE_VALUES = new Set(['1', 'true', 'yes', 'on']);
-const boolish = z.preprocess(
-  (v) => (v == null || v === '' ? false : TRUE_VALUES.has(String(v).trim().toLowerCase())),
+// Two boolean coercion strategies — the codebase has both, intentionally:
+//
+// `strictBool` matches the runtime check `process.env.X === 'true'` used
+// in 30+ sites for HUB_MODE / HTTPS / TLS_FRONTING. Only literal 'true'
+// (case-insensitive) is true; everything else (including '1', 'yes', 'on')
+// is false. This is what we use here for those three vars so the validator's
+// interpretation matches what the runtime will actually do — without it,
+// HUB_MODE='1' would pass the validator's "are we in hub mode" check and
+// hard-fail on missing HUB_POSTGRES_URL while runtime treats it as
+// site-mode and never reaches the Postgres path.
+//
+// `lenientBool` matches the existing `readFlag` helper in
+// src/config/hubPostgres.js, which accepts '1'/'true'/'yes'/'on' for
+// HUB_POSTGRES_ENABLED and HUB_POSTGRES_SSL. Used here only for those
+// two vars so the validator agrees with that parser.
+const strictBool = z.preprocess(
+  (v) => String(v ?? '').trim().toLowerCase() === 'true',
+  z.boolean(),
+);
+const LENIENT_TRUE = new Set(['1', 'true', 'yes', 'on']);
+const lenientBool = z.preprocess(
+  (v) => (v == null || v === '' ? false : LENIENT_TRUE.has(String(v).trim().toLowerCase())),
   z.boolean(),
 );
 
@@ -86,18 +103,23 @@ const envSchema = z
     // stored passwords (that check stays in startup.js).
     ENCRYPTION_KEY: hexBytes(32),
 
-    // Mode flags
-    HUB_MODE: boolish.default(false),
-    HTTPS: boolish.default(false),
-    TLS_FRONTING: boolish.default(false),
+    // Mode flags — STRICT bool (matches `process.env.X === 'true'` checks
+    // used at 30+ runtime sites). HUB_MODE='1' / 'yes' / 'on' is treated
+    // as FALSE here, same as the runtime, to avoid a validator-runtime
+    // mismatch where the schema thinks we're in hub mode but the actual
+    // routes / migrations don't.
+    HUB_MODE: strictBool.default(false),
+    HTTPS: strictBool.default(false),
+    TLS_FRONTING: strictBool.default(false),
 
     // Hub Postgres scaffold (enabled = HUB_MODE && HUB_POSTGRES_ENABLED &&
-    // HUB_POSTGRES_URL set). Validation chain expressed as refinements
-    // below the object schema.
-    HUB_POSTGRES_ENABLED: boolish.default(false),
+    // HUB_POSTGRES_URL set). LENIENT bool here because the runtime parser
+    // in src/config/hubPostgres.js (`readFlag`) accepts 1/true/yes/on —
+    // we match that.
+    HUB_POSTGRES_ENABLED: lenientBool.default(false),
     HUB_POSTGRES_URL: z.string().optional(),
     HUB_POSTGRES_SCHEMA: z.string().default('public'),
-    HUB_POSTGRES_SSL: boolish.default(false),
+    HUB_POSTGRES_SSL: lenientBool.default(false),
     HUB_POSTGRES_APPLICATION_NAME: z.string().default('cardoso-hub'),
     HUB_POSTGRES_POOL_MIN: optionalInt(0).pipe(z.number().int().min(0)),
     HUB_POSTGRES_POOL_MAX: optionalInt(10).pipe(z.number().int().min(1)),

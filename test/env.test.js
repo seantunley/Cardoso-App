@@ -26,15 +26,45 @@ describe('parseEnv — happy paths', () => {
     });
   });
 
-  it('coerces boolean-ish strings to real booleans', () => {
-    for (const v of ['1', 'true', 'TRUE', 'yes', 'on']) {
-      const { config } = parseEnv({ ...baseEnv, HUB_MODE: v });
-      expect(config.HUB_MODE).toBe(true);
+  it('HUB_MODE / HTTPS / TLS_FRONTING use STRICT bool coercion (only literal "true")', () => {
+    // Matches the 30+ runtime sites that read `process.env.X === 'true'`.
+    // Without this, HUB_MODE='1' would pass the validator's hub-mode check
+    // and the cross-field refinement would hard-fail on missing
+    // HUB_POSTGRES_URL — while the runtime treats HUB_MODE='1' as site
+    // mode and never reaches the Postgres path. Pinning the contract.
+    for (const v of ['true', 'TRUE', 'True']) {
+      expect(parseEnv({ ...baseEnv, HUB_MODE: v }).config.HUB_MODE).toBe(true);
+    }
+    for (const v of ['1', 'yes', 'on', '0', 'false', 'no', 'off', '']) {
+      expect(parseEnv({ ...baseEnv, HUB_MODE: v }).config.HUB_MODE).toBe(false);
+    }
+  });
+
+  it('HUB_POSTGRES_ENABLED uses LENIENT bool coercion (matches readFlag in hubPostgres.js)', () => {
+    // The runtime parser in src/config/hubPostgres.js accepts 1/true/yes/on.
+    // The schema must agree or the cross-field refinement (URL required
+    // when both ENABLED and MODE) won't behave consistently with what the
+    // hub storage runtime actually does.
+    for (const v of ['1', 'true', 'yes', 'on', 'TRUE']) {
+      expect(parseEnv({ ...baseEnv, HUB_POSTGRES_ENABLED: v }).config.HUB_POSTGRES_ENABLED).toBe(true);
     }
     for (const v of ['0', 'false', 'no', 'off', '']) {
-      const { config } = parseEnv({ ...baseEnv, HUB_MODE: v });
-      expect(config.HUB_MODE).toBe(false);
+      expect(parseEnv({ ...baseEnv, HUB_POSTGRES_ENABLED: v }).config.HUB_POSTGRES_ENABLED).toBe(false);
     }
+  });
+
+  it('regression: HUB_MODE="1" + HUB_POSTGRES_ENABLED="1" no longer hard-fails on missing HUB_POSTGRES_URL', () => {
+    // The bug: validator coerced HUB_MODE='1' to true (lenient), then the
+    // cross-field check fired and rejected boot for missing URL — even
+    // though the runtime treats HUB_MODE='1' as site mode and never
+    // reaches the Postgres init. The fix tightens HUB_MODE to strict bool.
+    const { ok } = parseEnv({
+      ...baseEnv,
+      HUB_MODE: '1',
+      HUB_POSTGRES_ENABLED: '1',
+      // HUB_POSTGRES_URL omitted on purpose
+    });
+    expect(ok).toBe(true);
   });
 
   it('coerces optional ints with defaults', () => {
