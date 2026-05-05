@@ -1593,6 +1593,85 @@ function buildMigrations(db) {
         }
       },
     },
+    {
+      version: 58,
+      name: 'hub_bat_summary_per_week_detail',
+      up() {
+        // Add per-week-detail fields to hub_bat_summary so the Hub
+        // Reconciliation per-site card can show the same level of detail
+        // the operator sees on each site's own dashboard:
+        //
+        //   - last_paid_week / last_paid_year: highest week with Sage
+        //     credit notes posted (e.g. "W9/2026")
+        //   - missing_credit_notes_weeks: JSON array of week numbers in
+        //     the current ISO year where BAT was uploaded but Sage has
+        //     no credit notes yet (the site's "Missing Credit Notes"
+        //     tile, scoped to one site)
+        //   - mismatch_weeks: JSON array of week numbers where both
+        //     sides exist but the variance exceeds R0.01 — the weeks
+        //     that need investigation
+        //   - summary_year: ISO year the lists are scoped to (so a
+        //     stale row from a prior year doesn't keep showing).
+        try {
+          const tableExists = db.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='hub_bat_summary'"
+          ).get();
+          if (!tableExists) return;
+          const cols = db.prepare("PRAGMA table_info(hub_bat_summary)").all().map(c => c.name);
+          const add = (name, decl) => {
+            if (!cols.includes(name)) db.exec(`ALTER TABLE hub_bat_summary ADD COLUMN ${name} ${decl}`);
+          };
+          add('last_paid_week', 'INTEGER');
+          add('last_paid_year', 'INTEGER');
+          add('last_bat_week', 'INTEGER');
+          add('last_bat_year', 'INTEGER');
+          add('missing_credit_notes_weeks', 'TEXT');
+          add('mismatch_weeks', 'TEXT');
+          add('summary_year', 'INTEGER');
+        } catch (err) {
+          console.error('[migration 58] hub_bat_summary per-week detail add failed:', err.message);
+        }
+      },
+    },
+    {
+      version: 59,
+      name: 'bat_year_scoped_indexes',
+      up() {
+        // The /api/reporting/bat-summary endpoint and the new per-site card
+        // queries all filter by year first (WHERE r.year = ?), but the
+        // existing idx_bat_recon_week index is keyed on (week_number, year)
+        // — leading column wrong, can't satisfy a year-only filter. SQLite
+        // falls back to a full scan of bat_reconciliations / bat_sage_week_cache
+        // for each year-scoped query (6 of them per /api/reporting/bat-summary
+        // call, fired by the hub every 5 min per site). Invisible today
+        // with sub-300-row tables, but real load by year 3.
+        //
+        // Add proper year-leading indexes; idempotent (CREATE INDEX IF NOT
+        // EXISTS).
+        try {
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_recon_year_week ON bat_reconciliations(year, week_number)`);
+        } catch (err) {
+          console.error('[migration 59] idx_bat_recon_year_week failed:', err.message);
+        }
+        try {
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_sage_cache_year_week ON bat_sage_week_cache(year, week_number)`);
+        } catch (err) {
+          console.error('[migration 59] idx_bat_sage_cache_year_week failed:', err.message);
+        }
+        try {
+          // Partial index for the exceptions count — typically <1% of
+          // extractions are flagged so a partial index is much smaller
+          // than a regular one and serves the bat-summary query directly.
+          db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_bat_extractions_exception
+              ON bat_invoice_extractions(is_exception)
+              WHERE is_exception = 1
+          `);
+        } catch (err) {
+          console.error('[migration 59] idx_bat_extractions_exception failed:', err.message);
+        }
+      },
+    },
   ];
 }
 

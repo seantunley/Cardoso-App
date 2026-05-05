@@ -1193,6 +1193,21 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/reporting/bat-summary', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       // Per-week base rows (year, week) joined with sage cache so totals are always live.
+      // Scope totals + per-week lists to the CURRENT ISO YEAR. The hub's
+      // per-site card shows year-scoped totals (matching the site's own
+      // dashboard which is filtered by year selector). All-time totals
+      // would mix 2025 and 2026 once we cross the year boundary, which
+      // isn't useful for the operator.
+      //
+      // ISO year — not calendar year — so weeks straddling Jan 1 are
+      // attributed to the right year. e.g. Jan 1 2027 (a Friday) belongs
+      // to W53/2026.
+      const _now = new Date();
+      const _isoTmp = new Date(Date.UTC(_now.getFullYear(), _now.getMonth(), _now.getDate()));
+      const _dayNum = _isoTmp.getUTCDay() || 7;
+      _isoTmp.setUTCDate(_isoTmp.getUTCDate() + 4 - _dayNum);
+      const summary_year = _isoTmp.getUTCFullYear();
+
       const rows = prep(
         `SELECT r.year, r.week_number,
                 COALESCE(r.supplier_total, 0) AS supplier_total,
@@ -1200,8 +1215,9 @@ export function createReportingRouter({ requireAuth }) {
                 CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END AS sage_present,
                 r.created_at, r.upload_filename
          FROM bat_reconciliations r
-         LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number`
-      ).all();
+         LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
+         WHERE r.year = ?`
+      ).all(summary_year);
 
       let weeks_count = rows.length;
       let total_supplier = 0, total_sage = 0;
@@ -1224,18 +1240,67 @@ export function createReportingRouter({ requireAuth }) {
 
       // Missing weeks = weeks where Sage has posted credit notes (i.e. they
       // exist in bat_sage_week_cache) but no BAT reconciliation has been
-      // uploaded yet. This is what the Hub Reconciliation per-site card
-      // surfaces so operators can see which sites are behind on data entry.
-      // Distinct from awaiting_count, which is the inverse direction.
+      // uploaded yet. Scoped to current ISO year, same as the rest.
       const missingWeeksRow = prep(
         `SELECT COUNT(*) AS c
          FROM bat_sage_week_cache c
-         WHERE NOT EXISTS (
+         WHERE c.year = ? AND NOT EXISTS (
            SELECT 1 FROM bat_reconciliations r
             WHERE r.year = c.year AND r.week_number = c.week_number
          )`
-      ).get();
+      ).get(summary_year);
       const missing_weeks_count = missingWeeksRow?.c || 0;
+
+      // Last paid week = highest week with Sage credit notes posted in the
+      // current year. Read from bat_sage_week_cache directly so we capture
+      // weeks Sage paid even when no BAT recon has been uploaded yet.
+      const lastPaid = prep(
+        `SELECT year, week_number
+         FROM bat_sage_week_cache
+         WHERE year = ?
+         ORDER BY week_number DESC
+         LIMIT 1`
+      ).get(summary_year);
+      const last_paid_week = lastPaid?.week_number ?? null;
+      const last_paid_year = lastPaid?.year ?? null;
+
+      // Last BAT week = highest week_number in bat_reconciliations for the
+      // current year. The week the operator most recently uploaded — paired
+      // with last_paid_week so an operator can see at a glance whether
+      // BAT side is keeping pace with Sage.
+      const lastBat = prep(
+        `SELECT year, week_number
+         FROM bat_reconciliations
+         WHERE year = ?
+         ORDER BY week_number DESC
+         LIMIT 1`
+      ).get(summary_year);
+      const last_bat_week = lastBat?.week_number ?? null;
+      const last_bat_year = lastBat?.year ?? null;
+
+      // Missing credit notes (current-year scope): weeks where BAT was
+      // uploaded but Sage hasn't posted credit notes yet — same definition
+      // as the site's own "Missing Credit Notes" tile.
+      const missingCreditNotesList = prep(
+        `SELECT r.week_number
+         FROM bat_reconciliations r
+         LEFT JOIN bat_sage_week_cache c
+           ON c.year = r.year AND c.week_number = r.week_number
+         WHERE r.year = ? AND c.year IS NULL
+         ORDER BY r.week_number ASC`
+      ).all(summary_year).map(x => x.week_number);
+
+      // Mismatch weeks (current-year scope): weeks where both BAT and Sage
+      // exist but the variance exceeds R0.01.
+      const mismatchList = prep(
+        `SELECT r.week_number,
+                ABS(COALESCE(r.supplier_total, 0) - COALESCE(c.total, 0)) AS abs_diff
+         FROM bat_reconciliations r
+         INNER JOIN bat_sage_week_cache c
+           ON c.year = r.year AND c.week_number = r.week_number
+         WHERE r.year = ? AND ABS(COALESCE(r.supplier_total, 0) - COALESCE(c.total, 0)) >= 0.01
+         ORDER BY r.week_number ASC`
+      ).all(summary_year).map(x => x.week_number);
 
       res.json({
         site_id: SITE_ID,
@@ -1252,6 +1317,14 @@ export function createReportingRouter({ requireAuth }) {
         total_exceptions: exc?.c || 0,
         total_exception_amount: exc?.a || 0,
         last_upload_at,
+        // Per-week detail for the hub's per-site card.
+        summary_year,
+        last_paid_week,
+        last_paid_year,
+        last_bat_week,
+        last_bat_year,
+        missing_credit_notes_weeks: missingCreditNotesList,
+        mismatch_weeks: mismatchList,
         generated_at: new Date().toISOString(),
       });
     } catch (err) {

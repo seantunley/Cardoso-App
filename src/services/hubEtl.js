@@ -148,6 +148,29 @@ async function syncSite(site) {
     clearTimeout(t2);
     const kpis = kpisRes.ok ? await kpisRes.json() : null;
 
+    // Kick off bat-summary EARLY so it runs in parallel with the
+    // records + inventory pagination loops below. bat-summary is a
+    // single tiny payload that's independent of records/inventory —
+    // previously it was the LAST step in the sequential pipeline,
+    // gated behind every records+inventory page completing. On a
+    // site with 5K records that's up to 50s of needless waiting
+    // before the BAT summary even fires. Fired now, awaited at the
+    // bottom of the try block once everything else is done.
+    //
+    // Wrap a .catch so a dangling rejection (e.g. records throws
+    // before we get to await batSummaryPromise) doesn't become an
+    // unhandledRejection event. The downstream consumer treats a
+    // null response as a transient bat-summary failure and logs it
+    // without failing the whole sync.
+    const ctrlBatEarly = new AbortController();
+    const tBatEarly = setTimeout(() => ctrlBatEarly.abort(), 30_000);
+    const batSummaryPromise = fetch(`${site.url}/api/reporting/bat-summary`, {
+      headers,
+      signal: ctrlBatEarly.signal,
+    })
+      .finally(() => clearTimeout(tBatEarly))
+      .catch((err) => ({ ok: false, _earlyError: err }));
+
     // Last sync for incremental pull
     const lastSync = db.prepare(
       `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status='ok' ORDER BY completed_at DESC LIMIT 1`
@@ -290,14 +313,14 @@ async function syncSite(site) {
 
     // Network devices: now served live from ntopng API — no ETL pull here.
 
-    // BAT Reconciliation summary — single-row pull, recorded into hub_bat_summary.
-    // Failures here are logged but don't fail the whole sync (the customer-records
-    // ETL is the primary purpose of this run).
+    // BAT Reconciliation summary — recorded into hub_bat_summary.
+    // The fetch was kicked off in parallel right after KPIs (above),
+    // so by this point the response is usually already in flight or
+    // complete — we just consume the prefetched promise here.
+    // Failures here are logged but don't fail the whole sync (the
+    // customer-records ETL is the primary purpose of this run).
     try {
-      const ctrlBat = new AbortController();
-      const tBat = setTimeout(() => ctrlBat.abort(), 10000);
-      const batRes = await fetch(`${site.url}/api/reporting/bat-summary`, { headers, signal: ctrlBat.signal });
-      clearTimeout(tBat);
+      const batRes = await batSummaryPromise;
       if (batRes.ok) {
         const bat = await batRes.json();
         db.prepare(`
@@ -305,12 +328,18 @@ async function syncSite(site) {
             site_id, total_supplier, total_sage, total_variance,
             weeks_count, matched_count, mismatch_count, awaiting_count,
             missing_weeks_count,
+            summary_year, last_paid_week, last_paid_year,
+            last_bat_week, last_bat_year,
+            missing_credit_notes_weeks, mismatch_weeks,
             total_exceptions, total_exception_amount,
             last_upload_at, synced_at, last_error
           ) VALUES (
             @site_id, @total_supplier, @total_sage, @total_variance,
             @weeks_count, @matched_count, @mismatch_count, @awaiting_count,
             @missing_weeks_count,
+            @summary_year, @last_paid_week, @last_paid_year,
+            @last_bat_week, @last_bat_year,
+            @missing_credit_notes_weeks, @mismatch_weeks,
             @total_exceptions, @total_exception_amount,
             @last_upload_at, @synced_at, NULL
           )
@@ -323,6 +352,13 @@ async function syncSite(site) {
             mismatch_count=excluded.mismatch_count,
             awaiting_count=excluded.awaiting_count,
             missing_weeks_count=excluded.missing_weeks_count,
+            summary_year=excluded.summary_year,
+            last_paid_week=excluded.last_paid_week,
+            last_paid_year=excluded.last_paid_year,
+            last_bat_week=excluded.last_bat_week,
+            last_bat_year=excluded.last_bat_year,
+            missing_credit_notes_weeks=excluded.missing_credit_notes_weeks,
+            mismatch_weeks=excluded.mismatch_weeks,
             total_exceptions=excluded.total_exceptions,
             total_exception_amount=excluded.total_exception_amount,
             last_upload_at=excluded.last_upload_at,
@@ -337,16 +373,29 @@ async function syncSite(site) {
           matched_count: bat.matched_count || 0,
           mismatch_count: bat.mismatch_count || 0,
           awaiting_count: bat.awaiting_count || 0,
-          // Sites running an older version that doesn't return this field
-          // will arrive as undefined; default to 0 so the column writes cleanly.
+          // Sites running an older version that doesn't return these fields
+          // will arrive as undefined; defaults below keep the writes clean
+          // and old sites just show 0 / null on the per-site card until
+          // they upgrade.
           missing_weeks_count: bat.missing_weeks_count || 0,
+          summary_year: bat.summary_year ?? null,
+          last_paid_week: bat.last_paid_week ?? null,
+          last_paid_year: bat.last_paid_year ?? null,
+          last_bat_week: bat.last_bat_week ?? null,
+          last_bat_year: bat.last_bat_year ?? null,
+          missing_credit_notes_weeks: Array.isArray(bat.missing_credit_notes_weeks)
+            ? JSON.stringify(bat.missing_credit_notes_weeks) : null,
+          mismatch_weeks: Array.isArray(bat.mismatch_weeks)
+            ? JSON.stringify(bat.mismatch_weeks) : null,
           total_exceptions: bat.total_exceptions || 0,
           total_exception_amount: bat.total_exception_amount || 0,
           last_upload_at: bat.last_upload_at || null,
           synced_at: new Date().toISOString(),
         });
       } else {
-        const msg = `BAT summary HTTP ${batRes.status}`;
+        const msg = batRes._earlyError
+          ? `BAT summary fetch failed: ${String(batRes._earlyError.message || batRes._earlyError).slice(0, 200)}`
+          : `BAT summary HTTP ${batRes.status}`;
         db.prepare(`
           INSERT INTO hub_bat_summary (site_id, last_error, synced_at)
           VALUES (?, ?, ?)
