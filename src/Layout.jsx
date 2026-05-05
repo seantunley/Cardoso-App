@@ -223,6 +223,26 @@ const IconReports = ({ className, style }) => (
   </svg>
 );
 
+// Operations icon — monitor/heartbeat metaphor. The Operations page is
+// "what's the system doing?" so the icon reads as a status display:
+// scope screen frame + pulse line + activity dots in indigo.
+const IconOperations = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Monitor frame */}
+    <rect x="2" y="3" width="16" height="11" rx="1.4" fill="#4f46e5" opacity="0.15"/>
+    <rect x="2" y="3" width="16" height="11" rx="1.4" stroke="#818cf8" strokeWidth="0.8" fill="none"/>
+    {/* Stand */}
+    <line x1="10" y1="14" x2="10" y2="16.5" stroke="#818cf8" strokeWidth="1.1" strokeLinecap="round"/>
+    <line x1="6" y1="17" x2="14" y2="17" stroke="#818cf8" strokeWidth="1.1" strokeLinecap="round"/>
+    {/* Pulse line across screen */}
+    <path d="M3.5 9.5 L6 9.5 L7 7 L9 11 L11 8 L13 10 L16.5 10"
+          stroke="#a5b4fc" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+    {/* Status dots — green = ok */}
+    <circle cx="14.5" cy="5.5" r="0.7" fill="#34d399"/>
+    <circle cx="16" cy="5.5" r="0.7" fill="#34d399" opacity="0.5"/>
+  </svg>
+);
+
 const IconReconciliation = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
     {/* Subtle ledger frame */}
@@ -269,6 +289,11 @@ const navItems = [
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
+  // Operations — admin-only home for background job runs, system errors,
+  // deploys, and (in hub mode) per-site sync log. Same admin gating as
+  // Credit Debug — hidden from the sidebar for non-admins; the page also
+  // self-guards so direct URL access shows a clear "admin only" message.
+  { name: "Operations",          icon: IconOperations,            page: "Operations",       adminOnly: true },
 ];
 
 export default function Layout({ children, currentPageName }) {

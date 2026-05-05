@@ -1,0 +1,111 @@
+// Operations page — admin-only home for "what's the system doing?" views.
+// Folds together what used to live as scattered Settings tabs (System Log,
+// Updates) and the standalone hub-mode Hub Sync Log page, plus a brand-new
+// Job Runs panel powered by the job_runs table (PR #178).
+//
+// Read-only by intent. The original 30/60/90 plan called for "run now /
+// retry / pause" buttons but the agreed-on MVP shape is glance-and-see.
+// Action buttons can land in follow-up PRs once we know which ones the
+// operator actually reaches for.
+//
+// IA decision: Audit Log stays in Settings — it's a security/who-did-what
+// artefact, not a background-work view. The other "logs" all answer
+// "what happened in the background?" and belong together here.
+
+import { useState, useEffect } from "react";
+import { useAuth } from "@/lib/AuthContext";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Activity, AlertTriangle, Download, RefreshCw } from "lucide-react";
+
+import JobRunsPanel from "@/components/operations/JobRunsPanel";
+import SystemLogPanel from "@/components/operations/SystemLogPanel";
+import UpdatesPanel from "@/components/operations/UpdatesPanel";
+import HubSyncLog from "@/pages/HubSyncLog";
+
+export default function Operations() {
+  const { user } = useAuth();
+  const [hubMode, setHubMode] = useState(false);
+
+  // Hub Sync Log tab only renders in hub mode (the underlying endpoints
+  // /api/hub/sync-log and /api/hub/sync don't exist on a site install).
+  // Same fetch the Layout already does — small duplication, avoids a
+  // prop-drilling refactor.
+  useEffect(() => {
+    fetch("/api/app-info", { credentials: "include" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d?.hub_mode) setHubMode(true); })
+      .catch(() => {});
+  }, []);
+
+  // Defence in depth — the route is gated by ProtectedRoute already, but
+  // belt-and-suspenders so a non-admin browsing here directly gets a clear
+  // message, not a cluttered page they can't read.
+  const isAdmin = user?.role === "admin";
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-3xl mx-auto px-8 py-16 text-center">
+          <h1 className="font-display text-3xl text-foreground mb-3">Operations</h1>
+          <p className="text-sm text-muted-foreground">
+            This page is admin-only — it surfaces background job runs, system errors, and update status.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-8">
+        <div className="border-b border-border pb-5">
+          <div className="font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground mb-3">
+            § Operations
+          </div>
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            What the system is doing
+          </h1>
+          <p className="text-sm text-muted-foreground mt-2">
+            Background jobs, system errors, deploy history{hubMode && ", and per-site sync runs"}.
+          </p>
+        </div>
+
+        <Tabs defaultValue="jobs" className="space-y-6">
+          <TabsList className="bg-muted/40">
+            <TabsTrigger value="jobs" className="data-[state=active]:bg-background">
+              <Activity className="w-3.5 h-3.5 mr-1.5" /> Job Runs
+            </TabsTrigger>
+            <TabsTrigger value="system-log" className="data-[state=active]:bg-background">
+              <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> System Log
+            </TabsTrigger>
+            <TabsTrigger value="updates" className="data-[state=active]:bg-background">
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Updates
+            </TabsTrigger>
+            {hubMode && (
+              <TabsTrigger value="hub-sync" className="data-[state=active]:bg-background">
+                <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Hub Sync Log
+              </TabsTrigger>
+            )}
+          </TabsList>
+
+          <TabsContent value="jobs" className="mt-0">
+            <JobRunsPanel />
+          </TabsContent>
+          <TabsContent value="system-log" className="mt-0">
+            <SystemLogPanel />
+          </TabsContent>
+          <TabsContent value="updates" className="mt-0">
+            <UpdatesPanel />
+          </TabsContent>
+          {hubMode && (
+            <TabsContent value="hub-sync" className="mt-0">
+              {/* HubSyncLog is the existing standalone page component.
+                  It renders its own page chrome so it nests cleanly here
+                  as a tab — no changes needed. */}
+              <HubSyncLog />
+            </TabsContent>
+          )}
+        </Tabs>
+      </div>
+    </div>
+  );
+}
