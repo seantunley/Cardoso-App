@@ -4,7 +4,7 @@ Rolling list of work that's been *consciously deferred* — not a backlog of
 everything that could ever be improved. Each entry says what it is, why
 it's not done, and what would change our mind.
 
-Last updated: 2026-05-05.
+Last updated: 2026-05-05 (env-validation + JWT-algorithms items completed).
 
 ---
 
@@ -45,11 +45,6 @@ end-of-lifed or a more serious CVE lands.
 
 ### Defense-in-depth items (no real exposure today)
 
-- **JWT verify** at `src/routes/auth.js:109` doesn't pass an explicit
-  `algorithms: ['HS256']` to `jwt.verify(token, secret)`. `jsonwebtoken@9`
-  defaults are safe (rejects `alg: none`, derives algorithm from key type),
-  so this isn't a real exposure today. Pass `algorithms: ['HS256']`
-  explicitly the next time someone touches that file.
 - **CORS production config** at `server.js:94-100` allows all origins with
   `credentials: true`. Mitigated because the session cookie is
   `sameSite: 'strict'` — the browser won't send it cross-origin regardless
@@ -109,15 +104,6 @@ Re-evaluate when one of them gains a feature we actively need.
 These came out of the "what would I actually do" review of a generic
 upgrade plan. The four highest-leverage items are landing now (CI,
 backup verification, Sage health, parser tests). The rest sit here.
-
-### Consolidate env validation under a zod schema
-
-`src/startup.js` has four ad-hoc validators (`validateSessionSecret`,
-`validateHubTokenSecret`, `validateEncryptionKey`,
-`validateHubPostgresConfig`). Folding them into a single zod schema
-that runs at boot and throws clearly on missing/invalid vars is real
-cleanup. `zod` is already a dep. Half-day task. Not blocking — the
-existing validators work, just inconsistent.
 
 ### Hub sync overlap-guard alerting
 

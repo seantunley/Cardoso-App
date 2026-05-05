@@ -107,7 +107,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
     let payload;
     try {
-      payload = jwt.verify(token, hubTokenSecret);
+      // Pin the algorithm explicitly. jsonwebtoken@9 already defaults to HS256
+      // when given a string secret and rejects `alg: none`, so this is purely
+      // defense-in-depth + intent documentation — closes the door on a future
+      // version-bump or refactor accidentally relaxing the algorithm check.
+      payload = jwt.verify(token, hubTokenSecret, { algorithms: ['HS256'] });
     } catch (err) {
       if (err.name === 'TokenExpiredError') {
         return res.status(401).json({ error: 'Token expired — please log in at the site again' });
