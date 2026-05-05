@@ -103,14 +103,23 @@ async function ruleBackupVerifyFailed() {
 async function ruleJobFailureSpike() {
   let rows;
   try {
+    // The cutoff has to be computed in JS, not via SQLite's `datetime('now',
+    // '-1 hour')`. Reason: started_at is stored as an ISO string with a 'T'
+    // separator (`2026-05-05T15:34:30.000Z`), but SQLite's datetime()
+    // returns a space-separated string (`2026-05-05 15:34:30`). The two
+    // are TEXT-compared, and 'T' (0x54) > ' ' (0x20) lexically, so a
+    // same-day stale row would compare as "newer than the cutoff" and
+    // leak into the spike count. Match the stored format by computing the
+    // cutoff as ISO in JS — both sides lexically sortable, indexes used.
+    const oneHourAgoIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     rows = db.prepare(`
       SELECT name, COUNT(*) AS fails
       FROM job_runs
       WHERE status = 'failed'
-        AND started_at >= datetime('now', '-1 hour')
+        AND started_at >= ?
       GROUP BY name
       HAVING fails >= 3
-    `).all();
+    `).all(oneHourAgoIso);
   } catch (err) {
     if (/no such table/i.test(err.message)) return;
     throw err;
