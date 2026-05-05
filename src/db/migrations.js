@@ -1673,33 +1673,46 @@ function buildMigrations(db) {
       },
     },
     {
-      version: 60,
-      name: 'job_runs',
+      // NOTE: PR #178 (job lifecycle) also claims version 60 with a
+      // job_runs table. Whichever PR merges first keeps v60; the other
+      // gets renumbered to v61 in the rebase. The alerts table here is
+      // independent — a clean v61 if v60 already exists, or rebased if
+      // this PR merges first.
+      version: 61,
+      name: 'alerts',
       up() {
-        // Lifecycle tracking for scheduled background jobs (sync, backup,
-        // backup-verify, sage-cache-refresh, hub-sync, hub-ping,
-        // credit-logic-sync, etc.). Wrapping helper in src/lib/jobRunner.js
-        // writes one row per invocation: started_at, ended_at, status,
-        // duration_ms, error_message. Backs the GET /api/system/jobs admin
-        // endpoint and feeds the alert engine (item #2).
+        // Operator alerts surfaced by the alert engine (src/lib/alertEngine.js).
+        // Each row is one firing of one rule. dedup_key is what stops
+        // the engine writing the same active alert repeatedly while a
+        // condition persists; resolved_at NULL = still active.
+        //
+        // Severity is a fixed enum mainly so the future email channel
+        // (env-var opt-in) can apply per-severity routing without a
+        // separate config table. context is a small JSON blob the rule
+        // attaches at fire time (offending values, links, etc.).
         db.exec(`
-          CREATE TABLE IF NOT EXISTS job_runs (
+          CREATE TABLE IF NOT EXISTS alerts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            status TEXT NOT NULL CHECK (status IN ('started','succeeded','failed')),
-            started_at TEXT NOT NULL,
-            ended_at TEXT,
-            duration_ms INTEGER,
-            error_message TEXT,
-            context TEXT
+            rule_name TEXT NOT NULL,
+            severity TEXT NOT NULL CHECK (severity IN ('critical','warning','info')),
+            message TEXT NOT NULL,
+            context TEXT,
+            dedup_key TEXT NOT NULL,
+            fired_at TEXT NOT NULL,
+            resolved_at TEXT,
+            resolved_by TEXT
           )
         `);
-        // Compound index for "latest N runs of job X" — the dominant read
-        // pattern from /api/system/jobs and from the alert engine's
-        // dedup checks.
-        db.exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_name_started ON job_runs(name, started_at DESC)`);
-        // For "all jobs since timestamp" queries (the dashboard view).
-        db.exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC)`);
+        // The dominant query pattern is "is there an active alert for
+        // this dedup_key?" — partial index keyed on dedup_key WHERE
+        // resolved_at IS NULL satisfies that without scanning resolved
+        // history.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_alerts_active_dedup
+            ON alerts(dedup_key) WHERE resolved_at IS NULL
+        `);
+        // For the dashboard / API: latest alerts overall.
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fired ON alerts(fired_at DESC)`);
       },
     },
   ];

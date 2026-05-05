@@ -7,7 +7,8 @@ import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
-import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
+import { evaluateAllRules } from './lib/alertRules.js';
+import { pruneResolvedAlerts } from './lib/alertEngine.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -245,8 +246,26 @@ export function startSchedulers() {
     ));
   }
 
-  intervals.push(setInterval(
-    track('auto-sync-cycle', async () => {
+  // Alert engine evaluation tick — runs every 60s, evaluates the rules
+  // in src/lib/alertRules.js, fires/resolves rows in the alerts table.
+  // Rules are dedup'd by dedup_key so this loop is safe to run
+  // frequently — a persistent condition produces ONE active row, not
+  // one per minute. Site-mode AND hub-mode both run this; the rules
+  // each decide whether they apply (e.g. sage-down only fires when
+  // the Sage health probe is active, which is site-mode only).
+  intervals.push(setInterval(() => {
+    evaluateAllRules().catch((err) => console.error('[alertRules] evaluation failed:', err.message));
+  }, 60_000));
+  // Initial pass shortly after boot so the admin UI doesn't show "no
+  // alerts" while waiting for the first 60s tick.
+  setTimeout(() => { evaluateAllRules().catch(() => {}); }, 20_000);
+  // Daily prune of resolved alerts at 04:30 (after job_runs prune at 04:00).
+  cronTasks.push(cron.schedule('30 4 * * *', () => {
+    try { pruneResolvedAlerts(30); } catch (err) { console.error('[alertEngine] prune failed:', err.message); }
+  }));
+
+  intervals.push(setInterval(async () => {
+    try {
       const conns = db.prepare(
         "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
       ).all();
