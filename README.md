@@ -5,8 +5,8 @@ management, accounts-receivable workflow, BAT supplier reconciliation, multi-sit
 hub aggregation and a printable reports module — all running on a single
 Node.js + SQLite stack.
 
-Built with **React (Vite) + Node.js / Express + better-sqlite3** and a small
-amount of MSSQL connectivity for live Sage 300 lookups.
+Built with **React 19 (Vite 8) + Node.js / Express 5 + better-sqlite3** and a
+small amount of MSSQL connectivity for live Sage 300 lookups.
 
 ---
 
@@ -71,7 +71,8 @@ search sync engine.
 
 Before you begin, make sure the following are installed on your machine:
 
-- **Node.js** (v18 or later) — https://nodejs.org
+- **Node.js** (v22 LTS) — https://nodejs.org. The codebase uses
+  `import.meta.dirname` and other ESM features added in Node 20+.
 - **Python** (v3.x) — required by some native Node modules — https://www.python.org/downloads/
 - **Git** — https://git-scm.com
 
@@ -158,8 +159,8 @@ See `.env.example` for the full list. The most important ones:
 
 ## Stack
 
-- **Frontend** React 18 + Vite + Tailwind + shadcn/ui + TanStack Query + Recharts.
-- **Backend** Node.js + Express + better-sqlite3 (synchronous), `mssql` for Sage 300.
+- **Frontend** React 19 + Vite 8 + Tailwind 3 + shadcn/ui + TanStack Query + Recharts.
+- **Backend** Node.js 22 + Express 5 + better-sqlite3 (synchronous), `mssql` for Sage 300.
 - **OCR** Multi-engine pipeline: Google Vision API → ocr.space → Tesseract.js fallback.
 - **Auth** Session-based, admin / per-permission gates per nav item.
 - **Toasts** Sonner with a custom Cardoso theme.
@@ -196,7 +197,7 @@ src/
 │   ├── hubEtl.js             ← cross-site puller
 │   └── syncEngine.js         ← per-connection import
 └── db/
-    ├── migrations.js       ← all schema migrations (v1–v49)
+    ├── migrations.js       ← all schema migrations (v1–v59)
     └── ...
 docs/
 └── release-notes-*.md      ← per-release notes
@@ -207,11 +208,11 @@ docs/
 ## Release notes
 
 Per-release notes live in [docs/](docs/). Latest:
-[2026-04-30](docs/release-notes-2026-04-30.md) — Reports module + Hub
-Reconciliation + performance pass + UI polish.
+[2026-05-05](docs/release-notes-2026-05-05.md) — security + offline + perms
++ perf + React 19 / Express 5 stack upgrade.
 
 ---
 
 ## Version
 
-Current version: **v2026.4.6**
+Current version: **v2026.4.18**
