@@ -7,6 +7,7 @@ import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
+import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 
