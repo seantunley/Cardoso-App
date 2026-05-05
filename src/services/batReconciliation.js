@@ -183,6 +183,74 @@ export async function resetSagePool() {
   poolConfigKey = null;
 }
 
+// ── Sage health check ────────────────────────────────────────────────────────
+//
+// Sage is the highest-likelihood silent-degrade integration in this app:
+// when the MSSQL box is unreachable, every BAT operation that needs Sage
+// data quietly returns empty results. The user only finds out later when
+// reconciliations look wrong. This probe runs every minute, tracks how
+// long Sage has been unreachable, and surfaces the state to the admin UI
+// via /api/bat/sage-health so a banner can warn before someone starts
+// debugging a "missing credit notes" report that's actually just a dead
+// Sage pool.
+//
+// The state is process-local (resets on restart). That's fine — once the
+// service comes back, the next probe rebuilds the picture within 60s.
+
+const _sageHealthState = {
+  ok: null,                  // null = never probed; true/false = last result
+  lastOkAt: null,            // ms timestamp of last successful probe
+  lastFailAt: null,          // ms timestamp of last failed probe
+  lastError: null,           // string of last error message
+  consecutiveFailures: 0,    // resets to 0 on success
+  lastProbeAt: null,         // when did probe last run
+};
+
+export async function probeSageHealth() {
+  _sageHealthState.lastProbeAt = Date.now();
+  try {
+    const p = await getSagePool();
+    // Cheapest possible round-trip — hits the SQL Server but reads nothing.
+    await p.request().query('SELECT 1 AS ok');
+    _sageHealthState.ok = true;
+    _sageHealthState.lastOkAt = Date.now();
+    _sageHealthState.consecutiveFailures = 0;
+    _sageHealthState.lastError = null;
+    return _sageHealthState;
+  } catch (err) {
+    _sageHealthState.ok = false;
+    _sageHealthState.lastFailAt = Date.now();
+    _sageHealthState.consecutiveFailures += 1;
+    _sageHealthState.lastError = err?.message || String(err);
+    // Don't logError on every probe failure — that floods the System Log
+    // when Sage is offline. Log only the FIRST failure of a streak.
+    if (_sageHealthState.consecutiveFailures === 1) {
+      try { logError('bat.sage.health_probe', err, { phase: 'first_failure' }, 'warn'); } catch {}
+    }
+    return _sageHealthState;
+  }
+}
+
+export function getSageHealth() {
+  // Derive a human-friendly summary on read. The probe loop owns the raw
+  // numbers; consumers just read this snapshot.
+  const s = _sageHealthState;
+  const downForMs = s.ok === false && s.lastFailAt ? Date.now() - s.lastFailAt : 0;
+  const downForMinutes = Math.floor(downForMs / 60_000);
+  return {
+    ok: s.ok,
+    lastProbeAt: s.lastProbeAt,
+    lastOkAt: s.lastOkAt,
+    lastFailAt: s.lastFailAt,
+    lastError: s.lastError,
+    consecutiveFailures: s.consecutiveFailures,
+    downForMinutes,
+    // attention=true when Sage has been failing for >5 minutes. UI uses
+    // this single flag to decide whether to show the warning banner.
+    attention: s.ok === false && s.consecutiveFailures >= 5,
+  };
+}
+
 // ── Spreadsheet Parsing ──────────────────────────────────────────────────────
 
 // Custom error class so the route can distinguish "spreadsheet was rejected

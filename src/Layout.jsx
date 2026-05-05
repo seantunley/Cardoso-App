@@ -286,6 +286,12 @@ export default function Layout({ children, currentPageName }) {
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
   const [backupAttention, setBackupAttention] = useState(false);
+  // Sage MSSQL connectivity. When the pool has been failing for >5 min the
+  // server-side probe sets attention=true; we render a top-of-page banner
+  // so an operator notices before they start chasing "missing credit notes"
+  // that's actually just a dead Sage connection. Site-mode only — the hub
+  // doesn't have a Sage connection.
+  const [sageHealth, setSageHealth] = useState(null);
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
@@ -333,6 +339,36 @@ export default function Layout({ children, currentPageName }) {
 
     pollBackupAttention();
     const timer = setInterval(pollBackupAttention, 60_000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [currentUser, hubMode, isAdmin]);
+
+  // Sage health poll — site mode only, only for users who can see BAT
+  // (otherwise we'd be making a permission-gated API call that 403s on
+  // every tick for non-BAT users, polluting their browser console).
+  useEffect(() => {
+    if (!currentUser || hubMode) {
+      setSageHealth(null);
+      return;
+    }
+    const canSeeBat = isAdmin || hasPermission(currentUser, "can_access_reconciliation");
+    if (!canSeeBat) return;
+
+    let cancelled = false;
+    const pollSage = async () => {
+      try {
+        const res = await fetch("/api/bat/sage-health", { credentials: "include" });
+        const data = res.ok ? await res.json() : null;
+        if (!cancelled) setSageHealth(data);
+      } catch {
+        // Network blip — don't mark Sage as down on a transient client-side
+        // fetch failure; the next tick will catch a real outage.
+      }
+    };
+    pollSage();
+    const timer = setInterval(pollSage, 60_000);
     return () => {
       cancelled = true;
       clearInterval(timer);
@@ -674,6 +710,15 @@ export default function Layout({ children, currentPageName }) {
         })}
       </nav>
       <main className={cn("bg-background pt-16 pb-[calc(5rem+env(safe-area-inset-bottom))] transition-all duration-300 lg:pt-0 lg:pb-0", isCollapsed ? "lg:ml-14" : "lg:ml-60")}>
+        {sageHealth?.attention && (
+          <div className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 font-mono text-[11px] uppercase tracking-[0.15em] text-destructive flex items-center gap-3">
+            <span className="inline-flex h-2 w-2 rounded-full bg-destructive animate-pulse" />
+            <span>
+              Sage unreachable for {sageHealth.downForMinutes} min · {sageHealth.consecutiveFailures} failed probes
+              {sageHealth.lastError && <span className="ml-2 normal-case tracking-normal text-destructive/70">({sageHealth.lastError})</span>}
+            </span>
+          </div>
+        )}
         {children}
       </main>
       {currentUser && (
