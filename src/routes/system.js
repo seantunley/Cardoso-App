@@ -412,6 +412,44 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // scripts/install-hub-caddy.ps1 on the Hub server).
   //
   // See docs/ops/hub-tls.md.
+  // GET /api/system/alerts?status=active|all
+  //
+  // Active alerts (resolved_at IS NULL) drive the admin banner; the
+  // 'all' view is for the history modal. Admin-only since the messages
+  // include diagnostic detail and the underlying conditions are
+  // operational, not user-facing.
+  router.get('/api/system/alerts', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { getActiveAlerts, getAllAlerts } = await import('../lib/alertEngine.js');
+      const status = req.query.status === 'all' ? 'all' : 'active';
+      const alerts = status === 'all' ? getAllAlerts() : getActiveAlerts();
+      res.json({ status, count: alerts.length, alerts });
+    } catch (err) {
+      console.error('[system.alerts] failed:', err.message);
+      res.status(500).json({ error: 'Failed to load alerts' });
+    }
+  });
+
+  // POST /api/system/alerts/:id/acknowledge
+  //
+  // Manual resolution. Records who acknowledged so the audit trail
+  // shows operator action vs. auto-resolution by the engine.
+  router.post('/api/system/alerts/:id/acknowledge', requireAuth, requireAdmin, async (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid alert id' });
+    try {
+      const { acknowledgeAlert } = await import('../lib/alertEngine.js');
+      const changes = acknowledgeAlert(id, `admin:${req.currentUser?.email || req.currentUser?.id || 'unknown'}`);
+      if (changes === 0) {
+        return res.status(404).json({ error: 'Alert not found or already resolved' });
+      }
+      res.json({ ok: true, id });
+    } catch (err) {
+      console.error('[system.alerts.ack] failed:', err.message);
+      res.status(500).json({ error: 'Failed to acknowledge alert' });
+    }
+  });
+
   router.get('/api/system/tls-status', requireAuth, requireAdmin, async (req, res) => {
     const isWindows = process.platform === 'win32';
     const caddyDir = process.env.CADDY_DIR || 'C:\\Caddy';
