@@ -1,0 +1,92 @@
+name: CI
+
+# Minimum-viable PR gate. Anything beyond lint + build + audit-critical +
+# secret-scan gets added separately as the baseline reaches green:
+# - typecheck is NOT a gate yet (~700 pre-existing errors, see
+#   docs/plans/tech-debt.md)
+# - tests are NOT a gate yet (none scaffolded — first ones land alongside
+#   this workflow for parseSupplierSpreadsheet)
+# - npm audit is set to --audit-level=critical, not high, because xlsx
+#   has known unfixed high-severity CVEs that are mitigated by trust
+#   boundary; flagged in tech-debt.md.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    # Pinned to windows-2022 to match the deployment runtime AND the
+    # build-windows.yml release workflow. Native module ABI on
+    # windows-latest is in transition to windows-2025; using a Linux
+    # runner here would mean canvas / better-sqlite3 / sharp compile
+    # for a different OS than ships, which defeats the point of the gate.
+    runs-on: windows-2022
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+        shell: powershell
+
+      - name: Guard pdfjs-dist version (load-bearing pin)
+        # Mirror of the same check in build-windows.yml so PRs catch a
+        # bumped pdfjs before they hit the release workflow. See
+        # docs/plans/pdf-engine-migration.md.
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).dependencies.'pdfjs-dist'
+          if ($version -ne '4.8.69') {
+            Write-Error "pdfjs-dist must be pinned to exactly 4.8.69 (got: $version). See src/services/ocrWorker.js."
+            exit 1
+          }
+          Write-Host "pdfjs-dist pin verified: $version"
+        shell: powershell
+
+      - name: Lint
+        run: npm run lint
+        shell: powershell
+
+      - name: Build frontend
+        run: npm run build
+        shell: powershell
+
+      - name: Audit (critical only)
+        # --audit-level=critical not high. xlsx has unfixed high CVEs
+        # we accept by trust-boundary (see tech-debt.md). Critical-only
+        # ensures this gate fails on actual emergencies, not on the
+        # known accepted-risk items.
+        run: npm audit --audit-level=critical
+        shell: powershell
+
+  secret-scan:
+    # Runs on Linux because gitleaks-action@v2 has a long-standing bug on
+    # Windows runners: it constructs `_windows_x64.tar.gz` URLs but
+    # gitleaks ships `.zip` on Windows, so the install step 404s. Linux
+    # is also faster and cheaper for what's a pure git-history scan
+    # with no native deps.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs full history
+
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

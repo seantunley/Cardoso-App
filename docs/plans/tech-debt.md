@@ -104,6 +104,77 @@ Re-evaluate when one of them gains a feature we actively need.
 
 ---
 
+## Operational hardening (deferred from May 5 plan)
+
+These came out of the "what would I actually do" review of a generic
+upgrade plan. The four highest-leverage items are landing now (CI,
+backup verification, Sage health, parser tests). The rest sit here.
+
+### Consolidate env validation under a zod schema
+
+`src/startup.js` has four ad-hoc validators (`validateSessionSecret`,
+`validateHubTokenSecret`, `validateEncryptionKey`,
+`validateHubPostgresConfig`). Folding them into a single zod schema
+that runs at boot and throws clearly on missing/invalid vars is real
+cleanup. `zod` is already a dep. Half-day task. Not blocking — the
+existing validators work, just inconsistent.
+
+### Hub sync overlap-guard alerting
+
+The overlap guard in `src/scheduler.js` (added 2026-05-05) skips a
+`syncAllSites` tick if the previous run is still going and `console.warn`s
+the skip. That's fine for a single skip — if it fires repeatedly, ETL
+is degrading and someone needs to know without grepping logs. Surface
+this in the admin UI as a banner ("Hub sync overruns: N in last hour")
+once we have a counter to drive it.
+
+### OCR memory metric + soft cap
+
+We've previously hit runaway OCR worker memory growth (RSS climbing past
+1 GB, eventually crashing). The current mitigation is operator-restart.
+Track per-worker RSS, log a `bat.ocr.memory_pressure` event over a
+threshold (e.g. 800 MB), and consider auto-recycling the lane. Not load-
+bearing — the event already crashes loudly when memory is exhausted —
+but a leading indicator beats a hard fail.
+
+### Structured JSON logging + request IDs
+
+Worth doing **only** once we have a central log aggregator to ship to.
+Until then the existing `[bat-...]` / `[hub-...]` / `[auto-sync]`
+prefixes give grep-friendly logs that work fine. Pinned here so we
+remember to revisit when the deployment story changes.
+
+### TypeScript migration in `src/lib/*` utilities
+
+A staged migration: add `// @ts-check` per file in `src/lib/`, fix the
+typecheck errors as they surface, expand outward only when those
+modules are clean. Do **not** flip `checkJs: true` repo-wide until the
+700-error baseline is dealt with. Dependent on the typecheck-cleanup
+item above.
+
+### Generic plan items rejected for this codebase
+
+For the record, the May 5 generic upgrade plan included the following
+items that were considered and rejected:
+
+- **Stricter CSP across all modes** — rejected. Production LAN-only
+  mode intentionally turns CSP off; TLS-fronted mode already has a
+  real CSP via `helmet`. Tightening LAN mode without a reason just
+  breaks things.
+- **Route-level code splitting** — already done. Every page in
+  `src/pages.config.js` is `React.lazy(...)` and `vite.config.js`
+  has explicit `manualChunks` for vendor-react / vendor-query /
+  vendor-ui / vendor-charts.
+- **Pagination/virtualization on heavy tables** — already done on
+  records, customer balances, BAT extractions.
+- **Repo-wide JS → TS migration** — see staged plan above. The 700
+  pre-existing typecheck errors mean a repo-wide flip adds friction
+  without value.
+- **Monthly dependency update cadence** — too slow for security.
+  Dependabot runs weekly, auto-merges patch.
+
+---
+
 ## Permanent pins (not deferrals — pointers)
 
 - `pdfjs-dist` is pinned at `4.8.69`. See `docs/plans/pdf-engine-migration.md`
