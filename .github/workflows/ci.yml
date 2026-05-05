@@ -17,7 +17,7 @@ on:
     branches: [main]
 
 jobs:
-  ci:
+  build:
     # Pinned to windows-2022 to match the deployment runtime AND the
     # build-windows.yml release workflow. Native module ABI on
     # windows-latest is in transition to windows-2025; using a Linux
@@ -30,8 +30,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # gitleaks needs full history
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -71,6 +69,22 @@ jobs:
         # known accepted-risk items.
         run: npm audit --audit-level=critical
         shell: powershell
+
+  secret-scan:
+    # Runs on Linux because gitleaks-action@v2 has a long-standing bug on
+    # Windows runners: it constructs `_windows_x64.tar.gz` URLs but
+    # gitleaks ships `.zip` on Windows, so the install step 404s. Linux
+    # is also faster and cheaper for what's a pure git-history scan
+    # with no native deps.
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs full history
 
       - name: Secret scan (gitleaks)
         uses: gitleaks/gitleaks-action@v2
