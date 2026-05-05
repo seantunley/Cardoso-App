@@ -1,11 +1,12 @@
 import cron from 'node-cron';
 import path from 'path';
 import { mkdirSync } from 'fs';
+import Database from 'better-sqlite3';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
-import { refreshSageWeekTotalsCache } from './services/batReconciliation.js';
+import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -45,6 +46,93 @@ async function runScheduledSyncCycle() {
     console.error('Scheduled sync job failed:', error);
   } finally {
     scheduledSyncInProgress = false;
+  }
+}
+
+// --- Backup verification ---
+//
+// Daily backup creation alone is not enough — we've seen backup files
+// land on disk that were corrupt/truncated and would have been useless
+// in a real recovery. This routine opens the most recent backup file
+// in read-only mode, runs SQLite's PRAGMA integrity_check, and counts
+// rows in critical tables. It logs loud and writes an audit row when
+// anything fails so an operator can spot a backup corruption window
+// instead of finding out the day they need to restore.
+//
+// Runs at 03:30 — 90 minutes after the 02:00 backup so even a slow
+// backup on a busy site has finished, and well before the 06:30
+// morning sync window.
+export async function verifyLatestBackup() {
+  const resolvedDbPath = path.resolve(dbPath);
+  const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
+
+  let backupFiles = [];
+  try {
+    const { readdirSync, statSync } = await import('fs');
+    backupFiles = readdirSync(backupDir)
+      .filter((f) => f.endsWith('.db'))
+      .map((f) => ({ name: f, full: path.join(backupDir, f), mtime: statSync(path.join(backupDir, f)).mtimeMs }))
+      .sort((a, b) => b.mtime - a.mtime);
+  } catch (err) {
+    console.error('[backup-verify] Cannot read backup dir:', err.message);
+    return { ok: false, reason: 'backup_dir_unreadable', error: err.message };
+  }
+
+  if (backupFiles.length === 0) {
+    console.error('[backup-verify] No backup files found — no backup has run yet, or all were pruned.');
+    return { ok: false, reason: 'no_backups_found' };
+  }
+
+  const latest = backupFiles[0];
+  const ageHours = (Date.now() - latest.mtime) / (1000 * 60 * 60);
+
+  // The latest backup should be < 26 hours old (24h cron + buffer). Anything
+  // older means yesterday's run failed or the cron stopped firing.
+  if (ageHours > 26) {
+    console.error(`[backup-verify] Latest backup is ${ageHours.toFixed(1)}h old (${latest.name}) — backup cron may have stopped.`);
+    return { ok: false, reason: 'stale_latest', ageHours, file: latest.name };
+  }
+
+  // Open read-only and run integrity_check + row counts on the tables we'd
+  // need to actually restore. better-sqlite3 readonly mode means we can't
+  // accidentally mutate the backup file.
+  let backupDb;
+  try {
+    backupDb = new Database(latest.full, { readonly: true, fileMustExist: true });
+  } catch (err) {
+    console.error(`[backup-verify] Cannot open ${latest.name}: ${err.message}`);
+    return { ok: false, reason: 'cannot_open', file: latest.name, error: err.message };
+  }
+
+  try {
+    const integrity = backupDb.prepare('PRAGMA integrity_check').all();
+    const passed = integrity.length === 1 && integrity[0].integrity_check === 'ok';
+    if (!passed) {
+      const issues = integrity.map(r => r.integrity_check).slice(0, 5).join('; ');
+      console.error(`[backup-verify] integrity_check FAILED on ${latest.name}: ${issues}`);
+      return { ok: false, reason: 'integrity_check_failed', file: latest.name, issues };
+    }
+
+    // Critical tables — if any of these are present in the live DB but
+    // missing/empty in the backup, the backup is structurally suspect.
+    // Wrapped per-table so a single missing table (e.g. fresh install
+    // where bat_reconciliations doesn't exist yet) doesn't fail the whole
+    // verification.
+    const criticalTables = ['datarecord', 'user', 'databaseconnection'];
+    const counts = {};
+    for (const t of criticalTables) {
+      try {
+        const row = backupDb.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get();
+        counts[t] = row?.c ?? 0;
+      } catch (err) {
+        counts[t] = `error: ${err.message}`;
+      }
+    }
+
+    console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(counts)})`);
+    return { ok: true, file: latest.name, ageHours, counts };
+  } finally {
+    try { backupDb.close(); } catch {}
   }
 }
 
@@ -96,6 +184,17 @@ export function startSchedulers() {
     cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', () => {
       refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] scheduled refresh failed:', e.message));
     }));
+
+    // Sage health probe — every 60s. Cheap SELECT 1 that lets the admin
+    // banner warn when Sage has been unreachable for more than 5 minutes,
+    // before someone starts debugging a "missing credit notes" report
+    // that's actually just a dead pool.
+    intervals.push(setInterval(() => {
+      probeSageHealth().catch(() => { /* probeSageHealth handles its own errors */ });
+    }, 60_000));
+    // Initial probe shortly after boot so the UI doesn't show a stale
+    // "never probed" state.
+    setTimeout(() => { probeSageHealth().catch(() => {}); }, 8000);
     // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
     setTimeout(() => {
       refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] boot refresh failed:', e.message));
@@ -105,6 +204,12 @@ export function startSchedulers() {
   if (process.env.HUB_MODE !== 'true') {
     // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
     cronTasks.push(cron.schedule('0 2 * * *', runLocalBackup));
+    // Daily backup verification at 03:30 — 90 min after the backup, well
+    // before the 06:30 morning sync window. Catches corrupt/truncated/stale
+    // backups so an operator finds out before the day they need to restore.
+    cronTasks.push(cron.schedule('30 3 * * *', () => {
+      verifyLatestBackup().catch((e) => console.error('[backup-verify] scheduled run failed:', e.message));
+    }));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
     setTimeout(() => {
       syncCreditLogicFromHub({ triggeredBy: 'startup' }).catch((error) => {
