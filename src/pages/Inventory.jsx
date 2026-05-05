@@ -11,7 +11,12 @@ const INV_COLUMN_DEFAULTS = {
   itemNumber: 140, description: 380, qty: 100, lastCost: 110,
   price: 110, priceList: 110, uom: 80, site: 140,
 };
-const INV_COLUMN_WIDTHS_KEY = "inventory.columnWidths.v1";
+// v2: switched table from absolute-pixel widths to a CSS width:100% +
+// percentage <col> layout. Existing v1 saves are absolute pixel values
+// that worked with the old layout but render with off-balance proportions
+// under the new percentage-based render; bumping the key gives operators
+// a clean default that fills the container.
+const INV_COLUMN_WIDTHS_KEY = "inventory.columnWidths.v2";
 
 function useInvColumnWidths(containerRef) {
   const [widths, setWidths] = useState(() => {
@@ -670,9 +675,22 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
         className="print-table-wrap"
         style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "hidden" }}
       >
-        <table className="text-sm" style={{ tableLayout: "fixed", width: totalWidth }}>
+        {/* Same percentage-fill layout as InvoiceMatching / CustomerBalances:
+            table is width:100%, each column is a percentage of the total
+            so the browser fills the container natively. The pixel widths
+            in `widths` only matter as proportions; resize handles still
+            update those pixel values, and we re-render percentages on
+            every keystroke. Eliminates the "table wider than container"
+            and "empty band on the right" failure modes the JS auto-fit
+            loop used to produce. */}
+        <table className="text-sm w-full" style={{ tableLayout: "fixed" }}>
           <colgroup>
-            {visibleKeys.map((k) => <col key={k} style={{ width: widths[k] }} />)}
+            {visibleKeys.map((k) => (
+              <col
+                key={k}
+                style={{ width: `${((widths[k] || 100) / (totalWidth || 1)) * 100}%` }}
+              />
+            ))}
           </colgroup>
           <thead className="sticky top-0 z-20">
             <tr className="border-b border-border bg-card">
