@@ -1,3 +1,38 @@
+/* Self-hosted fonts. Files live in /public/fonts/ and are served at /fonts/*
+   so absolute URLs work in dev and prod. We only ship the `latin` subset
+   (~120KB total) — the app's data is South African English/Afrikaans, both
+   covered by latin. Inter Tight and JetBrains Mono are variable fonts so
+   one file serves every weight via the font-weight range.
+   Replaces a Google Fonts <link> that fetched on every page load. */
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/instrument-serif-regular.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Instrument Serif';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/instrument-serif-italic.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter Tight';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-tight-variable.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('/fonts/jetbrains-mono-variable.woff2') format('woff2');
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -139,13 +139,38 @@ export function startSchedulers() {
 }
 
 export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites) {
-  setTimeout(syncAllSites, 10000);
-  intervals.push(setInterval(syncAllSites, 5 * 60 * 1000));
+  // Overlap guard: if a previous syncAllSites is still running when the
+  // 5-minute interval fires (which happens when one site has slow ETL or
+  // a long-running backup pull), skip the new tick instead of letting two
+  // syncs race on the Hub Postgres pool and per-site sync state. Same
+  // pattern for pingAllSites — defensive even though pings are normally fast.
+  let syncRunning = false;
+  const guardedSync = async () => {
+    if (syncRunning) {
+      console.warn('[hub-sync] previous syncAllSites still running — skipping this tick');
+      return;
+    }
+    syncRunning = true;
+    try { await syncAllSites(); }
+    catch (err) { console.error('[hub-sync] syncAllSites failed:', err.message); }
+    finally { syncRunning = false; }
+  };
+  setTimeout(guardedSync, 10000);
+  intervals.push(setInterval(guardedSync, 5 * 60 * 1000));
+
   cronTasks.push(cron.schedule('0 3 * * *', runHubBackupPull));
-  // Ping sites every 15 minutes
+
   if (pingAllSites) {
-    setTimeout(pingAllSites, 15000); // initial ping 15s after startup
-    intervals.push(setInterval(pingAllSites, 15 * 60 * 1000));
+    let pingRunning = false;
+    const guardedPing = async () => {
+      if (pingRunning) return;
+      pingRunning = true;
+      try { await pingAllSites(); }
+      catch (err) { console.error('[hub-sync] pingAllSites failed:', err.message); }
+      finally { pingRunning = false; }
+    };
+    setTimeout(guardedPing, 15000);
+    intervals.push(setInterval(guardedPing, 15 * 60 * 1000));
   }
 }
 

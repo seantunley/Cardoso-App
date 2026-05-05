@@ -103,9 +103,25 @@ if (IS_PRODUCTION) {
 }
 app.use(express.json());
 
-const SQLiteStore = require('connect-sqlite3')(session);
+// Session store backed by a dedicated better-sqlite3 connection. Replaces
+// connect-sqlite3 (which depended on the legacy `sqlite3` package and pulled
+// in 6 high-severity transitive vulns through node-gyp + tar). Sessions live
+// in their own DB file alongside the main app DB so a session table corruption
+// can't take the main app offline.
+//
+// Side-effect: the new store creates its own `sessions` table layout, so any
+// existing sessions on disk are dropped on first boot — every user has to
+// log in once after the upgrade.
+const Database = require('better-sqlite3');
+const SqliteStore = require('better-sqlite3-session-store')(session);
+const sessionsDbDir = path.dirname(process.env.DB_PATH || './database/cardoso.db');
+const sessionsDb = new Database(path.join(sessionsDbDir, 'sessions.db'));
 app.use(session({
-  store: new SQLiteStore({ db: 'sessions.db', dir: path.dirname(process.env.DB_PATH || './database/cardoso.db'), table: 'sessions' }),
+  store: new SqliteStore({
+    client: sessionsDb,
+    // GC expired rows every 15 min so the file doesn't grow forever.
+    expired: { clear: true, intervalMs: 15 * 60 * 1000 },
+  }),
   secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, secure: process.env.HTTPS === 'true', sameSite: 'strict', maxAge: 1000 * 60 * 60 * 12 },
 }));
@@ -132,9 +148,9 @@ app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
 
-// ── BAT Supplier Reconciliation (admin-only while testing) ──
+// ── BAT Supplier Reconciliation ──
 // (initBatSchema already ran earlier, before the migrations.)
-app.use(createBatReconciliationRouter({ requireAuth, requireAdmin }));
+app.use(createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
@@ -169,7 +185,11 @@ app.use((err, req, res, next) => {
 });
 
 if (IS_PRODUCTION) {
-  app.get('*', (req, res) => {
+  // Express 5 (path-to-regexp v8) no longer accepts bare '*' wildcards;
+  // catch-all routes must use the named-splat syntax. This serves the SPA's
+  // index.html for any client-side route while letting unmatched /api/*
+  // requests fall through to the JSON 404 handler.
+  app.get('/{*splat}', (req, res) => {
     if (!req.path.startsWith('/api')) res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
   });
 }

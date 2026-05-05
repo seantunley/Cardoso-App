@@ -1,9 +1,9 @@
 /**
  * BAT Supplier Reconciliation routes.
  *
- * All endpoints are gated with requireAdmin while the module is in testing.
- * To open to non-admins later, swap requireAdmin → requirePermission('can_access_reconciliation')
- * and add the corresponding feature_permissions row + UI toggle.
+ * Gated by `can_access_reconciliation`. Admins always pass (requirePermission
+ * short-circuits on role==='admin'); non-admins need the toggle on in their
+ * User Permissions row. The matching UI toggle lives in UserPermissionsModal.
  */
 import { Router } from 'express';
 import multer from 'multer';
@@ -61,11 +61,13 @@ const upload = multer({
   },
 });
 
-export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
+export function createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
 
-  // Gate everything behind admin while testing
-  const gate = [requireAuth, requireAdmin];
+  // Default gate: any user with can_access_reconciliation. Admins pass
+  // unconditionally. A handful of admin-only endpoints below (settings
+  // mutation, OCR pause, Sage refresh, etc.) layer requireAdmin on top.
+  const gate = [requireAuth, requirePermission('can_access_reconciliation')];
 
   // Serve preview JPEGs (lightweight rendered page images)
   const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
@@ -269,7 +271,19 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     // Heartbeat every 25 s so proxies / load balancers don't kill the connection.
     const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25_000);
 
+    // Belt-and-suspenders cap. `req.on('close')` fires on a normal TCP teardown,
+    // but a half-open connection (NAT silently dropping state, laptop suspended,
+    // etc.) can leave the heartbeat firing indefinitely against a dead socket.
+    // Cap at 30 minutes so the worst-case leak is bounded — the client will
+    // reconnect on next page interaction.
+    const hardCap = setTimeout(() => {
+      clearInterval(heartbeat);
+      extractionEvents.off(channel, onUpdate);
+      try { res.end(); } catch {}
+    }, 30 * 60 * 1000);
+
     req.on('close', () => {
+      clearTimeout(hardCap);
       clearInterval(heartbeat);
       extractionEvents.off(channel, onUpdate);
     });
@@ -337,6 +351,15 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
   // is the cheap retry mechanism.
   const lastCreditNotesPullAt = new Map(); // reconId -> ms timestamp
   const CREDIT_NOTES_PULL_THROTTLE_MS = 60_000;
+  // De-dupes concurrent Sage auto-pulls for the same recon. Without this, a
+  // polling tick that overlaps with a fresh loadReconciliation (or the user
+  // hammering refresh) fired N parallel querySageCreditNotes calls — each one
+  // hitting the MSSQL pool, each one tying up an Express request slot for
+  // 1–5s. With clicks-across-recons triggering individual Sage queries
+  // anyway this isn't a full fix for "rapid clicks hang the UI" (different
+  // recons still hit Sage independently), but it eliminates the same-recon
+  // pile-up that was the most reliable repro.
+  const inFlightCreditNotes = new Map(); // reconId -> Promise<creditNotes|null>
 
   router.get('/api/bat/reconciliation/:id', ...gate, async (req, res) => {
     const id = parseInt(req.params.id, 10);
@@ -344,34 +367,31 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
 
     // Auto-refresh per-recon Sage credit-note detail when the recon screen
-    // is opened. Without this, the "Sage Credit Note Details" panel only
-    // appeared if the recon was created with Sage already active, or the
-    // operator manually clicked the "Refresh Sage" toolbar button — every
-    // other recon silently showed correct Sage totals (from the cache)
-    // but no per-line breakdown. Throttled per-recon so the page's
-    // adaptive polling loop doesn't hammer Sage.
+    // is opened. Throttled per-recon (60s) and de-duped across overlapping
+    // requests for the same recon.
     const now = Date.now();
     const lastPull = lastCreditNotesPullAt.get(id) || 0;
     const empty = !recon.creditNotes || recon.creditNotes.length === 0;
     const hasSageData = (recon.sage_total || 0) > 0;
-    // Pull when the panel is empty (first open) OR when enough time has
-    // elapsed that this is plausibly a fresh page navigation. Skip if
-    // the cache says there's no Sage data for this week — no point
-    // querying for nothing.
     if (hasSageData && (empty || now - lastPull >= CREDIT_NOTES_PULL_THROTTLE_MS)) {
-      lastCreditNotesPullAt.set(id, now);
-      try {
-        const creditNotes = await querySageCreditNotes(recon.week_number, recon.year);
-        if (creditNotes) {
-          db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
-          if (creditNotes.length > 0) storeSageCreditNotes(id, creditNotes);
-          recon = getReconciliation(id);
-        }
-      } catch (err) {
-        // Don't fail the whole request — the totals are still useful even
-        // without per-line detail. Log so an operator can see why the
-        // detail panel still isn't showing.
-        console.error(`[bat] Auto credit-note pull failed for recon ${id}:`, err.message);
+      let pending = inFlightCreditNotes.get(id);
+      if (!pending) {
+        lastCreditNotesPullAt.set(id, now);
+        pending = (async () => {
+          try {
+            return await querySageCreditNotes(recon.week_number, recon.year);
+          } catch (err) {
+            console.error(`[bat] Auto credit-note pull failed for recon ${id}:`, err.message);
+            return null;
+          }
+        })().finally(() => inFlightCreditNotes.delete(id));
+        inFlightCreditNotes.set(id, pending);
+      }
+      const creditNotes = await pending;
+      if (creditNotes) {
+        db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
+        if (creditNotes.length > 0) storeSageCreditNotes(id, creditNotes);
+        recon = getReconciliation(id);
       }
     }
 
@@ -505,8 +525,16 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
 
   // POST /api/bat/refresh-sage-cache — manual instant refresh used by the UI button
   router.post('/api/bat/refresh-sage-cache', ...gate, async (req, res) => {
-    const result = await refreshSageWeekTotalsCache();
-    res.json(result);
+    try {
+      const result = await refreshSageWeekTotalsCache();
+      res.json(result);
+    } catch (err) {
+      // Express 5 would auto-propagate this to the global error handler,
+      // but keeping an explicit local catch returns a more useful message
+      // to the operator and avoids the generic 500 path.
+      console.error('[bat] refresh-sage-cache failed:', err.message);
+      res.status(500).json({ error: err.message || 'Sage cache refresh failed' });
+    }
   });
 
   // OCR pause/resume — Settings → Reconciliation toggle
@@ -541,7 +569,8 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     }
   });
 
-  router.post('/api/bat/ocr-pause', ...gate, (req, res) => {
+  // Admin-only: global toggle that affects every operator using the module.
+  router.post('/api/bat/ocr-pause', ...gate, requireAdmin, (req, res) => {
     const paused = !!req.body?.paused;
     const wasPaused = isOcrPaused();
     setOcrPaused(paused);
@@ -725,7 +754,8 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     res.json(settings);
   });
 
-  router.put('/api/bat/settings', ...gate, (req, res) => {
+  // Admin-only: global VAT %, TG rates, sage_connection_id, etc.
+  router.put('/api/bat/settings', ...gate, requireAdmin, (req, res) => {
     const before = Object.fromEntries(
       db.prepare('SELECT key, value FROM bat_settings WHERE key IN (' + Object.keys(req.body || {}).map(() => '?').join(',') + ')')
         .all(...Object.keys(req.body || {})).map(r => [r.key, r.value])

@@ -152,3 +152,6 @@ uploads/
 # Sample / large reference spreadsheets (kept locally, not in source)
 docs/*.xls
 docs/*.xlsx
+
+# Local Claude Code agent runtime state
+.claude/

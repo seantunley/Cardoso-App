@@ -255,6 +255,13 @@ export default function Reconciliation() {
       }
       try {
         const r = await fetch(`/api/bat/reconciliation/${id}`, { credentials: 'include' });
+        // Stale guard: the user may have clicked a different recon while
+        // the poll's fetch was in flight. Writing the old recon's data into
+        // setSelected here would flicker the UI back to the wrong recon.
+        if (selectedIdRef.current !== id) {
+          timer = setTimeout(tick, pollInterval);
+          return;
+        }
         if (r.ok) {
           const data = await r.json();
           const stillPending = data.extractions?.some(e => e.extraction_status === 'pending');
@@ -285,20 +292,40 @@ export default function Reconciliation() {
     };
   }, [view]);
 
+  // Holds the AbortController for the in-flight loadReconciliation fetches.
+  // Replaced on every new call so a rapid second click cancels the first
+  // pair of requests immediately. Without this, six rapid clicks pinned all
+  // six of Chrome's per-origin connection slots on dead-on-arrival GETs
+  // (the data was about to be replaced) and every subsequent request — JPEG
+  // previews, polls, navigations — stalled until something completed,
+  // which felt like the entire UI was hung.
+  const loadReconRef = useRef({ ctrl: null, latestId: null });
   const loadReconciliation = async (id) => {
-    const r = await fetch(`/api/bat/reconciliation/${id}`, { credentials: 'include' });
-    if (r.ok) {
-      const data = await r.json();
-      setSelected(data);
-      setView('detail');
-      // Load Cardoso match if available
+    const slot = loadReconRef.current;
+    if (slot.ctrl) { try { slot.ctrl.abort(); } catch {} }
+    const ctrl = new AbortController();
+    slot.ctrl = ctrl;
+    slot.latestId = id;
+    setView('detail');
+
+    // Fire both in parallel. Previously sequential, which doubled wall time
+    // for every click; the cardoso-match call doesn't need the recon body.
+    const [reconRes, matchRes] = await Promise.allSettled([
+      fetch(`/api/bat/reconciliation/${id}`, { credentials: 'include', signal: ctrl.signal }),
+      fetch(`/api/bat/cardoso-match/${id}`, { credentials: 'include', signal: ctrl.signal }),
+    ]);
+
+    // Stale-response guard: a slower earlier click resolving after a faster
+    // later one would otherwise overwrite `selected` with the wrong recon.
+    if (slot.latestId !== id || ctrl.signal.aborted) return;
+
+    if (reconRes.status === 'fulfilled' && reconRes.value.ok) {
+      try { setSelected(await reconRes.value.json()); } catch {}
+    }
+    if (matchRes.status === 'fulfilled' && matchRes.value.ok) {
       try {
-        const mr = await fetch(`/api/bat/cardoso-match/${id}`, { credentials: 'include' });
-        if (mr.ok) {
-          const md = await mr.json();
-          if (md.cardosoCount > 0) setCardosoMatch(md.matching);
-          else setCardosoMatch(null);
-        }
+        const md = await matchRes.value.json();
+        setCardosoMatch(md.cardosoCount > 0 ? md.matching : null);
       } catch {}
     }
   };

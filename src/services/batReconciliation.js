@@ -1402,7 +1402,22 @@ async function runGoogleVisionRetryInner(reconId, rows) {
     try {
       console.log(`[bat-gv] Processing id=${row.id} ${row.store_name || ''}`);
 
-      const response = await fetch(row.pdf_url);
+      // 30s download cap. Without this, a slow/wedged supplier S3 endpoint can
+      // hang the main thread for 60-120s (until socket-level timeout) and
+      // block every unrelated HTTP request behind it. The OCR worker has its
+      // own fetchWithTimeout helper; this main-thread retry path needs the
+      // same protection.
+      const dlCtrl = new AbortController();
+      const dlTimer = setTimeout(() => dlCtrl.abort(), 30_000);
+      let response;
+      try {
+        response = await fetch(row.pdf_url, { signal: dlCtrl.signal });
+      } catch (err) {
+        clearTimeout(dlTimer);
+        updateExtraction.run(null, 'failed', `PDF download failed: ${err.message}`, row.id);
+        continue;
+      }
+      clearTimeout(dlTimer);
       if (!response.ok) { updateExtraction.run(null, 'failed', `HTTP ${response.status} downloading PDF`, row.id); continue; }
       const buffer = Buffer.from(await response.arrayBuffer());
       if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
@@ -2399,11 +2414,23 @@ async function ocrViaGoogleVision(imageBuffer) {
       features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
     }],
   };
-  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
+  // 30s cap. Hung Google Vision call in this main-thread retry path would
+  // otherwise stall the event loop until socket timeout (60-120s), blocking
+  // every other request. The worker-thread version of this engine already
+  // wraps in fetchWithTimeout — this is the same guard for the retry batch.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 30_000);
+  let res;
+  try {
+    res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 200)}`);

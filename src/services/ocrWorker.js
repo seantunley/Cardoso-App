@@ -75,14 +75,41 @@ let _sharp = null;
 let _pdfjs = null;
 let _canvas = null;
 
+// Trained data ships with the app under vendor/tessdata/. We point
+// tesseract.js at that directory instead of letting it download from
+// tessdata.projectnaptha.com on first use — the app must work fully
+// offline (firewalled sites, no internet, etc.). cacheMethod='none'
+// stops it writing its own cache copy somewhere in os.tmpdir().
+const TESSDATA_DIR = path.resolve(import.meta.dirname, '..', '..', 'vendor', 'tessdata');
+
 async function getTesseract() {
   if (_tesseract) return _tesseract;
   const { createWorker } = await import('tesseract.js');
-  // 30s hard cap on Tesseract init. createWorker('eng') silently downloads
-  // ~10MB of trained data from tessdata.projectnaptha.com on first use.
-  // On a firewalled / AV-blocked / corporate-proxy site this hangs forever;
-  // a clear timeout error here lets the operator see exactly what's wrong.
-  _tesseract = await withTimeout(createWorker('eng'), 30_000, 'tesseract_init');
+
+  // Verify trained data is present before init. If we just call createWorker
+  // and the file's missing, tesseract.js silently falls back to its CDN URL
+  // and the operator sees a 30s "tesseract_init timeout" that looks like a
+  // network problem. Loud-fail with a clear cause instead.
+  const trainedDataPath = path.join(TESSDATA_DIR, 'eng.traineddata.gz');
+  try {
+    await fsp.access(trainedDataPath);
+  } catch {
+    throw new Error(
+      `Tesseract trained data missing at ${trainedDataPath}. ` +
+      'The app ships this file with each release for offline OCR; reinstall the app to restore it.',
+    );
+  }
+
+  // 30s init cap. With a local langPath this completes in ~1s — kept as a
+  // backstop in case sharp/pdfjs native init wedges (AV interference, etc.).
+  _tesseract = await withTimeout(
+    createWorker('eng', 1, {
+      langPath: TESSDATA_DIR,
+      cacheMethod: 'none',
+    }),
+    30_000,
+    'tesseract_init',
+  );
   return _tesseract;
 }
 
