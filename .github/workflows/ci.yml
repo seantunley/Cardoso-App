@@ -62,6 +62,13 @@ jobs:
         run: npm run build
         shell: powershell
 
+      - name: Tests
+        # vitest covering parseSupplierSpreadsheet (PR #171). First module
+        # under test coverage; expands as more modules join. Tests must
+        # pass for the PR to merge.
+        run: npm test
+        shell: powershell
+
       - name: Audit (critical only)
         # --audit-level=critical not high. xlsx has unfixed high CVEs
         # we accept by trust-boundary (see tech-debt.md). Critical-only
