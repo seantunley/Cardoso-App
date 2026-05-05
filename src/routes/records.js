@@ -43,9 +43,13 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     _schemaCache.set(table, cols);
     return cols;
   }
-  // Warm the cache for all allowed tables at startup
+  // Warm the cache for all allowed tables at startup. A failure here usually
+  // means the table doesn't exist yet (fresh install before migrations create
+  // it) — non-fatal, but worth logging so a real schema problem doesn't hide
+  // behind the empty catch and surface as a confusing per-request error later.
   for (const t of allowedTables) {
-    try { getTableColumns(t); } catch {}
+    try { getTableColumns(t); }
+    catch (err) { console.warn(`[records] schema-cache warm failed for "${t}": ${err.message}`); }
   }
 
   // ==================== CUSTOM FIELD CONFIG ROUTES ====================

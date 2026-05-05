@@ -23,11 +23,15 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          "vendor-react": ["react", "react-dom", "react-router-dom"],
-          "vendor-query": ["@tanstack/react-query"],
-          "vendor-ui": ["lucide-react"],
-          "vendor-charts": ["recharts"],
+        // Vite 8 / Rolldown require manualChunks as a function, not an
+        // object map. Same chunking outcome as before — just the shape
+        // the new bundler expects.
+        manualChunks: (id) => {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/]react(?:-dom|-router-dom)?[\\/]/.test(id)) return 'vendor-react';
+          if (id.includes('@tanstack/react-query')) return 'vendor-query';
+          if (id.includes('lucide-react')) return 'vendor-ui';
+          if (id.includes('recharts')) return 'vendor-charts';
         },
       },
     },

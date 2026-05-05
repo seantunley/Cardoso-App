@@ -1,6 +1,6 @@
 import { Check, AlertTriangle, Clock, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
-import moment from "moment";
+import { formatDistanceToNow } from "date-fns";
 
 export default function ConnectionStatus({ connection }) {
   const getStatusInfo = (status) => {
@@ -61,7 +61,7 @@ export default function ConnectionStatus({ connection }) {
           <p className="text-xs text-gray-400 mt-1">{statusInfo.description}</p>
           {connection.last_sync && (
             <p className="text-xs text-gray-500 mt-2">
-              Last synced: {moment(connection.last_sync).fromNow()}
+              Last synced: {formatDistanceToNow(new Date(connection.last_sync), { addSuffix: true })}
             </p>
           )}
         </div>
