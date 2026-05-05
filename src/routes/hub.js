@@ -633,12 +633,27 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
                b.total_supplier, b.total_sage, b.total_variance,
                b.weeks_count, b.matched_count, b.mismatch_count, b.awaiting_count,
                b.missing_weeks_count,
+               b.summary_year, b.last_paid_week, b.last_paid_year,
+               b.last_bat_week, b.last_bat_year,
+               b.missing_credit_notes_weeks, b.mismatch_weeks,
                b.total_exceptions, b.total_exception_amount,
                b.last_upload_at, b.synced_at, b.last_error
         FROM hub_sites s
         LEFT JOIN hub_bat_summary b ON b.site_id = s.id
         ORDER BY s.name
       `).all();
+
+      // Parse JSON-stored week-number arrays back to JS arrays for the
+      // frontend. Stored as TEXT because SQLite has no native array type;
+      // null/empty → empty array so the UI doesn't have to special-case
+      // older sites that haven't reported these fields yet.
+      const parseWeeks = (raw) => {
+        if (!raw) return [];
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : [];
+        } catch { return []; }
+      };
 
       const sites = rows.map(r => ({
         site_id: r.site_id,
@@ -655,6 +670,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         mismatch_count: r.mismatch_count || 0,
         awaiting_count: r.awaiting_count || 0,
         missing_weeks_count: r.missing_weeks_count || 0,
+        summary_year: r.summary_year ?? null,
+        last_paid_week: r.last_paid_week ?? null,
+        last_paid_year: r.last_paid_year ?? null,
+        last_bat_week: r.last_bat_week ?? null,
+        last_bat_year: r.last_bat_year ?? null,
+        missing_credit_notes_weeks: parseWeeks(r.missing_credit_notes_weeks),
+        mismatch_weeks: parseWeeks(r.mismatch_weeks),
         total_exceptions: r.total_exceptions || 0,
         total_exception_amount: r.total_exception_amount || 0,
         last_upload_at: r.last_upload_at,

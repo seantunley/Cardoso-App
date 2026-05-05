@@ -1,11 +1,6 @@
-import { useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { ChartCard, SummaryTile,
-  fmtR, fmtRSigned, fmtCount, BarChart, Bar,
-  ThemedXAxis, ThemedYAxis, ThemedTooltip, ThemedGrid,
-  REPORT_COLORS,
-} from '@/components/reports/lib';
+import { SummaryTile, fmtR, fmtRSigned, fmtCount, REPORT_COLORS } from '@/components/reports/lib';
 import { CheckCircle, AlertTriangle, CloudOff, ExternalLink, RefreshCw } from 'lucide-react';
 
 function fetchBatSummary() {
@@ -38,16 +33,6 @@ export default function HubReconciliation() {
   const sites = data?.sites || [];
   const summary = data?.summary;
 
-  const chartData = useMemo(() => sites
-    .filter(s => s.has_data)
-    .slice(0, 30)
-    .map(s => ({
-      name: s.site_name?.length > 16 ? s.site_name.slice(0, 14) + '…' : (s.site_name || s.site_slug),
-      fullName: s.site_name || s.site_slug,
-      supplier: s.total_supplier,
-      sage: s.total_sage,
-      variance: s.total_variance,
-    })), [sites]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -129,20 +114,6 @@ export default function HubReconciliation() {
               })()}
             </div>
 
-            {/* Cross-site bar chart */}
-            {chartData.length > 0 && (
-              <ChartCard title="BAT vs Credit Notes by site" sub={`${chartData.length} sites with data`} height={Math.max(280, chartData.length * 44)}>
-                <BarChart data={chartData} layout="vertical" margin={{ top: 10, right: 16, left: 100, bottom: 24 }}>
-                  <ThemedGrid />
-                  <ThemedXAxis type="number" currency label="Rand" />
-                  <ThemedYAxis type="category" dataKey="name" width={120} tickFormatter={(v) => v} />
-                  <ThemedTooltip formatter={(v, n, p) => [`R ${fmtR(v)}`, n === 'supplier' ? 'BAT' : 'Credit Notes']} labelFormatter={(label, payload) => payload?.[0]?.payload?.fullName || label} />
-                  <Bar dataKey="supplier" name="BAT" fill={REPORT_COLORS.primary} radius={[0, 2, 2, 0]} />
-                  <Bar dataKey="sage" name="Credit Notes" fill={REPORT_COLORS.secondary} radius={[0, 2, 2, 0]} />
-                </BarChart>
-              </ChartCard>
-            )}
-
             {/* Per-site card grid */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {sites.map(s => <SiteCard key={s.site_id} site={s} />)}
@@ -201,11 +172,68 @@ function SiteCard({ site }) {
           <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">No BAT summary returned yet — site may not have any reconciliations uploaded.</p>
         ) : (
           <>
+            {/* Year-scoped totals (current ISO year — matches what the site
+                shows in its own Reconciliation page when no other year is
+                selected). The summary_year label tells the operator
+                explicitly which year's data is in the card. */}
+            {site.summary_year && (
+              <div className="font-mono text-[9px] uppercase tracking-[0.25em] text-muted-foreground/70">
+                Year {site.summary_year}
+              </div>
+            )}
             <div className="space-y-1">
               <DataRow label="BAT" value={fmtR(site.total_supplier)} />
               <DataRow label="Credit Notes" value={fmtR(site.total_sage)} muted />
               <DataRow label="Variance" value={fmtRSigned(site.total_variance)} variance={site.total_variance} />
             </div>
+
+            {/* Per-week status row — replicates the most useful tiles from
+                the site's own Reconciliation page so an operator scanning
+                the hub knows which sites need chasing without drilling in.
+                Only renders when the site has reported the new fields
+                (older sites: last_bat_week / last_paid_week null). */}
+            {(site.last_bat_week != null || site.last_paid_week != null) && (
+              <div className="pt-2 border-t border-border grid grid-cols-2 gap-2">
+                <Stat
+                  label="Last BAT week"
+                  value={site.last_bat_week != null
+                    ? `W${String(site.last_bat_week).padStart(2, '0')}/${site.last_bat_year ?? site.summary_year ?? ''}`
+                    : '—'}
+                />
+                <Stat
+                  label="Last paid (Sage)"
+                  value={site.last_paid_week != null
+                    ? `W${String(site.last_paid_week).padStart(2, '0')}/${site.last_paid_year ?? site.summary_year ?? ''}`
+                    : '—'}
+                />
+              </div>
+            )}
+
+            {/* Mismatch / missing-credit-note week numbers, listed
+                explicitly so the operator can see which weeks to look at
+                — not just a count. Phosphor for missing credit notes
+                (chase accounts), red for mismatches (investigate). */}
+            {site.mismatch_weeks?.length > 0 && (
+              <div className="pt-2 border-t border-border">
+                <div className="font-mono text-[9px] uppercase tracking-[0.15em] text-destructive mb-1">
+                  ⚠ Mismatch · {site.mismatch_weeks.length} week{site.mismatch_weeks.length !== 1 ? 's' : ''}
+                </div>
+                <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {site.mismatch_weeks.map(w => `W${String(w).padStart(2, '0')}`).join(', ')}
+                </div>
+              </div>
+            )}
+
+            {site.missing_credit_notes_weeks?.length > 0 && (
+              <div className="pt-2 border-t border-border">
+                <div className="font-mono text-[9px] uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--phosphor)' }}>
+                  ⚠ Missing credit notes · {site.missing_credit_notes_weeks.length} week{site.missing_credit_notes_weeks.length !== 1 ? 's' : ''}
+                </div>
+                <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                  {site.missing_credit_notes_weeks.map(w => `W${String(w).padStart(2, '0')}`).join(', ')}
+                </div>
+              </div>
+            )}
 
             <div className="pt-2 border-t border-border grid grid-cols-3 gap-2">
               <Stat label="Weeks" value={fmtCount(site.weeks_count)} />
@@ -215,7 +243,7 @@ function SiteCard({ site }) {
                   entry. Highlighted in phosphor when > 0 so an operator
                   scanning the network can spot stragglers immediately. */}
               <Stat
-                label="Missing"
+                label="Missing BAT"
                 value={fmtCount(site.missing_weeks_count)}
                 color={site.missing_weeks_count > 0 ? 'var(--phosphor)' : undefined}
               />

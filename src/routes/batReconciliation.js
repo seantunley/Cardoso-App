@@ -14,6 +14,7 @@ import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
 import {
   parseSupplierSpreadsheet,
+  SpreadsheetValidationError,
   querySageCreditNotes,
   querySagePaidWeeks,
   querySageWeekTotals,
@@ -80,11 +81,14 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     try {
+      // parseSupplierSpreadsheet now throws SpreadsheetValidationError with
+      // a list of human-readable reasons when the file is structurally
+      // unusable (missing sheets, no ODR rows, no PODs, unparseable filename
+      // week, etc.). We catch and 400 it back so NOTHING gets persisted —
+      // the operator gets the full list in a modal and can fix + retry.
+      // Previously bad spreadsheets would sometimes create an empty recon
+      // with zero PODs that polluted the dashboard.
       const parsed = parseSupplierSpreadsheet(req.file.path, req.file.originalname);
-
-      if (!parsed.weekNumber) {
-        return res.status(400).json({ error: 'Could not detect week number from filename. Expected format: Week_XX_...' });
-      }
 
       const year = parsed.year || parseInt(req.body.year, 10) || new Date().getFullYear();
       if (parsed.year) console.log(`[bat] Year detected from order numbers: ${parsed.year}`);
@@ -128,6 +132,16 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
         resourceName: req.file?.originalname || 'unknown',
         details: err.message, status: 'failure',
       });
+      // Validation failures (documented spreadsheet defects) → 400 with
+      // the structured list so the UI can render each reason as a
+      // separate bullet. Anything else is a server-side bug → 500.
+      if (err instanceof SpreadsheetValidationError) {
+        return res.status(400).json({
+          error: 'Spreadsheet rejected',
+          reasons: err.reasons,
+          fileName: err.fileName,
+        });
+      }
       res.status(500).json({ error: err.message || 'Failed to process spreadsheet' });
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
@@ -202,16 +216,27 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin }) {
     });
     res.flushHeaders?.();
 
+    // SSE only ships the cheap progress payload — never the full
+    // recon. The previous version fell through to getReconciliation()
+    // (a 4-query + O(n) two-pass build) on every emit when no
+    // worker progress was active, then JSON-stringified the entire
+    // recon (creditNotes + every extraction row + computed stats) to
+    // every connected listener. With 4 listeners × ~4 emits/sec/recon
+    // that was ~16 full-recon hydrations/sec at 200+-row recons, all
+    // synchronously on the main thread. Operators saw it as the page
+    // hanging during OCR and JPEG previews stalling behind it.
+    //
+    // The frontend already polls /api/bat/reconciliation/:id (the
+    // dedicated GET handler) on its own cadence for the heavy payload.
+    // Keep SSE laser-focused on what only it can do: push the live
+    // worker progress.
     const send = () => {
       const progress = getExtractionProgress(id);
-      let payload;
-      if (progress) {
-        payload = progress;
-      } else {
-        const recon = getReconciliation(id);
-        if (!recon) { res.write(`event: error\ndata: ${JSON.stringify({ error: 'Reconciliation not found' })}\n\n`); return; }
-        payload = { running: false, ...recon.extractionStats };
-      }
+      // Worker isn't running and there's no progress to ship — emit
+      // a minimal "running: false" so the client knows to stop
+      // polling SSE for this recon. Cheap COUNT-only query, no
+      // recon hydration.
+      const payload = progress ?? { running: false };
       res.write(`data: ${JSON.stringify(payload)}\n\n`);
     };
 
