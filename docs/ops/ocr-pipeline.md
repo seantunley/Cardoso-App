@@ -215,7 +215,15 @@ There are five independent safeguards. Each catches a different failure mode.
 | PDF download | 60 s |
 | Google Vision API | 45 s |
 | ocr.space API | 60 s |
-| Tesseract trained-data download (`createWorker('eng')`) | 30 s |
+| Tesseract `createWorker('eng')` init | 30 s (backstop) |
+
+Tesseract's trained-data file ships with the app at
+`vendor/tessdata/eng.traineddata.gz` (~10 MB). `ocrWorker.js` points
+`createWorker` at that local path with `cacheMethod: 'none'`, so init
+completes in ~1 s with no network call. The 30 s timeout is retained
+purely as a backstop in case sharp or pdfjs native init wedges (AV
+interference, missing VC++ runtime, etc.). Air-gapped sites OCR cleanly
+because no CDN download is required.
 
 A stuck SharePoint connection, a blocked CDN, or a hung corporate proxy all surface as `Timeout in stage: <label>` instead of an indefinite wait.
 
