@@ -412,6 +412,23 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // scripts/install-hub-caddy.ps1 on the Hub server).
   //
   // See docs/ops/hub-tls.md.
+  // GET /api/system/jobs — last run of each scheduled job + failure
+  // counts in a configurable window (default 24h). Admin-only because
+  // the response includes error messages and timing data that's
+  // diagnostic, not user-facing. Backs the future Jobs admin tab.
+  router.get('/api/system/jobs', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      // Lazy import so this route file doesn't pull jobRunner (and
+      // therefore better-sqlite3) into anything that loads it standalone.
+      const { getJobsSummary } = await import('../lib/jobRunner.js');
+      const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+      res.json({ jobs: getJobsSummary({ since }) });
+    } catch (err) {
+      console.error('[system.jobs] failed:', err.message);
+      res.status(500).json({ error: 'Failed to load job summary' });
+    }
+  });
+
   router.get('/api/system/tls-status', requireAuth, requireAdmin, async (req, res) => {
     const isWindows = process.platform === 'win32';
     const caddyDir = process.env.CADDY_DIR || 'C:\\Caddy';

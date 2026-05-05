@@ -26,17 +26,24 @@ import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
-import { validateSessionSecret, validateHubTokenSecret, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
+import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
-import { validateHubPostgresConfig } from './src/config/hubPostgres.js';
+import { validateEnvOrExit } from './src/config/env.js';
 import { logError } from './src/lib/errorLog.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
-validateSessionSecret(process.env.SESSION_SECRET);
-validateHubTokenSecret(process.env.HUB_TOKEN_SECRET);
-validateHubPostgresConfig(process.env);
+
+// Boot-time env validation — three steps:
+// 1. Auto-heal SESSION_SECRET in production if it's the installer
+//    placeholder (so the service keeps running on a fresh install).
+// 2. Run the zod schema over every other env var. Aggregates ALL
+//    failures into one boot message (no fix-restart-fix-restart).
+// 3. validateEncryptionKey checks against the DB (separate because it
+//    requires a query) and runs a touch later, after the DB is open.
+autoHealSessionSecretIfNeeded();
+validateEnvOrExit();
 initHubStorageRuntime();
 
 const app = express();

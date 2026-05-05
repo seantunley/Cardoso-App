@@ -1672,6 +1672,36 @@ function buildMigrations(db) {
         }
       },
     },
+    {
+      version: 60,
+      name: 'job_runs',
+      up() {
+        // Lifecycle tracking for scheduled background jobs (sync, backup,
+        // backup-verify, sage-cache-refresh, hub-sync, hub-ping,
+        // credit-logic-sync, etc.). Wrapping helper in src/lib/jobRunner.js
+        // writes one row per invocation: started_at, ended_at, status,
+        // duration_ms, error_message. Backs the GET /api/system/jobs admin
+        // endpoint and feeds the alert engine (item #2).
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS job_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            status TEXT NOT NULL CHECK (status IN ('started','succeeded','failed')),
+            started_at TEXT NOT NULL,
+            ended_at TEXT,
+            duration_ms INTEGER,
+            error_message TEXT,
+            context TEXT
+          )
+        `);
+        // Compound index for "latest N runs of job X" — the dominant read
+        // pattern from /api/system/jobs and from the alert engine's
+        // dedup checks.
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_name_started ON job_runs(name, started_at DESC)`);
+        // For "all jobs since timestamp" queries (the dashboard view).
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_job_runs_started ON job_runs(started_at DESC)`);
+      },
+    },
   ];
 }
 

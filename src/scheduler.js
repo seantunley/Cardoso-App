@@ -7,6 +7,7 @@ import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
 import { syncCreditLogicFromHub } from './services/creditLogic.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
+import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -170,9 +171,22 @@ export async function runLocalBackup() {
   }
 }
 
+// Helper: wrap a scheduled job in recordJob + a swallowed-error trailer so
+// the lifecycle row gets written but a thrown error doesn't escape into
+// node-cron / setInterval (which would crash the next tick). Each call
+// site previously had its own .catch — this centralises the pattern.
+// `opts` is forwarded to recordJob — most importantly `successCheck`,
+// for jobs (like verifyLatestBackup) that signal failure by returning
+// `{ ok: false }` rather than throwing.
+function track(name, fn, contextFn, opts) {
+  return () => recordJob(name, fn, contextFn, opts).catch((err) => {
+    console.error(`[${name}] failed:`, err.message);
+  });
+}
+
 export function startSchedulers() {
-  cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', runScheduledSyncCycle));
-  cronTasks.push(cron.schedule('0 17 * * 1-5', runScheduledSyncCycle));
+  cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', track('scheduled-sync', runScheduledSyncCycle)));
+  cronTasks.push(cron.schedule('0 17 * * 1-5', track('scheduled-sync', runScheduledSyncCycle)));
 
   // BAT Sage week-totals cache — refresh every 3h on weekdays at 7/10/13/16.
   // Site-only: the Hub doesn't have a Sage connection (it aggregates data
@@ -181,14 +195,14 @@ export function startSchedulers() {
   // on every cron tick and on every boot, each call throwing "No Sage
   // connection configured" into the System Log.
   if (process.env.HUB_MODE !== 'true') {
-    cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', () => {
-      refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] scheduled refresh failed:', e.message));
-    }));
+    cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', track('sage-cache-refresh', refreshSageWeekTotalsCache)));
 
     // Sage health probe — every 60s. Cheap SELECT 1 that lets the admin
     // banner warn when Sage has been unreachable for more than 5 minutes,
     // before someone starts debugging a "missing credit notes" report
-    // that's actually just a dead pool.
+    // that's actually just a dead pool. Not tracked in job_runs because
+    // it fires every minute — would dominate the table without adding
+    // value (its state is already exposed via /api/bat/sage-health).
     intervals.push(setInterval(() => {
       probeSageHealth().catch(() => { /* probeSageHealth handles its own errors */ });
     }, 60_000));
@@ -196,51 +210,67 @@ export function startSchedulers() {
     // "never probed" state.
     setTimeout(() => { probeSageHealth().catch(() => {}); }, 8000);
     // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
-    setTimeout(() => {
-      refreshSageWeekTotalsCache().catch((e) => console.error('[bat-sage-cache] boot refresh failed:', e.message));
-    }, 15000);
+    setTimeout(track('sage-cache-refresh', refreshSageWeekTotalsCache), 15000);
   }
 
   if (process.env.HUB_MODE !== 'true') {
     // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
-    cronTasks.push(cron.schedule('0 2 * * *', runLocalBackup));
+    cronTasks.push(cron.schedule('0 2 * * *', track('local-backup', runLocalBackup)));
     // Daily backup verification at 03:30 — 90 min after the backup, well
     // before the 06:30 morning sync window. Catches corrupt/truncated/stale
     // backups so an operator finds out before the day they need to restore.
-    cronTasks.push(cron.schedule('30 3 * * *', () => {
-      verifyLatestBackup().catch((e) => console.error('[backup-verify] scheduled run failed:', e.message));
-    }));
+    cronTasks.push(cron.schedule('30 3 * * *', track(
+      'backup-verify',
+      verifyLatestBackup,
+      // Attach the verification result as the run's context so the
+      // dashboard can show "ok / which file / how stale / row counts"
+      // without an extra log scrape.
+      (result) => result,
+      // verifyLatestBackup signals failure by returning { ok: false, ... }
+      // instead of throwing. Without this hook, recordJob would persist
+      // the row as 'succeeded' and the dashboard / alerts would miss
+      // real backup failures (stale, corrupt, missing). The hook tells
+      // recordJob to record 'failed' when ok===false; the failure
+      // reason from the result is captured in error_message.
+      { successCheck: (r) => r?.ok !== false },
+    )));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
-    setTimeout(() => {
-      syncCreditLogicFromHub({ triggeredBy: 'startup' }).catch((error) => {
-        console.error('[credit-logic] startup sync failed:', error.message);
-      });
-    }, 12000);
-    intervals.push(setInterval(() => {
-      syncCreditLogicFromHub({ triggeredBy: 'scheduler' }).catch((error) => {
-        console.error('[credit-logic] scheduled sync failed:', error.message);
-      });
-    }, 10 * 60 * 1000));
+    setTimeout(
+      track('credit-logic-sync', () => syncCreditLogicFromHub({ triggeredBy: 'startup' })),
+      12000,
+    );
+    intervals.push(setInterval(
+      track('credit-logic-sync', () => syncCreditLogicFromHub({ triggeredBy: 'scheduler' })),
+      10 * 60 * 1000,
+    ));
   }
 
-  intervals.push(setInterval(async () => {
-    try {
+  intervals.push(setInterval(
+    track('auto-sync-cycle', async () => {
       const conns = db.prepare(
         "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
       ).all();
       const now = Date.now();
+      let triggered = 0;
       for (const conn of conns) {
         const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
         const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
         if (now - lastSync >= intervalMs) {
           console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
+          triggered += 1;
           runConnectionImport(conn.id, { isShuttingDown: () => shuttingDown }).catch(err => console.error(`[auto-sync] error for ${conn.id}:`, err));
         }
       }
-    } catch (err) {
-      console.error("[auto-sync] scheduler error:", err);
-    }
-  }, 5 * 60 * 1000));
+      return { triggered, considered: conns.length };
+    }, (r) => r),
+    5 * 60 * 1000,
+  ));
+
+  // Daily prune of job_runs at 04:00 (after backup-verify at 03:30).
+  // Keeps the table from growing unbounded over months.
+  cronTasks.push(cron.schedule('0 4 * * *', () => {
+    try { pruneOldJobRuns(30); } catch (err) { console.error('[jobRunner] prune failed:', err.message); }
+  }));
 }
 
 export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites) {
@@ -250,29 +280,29 @@ export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites)
   // syncs race on the Hub Postgres pool and per-site sync state. Same
   // pattern for pingAllSites — defensive even though pings are normally fast.
   let syncRunning = false;
-  const guardedSync = async () => {
+  const guardedSync = () => {
     if (syncRunning) {
       console.warn('[hub-sync] previous syncAllSites still running — skipping this tick');
-      return;
+      return Promise.resolve({ skipped: true });
     }
     syncRunning = true;
-    try { await syncAllSites(); }
-    catch (err) { console.error('[hub-sync] syncAllSites failed:', err.message); }
-    finally { syncRunning = false; }
+    return recordJob('hub-sync', syncAllSites)
+      .catch((err) => console.error('[hub-sync] syncAllSites failed:', err.message))
+      .finally(() => { syncRunning = false; });
   };
   setTimeout(guardedSync, 10000);
   intervals.push(setInterval(guardedSync, 5 * 60 * 1000));
 
-  cronTasks.push(cron.schedule('0 3 * * *', runHubBackupPull));
+  cronTasks.push(cron.schedule('0 3 * * *', track('hub-backup-pull', runHubBackupPull)));
 
   if (pingAllSites) {
     let pingRunning = false;
-    const guardedPing = async () => {
-      if (pingRunning) return;
+    const guardedPing = () => {
+      if (pingRunning) return Promise.resolve({ skipped: true });
       pingRunning = true;
-      try { await pingAllSites(); }
-      catch (err) { console.error('[hub-sync] pingAllSites failed:', err.message); }
-      finally { pingRunning = false; }
+      return recordJob('hub-ping', pingAllSites)
+        .catch((err) => console.error('[hub-sync] pingAllSites failed:', err.message))
+        .finally(() => { pingRunning = false; });
     };
     setTimeout(guardedPing, 15000);
     intervals.push(setInterval(guardedPing, 15 * 60 * 1000));
