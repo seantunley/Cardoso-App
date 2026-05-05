@@ -46,6 +46,7 @@ import {
   setOcrPaused,
   resumeExtractionWorker,
   extractionEvents,
+  getSageHealth,
 } from '../services/batReconciliation.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
@@ -535,6 +536,14 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       console.error('[bat] refresh-sage-cache failed:', err.message);
       res.status(500).json({ error: err.message || 'Sage cache refresh failed' });
     }
+  });
+
+  // GET /api/bat/sage-health — Sage MSSQL connectivity status. Polled by
+  // the admin layout every 60s to drive the "Sage unreachable" banner.
+  // Open to all permission holders; reading the banner is fine for any
+  // BAT user, but the data is non-sensitive (just connectivity state).
+  router.get('/api/bat/sage-health', ...gate, (req, res) => {
+    res.json(getSageHealth());
   });
 
   // OCR pause/resume — Settings → Reconciliation toggle
