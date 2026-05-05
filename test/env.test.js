@@ -59,6 +59,20 @@ describe('parseEnv — hard errors', () => {
     expect(errs.some((e) => e.path === 'SESSION_SECRET')).toBe(true);
   });
 
+  it('rejects a missing SESSION_SECRET (regression guard)', () => {
+    // Previously the schema had `.optional()` on SESSION_SECRET, so an
+    // unset value silently passed validation. boot continued, then
+    // express-session crashed at first request with "secret option
+    // required" — a config bug masquerading as a runtime auth failure.
+    // The old validateSessionSecret hard-failed here. This test pins the
+    // restored dev-mode behaviour. (Production gets autoHeal'd in
+    // startup.js BEFORE this validator runs, so prod boot still survives
+    // an unset secret.)
+    const { ok, issues } = parseEnv({ NODE_ENV: 'development' });
+    expect(ok).toBe(false);
+    expect(issues.some((i) => i.severity === 'error' && i.path === 'SESSION_SECRET')).toBe(true);
+  });
+
   it('treats installer placeholder as missing (so auto-heal can fire)', () => {
     const { ok, issues } = parseEnv({
       ...baseEnv,

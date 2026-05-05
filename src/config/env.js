@@ -59,11 +59,22 @@ const envSchema = z
     NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
     PORT: optionalInt(3001).pipe(z.number().int().min(1).max(65535)),
 
-    // Session secret. Must be ≥32 chars after auto-heal. Placeholder values
-    // get treated as "missing" so the auto-heal path in startup.js fires.
+    // Session secret. REQUIRED — express-session crashes at first request
+    // with "secret option required" if this is missing, turning a config
+    // bug into a runtime auth failure. In production, autoHealSession-
+    // SecretIfNeeded() runs BEFORE this validator and will generate one
+    // for the installer-placeholder case, so production boots clean even
+    // if the operator hasn't set it. In development, an unset/short
+    // secret hard-fails here so the developer notices misconfiguration.
+    //
+    // Placeholder values get coerced to '' so they fail the .min(32)
+    // check (otherwise an installer placeholder would slip through).
     SESSION_SECRET: z.preprocess(
       (v) => (typeof v === 'string' && SESSION_SECRET_PLACEHOLDERS.has(v) ? '' : v),
-      z.string().min(32, 'SESSION_SECRET must be at least 32 characters long').optional(),
+      z.string({
+        required_error: 'SESSION_SECRET is required (set a 32+ char value in .env)',
+        invalid_type_error: 'SESSION_SECRET must be a string of at least 32 chars',
+      }).min(32, 'SESSION_SECRET must be at least 32 characters long'),
     ),
 
     // Hub silent-login JWT secret. Optional; warning only if too short
