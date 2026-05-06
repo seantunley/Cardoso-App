@@ -54,6 +54,10 @@ jobs:
           Copy-Item -Recurse dist windows/build/app/dist
           Copy-Item -Recurse src windows/build/app/src
           Copy-Item -Recurse scripts windows/build/app/scripts
+          # vendor/ holds Tesseract trained data shipped for offline OCR.
+          # ocrWorker.js loud-fails if vendor/tessdata/eng.traineddata.gz is
+          # missing, so the build must include it. Was missing pre-2026.4.24.
+          Copy-Item -Recurse vendor windows/build/app/vendor
           # Copy node_modules WITH pre-compiled native binaries (built on this windows runner)
           Copy-Item -Recurse node_modules windows/build/app/node_modules
           Write-Host "Staged app. node_modules size: $((Get-ChildItem windows/build/app/node_modules -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB) MB"
@@ -64,6 +68,12 @@ jobs:
           $bsq3 = Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
           $bsq3 | ForEach-Object { Write-Host "BSQ3: $($_.FullName)" }
           if (-not $bsq3) { throw "better-sqlite3 native binary missing - build will not work" }
+          # Same loud-fail pattern for tessdata. ocrWorker.js requires this
+          # file at runtime; before 2026.4.24 the staging step omitted vendor/
+          # and every install silently lost Tesseract OCR.
+          $tess = "windows/build/app/vendor/tessdata/eng.traineddata.gz"
+          if (-not (Test-Path $tess)) { throw "Tesseract trained data missing at $tess - Tesseract OCR will fail at runtime" }
+          Write-Host "tessdata present: $((Get-Item $tess).Length / 1MB) MB"
         shell: powershell
 
       - name: Install NSIS
@@ -153,6 +163,10 @@ jobs:
           Copy-Item -Recurse dist windows/build/delta/dist
           Copy-Item -Recurse src windows/build/delta/src
           Copy-Item -Recurse scripts windows/build/delta/scripts
+          # See full-installer staging step above — vendor/ ships Tesseract
+          # trained data and must be in the delta zip too, otherwise the
+          # in-app updater erases it on every release.
+          Copy-Item -Recurse vendor windows/build/delta/vendor
           Compress-Archive -Path windows/build/delta/* -DestinationPath "app-v$version.zip" -Force
           $zipBytes = (Get-Item "app-v$version.zip").Length
           $appHash  = (Get-FileHash "app-v$version.zip" -Algorithm SHA256).Hash.ToLower()
