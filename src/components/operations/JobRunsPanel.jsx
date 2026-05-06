@@ -7,13 +7,14 @@
 // only. Action buttons land in follow-up PRs as we discover which ones
 // the operator actually reaches for.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   RefreshCw, CheckCircle2, AlertCircle, Clock, Activity,
 } from "lucide-react";
+import { useColumnWidths } from "@/lib/useColumnWidths";
 
 // Friendly labels + descriptions per job name. The job_runs table stores
 // short technical identifiers — the dashboard renders these so an operator
@@ -29,6 +30,21 @@ const JOB_LABELS = {
   'hub-backup-pull':     { label: 'Hub: pull site backups',   schedule: 'Daily 03:00 (hub mode)' },
   'hub-ping':            { label: 'Hub: site reachability',   schedule: 'Every 15 min (hub mode)' },
 };
+
+// Default column widths. These are the seed values — the operator's
+// resizes are persisted to localStorage and merged in on mount. Sized
+// generously for the LAST ERROR column since failure descriptions now
+// include URL + cause + code (see lib/errorDescribe.js) — when a sync
+// fails the operator wants the full string visible at a glance.
+const COLUMN_DEFAULTS = {
+  job: 280,
+  status: 150,
+  lastRun: 220,
+  duration: 100,
+  lastError: 600,
+};
+const COLUMN_ORDER = ['job', 'status', 'lastRun', 'duration', 'lastError'];
+const COLUMN_WIDTHS_KEY = 'cardoso.jobRuns.columnWidths.v1';
 
 function StatusBadge({ status, failuresInWindow }) {
   if (status === 'succeeded') {
@@ -102,6 +118,12 @@ function fmtAgo(iso) {
 
 export default function JobRunsPanel() {
   const [tick, setTick] = useState(0);
+  const containerRef = useRef(null);
+  const { widths, startResize, resetColumn } = useColumnWidths(
+    COLUMN_DEFAULTS,
+    COLUMN_WIDTHS_KEY,
+    containerRef,
+  );
 
   // Refresh "min ago" labels every 30 sec without re-fetching from server.
   useEffect(() => {
@@ -130,7 +152,7 @@ export default function JobRunsPanel() {
         <div>
           <h3 className="text-sm font-semibold text-foreground">Background job runs</h3>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Latest run of every scheduled job. Read-only — refreshes every 60 seconds.
+            Latest run of every scheduled job. Read-only — refreshes every 60 seconds. Drag column edges to resize.
           </p>
         </div>
         <Button onClick={() => refetch()} disabled={isRefetching} variant="outline" size="sm" className="ml-auto border-border text-muted-foreground hover:text-foreground">
@@ -154,15 +176,29 @@ export default function JobRunsPanel() {
           (sync runs every 5 min; backup runs nightly at 02:00).
         </div>
       ) : (
-        <div className="rounded-xl border border-border bg-card overflow-x-auto">
-          <table className="w-full text-sm">
+        <div ref={containerRef} className="rounded-xl border border-border bg-card overflow-x-auto">
+          {(() => {
+            // Same render strategy as InvoiceMatching: table is 100% wide,
+            // colgroup uses percentages derived from the pixel ratios in
+            // `widths`. Pixel state is the source of truth for resize
+            // gestures; percentages come out at render time. The browser
+            // does the "fill the container" work — no JS auto-fit logic
+            // to get wrong on resize / sidebar collapse / responsive jumps.
+            const total = COLUMN_ORDER.reduce((s, id) => s + (widths[id] || 100), 0);
+            return (
+          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              {COLUMN_ORDER.map(id => (
+                <col key={id} style={{ width: `${((widths[id] || 100) / total) * 100}%` }} />
+              ))}
+            </colgroup>
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">Job</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-32">Status</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-44">Last run</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase w-24">Duration</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase">Last error</th>
+                <Th id="job"       label="Job"        startResize={startResize} resetColumn={resetColumn} />
+                <Th id="status"    label="Status"     startResize={startResize} resetColumn={resetColumn} />
+                <Th id="lastRun"   label="Last run"   startResize={startResize} resetColumn={resetColumn} />
+                <Th id="duration"  label="Duration"   startResize={startResize} resetColumn={resetColumn} />
+                <Th id="lastError" label="Last error" startResize={startResize} resetColumn={resetColumn} />
               </tr>
             </thead>
             <tbody>
@@ -173,27 +209,27 @@ export default function JobRunsPanel() {
                 const ago = fmtAgo(j.last_started_at);
                 return (
                   <tr key={j.name} className="border-b border-border last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2.5">
-                      <div className="font-medium text-foreground">{meta.label}</div>
+                    <td className="px-4 py-2.5 align-top">
+                      <div className="font-medium text-foreground truncate">{meta.label}</div>
                       {meta.schedule && (
-                        <div className="text-[10px] text-muted-foreground font-mono mt-0.5">{meta.schedule}</div>
+                        <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">{meta.schedule}</div>
                       )}
-                      <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5">{j.name}</div>
+                      <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5 truncate">{j.name}</div>
                     </td>
-                    <td className="px-4 py-2.5">
+                    <td className="px-4 py-2.5 align-top">
                       <StatusBadge status={j.last_status} failuresInWindow={j.failures_in_window} />
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap">
-                      <div>{fmtTime(j.last_started_at)}</div>
+                    <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap align-top">
+                      <div className="truncate">{fmtTime(j.last_started_at)}</div>
                       {ago && <div className="text-[10px] text-muted-foreground/70">{ago}</div>}
                     </td>
-                    <td className="px-4 py-2.5 text-muted-foreground font-mono">{fmtDuration(j.last_duration_ms)}</td>
-                    <td className="px-4 py-2.5 text-foreground break-words">
+                    <td className="px-4 py-2.5 text-muted-foreground font-mono align-top">{fmtDuration(j.last_duration_ms)}</td>
+                    <td className="px-4 py-2.5 text-foreground align-top">
                       {j.last_error ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <span className="text-rose-400 cursor-help">
-                              {j.last_error.length > 80 ? j.last_error.slice(0, 80) + '…' : j.last_error}
+                            <span className="text-rose-400 cursor-help break-words whitespace-pre-wrap">
+                              {j.last_error}
                             </span>
                           </TooltipTrigger>
                           <TooltipContent className="max-w-xl">
@@ -209,8 +245,28 @@ export default function JobRunsPanel() {
               })}
             </tbody>
           </table>
+            );
+          })()}
         </div>
       )}
     </div>
+  );
+}
+
+// Header cell with a drag-handle on the right edge. Matches the same
+// pattern InvoiceMatching uses (hover state via Tailwind's `accent`,
+// z-20 so the handle wins over row hover, and an explicit cursor).
+function Th({ id, label, startResize, resetColumn }) {
+  return (
+    <th className="relative px-4 py-2.5 text-left text-xs font-medium text-muted-foreground uppercase select-none">
+      <span className="block truncate">{label}</span>
+      <span
+        onMouseDown={startResize(id)}
+        onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetColumn(id); }}
+        title="Drag to resize · double-click to reset"
+        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/50 active:bg-accent z-20"
+        style={{ touchAction: 'none' }}
+      />
+    </th>
   );
 }
