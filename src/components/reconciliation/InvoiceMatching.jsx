@@ -114,7 +114,12 @@ const fmt = (v) => {
 function needsAttention(extraction) {
   if (extraction.extraction_status === 'not_found' || extraction.extraction_status === 'failed') return true;
   const inv = extraction.extracted_invoice;
-  if (inv && !/^IN(000\d{6}|\d{6})$/i.test(inv.trim())) return true;
+  // Accept any IN-prefix shape that the OCR pipeline can produce: 6 digits
+  // (legacy short — e.g. IN580437), or 6 digits with up to 3 leading zeros
+  // (8-digit IN00xxxxxx and 9-digit IN000xxxxxx — different sites use
+  // different padding lengths; the per-site `invoice_in_digit_length`
+  // setting decides which one OCR returns).
+  if (inv && !/^IN0{0,3}\d{6}$/i.test(inv.trim())) return true;
   return false;
 }
 
