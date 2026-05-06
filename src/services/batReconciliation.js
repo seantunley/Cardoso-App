@@ -797,65 +797,89 @@ export async function querySageCreditNotes(weekNumber, year) {
   // purged / archived still appear (they were dropped silently before,
   // making per-week totals diverge from the cached week totals).
   //
-  // Year filter: WEEK NN appears in the description verbatim, but the
-  // calendar year only lives on h.DATEINVC (an INT YYYYMMDD). We bound
-  // h.DATEINVC to a window around the supplied year so a Week 7 / 2026
-  // recon never picks up Week 7 / 2025 lines. Window is generous
-  // (Dec of prev year → Jan of next year) to handle ISO-week year
-  // rollover at the edges, then we trust the WEEK NN match to disambiguate.
-  const wk = String(weekNumber).padStart(2, '0');
-  const yr = parseInt(year, 10);
-  const yearLow  = yr ? (yr - 1) * 10000 + 1201 : 0;        // Dec 1 of previous year
-  const yearHigh = yr ? (yr + 1) * 10000 + 131  : 99991231; // Jan 31 of next year
-  const yearClause = yr
-    ? `AND h.DATEINVC BETWEEN ${yearLow} AND ${yearHigh}`
-    : '';
+  // Week match parses the digits after "WEEK " as an INT and compares
+  // numerically. The previous version filtered with a literal
+  // `LIKE '%WEEK ${wk}%'` (zero-padded), which silently dropped every
+  // line whose description used the unpadded form ("WEEK 1" vs "WEEK 01")
+  // — Sage operators format these by hand so both forms appear in the
+  // wild on the same site. The cache feeder (querySageWeekTotals) has
+  // always parsed-and-compared, so this brings the two paths in sync.
+  //
+  // Year attribution mirrors querySageWeekTotals: derive the year from
+  // h.DATEINVC adjusted by the ISO-week heuristic (a desc_week far
+  // ahead of the doc's actual ISO week means the line crossed a year
+  // boundary and belongs to the previous calendar year). The previous
+  // BETWEEN window on h.DATEINVC was a coarser approximation of the
+  // same idea — unifying on the heuristic eliminates a class of
+  // edge-case disagreement between the credit-note details panel and
+  // the comparison Sage column.
+  const targetWeek = parseInt(weekNumber, 10);
+  const targetYear = parseInt(year, 10);
+  const yearClause = targetYear ? `AND attributed_year = ${targetYear}` : '';
 
   const result = await sagePool.request().query(`
+    ;WITH src AS (
+      SELECT
+        h.CNTBTCH,
+        bc.BTCHDESC,
+        bc.BTCHSTTS,
+        h.IDVEND,
+        h.IDINVC,
+        h.DATEINVC,
+        CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE) AS doc_date,
+        d.TEXTDESC,
+        d.AMTDISTHC,
+        CAST(LTRIM(RTRIM(SUBSTRING(d.TEXTDESC, PATINDEX('%WEEK [0-9]%', d.TEXTDESC) + 5, 2))) AS INT) AS desc_week
+      FROM APIBH h
+      INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
+      LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
+      WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
+        AND d.TEXTDESC LIKE '%WEEK [0-9]%'
+    ),
+    attributed AS (
+      SELECT *,
+        CASE
+          WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
+            THEN YEAR(doc_date) - 1
+          ELSE YEAR(doc_date)
+        END AS attributed_year
+      FROM src
+    )
     SELECT
-      h.CNTBTCH AS batch_number,
-      LTRIM(RTRIM(COALESCE(bc.BTCHDESC, ''))) AS batch_description,
-      CASE bc.BTCHSTTS
+      CNTBTCH AS batch_number,
+      LTRIM(RTRIM(COALESCE(BTCHDESC, ''))) AS batch_description,
+      CASE BTCHSTTS
         WHEN 1 THEN 'Open'
         WHEN 3 THEN 'Posted'
         WHEN 4 THEN 'Deleted'
         WHEN 7 THEN 'Posted'
         WHEN NULL THEN 'Archived'
-        ELSE 'Unknown (' + CAST(bc.BTCHSTTS AS VARCHAR) + ')'
+        ELSE 'Unknown (' + CAST(BTCHSTTS AS VARCHAR) + ')'
       END AS batch_status,
-      LTRIM(RTRIM(h.IDVEND)) AS vendor_number,
-      LTRIM(RTRIM(h.IDINVC)) AS document_number,
-      h.DATEINVC AS document_date,
-      LTRIM(RTRIM(d.TEXTDESC)) AS line_description,
-      LTRIM(RTRIM(
-        SUBSTRING(
-          d.TEXTDESC,
-          PATINDEX('%WEEK [0-9]%', d.TEXTDESC) + 5,
-          2
-        )
-      )) AS week_number,
+      LTRIM(RTRIM(IDVEND)) AS vendor_number,
+      LTRIM(RTRIM(IDINVC)) AS document_number,
+      DATEINVC AS document_date,
+      LTRIM(RTRIM(TEXTDESC)) AS line_description,
+      desc_week AS week_number,
       CASE
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
         ELSE 'OTHER'
       END AS fee_type,
-      d.AMTDISTHC AS line_amount
-    FROM APIBH h
-    INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
-    LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
-    WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
-      AND LTRIM(RTRIM(d.TEXTDESC)) LIKE '%WEEK ${wk}%'
+      AMTDISTHC AS line_amount
+    FROM attributed
+    WHERE desc_week = ${targetWeek}
       ${yearClause}
     ORDER BY
       CASE
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 1
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 2
-        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 3
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'DELIVERY%' THEN 1
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'DISCOUNT%' THEN 2
+        WHEN LTRIM(RTRIM(TEXTDESC)) LIKE 'PRICING%'  THEN 3
         ELSE 4
       END,
-      h.CNTBTCH
+      CNTBTCH
   `);
   return result.recordset || [];
 }
