@@ -22,6 +22,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       return res.status(400).json({ error: 'Username and password are required' });
     }
 
+    // Tracks which step blew up if we hit the generic catch below — turns
+    // a vague "Login failed" into "Login failed during bcrypt verify" so
+    // the System Log row points at the actual layer (DB lookup, hash
+    // verify, session write, jwt sign, etc.).
+    let phase = 'lookup';
     try {
       const user = stmts.getUserByEmail.get(email);
 
@@ -33,11 +38,13 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         return res.status(403).json({ error: 'User is inactive' });
       }
 
+      phase = 'verify';
       const valid = await bcrypt.compare(password, user.password_hash);
       if (!valid) {
         return res.status(401).json({ error: 'Invalid username or password' });
       }
 
+      phase = 'session';
       req.session.userId = user.id;
 
       try {
@@ -61,6 +68,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       // Hub redirect: if user is flagged as a hub user, send them to head office
       if (user.hub_redirect) {
+        phase = 'hub_redirect';
         const hubUrl = process.env.HUB_REDIRECT_URL || process.env.HUB_SYNC_URL || null;
         const hubTokenSecret = process.env.HUB_TOKEN_SECRET;
         if (hubUrl && hubTokenSecret) {
@@ -86,9 +94,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         user: sanitizeUser(user),
       });
     } catch (error) {
-      console.error('Login error:', error);
-      try { logError('auth.login', error, { email: req.body?.email }); } catch {}
-      res.status(500).json({ error: 'Login failed' });
+      console.error(`Login error (phase=${phase}):`, error);
+      try { logError('auth.login', error, { email: req.body?.email, phase }); } catch {}
+      res.status(500).json({ error: `Login failed during ${phase}` });
     }
   });
 

@@ -88,18 +88,22 @@ async function getCustomerSqlPool() {
 // Run a query with one auto-retry if the cached pool turns out to be dead.
 export async function runCustomerSqlQuery(sqlText) {
   let p = await getCustomerSqlPool();
+  // First 80 chars of the SQL — enough to identify the query in logs
+  // without dumping a multi-line SELECT into error_log.context. Helps
+  // triage "which query failed" without grep'ing the codebase.
+  const sqlPreview = String(sqlText || '').replace(/\s+/g, ' ').trim().slice(0, 80);
   try {
     return await p.request().query(sqlText);
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[customer-sql] Pool dropped, reopening and retrying once');
-      try { logError('customer.sql.query', err, { phase: 'pool_dropped_retrying' }, 'info'); } catch {}
+      try { logError('customer.sql.query', err, { phase: 'pool_dropped_retrying', sql_preview: sqlPreview, role: 'customer_lookup' }, 'info'); } catch {}
       try { await p.close(); } catch {}
       pool = null;
       p = await getCustomerSqlPool();
       return await p.request().query(sqlText);
     }
-    try { logError('customer.sql.query', err); } catch {}
+    try { logError('customer.sql.query', err, { sql_preview: sqlPreview, role: 'customer_lookup', sql_code: err.code }); } catch {}
     throw err;
   }
 }

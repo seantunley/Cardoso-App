@@ -12,6 +12,7 @@ import { pipeline } from 'stream/promises';
 import path from 'path';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
+import { describeFetchError } from '../lib/errorDescribe.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -394,8 +395,8 @@ async function syncSite(site) {
         });
       } else {
         const msg = batRes._earlyError
-          ? `BAT summary fetch failed: ${String(batRes._earlyError.message || batRes._earlyError).slice(0, 200)}`
-          : `BAT summary HTTP ${batRes.status}`;
+          ? `BAT summary fetch failed — ${describeFetchError(batRes._earlyError, `${site.url}/api/reporting/bat-summary`).slice(0, 400)}`
+          : `BAT summary fetch returned HTTP ${batRes.status} from ${site.url}/api/reporting/bat-summary`;
         db.prepare(`
           INSERT INTO hub_bat_summary (site_id, last_error, synced_at)
           VALUES (?, ?, ?)
@@ -404,13 +405,13 @@ async function syncSite(site) {
         console.warn(`[HUB] ${site.name}: ${msg}`);
       }
     } catch (batErr) {
-      const msg = String(batErr.message || batErr).slice(0, 500);
+      const msg = describeFetchError(batErr, `${site.url}/api/reporting/bat-summary`).slice(0, 500);
       db.prepare(`
         INSERT INTO hub_bat_summary (site_id, last_error, synced_at)
         VALUES (?, ?, ?)
         ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
       `).run(site.id, msg, new Date().toISOString());
-      console.warn(`[HUB] ${site.name}: BAT summary fetch failed: ${msg}`);
+      console.warn(`[HUB] ${site.name}: BAT summary fetch failed — ${msg}`);
     }
 
     // Update hub_sites
@@ -419,9 +420,13 @@ async function syncSite(site) {
     `).run(new Date().toISOString(), kpis ? JSON.stringify(kpis) : null, site.id);
 
   } catch (err) {
-    syncError = err.message;
+    // describeFetchError unwraps undici "fetch failed" → real cause + URL.
+    // For non-fetch errors (e.g. SQLite from insertMany / upsertInv) the
+    // helper just returns err.message verbatim, so this is safe to use as
+    // a single funnel.
+    syncError = describeFetchError(err, site.url);
     db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
-    logError('hub.sync', err, { site_slug: site.slug, site_id: site.id });
+    logError('hub.sync', err, { site_slug: site.slug, site_id: site.id, site_url: site.url });
   }
 
   db.prepare(`
@@ -520,13 +525,14 @@ async function runHubBackupPull() {
           }
         } catch (envErr) {
           // Don't let a config-pull failure mark the whole site backup as failed.
-          console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed: ${envErr.message}`);
+          console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed — ${describeFetchError(envErr, `${site.url}/api/backup/config`)}`);
         }
       } catch (err) {
-        logError('hub.backupPull', err, { site_name: site.name, site_id: site.id });
+        const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
+        logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
         try {
           db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
-            .run(site.id, '(download failed)', `pull_failed: ${err.message || 'unknown'}`);
+            .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
         } catch {}
       }
     }));

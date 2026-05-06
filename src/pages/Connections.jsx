@@ -5,6 +5,7 @@ import { Database, Plus, RefreshCw, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
+import { humanizeApiError } from "@/lib/humanizeApiError";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
 import ConnectionStatus from "../components/connections/ConnectionStatus";
@@ -110,7 +111,7 @@ function ModuleRoutingCard({ connections, isAdmin }) {
       queryClient.invalidateQueries({ queryKey: ["connection-roles"] });
       toast.success("Module routing updated");
     },
-    onError: (err) => toast.error(err.message || "Update failed"),
+    onError: (err) => toast.error(humanizeApiError(err, "update module routing")),
   });
 
   if (error) {
@@ -234,7 +235,7 @@ export default function Connections() {
     },
     onError: (error) => {
       console.error("Create connection error:", error);
-      toast.error(`Failed to create connection: ${error.message || "Unknown error"}`);
+      toast.error(humanizeApiError(error, "create connection"));
     },
   });
 
@@ -246,9 +247,12 @@ export default function Connections() {
       setEditingConnection(null);
       toast.success("Connection updated successfully");
     },
-    onError: (error) => {
+    onError: (error, vars) => {
+      // `vars` carries the {id, data} we mutated against, so we can name
+      // the connection in the toast even when only the ID is to hand.
       console.error("Update connection error:", error);
-      toast.error(`Failed to update connection: ${error.message || "Unknown error"}`);
+      const name = vars?.data?.name;
+      toast.error(humanizeApiError(error, name ? `update connection "${name}"` : "update connection"));
     },
   });
 
@@ -260,7 +264,7 @@ export default function Connections() {
     },
     onError: (error) => {
       console.error("Delete connection error:", error);
-      toast.error(`Failed to delete connection: ${error.message || "Unknown error"}`);
+      toast.error(humanizeApiError(error, "delete connection"));
     },
   });
 
@@ -299,7 +303,7 @@ export default function Connections() {
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
     } catch (error) {
       console.error("Sync all error:", error);
-      toast.error(`Sync failed: ${error.message || "Unknown error"}`);
+      toast.error(humanizeApiError(error, "sync all connections"));
     } finally {
       setIsSyncingAll(false);
     }
@@ -318,7 +322,7 @@ export default function Connections() {
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
     } catch (error) {
       console.error("Sync connection error:", error);
-      toast.error(`Failed to sync: ${error.message || "Unknown error"}`);
+      toast.error(humanizeApiError(error, `sync "${connection.name}"`));
     } finally {
       setSyncingId(null);
     }

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
+import { humanizeApiError } from '@/lib/humanizeApiError';
 import { reportClientError } from '@/lib/clientLog';
 import { RefreshCw, FileText, ChevronLeft, ChevronDown, ChevronRight, AlertTriangle, Upload, Calendar as CalendarIcon } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
@@ -126,15 +127,15 @@ export default function Reconciliation() {
       try {
         const res = await fetch(url, { credentials: 'include' });
         if (!res.ok) {
-          const err = new Error(`${label} HTTP ${res.status}`);
-          toast.error(`Failed to load ${label}: HTTP ${res.status}`);
+          const err = new Error(`HTTP ${res.status}`);
+          toast.error(humanizeApiError(err, `load ${label}`));
           reportClientError(`reconciliation.loadDashboard.${label}`, err, { url, status: res.status });
           return;
         }
         const data = await res.json();
         onSuccess(data);
       } catch (err) {
-        toast.error(`Failed to load ${label}: ${err.message}`);
+        toast.error(humanizeApiError(err, `load ${label}`));
         reportClientError(`reconciliation.loadDashboard.${label}`, err, { url });
       }
     };
@@ -161,7 +162,7 @@ export default function Reconciliation() {
         if (data.cardosoCount > 0) setCardosoMatch(data.matching);
       })
       .catch(err => {
-        toast.error(`Failed to load cross-reference: ${err.message}`);
+        toast.error(humanizeApiError(err, "load cross-reference"));
         reportClientError('reconciliation.lazyLoadCardosoMatch', err);
       });
     return () => { cancelled = true; };
@@ -783,9 +784,9 @@ export default function Reconciliation() {
                               toast.success(`Sage cache refreshed · ${d.total} weeks (added ${d.added}, changed ${d.changed}, removed ${d.removed})`);
                               loadDashboard();
                             } else {
-                              toast.error(`Refresh failed: ${d.error || d.status}`);
+                              toast.error(`Couldn't refresh Sage cache — ${d.error || d.status || 'unknown reason'}`);
                             }
-                          } catch (e) { toast.error(`Refresh failed: ${e.message}`); }
+                          } catch (e) { toast.error(humanizeApiError(e, "refresh Sage cache")); }
                         }}
                         className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent hover:text-foreground transition-colors border border-border bg-card px-3 py-1.5"
                         style={{ borderRadius: '12px' }}
@@ -1535,7 +1536,7 @@ export default function Reconciliation() {
                       loadDashboard();
                     }
                   } catch (err) {
-                    toast.error(`Generate failed: ${err.message}`);
+                    toast.error(humanizeApiError(err, `generate Cardoso invoices for week ${recon?.week_number ?? '?'}`));
                   } finally {
                     setGenerating(false);
                   }
@@ -1552,7 +1553,7 @@ export default function Reconciliation() {
                     try {
                       await fetch('/api/bat/cardoso-invoices/cancel-generate', { method: 'POST', credentials: 'include' });
                       toast.info('Cancellation requested…');
-                    } catch (e) { toast.error(`Cancel failed: ${e.message}`); }
+                    } catch (e) { toast.error(humanizeApiError(e, "cancel generation")); }
                   }}
                   className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsla(0,72%,50%,0.18)] hover:shadow-[0_0_12px_hsla(0,72%,50%,0.35)] transition-colors"
                   style={{ borderRadius: '12px' }}

@@ -13,6 +13,7 @@ import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLo
 import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataRecord } from '../helpers.js';
 import { applyAutoFlagRulesToRecord } from './autoFlag.js';
 import { logError } from '../lib/errorLog.js';
+import { describeSqlError } from '../lib/errorDescribe.js';
 
 // ── Statements prepared once at module level (not per-sync) ────────────────
 const stmts = buildStatements(db);
@@ -568,13 +569,27 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       imported: importedCount,
     };
   } catch (error) {
-    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId }); } catch {}
+    // Pull the connection's identifying fields so the persisted error
+    // mentions WHICH SQL Server / DB went wrong. The connection row may
+    // have been deleted between the start of import and this catch (rare
+    // — happens when an operator removes the connection while a sync is
+    // running) so we tolerate a missing row.
+    let connRow = null;
+    try {
+      connRow = db.prepare(`SELECT name, host, database_name FROM databaseconnection WHERE id = ?`).get(connectionId);
+    } catch {}
+    const friendly = describeSqlError(error, {
+      op: connRow ? `sync ${connRow.name}` : 'sync',
+      host: connRow?.host,
+      database: connRow?.database_name,
+    });
+    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId, friendly }); } catch {}
     try {
       db.prepare(`
         UPDATE databaseconnection
         SET status = 'error', last_error = ?, updated_date = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(error.message || 'Unknown error', connectionId);
+      `).run(friendly, connectionId);
     } catch {}
 
     try {
@@ -585,7 +600,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           WHERE id = ?
         `).run(
           new Date().toISOString(),
-          error.message || 'Import failed',
+          friendly,
           syncRunId
         );
       }

@@ -14,6 +14,7 @@ import { syncAllSites, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
 import { logAudit } from '../lib/audit.js';
+import { describeFetchError } from '../lib/errorDescribe.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
@@ -153,8 +154,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       setHubSetting('last_backup_pull', JSON.stringify({ status: 'ok', completedAt: new Date().toISOString() }));
       console.log('[hub] Manual backup pull completed');
     } catch (err) {
-      logError('hub.manualBackupPull', err);
-      setHubSetting('last_backup_pull', JSON.stringify({ status: 'error', completedAt: new Date().toISOString(), error: err.message }));
+      // runHubBackupPull catches per-site errors internally (logs each via
+      // hub.backupPull). A throw out here means a top-level failure (e.g.
+      // mkdir on hub_backup_root, or hub_sites empty) — surface that
+      // verbatim, but tag it so the operator knows it's the orchestrator,
+      // not a site-pull, that failed.
+      const friendly = `Backup-pull orchestrator: ${err.message || 'unknown failure'}`;
+      logError('hub.manualBackupPull', err, { friendly });
+      setHubSetting('last_backup_pull', JSON.stringify({ status: 'error', completedAt: new Date().toISOString(), error: friendly }));
     } finally {
       backupPullInProgress = false;
     }
@@ -1207,20 +1214,27 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (targetSites.length === 0) return res.status(400).json({ error: 'No target sites' });
 
     const results = await Promise.allSettled(targetSites.map(async (site) => {
-      const resp = await fetch(`${site.url}/api/hub/receive-users`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Reporting-Token': site.token,
-        },
-        body: JSON.stringify({ users: usersToSync }),
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(`${site.name}: HTTP ${resp.status} — ${body}`);
+      const url = `${site.url}/api/hub/receive-users`;
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Reporting-Token': site.token,
+          },
+          body: JSON.stringify({ users: usersToSync }),
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!resp.ok) {
+          const body = await resp.text();
+          throw new Error(`HTTP ${resp.status} — ${body || 'no body'}`);
+        }
+        return { site: site.name, ok: true };
+      } catch (err) {
+        // describeFetchError unwraps undici "fetch failed" → real cause + URL.
+        // Re-throw with the readable form so summary.error below is useful.
+        throw new Error(describeFetchError(err, url));
       }
-      return { site: site.name, ok: true };
     }));
 
     const summary = results.map((r, i) => ({
@@ -1305,8 +1319,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       }
 
       const results = await Promise.all(targetSites.map(async (site) => {
+        const url = `${site.url}/api/hub/receive-rules`;
         try {
-          const response = await fetch(`${site.url}/api/hub/receive-rules`, {
+          const response = await fetch(url, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -1318,7 +1333,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
           if (!response.ok) {
             const body = await response.text();
-            throw new Error(body || `HTTP ${response.status}`);
+            throw new Error(`HTTP ${response.status} — ${body || 'no body'}`);
           }
 
           logHubAudit({
@@ -1330,7 +1345,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
           return { site: site.name || site.slug || site.id, status: 'ok' };
         } catch (err) {
-          return { site: site.name || site.slug || site.id, status: err.message || 'failed' };
+          // Frontend reads `result.error` first, then result.status — pass the
+          // describeFetchError-shaped string in `error` so the toast is useful.
+          return {
+            site: site.name || site.slug || site.id,
+            status: 'error',
+            error: describeFetchError(err, url),
+          };
         }
       }));
 
