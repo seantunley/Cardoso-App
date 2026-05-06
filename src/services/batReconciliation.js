@@ -792,6 +792,19 @@ function parseAmount(val) {
 // ── Sage 300 Queries ─────────────────────────────────────────────────────────
 
 export async function querySageCreditNotes(weekNumber, year) {
+  // Validate week before opening a Sage pool. The query interpolates
+  // targetWeek as a SQL literal, so a NaN would produce a syntax error
+  // ("desc_week = NaN"). The previous LIKE-based filter degraded to
+  // "match nothing" on bad input — preserve that softer failure mode
+  // for callers that hand us malformed legacy data (no recon page
+  // currently does, but the public route /api/bat/sage-credit-notes
+  // and any future ad-hoc caller might).
+  const targetWeek = parseInt(weekNumber, 10);
+  if (!Number.isFinite(targetWeek) || targetWeek < 1 || targetWeek > 53) {
+    return [];
+  }
+  const targetYear = parseInt(year, 10);
+
   const sagePool = await getSagePool();
   // APIBC join is LEFT so credit-note lines whose batch header has been
   // purged / archived still appear (they were dropped silently before,
@@ -813,9 +826,9 @@ export async function querySageCreditNotes(weekNumber, year) {
   // same idea — unifying on the heuristic eliminates a class of
   // edge-case disagreement between the credit-note details panel and
   // the comparison Sage column.
-  const targetWeek = parseInt(weekNumber, 10);
-  const targetYear = parseInt(year, 10);
-  const yearClause = targetYear ? `AND attributed_year = ${targetYear}` : '';
+  const yearClause = Number.isFinite(targetYear) && targetYear > 0
+    ? `AND attributed_year = ${targetYear}`
+    : '';
 
   const result = await sagePool.request().query(`
     ;WITH src AS (
