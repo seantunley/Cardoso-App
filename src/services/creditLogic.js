@@ -5,10 +5,58 @@ import {
   normaliseCreditLogicConfig,
   validateCreditLogicConfig,
 } from "../lib/creditLogic.js";
+import { describeFetchError } from "../lib/errorDescribe.js";
+
+// Resolve the hub URL the site uses for syncs.
+//
+// Order:
+//   1. bat_settings.hub_sync_url      (operator-editable in Settings → TLS)
+//   2. process.env.HUB_SYNC_URL       (legacy)
+//   3. process.env.HUB_REDIRECT_URL   (set by SSO redirect plumbing)
+//
+// Storing in the DB lets an operator fix port/scheme drift without RDP'ing
+// to the box and editing .env. The .env values stay as the seed config the
+// installer writes; the DB row is the live override.
+function getHubSyncUrlFromDb() {
+  try {
+    const row = db.prepare(`SELECT value FROM bat_settings WHERE key = 'hub_sync_url'`).get();
+    return row?.value || null;
+  } catch { return null; }
+}
+
+export function setHubSyncUrlInDb(url) {
+  const cleaned = String(url || "").trim().replace(/\/$/, "");
+  db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, datetime('now'))
+              ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+    .run(cleaned);
+  return cleaned;
+}
 
 function getHubSyncBaseUrl() {
-  return (process.env.HUB_SYNC_URL || process.env.HUB_REDIRECT_URL || "").replace(/\/$/, "");
+  const dbUrl = getHubSyncUrlFromDb();
+  const envUrl = process.env.HUB_SYNC_URL || process.env.HUB_REDIRECT_URL || "";
+  return (dbUrl || envUrl).replace(/\/$/, "");
 }
+
+// Probe the configured hub URL. Returns { ok, url, status, error } — never
+// throws. Used by the boot self-test and the Settings → TLS UI to surface
+// connectivity loud rather than silently waiting until the next sync tick.
+export async function probeHubUrl() {
+  const url = getHubSyncBaseUrl();
+  if (!url) return { ok: false, url: null, error: "Hub URL not configured" };
+  const probeUrl = `${url}/api/health`;
+  try {
+    const r = await fetch(probeUrl, { signal: AbortSignal.timeout(8000) });
+    if (!r.ok) return { ok: false, url, status: r.status, error: `Hub returned ${r.status}` };
+    return { ok: true, url, status: r.status };
+  } catch (error) {
+    return { ok: false, url, error: describeFetchError(error, probeUrl) };
+  }
+}
+
+// describeFetchError is now in src/lib/errorDescribe.js (imported above).
+// Other modules — hubEtl, syncEngine, the hub backup pull route — share
+// the helper so the operator sees the same readable shape everywhere.
 
 function parseJson(value, fallback = null) {
   if (!value) return fallback;
@@ -355,8 +403,9 @@ export async function syncCreditLogicFromHub({ triggeredBy = "scheduler" } = {})
   if (process.env.HUB_MODE === "true") return { skipped: true, reason: "hub_mode" };
   if (!hubSyncBaseUrl || !process.env.SITE_ID || !process.env.REPORTING_TOKEN) return { skipped: true, reason: "not_configured" };
 
+  const url = `${hubSyncBaseUrl}/api/hub/credit-logic/published`;
   try {
-    const response = await fetch(`${hubSyncBaseUrl}/api/hub/credit-logic/published`, {
+    const response = await fetch(url, {
       headers: {
         "x-site-id": process.env.SITE_ID,
         "x-site-token": process.env.REPORTING_TOKEN,
@@ -378,14 +427,15 @@ export async function syncCreditLogicFromHub({ triggeredBy = "scheduler" } = {})
     return { ok: true, triggeredBy, logicVersion: state.logicVersion, lastSyncedAt: state.lastSyncedAt };
   } catch (error) {
     const status = error.name === "TimeoutError" || error.name === "AbortError" ? "unreachable" : "error";
-    setLocalCreditLogicSyncError(error.message, status);
+    const description = describeFetchError(error, url);
+    setLocalCreditLogicSyncError(description, status);
     const fallbackState = getLocalCreditLogicState();
     try {
-      await notifyHubOfLocalStatus({ ...fallbackState, lastError: error.message }, status);
+      await notifyHubOfLocalStatus({ ...fallbackState, lastError: description }, status);
     } catch {
       // non-fatal, last-known-good stays local
     }
-    return { ok: false, triggeredBy, logicVersion: fallbackState.logicVersion, lastSyncedAt: fallbackState.lastSyncedAt, error: error.message, status };
+    return { ok: false, triggeredBy, logicVersion: fallbackState.logicVersion, lastSyncedAt: fallbackState.lastSyncedAt, error: description, status };
   }
 }
 
@@ -397,8 +447,9 @@ export async function pushCreditLogicToSites({ siteIds = null } = {}) {
     : db.prepare(`SELECT id, slug, name, url, token FROM hub_sites ORDER BY name ASC, slug ASC`).all();
 
   const results = await Promise.all(rows.map(async (site) => {
+    const url = `${site.url}/api/hub/receive-credit-logic`;
     try {
-      const response = await fetch(`${site.url}/api/hub/receive-credit-logic`, {
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -417,9 +468,10 @@ export async function pushCreditLogicToSites({ siteIds = null } = {}) {
       updateHubSiteCreditLogicStatus({ siteId: site.id, logicVersion: body.logicVersion ?? latest.version, syncStatus: body.syncStatus || "current", lastSyncedAt: body.lastSyncedAt || new Date().toISOString() });
       return { siteId: site.id, siteSlug: site.slug, siteName: site.name, ok: true, logicVersion: body.logicVersion ?? latest.version, syncStatus: body.syncStatus || "current", driftStatus: "current", lastSyncedAt: body.lastSyncedAt || new Date().toISOString(), error: null };
     } catch (error) {
+      const description = describeFetchError(error, url);
       const syncStatus = /timeout|abort/i.test(error.message) ? "unreachable" : "error";
-      updateHubSiteCreditLogicStatus({ siteId: site.id, syncStatus, lastError: error.message, lastSyncedAt: null });
-      return { siteId: site.id, siteSlug: site.slug, siteName: site.name, ok: false, logicVersion: null, syncStatus, driftStatus: syncStatus, lastSyncedAt: null, error: error.message };
+      updateHubSiteCreditLogicStatus({ siteId: site.id, syncStatus, lastError: description, lastSyncedAt: null });
+      return { siteId: site.id, siteSlug: site.slug, siteName: site.name, ok: false, logicVersion: null, syncStatus, driftStatus: syncStatus, lastSyncedAt: null, error: description };
     }
   }));
 

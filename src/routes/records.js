@@ -5,6 +5,7 @@ import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
 import { runCustomerSqlQuery } from '../services/customerSqlPool.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
+import { describeSqlError } from '../lib/errorDescribe.js';
 
 // Tables whose CRUD via the generic /api/:table routes deserves an audit row.
 // datarecord is excluded — it has its own per-flag audit further down.
@@ -433,9 +434,10 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       }));
       res.json({ invoice: raw, matches, source: 'sage' });
     } catch (err) {
-      console.error('[customer-by-invoice/sage] error:', err.message);
-      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice }); } catch {}
-      res.status(500).json({ error: `Sage lookup failed: ${err.message}` });
+      const friendly = describeSqlError(err, { op: 'invoice lookup' });
+      console.error('[customer-by-invoice/sage] error:', friendly);
+      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice, friendly }); } catch {}
+      res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });
 
@@ -498,9 +500,10 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       });
       res.json({ amount: target, tolerance, days, matches, source: 'sage' });
     } catch (err) {
-      console.error('[customer-by-invoice-amount/sage] error:', err.message);
-      try { logError('customer.amount_lookup', err, { amount: req.query.amount }); } catch {}
-      res.status(500).json({ error: `Sage lookup failed: ${err.message}` });
+      const friendly = describeSqlError(err, { op: 'invoice amount lookup' });
+      console.error('[customer-by-invoice-amount/sage] error:', friendly);
+      try { logError('customer.amount_lookup', err, { amount: req.query.amount, friendly }); } catch {}
+      res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });
 

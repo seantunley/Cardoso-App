@@ -16,6 +16,7 @@ import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
+import { humanizeApiError } from "@/lib/humanizeApiError";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -656,11 +657,11 @@ export default function HubDashboard() {
     toast(`Resyncing ${name}...`);
     try {
       const res = await fetch(`/api/hub/force-resync/${site.site_id}`, { method: "POST", credentials: "include" });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "Resync failed"); }
-      toast.success("Resync complete");
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || `HTTP ${res.status}`); }
+      toast.success(`Resync of ${name} complete`);
       setTimeout(() => fetchAll(), 5000);
     } catch (err) {
-      toast.error(err.message || "Resync failed");
+      toast.error(humanizeApiError(err, `resync ${name}`));
     }
   };
 

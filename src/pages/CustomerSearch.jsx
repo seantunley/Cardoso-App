@@ -4,6 +4,7 @@ import { api } from "@/api/apiClient";
 import { AlertCircle, Database, Flag, CheckCircle, RefreshCw, FileSearch, Search, X } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { toast } from "sonner";
+import { humanizeApiError } from "@/lib/humanizeApiError";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 
@@ -48,7 +49,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
       setResults(d.matches || []);
     } catch (err) {
       setError(err.message);
-      toast.error(`Invoice amount lookup failed: ${err.message}`);
+      toast.error(humanizeApiError(err, `look up invoices for amount R${v}`));
     } finally { setSearching(false); }
   };
 
@@ -64,7 +65,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
       setSageResults(d.matches || []);
     } catch (err) {
       setSageError(err.message);
-      toast.error(`Sage 300 lookup failed: ${err.message}`);
+      toast.error(humanizeApiError(err, `look up invoices for amount R${v} in Sage`));
     } finally { setSageSearching(false); }
   };
 
@@ -250,7 +251,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
       setResults(d.matches || []);
     } catch (err) {
       setError(err.message);
-      toast.error(`Invoice lookup failed: ${err.message}`);
+      toast.error(humanizeApiError(err, `look up invoice "${q}"`));
     } finally {
       setSearching(false);
     }
@@ -267,7 +268,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
       setSageResults(d.matches || []);
     } catch (err) {
       setSageError(err.message);
-      toast.error(`Sage 300 lookup failed: ${err.message}`);
+      toast.error(humanizeApiError(err, `look up invoice "${q}" in Sage`));
     } finally { setSageSearching(false); }
   };
 

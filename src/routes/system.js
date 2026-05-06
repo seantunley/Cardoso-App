@@ -485,6 +485,23 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // GET /api/system/security-signals
+  //
+  // Admin-only. Returns the rolled-up totals over the last 60 minutes
+  // (per-status counts, login failures, latency, upload volume) plus
+  // the live threshold-alert strings. Backs the Operations → Security
+  // tab. The persistent record of any threshold breach lives in the
+  // alerts table via src/lib/alertRules.js.
+  router.get('/api/system/security-signals', requireAuth, requireAdmin, (req, res) => {
+    try {
+      res.json(getSecuritySignals());
+    } catch (err) {
+      console.error('[system.security-signals] failed:', err.message);
+      try { logError('system.security_signals', err); } catch {}
+      res.status(500).json({ error: 'Failed to load security signals' });
+    }
+  });
+
   router.get('/api/system/tls-status', requireAuth, requireAdmin, async (req, res) => {
     const isWindows = process.platform === 'win32';
     const caddyDir = process.env.CADDY_DIR || 'C:\\Caddy';
@@ -665,6 +682,77 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         status: 'failure',
       });
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/system/hub-url — show what's in the DB override + .env seed,
+  // and the live "effective" URL hub-bound fetches will use. Lets the
+  // operator see config drift without RDP'ing to read .env.
+  router.get('/api/system/hub-url', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const dbRow = db.prepare(`SELECT value, updated_at FROM bat_settings WHERE key = 'hub_sync_url'`).get();
+      const envValue = process.env.HUB_SYNC_URL || process.env.HUB_REDIRECT_URL || null;
+      const effective = (dbRow?.value || envValue || '').replace(/\/$/, '') || null;
+      res.json({
+        configured: dbRow?.value || null,
+        configuredUpdatedAt: dbRow?.updated_at || null,
+        envSeed: envValue,
+        effective,
+        hubMode: process.env.HUB_MODE === 'true',
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // PUT /api/system/hub-url { url } — set the override. Empty string clears
+  // the override (sync falls back to .env). Probes the URL after saving and
+  // returns the probe result so the UI can show ✓/✗ inline.
+  router.put('/api/system/hub-url', requireAuth, requireAdmin, async (req, res) => {
+    if (process.env.HUB_MODE === 'true') {
+      return res.status(400).json({ error: 'Hub URL is configured on sites only — this instance is the hub.' });
+    }
+    const raw = typeof req.body?.url === 'string' ? req.body.url.trim() : '';
+    // Sanity: require https?:// scheme to avoid storing bare hostnames or
+    // accidentally setting it to a path. Empty string is allowed (clears override).
+    if (raw && !/^https?:\/\/[^/\s]+/.test(raw)) {
+      return res.status(400).json({ error: 'URL must include scheme (http:// or https://) and a host.' });
+    }
+    try {
+      const before = db.prepare(`SELECT value FROM bat_settings WHERE key = 'hub_sync_url'`).get()?.value || null;
+      if (raw) {
+        const cleaned = raw.replace(/\/$/, '');
+        db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, datetime('now'))
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
+          .run(cleaned);
+      } else {
+        db.prepare(`DELETE FROM bat_settings WHERE key = 'hub_sync_url'`).run();
+      }
+      logAudit({
+        req, action: 'hub_url_update', resourceType: 'system',
+        resourceName: 'hub_sync_url',
+        details: `Hub sync URL ${raw ? `set to ${raw}` : 'cleared'}`,
+        changes: { before: { hub_sync_url: before }, after: { hub_sync_url: raw || null } },
+      });
+
+      // Probe immediately so the UI can show whether the new URL works.
+      const { probeHubUrl } = await import('../services/creditLogic.js');
+      const probe = await probeHubUrl();
+      res.json({ ok: true, probe });
+    } catch (err) {
+      try { logError('system.hub_url_update', err); } catch {}
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // POST /api/system/hub-probe — manual probe trigger (used by Settings UI
+  // refresh button). Same as the auto-boot probe but on demand.
+  router.post('/api/system/hub-probe', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { probeHubUrl } = await import('../services/creditLogic.js');
+      res.json(await probeHubUrl());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   });
 

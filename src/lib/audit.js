@@ -114,7 +114,18 @@ export function logAudit({
     // throw out of an audit call (audit failures must not break the actual
     // operation the user is performing).
     console.error('[audit] insert failed:', err.message);
-    try { logError('audit.insert', err, { action }); } catch {}
+    try {
+      logError('audit.insert', err, {
+        action,
+        resourceType,
+        resourceId,
+        resourceName,
+        // SQLite constraint codes look like SQLITE_CONSTRAINT_UNIQUE — the
+        // raw err.message embeds the column / table name. Carrying the
+        // code separately makes triage faster.
+        sqlite_code: err.code,
+      });
+    } catch {}
   }
 }
 

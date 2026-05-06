@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Loader2, Send, RefreshCw, Shield, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { humanizeApiError } from "@/lib/humanizeApiError";
 
 // sites = array of { site_id, site_name, site_slug } (from /api/hub/kpis)
 export default function HubUserManager({ sites = [] }) {
@@ -38,10 +39,13 @@ export default function HubUserManager({ sites = [] }) {
       const ok = data.results.filter(r => r.ok);
       const failed = data.results.filter(r => !r.ok);
       if (ok.length) toast.success(`Pushed to: ${ok.map(r => r.site).join(", ")}`);
-      failed.forEach(r => toast.error(`${r.site}: ${r.error}`));
+      // Per-site failures: server already passes a describeFetchError-shaped
+      // string in r.error (URL + cause). Prefix with the site so the operator
+      // knows which one needs attention.
+      failed.forEach(r => toast.error(`Push to ${r.site} failed — ${r.error || 'unknown reason'}`));
       setSelectedUsers(new Set());
     },
-    onError: (err) => toast.error(err.message || "Push failed"),
+    onError: (err) => toast.error(humanizeApiError(err, "push users to sites")),
   });
 
   const saveAllowedSitesMutation = useMutation({

@@ -5,7 +5,8 @@ import Database from 'better-sqlite3';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
-import { syncCreditLogicFromHub } from './services/creditLogic.js';
+import { syncCreditLogicFromHub, probeHubUrl } from './services/creditLogic.js';
+import { logError } from './lib/errorLog.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
 import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
@@ -182,7 +183,16 @@ export async function runLocalBackup() {
 // `{ ok: false }` rather than throwing.
 function track(name, fn, contextFn, opts) {
   return () => recordJob(name, fn, contextFn, opts).catch((err) => {
+    // Hard failures (thrown errors) already land in job_runs.error_message
+    // via recordJob. Mirror them to error_log so they also show up in
+    // System Log — without this, the operator had to flip between
+    // Operations → Job Runs and Operations → System Log to triage. The
+    // mirror only fires for HARD failures (thrown); soft failures (where
+    // the function returned ok:false) live in job_runs only by design,
+    // since those usually have their own dedicated logging upstream
+    // (e.g. credit-logic-sync writes to credit_logic_state.last_error).
     console.error(`[${name}] failed:`, err.message);
+    try { logError(`scheduler.${name}`, err); } catch {}
   });
 }
 
@@ -237,12 +247,58 @@ export function startSchedulers() {
       { successCheck: (r) => r?.ok !== false },
     )));
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
+
+    // Boot-time hub-URL probe. Hits ${HUB_URL}/api/health once a few seconds
+    // after startup and logs LOUD if it fails. The first credit-logic-sync
+    // attempt below would also catch the failure, but that runs at +12s and
+    // is one of dozens of scheduled jobs — the dedicated probe surfaces
+    // hub-connectivity issues at the top of the System Log so an operator
+    // immediately sees "Hub unreachable" instead of having to dig for a
+    // credit-logic-sync failure.
+    setTimeout(async () => {
+      try {
+        const probe = await probeHubUrl();
+        if (probe.ok) {
+          console.log(`[hub-probe] OK: ${probe.url} (HTTP ${probe.status})`);
+        } else {
+          console.warn(`[hub-probe] FAILED: ${probe.error}`);
+          try {
+            logError(
+              'hub.probe',
+              new Error(probe.error || 'Hub unreachable'),
+              { url: probe.url, status: probe.status },
+              'warn',
+            );
+          } catch {}
+        }
+      } catch (err) {
+        try { logError('hub.probe', err, { phase: 'unhandled' }); } catch {}
+      }
+    }, 5000);
+
+    // syncCreditLogicFromHub catches its own fetch errors and returns
+    // { ok: false, error, status } rather than throwing. Without
+    // successCheck, recordJob would persist these soft failures as
+    // 'succeeded' and the Job Runs panel + alert rules would never see
+    // them. successCheck flips them to 'failed' so the readable error
+    // description (URL + cause from describeFetchError) lands in
+    // job_runs.error_message and feeds the credit-logic-sync alert rule.
     setTimeout(
-      track('credit-logic-sync', () => syncCreditLogicFromHub({ triggeredBy: 'startup' })),
+      track(
+        'credit-logic-sync',
+        () => syncCreditLogicFromHub({ triggeredBy: 'startup' }),
+        null,
+        { successCheck: (r) => r?.ok !== false },
+      ),
       12000,
     );
     intervals.push(setInterval(
-      track('credit-logic-sync', () => syncCreditLogicFromHub({ triggeredBy: 'scheduler' })),
+      track(
+        'credit-logic-sync',
+        () => syncCreditLogicFromHub({ triggeredBy: 'scheduler' }),
+        null,
+        { successCheck: (r) => r?.ok !== false },
+      ),
       10 * 60 * 1000,
     ));
   }

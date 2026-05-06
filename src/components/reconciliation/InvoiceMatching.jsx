@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { Search, ExternalLink, Save, RotateCcw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { humanizeApiError } from '@/lib/humanizeApiError';
 
 const COLUMN_TIPS = {
   idx: 'Row number within this filter/tab',
@@ -153,13 +154,19 @@ function ManualInvoiceInput({ extraction, onSaved }) {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(`Couldn't save invoice ${inv}: ${data.error || `HTTP ${res.status}`}`);
+        // Server-side errors come back as { error: "..." } — surface that
+        // verbatim if present (it's already a readable string for known
+        // codes), otherwise fall back to a humanised HTTP description.
+        const detail = data.error || data.detail;
+        toast.error(detail
+          ? `Couldn't save invoice ${inv} — ${detail}`
+          : humanizeApiError(new Error(`HTTP ${res.status}`), `save invoice ${inv}`));
         return;
       }
       toast.success(`Saved ${inv}`);
       onSaved(data.reconciliation);
     } catch (err) {
-      toast.error(`Couldn't save invoice ${inv}: ${err.message}`);
+      toast.error(humanizeApiError(err, `save invoice ${inv}`));
     } finally {
       setSaving(false);
     }

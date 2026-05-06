@@ -12,6 +12,7 @@ import { runConnectionImport } from '../services/syncEngine.js';
 import { KNOWN_ROLES, listConnectionRoles, setRoleConnection } from '../services/connectionRoles.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
+import { describeSqlError } from '../lib/errorDescribe.js';
 
 export function createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }) {
   const router = Router();
@@ -78,11 +79,14 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           fields,
         });
       } catch (error) {
-        console.error('Test connection error:', error);
-        try { logError('connection.test', error, { connection_id: req.body?.connectionId, host: req.body?.host }); } catch {}
-        res.status(500).json({
-          error: error.message || 'Failed to connect to SQL Server',
+        const friendly = describeSqlError(error, {
+          op: 'test connection',
+          host: req.body?.host,
+          database: req.body?.database_name,
         });
+        console.error('Test connection error:', friendly);
+        try { logError('connection.test', error, { connection_id: req.body?.connectionId, host: req.body?.host, database: req.body?.database_name, friendly }); } catch {}
+        res.status(500).json({ error: friendly });
       } finally {
         if (pool) {
           try {
@@ -157,9 +161,14 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           preview: rows,
         });
       } catch (error) {
-        console.error('Test query error:', error);
-        try { logError('connection.test_query', error, { connection_id: req.body?.connectionId }); } catch {}
-        res.status(500).json({ error: error.message || 'Query failed' });
+        const friendly = describeSqlError(error, {
+          op: 'test query',
+          host: req.body?.host,
+          database: req.body?.database_name,
+        });
+        console.error('Test query error:', friendly);
+        try { logError('connection.test_query', error, { connection_id: req.body?.connectionId, host: req.body?.host, friendly }); } catch {}
+        res.status(500).json({ error: friendly });
       } finally {
         if (pool) { try { await pool.close(); } catch {} }
       }
