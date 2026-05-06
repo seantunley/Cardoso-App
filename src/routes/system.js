@@ -423,6 +423,30 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // scripts/install-hub-caddy.ps1 on the Hub server).
   //
   // See docs/ops/hub-tls.md.
+  // GET /api/system/jobs[?since=ISO_DATE]
+  //
+  // Returns the latest run of every scheduled background job + a failure
+  // count in the time window (default 24h). Backs the Operations page's
+  // Job Runs tab.
+  //
+  // (This endpoint was meant to ship with PR #178 but got dropped in the
+  // #178 ↔ #180 merge collision — same merge that ate the recordJob
+  // imports fixed in PR #182. Adding it back here so the Operations
+  // page actually has data to render.)
+  //
+  // Lazy-import jobRunner so the route file doesn't pull better-sqlite3
+  // into anything that loads system.js standalone.
+  router.get('/api/system/jobs', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { getJobsSummary } = await import('../lib/jobRunner.js');
+      const since = typeof req.query.since === 'string' ? req.query.since : undefined;
+      res.json({ jobs: getJobsSummary({ since }) });
+    } catch (err) {
+      console.error('[system.jobs] failed:', err.message);
+      res.status(500).json({ error: 'Failed to load job summary' });
+    }
+  });
+
   // GET /api/system/alerts?status=active|all
   //
   // Active alerts (resolved_at IS NULL) drive the admin banner; the

@@ -66,6 +66,7 @@ const Inventory = React.lazy(() => import('./pages/Inventory'));
 const NetworkDevices = React.lazy(() => import('./pages/NetworkDevices'));
 const CreditDebug = React.lazy(() => import('./pages/CreditDebug'));
 const Reconciliation = React.lazy(() => import('./pages/Reconciliation'));
+const Operations = React.lazy(() => import('./pages/Operations'));
 
 
 export const PAGES = {
@@ -89,6 +90,7 @@ export const PAGES = {
     "Users": Users,
     "CreditDebug": CreditDebug,
     "Reconciliation": Reconciliation,
+    "Operations": Operations,
 }
 
 export const pagesConfig = {
