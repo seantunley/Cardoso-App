@@ -252,7 +252,7 @@ async function ocrViaOcrSpaceEngine(imageBuffer, engine = '2', apiKey, retries =
 
 // ── Invoice number extraction (regex pipeline) ───────────────────────────────
 
-function findInvoiceNumber(text) {
+function findInvoiceNumber(text, inDigitLength = 9) {
   if (!text) return null;
   const cleaned = text
     .replace(/[|]/g, 'I')
@@ -270,12 +270,16 @@ function findInvoiceNumber(text) {
   const longMatch = cleaned.match(/\b(18\d{8,10})\b/);
   if (longMatch) return 'IN' + longMatch[1].substring(2);
 
-  // IN-prefixed long. Range widened from {8,9} to {8,10} for the same
-  // reason. 8 → padded to 9 (legacy); 9 and 10 returned as-is.
+  // IN-prefixed long. Range widened from {8,9} to {8,10} for the
+  // post-rollover 10-digit form. Padding to the per-site canonical length
+  // (`inDigitLength`, default 9): a one-short read is treated as a
+  // dropped-zero OCR error and padded; an at-or-above-length read is
+  // returned as-is. Sites whose canonical IN format is 8 digits set
+  // inDigitLength=8 so an 8-digit read isn't padded to 9.
   const inLongMatch = cleaned.match(/\bIN\s*(\d{8,10})\b/i);
   if (inLongMatch) {
     let digits = inLongMatch[1];
-    if (digits.length === 8) digits = '0' + digits;
+    if (digits.length < inDigitLength) digits = '0'.repeat(inDigitLength - digits.length) + digits;
     return `IN${digits}`;
   }
 
@@ -319,7 +323,7 @@ function findInvoiceNumber(text) {
 
 // ── Main extraction entry point ──────────────────────────────────────────────
 
-async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId) {
+async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId, inDigitLength = 9) {
   // Download — strict timeout. PODs are typically <2MB and live on
   // Microsoft 365 / SharePoint. A stuck connection here used to wedge a
   // whole lane until the parent's 120s backstop fired.
@@ -356,7 +360,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           const textContent = await page.getTextContent();
           const pageText = textContent.items.map(item => item.str).join(' ');
           if (pageText.trim()) {
-            const invoice = findInvoiceNumber(pageText);
+            const invoice = findInvoiceNumber(pageText, inDigitLength);
             if (invoice) return { invoice };
           }
         }
@@ -503,7 +507,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           } catch {}
           continue;
         }
-        const invoice = findInvoiceNumber(text);
+        const invoice = findInvoiceNumber(text, inDigitLength);
         if (invoice) return { invoice, previewPath };
         // Text was returned but findInvoiceNumber couldn't parse an invoice
         // number out of it. This is the most-likely cause of "everything
@@ -584,6 +588,7 @@ parentPort.on('message', async (msg) => {
           payload.googleVisionKey,
           payload.ocrSpaceKey,
           id,
+          payload.inDigitLength,
         ),
         90_000,
         'extract_total',

@@ -2041,7 +2041,7 @@ function AccountingTab() {
 
 // ─── Reconciliation Settings Tab ──────────────────────────────────────────
 function ReconciliationSettingsTab() {
-  const [settings, setSettings] = useState({ google_vision_key: '', ocr_space_key: '' });
+  const [settings, setSettings] = useState({ google_vision_key: '', ocr_space_key: '', invoice_in_digit_length: '9' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showGvKey, setShowGvKey] = useState(false);
@@ -2171,6 +2171,34 @@ function ReconciliationSettingsTab() {
                 {saving ? 'Saving…' : 'Save Keys'}
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* Invoice number format — drives findInvoiceNumber's pad behaviour.
+            Legacy stores use IN + 9 digits (IN000xxxxxx); newer onboarded
+            sites use IN + 8 digits (IN00xxxxxx). Wrong length here means
+            correctly-read invoices get padded to a non-existent number and
+            never match Cardoso. */}
+        <div className="space-y-3">
+          <div>
+            <h3 className="text-sm font-semibold">Invoice number format</h3>
+            <p className="text-xs text-muted-foreground">
+              How many digits follow the <span className="font-mono">IN</span> prefix on this site's invoices. Used to recover dropped-zero OCR errors without over-padding correctly-read shorter numbers.
+            </p>
+          </div>
+          <div className="space-y-2 pl-3 border-l-2 border-border/40">
+            <label className="text-xs font-medium text-foreground">IN digit length</label>
+            <select
+              value={settings.invoice_in_digit_length || '9'}
+              onChange={e => setSettings(s => ({ ...s, invoice_in_digit_length: e.target.value }))}
+              className="rounded-[2px] border border-input bg-background text-foreground px-3 py-2 text-sm font-mono focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+            >
+              <option value="8" className="bg-background text-foreground">8 digits — IN00xxxxxx</option>
+              <option value="9" className="bg-background text-foreground">9 digits — IN000xxxxxx (default)</option>
+            </select>
+            <p className="text-[10px] text-muted-foreground">
+              Saved with the API keys above via <span className="font-mono">Save Keys</span>.
+            </p>
           </div>
         </div>
 

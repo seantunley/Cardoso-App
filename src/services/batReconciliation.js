@@ -1452,6 +1452,7 @@ async function runGoogleVisionRetry(reconId, rows) {
 
 async function runGoogleVisionRetryInner(reconId, rows) {
   const sharp = (await import('sharp')).default;
+  const inDigitLength = getInvoiceInDigitLength();
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extracted_invoice = ?, extraction_status = ?,
@@ -1512,7 +1513,7 @@ async function runGoogleVisionRetryInner(reconId, rows) {
           .toBuffer();
 
         const text = await ocrViaGoogleVision(jpeg);
-        invoice = findInvoiceNumber(text);
+        invoice = findInvoiceNumber(text, inDigitLength);
         if (invoice) {
           console.log(`[bat-gv] id=${row.id} -> ${invoice} (rot ${angle})`);
           break;
@@ -2075,6 +2076,7 @@ async function processQueue(reconId) {
   // has no DB access and shouldn't need any.
   const googleVisionKey = getGoogleVisionKey();
   const ocrSpaceKey = getOcrSpaceKey();
+  const inDigitLength = getInvoiceInDigitLength();
 
   const lanes = Array.from({ length: N }, () => ({ worker: new OcrLane() }));
 
@@ -2204,6 +2206,7 @@ async function processQueue(reconId) {
               extractionId: next.id,
               googleVisionKey,
               ocrSpaceKey,
+              inDigitLength,
             },
             PDF_TIMEOUT,
             // onProgress: worker emits these as it transitions between
@@ -2429,6 +2432,15 @@ function getOcrSpaceKey() {
   return getBatSetting('ocr_space_key') || process.env.OCR_SPACE_KEY || null;
 }
 
+// Per-site BAT invoice number length (digits after "IN"). Sites differ:
+// the legacy stores use IN + 9 digits (IN000xxxxxx), the newer onboarded
+// sites use IN + 8 digits (IN00xxxxxx). Drives whether findInvoiceNumber
+// pads a borderline OCR read or leaves it alone.
+function getInvoiceInDigitLength() {
+  const v = parseInt(getBatSetting('invoice_in_digit_length') || '', 10);
+  return (v === 8 || v === 9) ? v : 9;
+}
+
 function recordReconciliationError(reconId, message) {
   if (!reconId || !message) return;
   // Mirror to the global error_log so off-site operators can see it in the
@@ -2508,7 +2520,7 @@ async function ocrViaGoogleVision(imageBuffer) {
   return annotation?.text || '';
 }
 
-function findInvoiceNumber(text) {
+function findInvoiceNumber(text, inDigitLength = 9) {
   if (!text) return null;
   // Normalize OCR artifacts: common misreads
   const cleaned = text
@@ -2527,11 +2539,15 @@ function findInvoiceNumber(text) {
     return corrected;
   }
 
-  // Pattern 1b: Already correct IN + 8-9 digits (IN000412926 or IN00412926 with dropped zero)
+  // Pattern 1b: Already correct IN + 8-9 digits. On legacy sites
+  // (inDigitLength=9, default) an 8-digit read is treated as a dropped-zero
+  // OCR error and padded to 9. On sites whose canonical format is
+  // IN00xxxxxx (inDigitLength=8) an 8-digit read is correct and is
+  // returned as-is — no pad.
   const inLongMatch = cleaned.match(/\bIN\s*(\d{8,9})\b/i);
   if (inLongMatch) {
     let digits = inLongMatch[1];
-    if (digits.length === 8) digits = '0' + digits; // pad dropped zero: IN00412926 -> IN000412926
+    if (digits.length < inDigitLength) digits = '0'.repeat(inDigitLength - digits.length) + digits;
     console.log(`[bat-ocr] Found long IN invoice: IN${digits}`);
     return `IN${digits}`;
   }
