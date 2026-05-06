@@ -31,6 +31,7 @@ import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefu
 import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
 import { validateEnvOrExit } from './src/config/env.js';
 import { logError } from './src/lib/errorLog.js';
+import { captureSecuritySignal } from './src/lib/securitySignals.js';
 
 const require = createRequire(import.meta.url);
 dotenv.config();
@@ -161,6 +162,13 @@ app.use(session({
   secret: process.env.SESSION_SECRET, resave: false, saveUninitialized: false,
   cookie: { httpOnly: true, secure: process.env.HTTPS === 'true', sameSite: 'strict', maxAge: 1000 * 60 * 60 * 12 },
 }));
+
+// Security-signals telemetry — registered AFTER session so any future
+// tweak that wants to bucket by user-id sees req.session populated.
+// Today the listener doesn't read session, but this position is the
+// safe default. See src/lib/securitySignals.js for the threshold model
+// and src/lib/alertRules.js for the alert wiring.
+app.use(captureSecuritySignal);
 
 // initBatSchema must run BEFORE the main migrations because some perf-index
 // migrations (e.g. v45 idx_bat_cardoso_inv_overwritten) target BAT tables.

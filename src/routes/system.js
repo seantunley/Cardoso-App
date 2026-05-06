@@ -11,6 +11,7 @@ import db from '../db/index.js';
 import { getVersionStatus } from '../services/versionCheck.js';
 import { logError } from '../lib/errorLog.js';
 import { logAudit } from '../lib/audit.js';
+import { getSecuritySignals } from '../lib/securitySignals.js';
 
 const require = createRequire(import.meta.url);
 

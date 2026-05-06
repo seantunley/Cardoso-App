@@ -15,11 +15,12 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, AlertTriangle, Download, RefreshCw } from "lucide-react";
+import { Activity, AlertTriangle, Download, RefreshCw, Shield } from "lucide-react";
 
 import JobRunsPanel from "@/components/operations/JobRunsPanel";
 import SystemLogPanel from "@/components/operations/SystemLogPanel";
 import UpdatesPanel from "@/components/operations/UpdatesPanel";
+import SecuritySignalsPanel from "@/components/operations/SecuritySignalsPanel";
 import HubSyncLog from "@/pages/HubSyncLog";
 
 export default function Operations() {
@@ -77,6 +78,9 @@ export default function Operations() {
             <TabsTrigger value="system-log" className="data-[state=active]:bg-background">
               <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> System Log
             </TabsTrigger>
+            <TabsTrigger value="security" className="data-[state=active]:bg-background">
+              <Shield className="w-3.5 h-3.5 mr-1.5" /> Security
+            </TabsTrigger>
             <TabsTrigger value="updates" className="data-[state=active]:bg-background">
               <Download className="w-3.5 h-3.5 mr-1.5" /> Updates
             </TabsTrigger>
@@ -92,6 +96,9 @@ export default function Operations() {
           </TabsContent>
           <TabsContent value="system-log" className="mt-0">
             <SystemLogPanel />
+          </TabsContent>
+          <TabsContent value="security" className="mt-0">
+            <SecuritySignalsPanel />
           </TabsContent>
           <TabsContent value="updates" className="mt-0">
             <UpdatesPanel />

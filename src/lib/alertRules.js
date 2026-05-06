@@ -14,6 +14,7 @@
 import db from '../db/index.js';
 import { fireAlert, resolveAlerts } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
+import { ruleSecuritySignals } from './securitySignals.js';
 
 // ── Rule: Sage MSSQL down ────────────────────────────────────────────────
 //
@@ -161,6 +162,10 @@ const RULES = [
   { name: 'sage-down', fn: ruleSageDown },
   { name: 'backup-verify-failed', fn: ruleBackupVerifyFailed },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
+  // Security signals — brute-force, flood, scanner detection. Rule
+  // owner lives next to the metric collection in src/lib/securitySignals.js
+  // so adding a new threshold is one file edit.
+  { name: 'security-signals', fn: ruleSecuritySignals },
 ];
 
 /**
