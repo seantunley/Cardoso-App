@@ -121,8 +121,18 @@ export function captureSecuritySignal(req, res, next) {
 }
 
 export function getSecuritySignals() {
-  const keys = [...buckets.keys()].sort();
-  const windowKeys = keys.slice(-WINDOW_MINUTES);
+  // Window the buckets by REAL TIME, not bucket count. Earlier we used
+  // `keys.slice(-WINDOW_MINUTES)` which grabs the 60 most-recent buckets
+  // — but buckets are only created when a request lands in that minute,
+  // so on a low-traffic site 60 buckets can span hours. That meant the
+  // dashboard (and ruleSecuritySignals) could fire alerts on yesterday's
+  // activity long after it ended. startedAtMs is cached on each bucket
+  // at create time, so this filter is cheap.
+  const cutoffMs = Date.now() - WINDOW_MINUTES * 60 * 1000;
+  const windowKeys = [...buckets.keys()].sort().filter((k) => {
+    const b = buckets.get(k);
+    return b && b.startedAtMs >= cutoffMs;
+  });
 
   const totals = {
     requests: 0,
