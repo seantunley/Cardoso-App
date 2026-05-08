@@ -235,18 +235,13 @@ export function createBackupRouter() {
     const envContent = fs.readFileSync(envPath, 'utf8');
     const payload = exportMode === 'full' ? envContent : redactEnvFile(envContent);
 
-    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
-    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
-    res.setHeader('X-Backup-Config-Mode', exportMode);
-    res.send(payload);
-
-    // Audit trail: persist a record of every successful config export.
-    // The "user" is fundamentally the hub puller (token-auth, no user
-    // session). Use userOverride='system:reporting-token' so the audit
-    // row is consistent across pulls and a real user identity (if/when
-    // a manual ops download lands) shows up via req.currentUser instead.
+    // Audit-state plumbing — same shape as /api/backup/download. The
+    // success audit MUST hang off res.on('finish') (the actual flush-
+    // to-client signal), not the synchronous res.send() return. An
+    // earlier draft wrote the success row immediately after res.send,
+    // but res.send returns once the data is queued, not delivered —
+    // a client disconnect between send and flush would record success
+    // for an operation that never reached the wire. Caught in PR review.
     //
     // resourceType MUST match the auditlog CHECK constraint in
     // src/db/schema.js — currently allows ('user','connection','record',
@@ -257,18 +252,39 @@ export function createBackupRouter() {
     // backup is site-wide system state, so 'system' is the right slot —
     // the action ('backup_config_exported') and resourceName carry the
     // backup-specific signal.
-    try {
-      logAudit({
-        req,
-        action: 'backup_config_exported',
-        resourceType: 'system',
-        resourceId: process.env.SITE_ID || 'site',
-        resourceName: filename,
-        details: `mode=${exportMode}, bytes=${payload.length}`,
-        status: 'success',
-        userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
-      });
-    } catch {}
+    let auditWritten = false;
+    const writeConfigAudit = (status) => {
+      if (auditWritten) return; auditWritten = true;
+      try {
+        logAudit({
+          req,
+          action: 'backup_config_exported',
+          resourceType: 'system',
+          resourceId: process.env.SITE_ID || 'site',
+          resourceName: filename,
+          details: `mode=${exportMode}, bytes=${payload.length}`,
+          status,
+          userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+        });
+      } catch {}
+    };
+
+    // Attach lifecycle listeners BEFORE sending. res.send is synchronous
+    // and returns once the data is queued; on a clean response 'finish'
+    // will fire later when bytes are flushed, and 'close' fires after
+    // that. On a mid-flush disconnect 'close' fires without 'finish' —
+    // that's the case the auditWritten guard turns into a 'failure' row.
+    res.on('finish', () => writeConfigAudit('success'));
+    res.on('close', () => {
+      if (!auditWritten) writeConfigAudit('failure');
+    });
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
+    res.setHeader('X-Backup-Timestamp', new Date().toISOString());
+    res.setHeader('X-Backup-Config-Mode', exportMode);
+    res.send(payload);
   });
 
   // GET /api/backup/download
