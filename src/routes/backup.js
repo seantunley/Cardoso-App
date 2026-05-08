@@ -377,6 +377,15 @@ export function createBackupRouter() {
       } catch {}
     };
 
+    // AbortController lets the close-handler cancel the SHA-256 hash
+    // pipeline mid-flight on client disconnect, instead of letting the
+    // hash run to completion against bytes nobody is going to read.
+    // On a 200MB DB the hash takes ~1-2s; without abort, repeated
+    // aborted pulls would tie up backup I/O for no useful work.
+    // pipeline(...) rejects with AbortError when signalled — the catch
+    // block treats that the same as any other pre-stream failure.
+    const hashAbortController = new AbortController();
+
     // Lifecycle listeners attached IMMEDIATELY — BEFORE any awaits.
     // res.on('close') covers disconnects during db.backup(), the
     // hash pipeline, AND the streaming phase below. res.on('finish')
@@ -386,11 +395,13 @@ export function createBackupRouter() {
     //   2. socket closed            → 'close'   → auditWritten guard skips
     // On a mid-flight disconnect:
     //   1. socket closed            → 'close'   → writeAudit('failure')
-    //      (no 'finish' was emitted)
+    //      + hashAbortController fires (abort is idempotent — safe to
+    //      call after the pipeline has already finished/rejected)
     res.on('finish', () => writeAudit('success'));
     res.on('close', () => {
       cleanup();
       if (!auditWritten) writeAudit('failure');
+      hashAbortController.abort();
     });
 
     try {
@@ -422,8 +433,22 @@ export function createBackupRouter() {
       // Cost is one extra full-file read on the site side (~1-2s for
       // a 200MB DB). Hub pulls hourly, so the latency is in the noise.
       const hash = crypto.createHash('sha256');
-      await pipeline(fs.createReadStream(tmpPath), hash);
-      sha256 = hash.digest('hex');
+      try {
+        await pipeline(fs.createReadStream(tmpPath), hash, {
+          signal: hashAbortController.signal,
+        });
+        sha256 = hash.digest('hex');
+      } catch (err) {
+        // Abort path — client disconnected, close-handler fired the
+        // abort, pipeline rejected with AbortError. The close-handler
+        // already wrote the failure audit, so just clean up and bail.
+        // Re-throw any non-abort error so the outer catch surfaces it.
+        if (err?.name === 'AbortError' || hashAbortController.signal.aborted) {
+          cleanup();
+          return;
+        }
+        throw err;
+      }
 
       // If the client disconnected during db.backup() or the hash pass,
       // res.on('close') has already fired writeAudit('failure'). Bail
