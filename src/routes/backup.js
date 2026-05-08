@@ -359,13 +359,27 @@ export function createBackupRouter() {
         writeAudit('failure');
         if (!res.headersSent) res.status(500).json({ error: 'Failed to stream snapshot' });
       });
-      stream.on('end', () => { cleanup(); writeAudit('success'); });
+      // Clean up the temp file when the read finishes — but DON'T audit
+      // success here. `stream.on('end')` only means the readable is
+      // exhausted; the bytes can still be sitting in res's outbound
+      // buffer / TCP buffer / on the wire. If the client disconnects
+      // between readable-end and ServerResponse-finish, an early
+      // success-audit would be wrong (and the close-handler couldn't
+      // correct it because auditWritten would already be true), so
+      // an interrupted pull would be misclassified as success.
+      stream.on('end', cleanup);
+      // res.on('finish') fires only after the response is fully flushed
+      // to the socket — that's the actual "success" signal for
+      // backup_db_exported. It always fires before res.on('close') on
+      // a clean response, so the close-handler's auditWritten guard
+      // sees true and skips, exactly as intended.
+      res.on('finish', () => writeAudit('success'));
       res.on('close', () => {
         cleanup();
-        // res.on('close') fires for both clean end and client disconnect.
-        // If we got the full stream-end first, writeAudit already ran.
-        // If not, the disconnect IS the audit event — record it as
-        // failure so the operator can spot interrupted pulls.
+        // Fires for both clean end and client disconnect. If 'finish'
+        // ran first the success audit is already in; otherwise this
+        // disconnect IS the audit event — record it as failure so the
+        // operator can spot interrupted pulls.
         if (!auditWritten) writeAudit('failure');
       });
       stream.pipe(res);
