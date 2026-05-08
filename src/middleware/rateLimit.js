@@ -31,3 +31,33 @@ export const reportingRateLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
 });
+
+// ── Backup-export rate limiter (heavy endpoints) ──────────────────────────
+//
+// /api/backup/download streams a SQLite snapshot (potentially hundreds of MB);
+// /api/backup/config returns the site's .env. Both are sensitive and
+// expensive — legitimate traffic is the hub puller, which hits these once
+// per scheduled cycle (roughly once an hour). 10/hour per token-or-IP gives
+// the hub plenty of headroom (cycle + manual smoke + retry) while making any
+// probing/exfil attempt visible by tripping limits.
+//
+// Cap is env-tunable so a small estate that schedules cycles more often can
+// dial it up. NaN guard: parseInt('garbage') returns NaN and Math.max(N, NaN)
+// returns NaN — leaving the comparison silently disabled. Validate explicitly.
+function _parseHeavyMaxFromEnv() {
+  const n = parseInt(process.env.BACKUP_HEAVY_MAX_PER_HOUR || '10', 10);
+  if (!Number.isFinite(n) || n < 1) return 10;
+  return n;
+}
+
+export const backupHeavyRateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour window
+  max: _parseHeavyMaxFromEnv(),
+  keyGenerator: (req) => {
+    const token = req.headers['x-reporting-token'];
+    return token ? String(token).slice(0, 16) : ipKeyGenerator(req);
+  },
+  message: { error: 'Too many backup-export requests. Try again later.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
