@@ -1745,6 +1745,44 @@ function buildMigrations(db) {
         db.exec(`CREATE INDEX IF NOT EXISTS idx_alerts_fired ON alerts(fired_at DESC)`);
       },
     },
+    {
+      version: 62,
+      name: 'hub_sites_accpac_freshness',
+      up() {
+        // The hub's customer-management page used to show `last_seen` as
+        // "Last sync" — but that's when the HUB last pulled from the
+        // SITE. The underlying records on the site can be days stale if
+        // its scheduled-sync (Accpac → datarecord) hasn't run, while
+        // hub→site keeps showing fresh. Real-world incident: a site's
+        // data was 2 days stale but the hub UI looked current.
+        //
+        // Three new columns capture site→Accpac freshness AND failure:
+        //   - last_accpac_synced_at: most recent SUCCESSFUL Accpac sync
+        //     (max of databaseconnection.last_sync across active
+        //     non-BAT-only connections).
+        //   - last_accpac_status: 'ok' | 'error' | 'never_synced'.
+        //     Driven by databaseconnection.status — if any active
+        //     non-BAT-only connection is 'error', the whole site is
+        //     'error'. Lets the hub tile go red when the site's sync
+        //     has actually started failing (timeouts, login errors,
+        //     etc.) instead of just looking "stale-ish".
+        //   - last_accpac_error: latest error message from any
+        //     databaseconnection.last_error or syncrun.message, truncated
+        //     to 500 chars. Surfaced on the tile so operators can fix
+        //     the underlying issue without having to RDP into the site.
+        //
+        // Populated by hubEtl.syncSite() from the /api/reporting/kpis
+        // response. Hub-only — gated on table existence so site installs
+        // that retain a legacy hub_sites table still get the columns
+        // without error.
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          ensureColumn(db, 'hub_sites', 'last_accpac_synced_at', 'TEXT');
+          ensureColumn(db, 'hub_sites', 'last_accpac_status',     'TEXT');
+          ensureColumn(db, 'hub_sites', 'last_accpac_error',      'TEXT');
+        }
+      },
+    },
   ];
 }
 

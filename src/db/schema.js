@@ -224,7 +224,17 @@ function initSchema(db) {
         logic_sync_status TEXT DEFAULT 'never_synced',
         logic_last_error TEXT,
         logic_last_synced_at TEXT,
-        logic_status_updated_at TEXT
+        logic_status_updated_at TEXT,
+        -- Site→Accpac sync visibility (separate from hub→site
+        -- freshness which is captured by last_seen). last_seen tells
+        -- you when the HUB last pulled; the columns below tell you
+        -- when the SITE last refreshed from its source — what the
+        -- operator actually cares about for data accuracy. Populated
+        -- by hubEtl.syncSite() from the /api/reporting/kpis response.
+        -- Migration v62 adds these columns to existing hub installs.
+        last_accpac_synced_at TEXT,
+        last_accpac_status TEXT,
+        last_accpac_error TEXT
       );
 
       CREATE TABLE IF NOT EXISTS credit_logic_versions (

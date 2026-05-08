@@ -415,9 +415,30 @@ async function syncSite(site) {
     }
 
     // Update hub_sites
+    // Promote the site→Accpac freshness/status/error fields from the
+    // kpis JSON blob to dedicated columns so the dashboard tile can
+    // colour-code without parsing JSON on every render. The tile shows
+    // last_accpac_synced_at as the user-visible "data freshness" line
+    // (vs last_seen which is when the HUB last pulled). last_accpac_status
+    // drives the tile colour; last_accpac_error gives the operator the
+    // actual reason ("ELOGIN", "ESOCKET", etc. via describeSqlError).
     db.prepare(`
-      UPDATE hub_sites SET last_seen=?, last_kpis=?, status='ok' WHERE id=?
-    `).run(new Date().toISOString(), kpis ? JSON.stringify(kpis) : null, site.id);
+      UPDATE hub_sites SET
+        last_seen = ?,
+        last_kpis = ?,
+        status = 'ok',
+        last_accpac_synced_at = ?,
+        last_accpac_status = ?,
+        last_accpac_error = ?
+      WHERE id = ?
+    `).run(
+      new Date().toISOString(),
+      kpis ? JSON.stringify(kpis) : null,
+      kpis?.site_accpac_last_synced_at || null,
+      kpis?.site_accpac_status || null,
+      kpis?.site_accpac_error || null,
+      site.id,
+    );
 
   } catch (err) {
     // describeFetchError unwraps undici "fetch failed" → real cause + URL.
