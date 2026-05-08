@@ -855,21 +855,28 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LIMIT 1
         `).get(query, query, query, query);
 
+        // Telemetry policy: only log SLOW or ERRORED lookups via logError.
+        // logError performs sync file append + sync SQLite insert + stderr
+        // mirror per call (see src/lib/errorLog.js, which explicitly
+        // documents itself as acceptable only because callers are
+        // infrequent). Calling it on every successful lookup would turn
+        // a hot path into repeated sync I/O — flagged in PR review.
+        // Slow-or-error remains rare enough to survive the cost, and is
+        // the only signal an operator actually needs to act on.
+        const SLOW_LOOKUP_MS = 500;
+
         if (!record) {
-          // Structured info-level telemetry on every lookup. Lets an
-          // operator answer "are misses suddenly spiking?" or "is the
-          // p99 latency creeping up?" without trawling generic
-          // console.error output. level='warn' on slow lookups so they
-          // surface in the System Log even when the result is benign.
           const elapsedMs = Date.now() - startedAtMs;
-          try {
-            logError(
-              'customer.lookup',
-              new Error(`miss in ${elapsedMs}ms`),
-              { query_length: query.length, hit: false, has_subaccounts: false, latency_ms: elapsedMs },
-              elapsedMs > 500 ? 'warn' : 'info',
-            );
-          } catch {}
+          if (elapsedMs > SLOW_LOOKUP_MS) {
+            try {
+              logError(
+                'customer.lookup.slow',
+                new Error(`slow miss in ${elapsedMs}ms`),
+                { query_length: query.length, hit: false, latency_ms: elapsedMs },
+                'warn',
+              );
+            } catch {}
+          }
           return res.json({ record: null, subAccounts: [] });
         }
 
@@ -897,14 +904,16 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         }
 
         const elapsedMs = Date.now() - startedAtMs;
-        try {
-          logError(
-            'customer.lookup',
-            new Error(`hit in ${elapsedMs}ms`),
-            { query_length: query.length, hit: true, has_subaccounts: subAccounts.length > 0, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
-            elapsedMs > 500 ? 'warn' : 'info',
-          );
-        } catch {}
+        if (elapsedMs > SLOW_LOOKUP_MS) {
+          try {
+            logError(
+              'customer.lookup.slow',
+              new Error(`slow hit in ${elapsedMs}ms`),
+              { query_length: query.length, hit: true, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
+              'warn',
+            );
+          } catch {}
+        }
 
         res.json({
           record: expandedRecord,
@@ -972,15 +981,24 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LIMIT ?
         `).all(startsWith, startsWith, contains, contains, query, query, startsWith, startsWith, limit);
 
+        // SLOW-ONLY telemetry — see policy comment on /customer-lookup
+        // above. The suggestions endpoint is the actual hot path
+        // (debounced typeahead, fires on every keystroke after 300ms),
+        // so per-call sync I/O via logError would be a real
+        // user-facing latency hit and would bloat error_log fast.
+        // Only the slow-tail surfaces as an early-warning signal.
         const elapsedMs = Date.now() - startedAtMs;
-        try {
-          logError(
-            'customer.lookup.suggestions',
-            new Error(`${rows.length} hit(s) in ${elapsedMs}ms`),
-            { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
-            elapsedMs > 500 ? 'warn' : 'info',
-          );
-        } catch {}
+        const SLOW_SUGGESTIONS_MS = 500;
+        if (elapsedMs > SLOW_SUGGESTIONS_MS) {
+          try {
+            logError(
+              'customer.lookup.suggestions.slow',
+              new Error(`slow suggestions in ${elapsedMs}ms`),
+              { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
+              'warn',
+            );
+          } catch {}
+        }
 
         res.json({
           suggestions: rows.map((row) => expandDataRecord(row)),
