@@ -2145,14 +2145,27 @@ async function processQueue(reconId) {
   //     own recycle; the others recycle on their own row count.
   //
   // Tunable via env so an operator can dial them down on a smaller box.
-  const ROW_RECYCLE_BUDGET = Math.max(
-    1,
-    parseInt(process.env.OCR_LANE_ROW_BUDGET || '25', 10),
+  //
+  // NaN guard: `parseInt('abc', 10)` returns NaN, and `Math.max(1, NaN)`
+  // returns NaN — not 1. Then every `>= NaN` check downstream is always
+  // false, which would silently disable the recycle mechanism if a typo
+  // landed in the env. Use a parse-then-validate helper that falls back
+  // to the default for any non-finite or sub-floor value.
+  const parsePositiveIntEnv = (envVal, defaultVal, floor) => {
+    const n = parseInt(envVal, 10);
+    if (!Number.isFinite(n) || n < floor) return defaultVal;
+    return n;
+  };
+  const ROW_RECYCLE_BUDGET = parsePositiveIntEnv(
+    process.env.OCR_LANE_ROW_BUDGET,
+    25, // default
+    1,  // floor — anything < 1 makes no sense
   );
-  const RSS_RECYCLE_THRESHOLD_BYTES = Math.max(
-    256 * 1024 * 1024, // floor: 256 MB — anything lower would recycle constantly on a normal box
-    parseInt(process.env.OCR_LANE_RSS_BUDGET_MB || '2048', 10) * 1024 * 1024,
-  );
+  const RSS_RECYCLE_THRESHOLD_BYTES = parsePositiveIntEnv(
+    process.env.OCR_LANE_RSS_BUDGET_MB,
+    2048, // default 2 GB
+    256,  // floor 256 MB — anything lower would recycle constantly on a normal box
+  ) * 1024 * 1024;
   async function recycleLane(lane, reason) {
     try { await lane.worker.terminate(); } catch {}
     try {
