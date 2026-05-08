@@ -56,13 +56,36 @@ Folded in from a code-review pass on the v1 plan:
   resolution is the **union** of both: if either says "exclude,"
   the customer is excluded. Errs on the side of *not* taking action.
 - **Write-path constraints (non-negotiable)** — added a dedicated
-  contract section (further below) listing the eleven rules every
+  contract section (further below) listing the rules every
   Accpac write must satisfy: one field only (`SWHOLD`), one row at
   a time, parameterised SQL, dedicated helper with no escape hatch,
   pre/post verify SELECTs, per-write transactions, and a build-time
   SQL-shape assertion that fails the build if the queries ever
   drift. The contract turns "don't cause a bulk apocalypse" from a
   guard rail into a structural impossibility.
+- **Hold-only invariant (policy, not just default)** — Cardoso
+  *never* releases a hold. Off-hold/release is always a manual
+  action by the credit controller in Accpac. The schema, the
+  helper, and the boot path all enforce this — `'release'` is
+  stripped from the `action` enum, `setHoldStatus` rejects any
+  call with `hold !== 1`, and a boot-time assertion refuses to
+  start if a future config edit tries to enable it. Making this
+  permanent (rather than a Phase 2 deferral) eliminates the
+  Cardoso-releases → rule-re-fires → re-proposes loop entirely.
+- **Alert thresholds + SLOs** — explicit numbers for when
+  `failed_terminal` and reconciliation drift should fire alerts
+  via the existing `alertRules.js` engine. Phase-1 baselines
+  inform the calibration; placeholders captured in the plan.
+- **Duplicate-proposal UX** — the unique partial index throws on
+  duplicate insert; the create endpoint translates that into
+  three structured 409 responses ("already queued", "already
+  approved, awaiting commit", "already committed in last N hours")
+  with a deep-link to the existing proposal. Not an error — the
+  existing row IS the right answer, the operator just needs to
+  see it.
+- **Incident runbook** — a dedicated section at the end of the
+  plan that an operator can find in 5 seconds when something is
+  going wrong. Disable, revert, investigate.
 
 ## Core principle
 
@@ -399,6 +422,21 @@ list and rejected if it weakens any of them.
     `can_write_hold = 0` returns `failed_terminal` without
     touching MSSQL. Defence in depth.
 
+12. **Hold-only invariant — Cardoso NEVER releases.**
+    `setHoldStatus(connectionId, idcust, hold)` rejects any call
+    with `hold !== 1`. There is no code path that can take
+    `SWHOLD` from 1 back to 0; release is strictly an Accpac-side
+    action by the credit controller, using information Cardoso
+    doesn't have (phone calls, payment promises, manager
+    overrides). The schema's `action` enum is `'hold'` only —
+    `'release'` is not a valid value. A boot-time assertion
+    refuses to start if anyone has flipped
+    `bat_settings.accpac_writes_release_allowed` to `'true'`,
+    forcing a deliberate code change rather than a config-only
+    toggle. This makes the Cardoso-releases → rule-re-fires →
+    re-proposes loop hazard structurally impossible, not merely
+    "unlikely under current rules."
+
 **Failure modes this contract eliminates:**
 
 | Threat | Why it can't happen |
@@ -409,6 +447,7 @@ list and rejected if it weakens any of them.
 | Trigger on `ARCUS` reverts the change silently | Rule #7 — post-write verify catches it |
 | Caller skips the queue and writes directly via `mssql` | Rules #5 + #10 — no other code path can write |
 | Dev forgets to flip `can_write_hold` and ships writes-on by default | Rule #11 — the helper itself enforces; default-off in schema |
+| Future PR adds a "release via Cardoso" button or auto-release logic | Rule #12 — `setHoldStatus(hold !== 1)` throws, `action` enum has no `'release'`, boot assertion refuses to start with the release-allowed flag flipped |
 
 If any future requirement seems to need relaxing one of these
 rules, that's a strong signal the requirement should be redesigned,
@@ -564,6 +603,15 @@ ALTER TABLE datarecord ADD COLUMN accpac_on_hold_synced_at TEXT;
 ALTER TABLE databaseconnection ADD COLUMN can_write_hold INTEGER DEFAULT 0;
 ALTER TABLE datarecord ADD COLUMN never_auto_hold INTEGER DEFAULT 0;
 
+-- Master enable switch (see Master enable switch section).
+INSERT OR IGNORE INTO bat_settings (key, value) VALUES ('accpac_write_enabled', 'false');
+
+-- Hold-only invariant policy flag. Default 'false'. The boot path
+-- asserts this stays 'false' — a future operator who edits
+-- bat_settings directly to flip it gets a refused boot, not a
+-- silent feature unlock. Forces the deliberate code change route.
+INSERT OR IGNORE INTO bat_settings (key, value) VALUES ('accpac_writes_release_allowed', 'false');
+
 CREATE TABLE pending_hold_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   customer_number TEXT NOT NULL,
@@ -573,7 +621,10 @@ CREATE TABLE pending_hold_actions (
   -- distinguishable, and so writes go through the can_write_hold
   -- gate of the right connection.
   connection_id INTEGER NOT NULL,
-  action TEXT CHECK(action IN ('hold', 'release')) NOT NULL,
+  -- Hold-only by design. The 'release' action is INTENTIONALLY
+  -- absent — see Write-path constraints rule #12. Release is
+  -- always done by the controller in Accpac directly.
+  action TEXT CHECK(action = 'hold') NOT NULL DEFAULT 'hold',
   source TEXT CHECK(source IN ('manual', 'rule')) NOT NULL,
   rule_id INTEGER,
   reason TEXT,
@@ -619,6 +670,145 @@ CREATE TABLE customer_exclusions (
   PRIMARY KEY (customer_number, source)
 );
 ```
+
+## Alert thresholds & SLOs
+
+Wires into the existing `alertRules.js` engine — same engine that
+handles `sage-down`, `backup-verify-failed`, `job-failure-spike`,
+and `security-signals`. Each rule fires/resolves as a row in the
+`alerts` table with a dedup key, so a single ongoing problem
+produces one active alert, not a stream.
+
+Thresholds below are **placeholders** — the right numbers depend
+on what "normal" looks like once Phase 1 has been running for
+a couple of weeks. The plan ships with these values; we calibrate
+after baseline.
+
+### Rule: `accpac-hold.terminal-failure-spike`
+
+Fires when commits to `ARCUS.SWHOLD` are failing terminally at a
+rate that suggests something systemic is broken (wrong credentials,
+schema drift on the Accpac side, blocked SQL Server login, etc.).
+
+| Severity | Condition (per connection, in 1h window) | Dedup key |
+|---|---|---|
+| `warning`  | ≥ 3 `failed_terminal` in the last hour | `accpac-hold-terminal:{connection_id}` |
+| `critical` | ≥ 10 `failed_terminal` in the last hour | (same — replaces the warning) |
+
+Resolves automatically when there are no terminal failures for
+that connection in the last hour. Per-connection dedup so one
+sick connection doesn't drown out signals from healthy ones.
+
+### Rule: `accpac-hold.retryable-failure-stuck`
+
+`failed_retryable` rows are eligible for re-evaluation on the next
+executor tick. Fires when a row stays in `failed_retryable` for
+longer than the retry budget — i.e. retry isn't helping.
+
+| Severity | Condition | Dedup key |
+|---|---|---|
+| `warning` | Any proposal in `failed_retryable` for > 6 hours | `accpac-hold-retryable-stuck:{customer_number}:{connection_id}` |
+
+Resolves when the row transitions to `committed` or `failed_terminal`.
+
+### Rule: `accpac-hold.reconciliation-drift`
+
+Reads from the new `GET /api/hold-reconciliation` endpoint.
+Counts customers in either direction of divergence:
+
+- `held_in_accpac_not_red_in_cardoso` — Accpac has them held;
+  Cardoso doesn't show red. May indicate manual Accpac action
+  Cardoso isn't aware of, or stale Cardoso flag data.
+- `red_in_cardoso_not_held` — Cardoso shows red; Accpac isn't
+  holding. Either Cardoso hasn't proposed yet, the controller
+  rejected, or the controller released without un-flagging.
+
+| Severity | Condition (sustained > 24h) | Dedup key |
+|---|---|---|
+| `warning` | Drift count > 5% of red-flagged customers | `accpac-hold-drift:high` |
+| `critical` | Drift count > 15% of red-flagged customers | (same — replaces warning) |
+
+The 24h sustain matters because some divergence is normal
+mid-day (operator hasn't approved a queued proposal yet, controller
+just released a customer this morning). Only a persistent drift
+indicates a workflow problem.
+
+### Rule: `accpac-hold.queue-backlog`
+
+Fires when the proposal queue is filling up faster than the
+controller is approving. Catches "operator went on holiday and
+nobody else picked up the queue" as well as "auto-flag rules went
+haywire."
+
+| Severity | Condition | Dedup key |
+|---|---|---|
+| `warning` | > 50 proposals in `queued` status, oldest > 48h old | `accpac-hold-backlog:warning` |
+| `critical` | > 200 proposals in `queued` status, oldest > 7 days | `accpac-hold-backlog:critical` |
+
+Resolves when both conditions are below thresholds.
+
+### SLO targets (once baseline is established)
+
+These are the numbers we should be hitting in steady state. Phase
+1 + early Phase 2 will tell us if they're realistic.
+
+- **Time-to-commit** (proposal `queued` → `committed`): median ≤ 4 business hours, p99 ≤ 24 business hours.
+- **Terminal failure rate**: ≤ 1% of commit attempts. Higher than that means a connection is unhealthy.
+- **Reconciliation drift**: ≤ 5% of red-flagged customers, sustained.
+- **Time-to-revert after disable**: ≤ 30 seconds from clicking Disable to the next executor tick refusing writes. (The executor reads the master switch on every commit attempt, not at boot.)
+
+## Duplicate-proposal UX
+
+The unique partial index on `pending_hold_actions(customer_number,
+connection_id, action) WHERE status IN ('queued', 'approved')`
+prevents duplicate active proposals at the database level — but
+the create endpoint MUST translate that constraint violation into
+operator-readable feedback, not a generic 500.
+
+When a caller (UI button, auto-flag rule, programmatic API client)
+tries to enqueue a proposal that would violate the index, the
+endpoint returns `409 Conflict` with a structured body. The body
+distinguishes three cases so the operator knows which:
+
+```json
+// Case 1 — already queued
+{
+  "ok": false,
+  "code": "duplicate_queued",
+  "message": "Hold proposal for IDCUST=12345 is already queued (proposed by jane@cardoso.local on 2026-05-08 10:14). Open the queue to review or approve it.",
+  "existing_proposal": { "id": 42, "status": "queued", "proposed_by": "...", "proposed_at": "...", "queue_url": "/operations/holds#proposal-42" }
+}
+
+// Case 2 — already approved, awaiting commit
+{
+  "ok": false,
+  "code": "duplicate_approved",
+  "message": "Hold for IDCUST=12345 has been approved by mark@cardoso.local and will commit on the next executor tick (within 5 min). Disable the master switch to halt.",
+  "existing_proposal": { "id": 42, "status": "approved", ... }
+}
+
+// Case 3 — already committed in last N hours (default 24h)
+{
+  "ok": false,
+  "code": "duplicate_recently_committed",
+  "message": "IDCUST=12345 was already put on hold 3 hours ago (proposal #42 by mark@cardoso.local). The controller must release in Accpac first if a new hold is needed.",
+  "existing_proposal": { "id": 42, "status": "committed", "committed_at": "...", ... }
+}
+```
+
+UI surfacing:
+- Button click that hits a `409 duplicate_*`: toast with the message
+  string and a "Go to queue" link if `queue_url` is present.
+  No red destructive treatment — these aren't errors, they're
+  *the existing proposal IS the right answer*.
+- Auto-flag rule path that hits a 409: silent success (the rule's
+  intent — "this customer should be held" — is already represented
+  by the existing proposal). No log spam, but the duplicate
+  attempt count is tracked so we can detect a misbehaving rule
+  via the `accpac-hold.terminal-failure-spike` style rule.
+
+The point is that duplicate suppression is a **success state**
+for the system, not a failure.
 
 ## Implementation surface (ordered by phase)
 
@@ -689,9 +879,137 @@ CREATE TABLE customer_exclusions (
    (25?), red-flag age before eligible (24h?).
 3. Which **Accpac SQL identity** the hold-writer uses. Existing
    read-only account or a new dedicated one.
-4. Whether **release-via-Cardoso** is in scope at all, or strictly
-   "Cardoso never releases."
+4. ~~Whether **release-via-Cardoso** is in scope at all, or strictly
+   "Cardoso never releases."~~
+   **Resolved (2026-05-08):** Cardoso *never* releases. Encoded as
+   the hold-only invariant (rule #12 in Write-path constraints).
+   Schema, helper, and boot-time assertion all enforce it.
 
 Once those are settled, Phase 1 is ~3-4 days. Phase 2 is ~2 weeks
 including UI. Phase 3 is ~3 days on top of Phase 2. Phase 4, if
 ever, is ~1 week.
+
+## Incident runbook
+
+When something is going wrong — operator sees customers being held
+who shouldn't be, controllers complaining, queue acting weird — this
+is the section to read first. Each scenario has a 30-second action
+followed by triage.
+
+### Symptom: customers are being put on hold incorrectly
+
+**Stop the bleeding (≤ 30 seconds):**
+
+1. **Settings → Accpac integration → Disable.** Single click.
+2. Confirm the state pill flips to **DISABLED**.
+3. Within 30 seconds the executor reads the flag on its next tick
+   and refuses any further commits.
+
+That's it for the immediate stop. No more `ARCUS.SWHOLD` writes
+will happen until you re-enable, regardless of what the queue
+contains.
+
+**Revert the bad commits:**
+
+1. Open Operations → Audit log, filter on `action = 'accpac_hold_committed'`.
+2. Each committed proposal has a row with the customer's `IDCUST`
+   and the prior `SWHOLD` value (captured by the pre-flight verify).
+3. SQL on the affected Accpac to revert — manual, deliberate:
+   ```sql
+   UPDATE ARCUS SET SWHOLD = 0 WHERE IDCUST IN ('IDCUST1', 'IDCUST2', ...);
+   ```
+   …with the list pulled from the audit. **Do not script this from
+   the proposal queue's `committed` list directly** — eyeball-verify
+   first.
+4. Cardoso sees the new `SWHOLD = 0` on the next sync and the
+   reconciliation report shows the divergence ("held in Cardoso's
+   record, not held in Accpac").
+
+**Stop the offending rule from re-queueing:**
+
+1. Settings → Auto-Flag Rules → find the rule that fired the bad
+   proposals.
+2. Toggle `is_active = 0`.
+3. Now even if you re-enable Accpac writes, that rule won't queue
+   new proposals.
+
+**Investigate, then re-enable:**
+
+1. Use the audit log + `pending_hold_actions.reason` to understand
+   what triggered the rule.
+2. Fix the rule conditions OR fix the underlying data OR add the
+   affected customers to `customer_exclusions`.
+3. Settings → Accpac integration → Enable (with password re-entry).
+
+### Symptom: queue full of stale proposals after an outage
+
+If the executor was down or `can_write_hold` was off for a while,
+proposals can pile up in `queued`/`approved` but never commit.
+Once you turn writes back on, you don't necessarily want a flood.
+
+1. Operations → Holds pending. Sort by `not_before` ascending.
+2. Bulk-expire endpoint: `POST /api/hold-proposals/expire-stale`
+   takes a `before_iso` cutoff. Flips all `queued` rows older than
+   that to `expired`. Audit-logged.
+3. The remaining proposals are recent enough that the controller
+   should review them individually before approve.
+
+### Symptom: operator accidentally enabled writes
+
+No data damage from enabling alone — enabling just unlocks the
+queue + executor. Nothing fires until something is approved.
+
+1. Settings → Accpac integration → Disable.
+2. Audit log records who enabled and when (and whose password
+   verified). Use that for the post-mortem.
+
+### Symptom: too many `failed_terminal` rows
+
+Means commits are being attempted but Accpac is rejecting them
+(login failed, schema drift, table locked, blocked by a trigger,
+etc.). The `accpac-hold.terminal-failure-spike` alert should fire
+automatically.
+
+1. Filter `pending_hold_actions WHERE status = 'failed_terminal'
+   AND committed_at > datetime('now', '-1 hour')`.
+2. Group by `failure_reason`. Almost always there's one root cause
+   across the batch (a credential rotated, a permission was
+   revoked).
+3. Disable Accpac writes while you fix the underlying issue.
+4. Once fixed, re-enable. Failed-terminal proposals don't auto-retry
+   — you have to either explicitly re-propose or accept that those
+   particular customers won't be held.
+
+### Symptom: reconciliation drift growing unexplained
+
+The `accpac-hold.reconciliation-drift` alert fires when the count
+of customers in either divergence direction exceeds threshold for
+> 24h.
+
+1. Open the Hold reconciliation panel (Operations or Settings).
+2. Two lists: "Held in Accpac, not red in Cardoso" and "Red in
+   Cardoso, not held in Accpac."
+3. Triage row by row. The point is the operator looks at each
+   customer and decides — Cardoso doesn't auto-resolve either
+   direction.
+4. Common drivers:
+   - Controller manually held in Accpac without Cardoso proposing
+     → expected, no action needed in Cardoso.
+   - Cardoso flagged red but proposal hasn't been approved →
+     follow up with the controller.
+   - Controller released in Accpac but Cardoso flag stale → operator
+     decides whether to clear the Cardoso flag.
+
+### Symptom: Master switch is off and you're not sure who turned it off
+
+Audit log has every `accpac_writes_enabled` and
+`accpac_writes_disabled` action with actor email, IP, and
+timestamp. There is no way to flip the switch without leaving an
+audit row — that's by design.
+
+### When in doubt: disable
+
+The **disable** action has no friction (no password, no warning,
+no confirmation) precisely because it's the universal undo. If
+something looks wrong and you're not sure what's happening:
+**disable first, investigate second.**
