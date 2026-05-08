@@ -19,14 +19,37 @@ export const loginLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// ── Token-or-IP keyGenerator factory ──────────────────────────────────────
+//
+// CRITICAL: only use the client-supplied token as the bucket key when it
+// matches THIS site's expected REPORTING_TOKEN. The naive form
+// `token ? token : ip` is bypass-trivial — an attacker rotates the
+// x-reporting-token header per request to get a fresh bucket every time,
+// and the rate limit silently does nothing. Limits run BEFORE auth
+// middleware, so we can't rely on requireReportingToken here; the
+// keyGenerator has to validate the token itself.
+//
+// Behaviour:
+//   - valid token (matches process.env.REPORTING_TOKEN) → per-token bucket
+//   - missing / wrong token / no expected token configured → per-IP bucket
+//
+// Per-token is still useful for the valid case (one bucket per legitimate
+// client even when multiple share an IP, e.g. behind a NAT). Per-IP for
+// the invalid case prevents the bypass.
+function _tokenOrIpKey(req) {
+  const token = req.headers['x-reporting-token'];
+  const expectedToken = process.env.REPORTING_TOKEN;
+  if (token && expectedToken && token === expectedToken) {
+    return String(token).slice(0, 16);
+  }
+  return ipKeyGenerator(req);
+}
+
 // ── Reporting API rate limiter (per token / IP) ───────────────────────────
 export const reportingRateLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute window
   max: 120, // 120 requests/min per IP — generous for polling clients
-  keyGenerator: (req) => {
-    const token = req.headers['x-reporting-token'];
-    return token ? String(token).slice(0, 16) : ipKeyGenerator(req);
-  },
+  keyGenerator: _tokenOrIpKey,
   message: { error: 'Too many requests. Slow down.' },
   standardHeaders: true,
   legacyHeaders: false,
@@ -41,6 +64,10 @@ export const reportingRateLimiter = rateLimit({
 // the hub plenty of headroom (cycle + manual smoke + retry) while making any
 // probing/exfil attempt visible by tripping limits.
 //
+// Uses the validated token-or-IP key (see _tokenOrIpKey). The earlier draft
+// trusted any client-supplied token as the bucket key, which an attacker
+// could rotate per request to bypass the 10/hour cap entirely.
+//
 // Cap is env-tunable so a small estate that schedules cycles more often can
 // dial it up. NaN guard: parseInt('garbage') returns NaN and Math.max(N, NaN)
 // returns NaN — leaving the comparison silently disabled. Validate explicitly.
@@ -53,10 +80,7 @@ function _parseHeavyMaxFromEnv() {
 export const backupHeavyRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour window
   max: _parseHeavyMaxFromEnv(),
-  keyGenerator: (req) => {
-    const token = req.headers['x-reporting-token'];
-    return token ? String(token).slice(0, 16) : ipKeyGenerator(req);
-  },
+  keyGenerator: _tokenOrIpKey,
   message: { error: 'Too many backup-export requests. Try again later.' },
   standardHeaders: true,
   legacyHeaders: false,
