@@ -32,18 +32,31 @@ import { useColorScheme } from '@/lib/useColorScheme';
 //   ok === null (no probe yet)     → grey    "Sage —"
 function SageStatusPill() {
   const [health, setHealth] = useState(null);
+  // fetchFailed flips true when /api/bat/sage-health is unreachable
+  // OR returns non-OK. The pill still renders in that case (as unknown
+  // with a distinct tooltip) instead of disappearing — operators
+  // shouldn't have to guess "is the feature broken or just unset?".
+  const [fetchFailed, setFetchFailed] = useState(false);
+
   useEffect(() => {
     let cancelled = false;
     const fetchHealth = async () => {
       try {
         const r = await fetch('/api/bat/sage-health', { credentials: 'include' });
-        if (!r.ok) return;
+        if (!r.ok) {
+          if (!cancelled) setFetchFailed(true);
+          return;
+        }
         const data = await r.json();
-        if (!cancelled) setHealth(data);
+        if (!cancelled) {
+          setHealth(data);
+          setFetchFailed(false);
+        }
       } catch {
-        // Network error — leave the pill as 'unknown' rather than fake
-        // a status. The admin banner's separate poll will surface the
-        // outage if it's persistent.
+        // Network error (server down, offline, etc.) — flip fetchFailed
+        // so the pill renders the "unknown" branch with the
+        // probe-endpoint-specific tooltip instead of vanishing.
+        if (!cancelled) setFetchFailed(true);
       }
     };
     fetchHealth();
@@ -51,10 +64,27 @@ function SageStatusPill() {
     return () => { cancelled = true; clearInterval(t); };
   }, []);
 
-  if (!health) return null;
-
+  // Pill ALWAYS renders — three "unknown" sub-cases:
+  //   - initial load before the first fetch resolves (health === null,
+  //     fetchFailed === false) → "Sage —" + "loading" tooltip
+  //   - probe endpoint unreachable / non-OK (fetchFailed === true) →
+  //     "Sage —" + "probe endpoint unreachable" tooltip (distinct from
+  //     "Sage backend down" which would be ok === false from a
+  //     successful response)
+  //   - server returned but probe never ran (health.ok === null) →
+  //     documented unknown state
+  // Earlier the component returned null on !health, so the pill
+  // disappeared during initial load and on any non-OK response —
+  // which an operator would naturally read as "the feature isn't
+  // there" rather than "I can't tell". Caught in PR review.
   let label, tone, tooltip;
-  if (health.attention) {
+  if (!health) {
+    label = 'Sage —';
+    tone = 'bg-slate-500/15 text-slate-400 border-slate-500/30';
+    tooltip = fetchFailed
+      ? 'Could not reach /api/bat/sage-health. The probe endpoint is unreachable; this is separate from Sage MSSQL connectivity.'
+      : 'Loading Sage health…';
+  } else if (health.attention) {
     label = `Sage down ${health.downForMinutes ?? '?'}m`;
     tone = 'bg-red-500/15 text-red-400 border-red-500/30';
     tooltip = `${health.consecutiveFailures} consecutive probe failures. Last error: ${health.lastError || 'unknown'}. Last OK: ${health.lastOkAt || 'never'}.`;
@@ -67,6 +97,7 @@ function SageStatusPill() {
     tone = 'bg-amber-500/15 text-amber-400 border-amber-500/30';
     tooltip = `${health.consecutiveFailures} probe failure(s). Last OK: ${health.lastOkAt || 'never'}. ${health.lastError || ''}`;
   } else {
+    // health.ok === null — server reachable but no probe yet.
     label = 'Sage —';
     tone = 'bg-slate-500/15 text-slate-400 border-slate-500/30';
     tooltip = 'Sage health not yet probed.';
