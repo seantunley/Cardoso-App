@@ -407,6 +407,34 @@ export function createBackupRouter() {
       res.setHeader('X-Backup-SHA256', sha256);
 
       const stream = fs.createReadStream(tmpPath);
+      // 'error' MUST be attached before pipe(). Without it, any read-side
+      // failure (file deleted between statSync and open due to AV
+      // sweep, permission flip, transient FS hiccup) emits an
+      // unhandled 'error' event — and on modern Node that takes the
+      // whole process down by default. A previous refactor lost this
+      // listener while restructuring the lifecycle code; flagged in
+      // PR review and restored.
+      //
+      // res.on('close') is also already attached (at the top of the
+      // handler), so even if pipe was already pumping bytes when this
+      // fires, the failure audit + cleanup still happen via that path.
+      // This handler does the same work eagerly so the temp file is
+      // unlinked immediately rather than waiting for the response to
+      // tear down.
+      stream.on('error', (err) => {
+        console.error('[backup] Stream error:', err.message);
+        cleanup();
+        writeAudit('failure');
+        if (!res.headersSent) {
+          res.status(500).json({ error: 'Failed to stream snapshot' });
+        } else {
+          // Headers already flushed via setHeader-then-pipe-then-error;
+          // we can't change status, but we can still abort the response
+          // so the hub-side fetch gets a clean disconnect rather than
+          // a hung half-stream.
+          try { res.destroy(err); } catch {}
+        }
+      });
       // Clean up the temp file when the read finishes — but DON'T audit
       // success here. `stream.on('end')` only means the readable is
       // exhausted; the bytes can still be sitting in res's outbound
