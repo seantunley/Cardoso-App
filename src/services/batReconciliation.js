@@ -1197,6 +1197,27 @@ export function backfillOrderAmounts(orderAmounts) {
   return count;
 }
 
+// Atomic refresh: DELETE existing rows, INSERT new ones, clear sage_error,
+// in one transaction so a read concurrent with a refresh never observes
+// the half-applied state. Earlier the routes did
+//   db.prepare('DELETE FROM bat_sage_credit_notes ...').run(id);
+//   storeSageCreditNotes(id, creditNotes);
+//   db.prepare('UPDATE bat_reconciliations SET sage_error = NULL ...').run(id);
+// as three separate statements. If storeSageCreditNotes threw mid-way (or
+// the totals UPDATE inside it threw), the recon was left with empty
+// credit notes plus stale totals. Caught by the BAT-module review.
+//
+// better-sqlite3 transactions nest correctly via savepoints, so the
+// inner txn inside storeSageCreditNotes participates in this outer one.
+export function replaceSageCreditNotes(reconId, creditNotes) {
+  const txn = db.transaction((id, notes) => {
+    db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
+    storeSageCreditNotes(id, notes);
+    db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(id);
+  });
+  txn(reconId, creditNotes);
+}
+
 export function storeSageCreditNotes(reconId, creditNotes) {
   const insert = db.prepare(`
     INSERT INTO bat_sage_credit_notes (

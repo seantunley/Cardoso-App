@@ -20,6 +20,7 @@ import {
   querySageWeekTotals,
   createReconciliation,
   storeSageCreditNotes,
+  replaceSageCreditNotes,
   backfillOrderAmounts,
   parseCardosoSpreadsheet,
   storeCardosoInvoices,
@@ -106,10 +107,13 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
 
       // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
       // so the UI shows it instead of silently displaying zero credit notes.
+      // Use replaceSageCreditNotes for atomicity even though there's
+      // nothing to delete on a freshly-created recon (the DELETE is a
+      // cheap no-op). One helper across all three call sites prevents
+      // drift if the refresh shape changes again.
       try {
         const creditNotes = await querySageCreditNotes(parsed.weekNumber, year);
-        storeSageCreditNotes(reconId, creditNotes);
-        db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(reconId);
+        replaceSageCreditNotes(reconId, creditNotes);
       } catch (sageErr) {
         console.error('[bat] Sage query failed:', sageErr.message);
         db.prepare('UPDATE bat_reconciliations SET sage_error = ? WHERE id = ?')
@@ -390,8 +394,11 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       }
       const creditNotes = await pending;
       if (creditNotes) {
-        db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
-        if (creditNotes.length > 0) storeSageCreditNotes(id, creditNotes);
+        // Atomic refresh — DELETE + insert + sage_error clear in one
+        // transaction so a concurrent reader can't observe the
+        // half-applied state (empty credit notes + stale totals).
+        // See replaceSageCreditNotes in the service for why.
+        replaceSageCreditNotes(id, creditNotes);
         recon = getReconciliation(id);
       }
     }
@@ -604,9 +611,12 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     try {
       const creditNotes = await querySageCreditNotes(recon.week_number, recon.year);
-      db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(id);
-      storeSageCreditNotes(id, creditNotes);
-      db.prepare('UPDATE bat_reconciliations SET sage_error = NULL WHERE id = ?').run(id);
+      // Atomic refresh — see replaceSageCreditNotes. Replaces three
+      // separate statements (DELETE, insert-via-storeSageCreditNotes,
+      // sage_error clear) with one transaction. If anything inside
+      // throws, the recon stays at its pre-refresh state instead of
+      // dropping to empty-credit-notes-with-stale-totals.
+      replaceSageCreditNotes(id, creditNotes);
       const updated = getReconciliation(id);
       logAudit({
         req, action: 'bat_refresh_sage', resourceType: 'system',
