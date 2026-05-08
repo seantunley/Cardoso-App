@@ -1462,10 +1462,23 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // refresh should trust the same row instead of silently skipping
       // when HUB_SITES.find() misses (which would leave the dashboard
       // freshness fields stale indefinitely).
+      // Important: syncSite() does NOT throw on pull failures — it
+      // catches internally, sets the hub_sites row to status='error',
+      // and returns { error } in its result object. The earlier
+      // try/catch-only check missed every soft failure, so the client
+      // would receive hub_refresh_ok=true even when the chained pull
+      // had silently failed and the dashboard would keep showing stale
+      // last_accpac_* values until the next scheduler tick. Check both
+      // the return value AND the catch (defence in depth — if a
+      // future refactor makes syncSite throw, this still works).
       let hubPullOk = true;
       let hubPullError = null;
       try {
-        await syncSite(site);
+        const refreshResult = await syncSite(site);
+        if (refreshResult?.error) {
+          hubPullOk = false;
+          hubPullError = String(refreshResult.error);
+        }
       } catch (pullErr) {
         hubPullOk = false;
         hubPullError = pullErr?.message || String(pullErr);
