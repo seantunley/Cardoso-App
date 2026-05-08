@@ -763,9 +763,19 @@ export default function HubDashboard() {
         const first = failed[0];
         toast.error(`${name}: ${first.name} — ${first.message}`);
       }
-      // Refresh the dashboard a few seconds later so the next hub-pull
-      // cycle has time to land and the tile reflects the new freshness.
-      setTimeout(() => fetchAll(), 8000);
+      // The hub's trigger endpoint chains a syncSite() after the site
+      // finishes, so hub_sites.last_accpac_* is already up to date by
+      // the time we get here. fetchAll runs immediately — no fixed
+      // setTimeout that used to "guess" when the next scheduler tick
+      // would land (and made the manual button look ineffective for
+      // up to 5 minutes on a quiet day).
+      if (body.hub_refresh_error) {
+        // Trigger succeeded but the chained hub-pull didn't. Dashboard
+        // still re-fetches; operator just sees a heads-up so they
+        // aren't surprised if the tile timestamp lags briefly.
+        toast(`Refresh of hub data lagged: ${body.hub_refresh_error}`);
+      }
+      fetchAll();
     } catch (err) {
       toast.error(humanizeApiError(err, `trigger Accpac sync at ${name}`));
     } finally {

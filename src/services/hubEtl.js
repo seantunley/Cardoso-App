@@ -603,4 +603,4 @@ export async function pingAllSites() {
   }
 }
 
-export { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, HUB_SITES };
+export { initHubTables, initHubSiteRegistry, syncAllSites, syncSite, runHubBackupPull, HUB_SITES };

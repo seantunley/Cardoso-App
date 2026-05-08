@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import { readdirSync, statSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSite, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
@@ -1439,7 +1439,38 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: `${body.succeeded || 0}/${body.total || 0} connection(s) synced`,
         changes: { results: body.results },
       });
-      res.json(body);
+
+      // Site has finished its Accpac sync. The hub_sites row is still
+      // stale at this point — `last_accpac_synced_at` won't update
+      // until the next 5-min hub→site scheduler tick re-pulls the
+      // site's KPIs. That made the manual button look ineffective:
+      // operator clicks Sync, response says success, tile keeps the
+      // old timestamp until the scheduler caught up minutes later.
+      //
+      // Chain a syncSite call here so by the time we respond, the
+      // hub has already pulled the freshly-updated kpis. Wrapped in a
+      // try/catch — if the hub-pull fails for some reason, the trigger
+      // itself still succeeded, so we report partial success rather
+      // than 502. The client's setTimeout-then-fetchAll then sees the
+      // up-to-date row.
+      let hubPullOk = true;
+      let hubPullError = null;
+      try {
+        const matchingSite = HUB_SITES.find((s) => s.id === site.id);
+        if (matchingSite) {
+          await syncSite(matchingSite);
+        }
+      } catch (pullErr) {
+        hubPullOk = false;
+        hubPullError = pullErr?.message || String(pullErr);
+        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch {}
+      }
+
+      res.json({
+        ...body,
+        hub_refresh_ok: hubPullOk,
+        hub_refresh_error: hubPullError,
+      });
     } catch (err) {
       const friendly = describeFetchError(err, url);
       logError('hub.trigger_accpac_sync', err, { site_id: site.id, site_url: site.url, friendly });
