@@ -55,6 +55,14 @@ Folded in from a code-review pass on the v1 plan:
   can add local overrides flagged `source='local'`. Conflict
   resolution is the **union** of both: if either says "exclude,"
   the customer is excluded. Errs on the side of *not* taking action.
+- **Write-path constraints (non-negotiable)** — added a dedicated
+  contract section (further below) listing the eleven rules every
+  Accpac write must satisfy: one field only (`SWHOLD`), one row at
+  a time, parameterised SQL, dedicated helper with no escape hatch,
+  pre/post verify SELECTs, per-write transactions, and a build-time
+  SQL-shape assertion that fails the build if the queries ever
+  drift. The contract turns "don't cause a bulk apocalypse" from a
+  guard rail into a structural impossibility.
 
 ## Core principle
 
@@ -305,6 +313,108 @@ operator makes the call.
    `GET /api/hold-reconciliation` endpoint backing an admin panel
    that lists both directions of divergence. Operator triages from
    the panel — no automatic action either way.
+
+## Write-path constraints (non-negotiable)
+
+**Nothing about the Accpac write path is "guard rails." It is
+structurally impossible to misuse.** A bug in the queue, a typo in
+a rule, a sketchy SQL-injection attempt against the proposal API
+— none of them can result in anything beyond `ARCUS.SWHOLD`
+flipping on one row. There is no code path that would let it.
+
+These rules are bake-in conditions. None of them are optional. Any
+PR that touches the Accpac write surface gets reviewed against this
+list and rejected if it weakens any of them.
+
+1. **One field. Only `ARCUS.SWHOLD`.** No other column ever
+   touched. The write helper takes a customer number and a hold
+   value (1 or 0) — that's it. No "while we're at it" updates to
+   `IDNATACCT`, `AMTCRLIMT`, or anything else, ever.
+
+2. **One row at a time.** No `WHERE status = …`, no
+   `WHERE IDCUST IN (...)`, no JOINs. Every commit is
+   `WHERE IDCUST = @idcust` matching exactly one row. SQL Server's
+   affected-row count must come back as 0 or 1 — anything else
+   (impossible without code corruption, but checked anyway) is a
+   hard abort recorded as `failed_terminal`, no retry.
+
+3. **No rollups, no SELECT-then-UPDATE patterns.** The write is a
+   single parameterised
+   `UPDATE ARCUS SET SWHOLD = @hold WHERE IDCUST = @idcust`
+   and nothing else. The pre/post verify SELECTs (rule #6 below) are
+   separate statements, not part of a chained query.
+
+4. **Static SQL string.** No string concatenation, no template-literal
+   interpolation of values. Parameterised binding only. The SQL is
+   a compile-time constant in the source file.
+
+5. **Dedicated write-pool helper** (`customerSqlWritePool.js`)
+   exposing exactly one function: `setHoldStatus(connectionId, idcust, hold01)`.
+   No generic `query()`, no `executeRaw()`, no escape hatch. Misuse-
+   resistant by API design — there is no other operation a caller
+   could invoke even if they wanted to.
+
+6. **Pre-flight verify.** Before the `UPDATE`, the helper runs
+   `SELECT IDCUST, SWHOLD FROM ARCUS WHERE IDCUST = @idcust`.
+   - 0 rows: abort, `failed_terminal`, no write.
+   - >1 rows: abort, `failed_terminal`, no write. (Theoretically
+     impossible since `IDCUST` is the PK, but checking is free.)
+   - 1 row: capture the current `SWHOLD` value for the audit
+     before/after.
+
+7. **Post-write verify.** After the `UPDATE`, a second
+   `SELECT SWHOLD FROM ARCUS WHERE IDCUST = @idcust` confirms the
+   value committed correctly. Mismatch = `failed_terminal`, alert,
+   no retry. (Catches the kind of trigger / replication weirdness
+   that would otherwise silently revert the change.)
+
+8. **Per-write transaction.** Each commit is its own transaction.
+   No batching across proposals. If the operator approves 5
+   proposals from a list, that's 5 independent transactions, one
+   row each, in sequence — not one transaction touching 5 rows.
+   Failures don't cascade; a single bad row doesn't abort the
+   others.
+
+9. **Build-time SQL-shape assertion.** A unit test that loads
+   `customerSqlWritePool.js`, captures every SQL string the helper
+   would emit, and asserts they match exactly:
+   ```
+   ^SELECT IDCUST, SWHOLD FROM ARCUS WHERE IDCUST = @idcust$
+   ^UPDATE ARCUS SET SWHOLD = @hold WHERE IDCUST = @idcust$
+   ^SELECT SWHOLD FROM ARCUS WHERE IDCUST = @idcust$
+   ```
+   The build fails if any string ever differs, even by whitespace.
+   Catches an accidental "let's also update X" refactor at PR
+   review time, not at production-incident time.
+
+10. **No code path skips the helper.** Every call into MSSQL that
+    might end up writing has to go through `setHoldStatus`. Direct
+    use of `mssql` from anywhere else in the codebase to write to
+    `ARCUS` is an automatic block at code-review. The write-pool
+    helper is the only sanctioned door, full stop.
+
+11. **`can_write_hold` checked inside the helper.** The flag is
+    enforced at the lowest level — even if a caller bypasses the
+    proposal queue and calls `setHoldStatus` directly,
+    `can_write_hold = 0` returns `failed_terminal` without
+    touching MSSQL. Defence in depth.
+
+**Failure modes this contract eliminates:**
+
+| Threat | Why it can't happen |
+|---|---|
+| Bulk update accidentally hits 200 customers | Rule #2 — affected_rows > 1 aborts |
+| SQL injection via flag_reason or proposal note | Rule #4 — values are bound params, never concatenated |
+| Future PR adds "while you're here, also update credit_limit" | Rule #9 — SQL-shape test fails the build |
+| Trigger on `ARCUS` reverts the change silently | Rule #7 — post-write verify catches it |
+| Caller skips the queue and writes directly via `mssql` | Rules #5 + #10 — no other code path can write |
+| Dev forgets to flip `can_write_hold` and ships writes-on by default | Rule #11 — the helper itself enforces; default-off in schema |
+
+If any future requirement seems to need relaxing one of these
+rules, that's a strong signal the requirement should be redesigned,
+not the contract weakened. The cost of these constraints is at most
+a handful of extra lines of code; the cost of relaxing them is the
+"bulk apocalypse" scenario this whole document exists to prevent.
 
 ## Schema changes required
 
