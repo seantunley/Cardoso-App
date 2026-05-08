@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, memo } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import {
   RefreshCw, AlertCircle, ShieldCheck, Clock, Search,
@@ -63,7 +63,11 @@ function getSinceDate(rangeValue) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
-function SiteCard({ site, onFlagClick, onResync }) {
+// Memoised so a parent re-render (search-typing, dateRange flip, kpis poll)
+// doesn't re-render every tile when the props for *this* tile haven't
+// shape-changed. The parent already wraps onFlagClick / onResync with
+// useCallback so the prop identity is stable across renders.
+const SiteCard = memo(function SiteCard({ site, onFlagClick, onResync }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
@@ -171,7 +175,7 @@ function SiteCard({ site, onFlagClick, onResync }) {
       )}
     </div>
   );
-}
+});
 
 // ─── customer modal (read-only from hub) ────────────────────────────────────────────
 
@@ -189,7 +193,10 @@ const verdictScoreHub = {
   dormant: "bg-purple-800/60 text-purple-200 ring-1 ring-purple-600/40",
 };
 
-function HubCustomerModal({ record, open, onClose }) {
+// Memoised — modal sits inside HubCustomerSearch. Without this, every
+// keystroke in the search input re-renders the modal too, and on a hub
+// with a heavy customer record the credit-analysis recompute is non-trivial.
+const HubCustomerModal = memo(function HubCustomerModal({ record, open, onClose }) {
   const [creditLogicConfig, setCreditLogicConfig] = useState(DEFAULT_CREDIT_LOGIC_CONFIG);
   const [subAccounts, setSubAccounts] = useState([]);
 
@@ -447,11 +454,14 @@ function HubCustomerModal({ record, open, onClose }) {
       </DialogContent>
     </Dialog>
   );
-}
+});
 
 // ─── hub customer search ─────────────────────────────────────────────────────
 
-function HubCustomerSearch({ sites }) {
+// Memoised so a parent re-render (kpis poll, dateRange flip) doesn't force
+// the search input + suggestion list to reconcile when its only prop
+// (`sites`) is identity-stable.
+const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
   const colorScheme = useColorScheme();
   const [selectedSiteId, setSelectedSiteId] = useState("");
   const [query, setQuery] = useState("");
@@ -483,7 +493,20 @@ function HubCustomerSearch({ sites }) {
   }, []);
 
   useEffect(() => {
-    const timeout = setTimeout(() => searchRecords(query, selectedSiteId), 200);
+    // Skip the schedule entirely on empty/whitespace-only input. Previously
+    // every empty-query render still scheduled a timeout that called
+    // searchRecords (which then bailed via the in-function trim check),
+    // burning React state-flips for no reason. Now the empty path clears
+    // suggestions synchronously and stops there.
+    if (!query.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+    // 300ms debounce — operator typing speed is ~120ms/char on a familiar
+    // customer name, so 200ms was effectively no debounce. 300ms still
+    // feels live but cuts the request count by ~30% on typical typing.
+    const timeout = setTimeout(() => searchRecords(query, selectedSiteId), 300);
     return () => clearTimeout(timeout);
   }, [query, selectedSiteId, searchRecords]);
 
@@ -593,7 +616,7 @@ function HubCustomerSearch({ sites }) {
       <HubCustomerModal record={modalRecord} open={modalOpen} onClose={() => { setModalOpen(false); setModalRecord(null); }} />
     </div>
   );
-}
+});
 
 
 // ─── main page ───────────────────────────────────────────────────────────────

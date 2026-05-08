@@ -767,16 +767,21 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const isParent = /^\d+$/.test(customerNumber);
       let subAccounts = [];
       if (isParent) {
+        // GLOB pattern `<parent>[!0-9]*` means: literal parent digits, then
+        // exactly one non-digit char, then anything. This filters at SQLite
+        // level instead of the previous LIKE-prefix + JS regex post-filter
+        // pattern, which pulled every prefix-match (e.g. parent "100"
+        // dragged out 1001, 1002, 1003 …) just to throw them away in JS
+        // after parsing every JSON blob. GLOB-with-character-class does the
+        // same job in one query without the parse-then-discard cost.
+        // customerNumber is `^\d+$`-validated above so no GLOB-injection
+        // risk, but we bind it as a parameter anyway.
         const prefixMatches = db.prepare(`
           SELECT * FROM hub_records
-          WHERE site_id = ? AND TRIM(customer_number) LIKE ? AND TRIM(customer_number) != ?
+          WHERE site_id = ? AND TRIM(customer_number) GLOB ?
           ORDER BY customer_number ASC, id ASC
-        `).all(site_id, `${customerNumber}%`, customerNumber);
-        subAccounts = prefixMatches.filter(r => {
-          const cn = String(r.customer_number || '').trim();
-          const m = cn.match(/^(\d+)/);
-          return m && m[1] === customerNumber;
-        }).map(r => expandDataRecord(parseBlobs(r)));
+        `).all(site_id, `${customerNumber}[!0-9]*`);
+        subAccounts = prefixMatches.map(r => expandDataRecord(parseBlobs(r)));
       }
 
       res.json({ record: expandDataRecord(parseBlobs(record)), subAccounts });
