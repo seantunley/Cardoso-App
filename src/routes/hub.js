@@ -1451,15 +1451,21 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // hub has already pulled the freshly-updated kpis. Wrapped in a
       // try/catch — if the hub-pull fails for some reason, the trigger
       // itself still succeeded, so we report partial success rather
-      // than 502. The client's setTimeout-then-fetchAll then sees the
-      // up-to-date row.
+      // than 502. The client's fetchAll then sees the up-to-date row.
+      //
+      // Use the DB row directly — earlier this looked up the site in
+      // HUB_SITES (the env-derived in-memory list), but the two can
+      // drift: hub_sites is upserted from HUB_SITES on boot but stale
+      // rows are never pruned, and a site-config change between boots
+      // leaves the table with rows the env no longer knows about. The
+      // trigger above already happily forwards to site.url, so the
+      // refresh should trust the same row instead of silently skipping
+      // when HUB_SITES.find() misses (which would leave the dashboard
+      // freshness fields stale indefinitely).
       let hubPullOk = true;
       let hubPullError = null;
       try {
-        const matchingSite = HUB_SITES.find((s) => s.id === site.id);
-        if (matchingSite) {
-          await syncSite(matchingSite);
-        }
+        await syncSite(site);
       } catch (pullErr) {
         hubPullOk = false;
         hubPullError = pullErr?.message || String(pullErr);
