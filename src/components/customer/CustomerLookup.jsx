@@ -177,14 +177,26 @@ function _isMissingForNumeric(value) {
 
 function _resolveField(record, fieldName, policySpec) {
   const dataObj = record?.data;
-  // Build the candidate chain in fallback order: canonical, legacy aliases
-  // (if any), then `data.canonical`, then `data.legacy`. Stop at the first
-  // value that passes the policy's "is present" check.
+  // Build the candidate chain in fallback order. The order MUST match the
+  // pre-refactor original:
+  //
+  //   1. record.canonical          — newest top-level column
+  //   2. record.data.canonical     — newest value inside the legacy data blob
+  //   3. record.legacy             — old top-level alias (e.g. last_receipt_number)
+  //   4. record.data.legacy        — old name inside the legacy data blob
+  //
+  // The reordering matters on upgraded DBs that still carry stale legacy
+  // columns from the v2 backfill. If `record.legacy` were checked BEFORE
+  // `record.data.canonical`, a stale `last_receipt_number` could shadow a
+  // freshly-synced `data.last_receipt_1` and render outdated receipt /
+  // invoice details. Caught in PR #212 review — an earlier draft of this
+  // refactor had aliases-on-record sandwiched between `record.canonical`
+  // and `data.canonical`, which inverted the original semantics.
   const aliases = LEGACY_FALLBACKS[fieldName] || [];
   const candidates = [
     record?.[fieldName],
-    ...aliases.map((alias) => record?.[alias]),
     dataObj?.[fieldName],
+    ...aliases.map((alias) => record?.[alias]),
     ...aliases.map((alias) => dataObj?.[alias]),
   ];
   const isMissing = policySpec.policy === FIELD_POLICY.numeric
