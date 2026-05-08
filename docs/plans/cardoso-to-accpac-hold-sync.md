@@ -87,6 +87,49 @@ Folded in from a code-review pass on the v1 plan:
   plan that an operator can find in 5 seconds when something is
   going wrong. Disable, revert, investigate.
 
+## Revisions (2026-05-08, second audit pass)
+
+Six issues caught by Codex review on the v2 plan, all valid
+text-vs-text inconsistencies introduced as the plan grew:
+
+- **Disabled-gate is not a terminal failure.** Earlier text said
+  the executor would record `failed_terminal` whenever
+  `can_write_hold = 0`; later text promised disabled writes preserve
+  the queue for re-enable. Reconciled — disabled gates leave the
+  proposal in its current state and emit an alert, instead of
+  burning approved work as a permanent failure. Same fix for the
+  master-switch-off case. (Phase 2 description + Defence-in-depth
+  ordering both updated.)
+- **Eligibility re-check scoped by source.** The commit-time
+  eligibility filter previously included `flag_source = 'auto'` and
+  exclusion-list membership for *every* proposal — which would have
+  blocked manual proposals that the plan elsewhere exempted from
+  those checks. Split the gate: full filter for `source='rule'`,
+  narrow filter (customer + connection still valid, hold still 0)
+  for `source='manual'`.
+- **Failure-state classification table.** Added an explicit per-gate
+  `failed_retryable` vs `failed_terminal` mapping so the executor
+  classifies deliberately. Transient MSSQL errors (timeout,
+  deadlock, connection reset) stay retryable; misconfiguration and
+  schema issues are terminal. The `describeSqlError` helper drives
+  the classification.
+- **`failed_at` timestamp.** Added to `pending_hold_actions`. Stamped
+  on every transition into `failed_*`, regardless of which gate
+  failed. The runbook query for "spike of terminal failures" now
+  filters on `failed_at`, not `committed_at` — which would have been
+  NULL for every gates-1-through-5 failure.
+- **Bulk-expire targets approved rows too.** The "queue full of
+  stale proposals" runbook step previously expired only `queued`
+  rows. Stale `approved` rows are the actually-dangerous case (they
+  bypass review on re-enable, using a sign-off potentially weeks
+  old). Endpoint now takes a `target_status` parameter; default
+  sweep includes both with stricter staleness for approved.
+- **`customer_exclusions` keyed by connection.** The previous PK
+  `(customer_number, source)` collapsed two real customers in
+  multi-ledger sites into one exclusion row. Added `connection_id`
+  to the PK. Hub-pushed exclusions ship with a `target_scope`
+  (`all_connections` by default) that the site fans out on receive.
+
 ## Core principle
 
 **Cardoso proposes, Accpac disposes.**
@@ -163,10 +206,16 @@ write capability turns on.
 - The executor itself is **gated by `databaseconnection.can_write_hold`**.
   Default is 0 on every connection. The endpoint runs the executor,
   but every write checks the flag — when 0, the executor is a no-op
-  that records `status='failed_terminal'` with reason "writes disabled
-  on connection." That lets the queue + approval UX bake in
-  production without any actual MSSQL writes happening, and turning
-  on writes for a test connection is a config flip, not a code release.
+  that **leaves the proposal in its current state** (typically
+  `approved`) and emits a `hold-writes-disabled` log line + alert.
+  The proposal is not flipped to `failed_terminal` — it stays
+  resumable, so when an operator turns the flag back on the queue
+  drains naturally without manual re-proposal. (Distinguishing the
+  disabled-gate path from a terminal failure was a late audit fix —
+  see "Failure-state classification" below.) That lets the queue +
+  approval UX bake in production without any actual MSSQL writes
+  happening, and turning on writes for a test connection is a config
+  flip, not a code release.
 - Auto-flag rules **do not** populate the queue yet.
 - Every commit writes an `auditlog` row plus a `pending_hold_actions`
   status change. Server-side `transitionStatus(from, to)` helper
@@ -563,19 +612,31 @@ ceremony; disabling is the emergency stop and stays that way.
 
 ### Defence-in-depth ordering
 
-When a write is attempted, the gates fire in this order. Failing
-any one returns `failed_terminal` with the specific reason — they
-don't cascade silently:
+When a write is attempted, the gates fire in this order. Each gate's
+outcome maps to either `failed_retryable`, `failed_terminal`, or (in
+the disabled-gate case) "leave alone for re-enable" — see the
+**Failure-state classification** subsection below for the table:
 
 1. **Master switch** (`bat_settings.accpac_write_enabled = 'true'`)
-   — set via Settings UI with password re-entry.
+   — set via Settings UI with password re-entry. Failure here leaves
+   the proposal in its current state (resumable on re-enable).
 2. **Per-connection flag** (`databaseconnection.can_write_hold = 1`)
-   — set via the Connections settings, audit-logged.
+   — set via the Connections settings, audit-logged. Same as #1:
+   resumable, not terminal.
 3. **Proposal status** — must be `approved`, not `queued` or
    `rejected`.
-4. **Eligibility filter** (auto-flag age, exclusion list, etc.)
-   — checked at enqueue time AND at commit time, since state can
-   change in between.
+4. **Eligibility filter** — checked at enqueue time AND at commit
+   time, since state can change in between. **Scope differs by
+   source**: rule-source proposals re-check the full filter
+   (auto-flag age, exclusion list, `flag_source = 'auto'`,
+   `accpac_on_hold = 0`); manual-source proposals re-check only the
+   narrow set that protects against stale state (customer still
+   exists in `datarecord`, connection still active, `accpac_on_hold`
+   still 0). The exclusion list and `flag_source` constraints stay
+   as enqueue-time checks for rule proposals only — re-applying them
+   at commit time would block manual proposals that legitimately
+   target excluded customers (per "manual proposals can still target
+   excluded customers" earlier in this doc).
 5. **Pre-flight verify SELECT** — the row must exist, return one
    row, with a captured before-value.
 6. **Executor write** — the `UPDATE ARCUS SET SWHOLD ...` only
@@ -587,6 +648,37 @@ That's seven independent checks for what is, technically, a single
 field flip. The cost is a handful of milliseconds and a few extra
 lines of code. The benefit is that no plausible failure mode
 results in unintended writes.
+
+### Failure-state classification
+
+The `failed_retryable` vs `failed_terminal` enum split (from the
+2026-05-08 audit revisions) is only useful if the executor
+classifies each gate's failure deliberately. Misclassifying a
+transient error as terminal forces manual re-proposal for what
+should have been a 30-second blip; misclassifying a terminal error
+as retryable creates infinite-loop alert noise.
+
+The mapping:
+
+| Gate / failure | State | Why |
+|---|---|---|
+| Master switch off | *no state change* | Disabled-gate path. Proposal stays in `approved` (or `queued`) and resumes on re-enable. Emits `hold-writes-disabled` alert, not a row mutation. |
+| `can_write_hold = 0` on connection | *no state change* | Same as above — gate is a deliberate operator stop, not a failure. |
+| Proposal not in `approved` status | `failed_terminal` | Either a logic bug or a manual override; either way, not retryable without operator action. |
+| Eligibility re-check fails (rule proposal) | `failed_terminal` | State changed between enqueue and commit (customer un-flagged, added to exclusion list, etc.). Re-proposing would just re-fail. |
+| Eligibility re-check fails (manual proposal) | `failed_terminal` | Customer no longer exists in `datarecord` or connection inactive. Operator needs to investigate, not retry. |
+| Pre-flight verify returns 0 rows | `failed_terminal` | Customer doesn't exist in Accpac. Won't fix itself. |
+| Pre-flight verify returns >1 rows | `failed_terminal` | Schema corruption. Halt and shout. |
+| Executor `UPDATE` — MSSQL timeout / deadlock / connection reset | `failed_retryable` | Classic transient. Backoff + retry. |
+| Executor `UPDATE` — login failed / permission denied | `failed_terminal` | Credentials rotated or permissions revoked. Won't fix without operator action. |
+| Executor `UPDATE` — any other MSSQL error | classified by `describeSqlError` | The same helper that drives the rest of the app's error surfacing. Add an `isRetryable` boolean to its return shape if it doesn't already have one. |
+| `affected_rows != 1` after `UPDATE` | `failed_terminal` | Code corruption (rule #2 of the write contract violated). Halt. |
+| Post-write verify mismatch | `failed_terminal` | Trigger reverted the change, or replication lag, or worse. Manual investigation required. |
+| SQL-shape build assertion failure | *build fails, never runs* | Caught at PR review; can't reach production. |
+
+`failed_retryable` rows get a `retry_count` increment and a
+`next_retry_at`. After 5 retries they auto-flip to `failed_terminal`
+with reason `retry_exhausted`, so the queue can't grow unboundedly.
 
 ## Schema changes required
 
@@ -642,6 +734,16 @@ CREATE TABLE pending_hold_actions (
   approved_by TEXT,
   approved_at TEXT,
   committed_at TEXT,
+  -- Stamped whenever status flips to failed_retryable or
+  -- failed_terminal, regardless of which gate failed. committed_at
+  -- only gets set on successful UPDATEs, so a query filtering
+  -- failures by committed_at would miss every failure from gates 1–5
+  -- (master switch, can_write_hold, status, eligibility, pre-flight
+  -- verify). failed_at is the canonical "when did this thing go
+  -- wrong" timestamp for runbook queries.
+  failed_at TEXT,
+  retry_count INTEGER DEFAULT 0,
+  next_retry_at TEXT,
   not_before TEXT,
   -- failure_reason captures the describeSqlError-shaped message when
   -- status flips to failed_*. Operator-readable, no free-text result
@@ -660,6 +762,11 @@ CREATE INDEX idx_pending_hold_status ON pending_hold_actions(status, customer_nu
 
 CREATE TABLE customer_exclusions (
   customer_number TEXT NOT NULL,
+  -- Scoped per connection so the same IDCUST text in two ledgers
+  -- doesn't collapse into one exclusion row. A multi-ledger site
+  -- can have customer "01-1234" excluded in connection A but
+  -- eligible for hold proposals in connection B.
+  connection_id INTEGER NOT NULL,
   -- 'hub' = pushed from the central list (read-only at sites);
   -- 'local' = added at the site as a local override. Both apply
   -- (exclusion union — if either says exclude, the customer is excluded).
@@ -667,9 +774,30 @@ CREATE TABLE customer_exclusions (
   reason TEXT,
   added_by TEXT,
   added_at TEXT DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (customer_number, source)
+  PRIMARY KEY (customer_number, connection_id, source)
 );
 ```
+
+**Hub-pushed exclusions and connection scoping.** The hub doesn't
+know which `connection_id` a site uses for its Accpac ledger — that
+ID is local to each site's `databaseconnection` table. Two patterns
+are workable:
+
+- **Fan-out on receive (recommended).** The hub pushes
+  `customer_exclusions` keyed only by `customer_number` + a target
+  scope (`all_connections` | `connection_slug:<x>`). The site's
+  receive handler resolves that against its own `databaseconnection`
+  rows and inserts one row per matching connection. Default scope
+  is `all_connections`, which matches the historical behaviour and
+  is what most operators want. Per-connection scoping is the
+  escape hatch for the multi-ledger edge case.
+- **Per-(site, connection-slug) hub records.** The hub stores
+  exclusions with explicit `(site_id, connection_slug)` tuples. More
+  bookkeeping at the hub, less work at the site. Worth it only if
+  multi-ledger sites become common.
+
+Phase 2 ships with fan-out on receive. Revisit if the operator load
+on per-connection exclusion management gets uncomfortable.
 
 ## Alert thresholds & SLOs
 
@@ -949,10 +1077,20 @@ Once you turn writes back on, you don't necessarily want a flood.
 
 1. Operations → Holds pending. Sort by `not_before` ascending.
 2. Bulk-expire endpoint: `POST /api/hold-proposals/expire-stale`
-   takes a `before_iso` cutoff. Flips all `queued` rows older than
-   that to `expired`. Audit-logged.
+   takes a `before_iso` cutoff and a `target_status` parameter
+   accepting `queued`, `approved`, or `both`. Flips all matching
+   rows older than the cutoff to `expired`. Audit-logged.
+   - **Important: stale `approved` rows are the dangerous case**,
+     not stale `queued` rows. An approved row will commit
+     immediately on re-enable without going back through review,
+     using a controller's sign-off that may be days or weeks old.
+     Always include `approved` in the cutoff sweep — and use a
+     stricter staleness threshold for `approved` than for `queued`
+     (suggested defaults: 7 days for queued, 24 hours for approved).
 3. The remaining proposals are recent enough that the controller
-   should review them individually before approve.
+   should review them individually before approve. For freshly
+   expired `approved` rows, the controller decides whether to
+   re-approve (with current context) or let them lapse.
 
 ### Symptom: operator accidentally enabled writes
 
@@ -965,20 +1103,29 @@ queue + executor. Nothing fires until something is approved.
 
 ### Symptom: too many `failed_terminal` rows
 
-Means commits are being attempted but Accpac is rejecting them
-(login failed, schema drift, table locked, blocked by a trigger,
-etc.). The `accpac-hold.terminal-failure-spike` alert should fire
+Means commits are being rejected — could be Accpac rejecting them
+(login failed, schema drift, table locked, blocked by a trigger),
+or could be earlier-gate failures (eligibility re-check, pre-flight
+verify). The `accpac-hold.terminal-failure-spike` alert should fire
 automatically.
 
 1. Filter `pending_hold_actions WHERE status = 'failed_terminal'
-   AND committed_at > datetime('now', '-1 hour')`.
+   AND failed_at > datetime('now', '-1 hour')`.
+   - Use `failed_at`, not `committed_at`. Failures from gates 1–5
+     (master switch, `can_write_hold`, status, eligibility,
+     pre-flight verify) never reach the UPDATE, so `committed_at`
+     stays NULL on those rows — a `committed_at`-filtered query
+     would return zero results during precisely the incidents
+     you're trying to triage.
 2. Group by `failure_reason`. Almost always there's one root cause
    across the batch (a credential rotated, a permission was
-   revoked).
+   revoked, an eligibility rule changed mid-batch).
 3. Disable Accpac writes while you fix the underlying issue.
 4. Once fixed, re-enable. Failed-terminal proposals don't auto-retry
    — you have to either explicitly re-propose or accept that those
-   particular customers won't be held.
+   particular customers won't be held. (Failed-retryable rows do
+   auto-retry up to 5 times — see the failure-state classification
+   table earlier in this doc.)
 
 ### Symptom: reconciliation drift growing unexplained
 
