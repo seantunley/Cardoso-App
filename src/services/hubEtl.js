@@ -247,8 +247,16 @@ async function syncSite(site) {
         clearTimeout(t3);
       }
     };
+    // Attach a no-op .catch() to every prefetched-but-not-yet-awaited
+    // promise so that if `insertMany` throws (SQLite I/O / locking
+    // error), the abandoned fetch's eventual rejection doesn't surface
+    // as an unhandledRejection. The .catch chain creates a sibling
+    // handler — when we DO await the original promise on the next
+    // iteration, errors still propagate normally.
+    const guardOrphan = (p) => { if (p) p.catch(() => {}); return p; };
+
     let offset = 0;
-    let nextRecordsPromise = fetchRecordsPage(0);
+    let nextRecordsPromise = guardOrphan(fetchRecordsPage(0));
     while (true) {
       const recData = await nextRecordsPromise;
       const records = recData?.records || [];
@@ -256,7 +264,7 @@ async function syncSite(site) {
       // network round-trip overlaps with the better-sqlite3 transaction.
       const consumed = records.length;
       const willHaveMore = recData?.has_more === true && consumed > 0;
-      nextRecordsPromise = willHaveMore ? fetchRecordsPage(offset + consumed) : null;
+      nextRecordsPromise = willHaveMore ? guardOrphan(fetchRecordsPage(offset + consumed)) : null;
 
       if (consumed > 0) {
         if (offset === 0) {
@@ -321,13 +329,15 @@ async function syncSite(site) {
     };
     const syncedItemNumbers = [];
     let invOffset = 0;
-    let nextInvPromise = fetchInvPage(0);
+    // Same orphan-rejection guard pattern as the records loop above —
+    // see the comment around guardOrphan().
+    let nextInvPromise = guardOrphan(fetchInvPage(0));
     while (true) {
       const invData = await nextInvPromise;
       const invRecords = invData?.records || [];
       const consumed = invRecords.length;
       const willHaveMore = invData?.has_more === true && consumed > 0;
-      nextInvPromise = willHaveMore ? fetchInvPage(invOffset + consumed) : null;
+      nextInvPromise = willHaveMore ? guardOrphan(fetchInvPage(invOffset + consumed)) : null;
       if (consumed > 0) {
         insertInventory(invRecords);
         for (const r of invRecords) { if (r.item_number) syncedItemNumbers.push(r.item_number); }
