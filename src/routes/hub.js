@@ -403,7 +403,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     // Narrow column list — UI listing only needs these fields
     const rawSites = db.prepare(
-      'SELECT id, slug, name, url, last_seen, status, last_kpis FROM hub_sites'
+      `SELECT id, slug, name, url, last_seen, status, last_kpis,
+              in_env, removed_from_env_at
+       FROM hub_sites`
     ).all();
     const mapped = rawSites.map((s) => ({
       site_id: s.id,
@@ -414,6 +416,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       last_seen: s.last_seen,
       status: s.status,
       last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
+      // Orphan flag: row exists in hub_sites but its id is no longer
+      // in HUB_SITES env. Schedulers don't refresh it; per-site action
+      // endpoints refuse on it. Surfaced in the UI as a small pill so
+      // operators can tell live tiles from frozen ones.
+      is_orphan: s.in_env === 0,
+      removed_from_env_at: s.removed_from_env_at || null,
     }));
     // Returns JSON array — compatible with both the UI and hub-pull-backups.ps1
     res.json(mapped);
@@ -520,8 +528,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
 
     let allSites = [];
-    // Narrow column list — KPI aggregator only needs these fields
-    try { allSites = db.prepare('SELECT id, slug, name, status, last_seen FROM hub_sites').all(); } catch {}
+    // Narrow column list — KPI aggregator only needs these fields,
+    // plus the orphan flags so the dashboard tile can render the pill.
+    try { allSites = db.prepare(`
+      SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at
+      FROM hub_sites
+    `).all(); } catch {}
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
@@ -555,6 +567,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         site_name: s.name,
         status: s.status,
         last_seen: s.last_seen,
+        // Orphan flag: row exists but its id is no longer in HUB_SITES.
+        // Tile renders an "ORPHAN" pill; per-site action endpoints
+        // refuse on it. Operator forgets via the admin section.
+        is_orphan: s.in_env === 0,
+        removed_from_env_at: s.removed_from_env_at || null,
         kpis: {
           total_records: siteTotal?.count || 0,
           records_by_flag: siteFlags,
@@ -855,6 +872,18 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // POST /api/hub/force-resync/:siteId — per-site force resync
   router.post('/api/hub/force-resync/:siteId', requireAuth, requireAdmin, (req, res) => {
     const { siteId } = req.params;
+    // Orphan guard. force-resync wipes hub_sync_log + hub_records +
+    // hub_inventory for the site, then queues a syncAllSites pull —
+    // but syncAllSites iterates HUB_SITES (the env-derived list), so
+    // for an orphan row the wipe runs and the pull silently skips.
+    // Net effect: hub_records evaporate and never come back. Refuse
+    // up front and tell the operator to use Forget instead.
+    const orphanRow = db.prepare('SELECT in_env, name, slug FROM hub_sites WHERE id = ?').get(siteId);
+    if (orphanRow && orphanRow.in_env === 0) {
+      return res.status(409).json({
+        error: `Site '${orphanRow.name || orphanRow.slug || siteId}' is no longer in HUB_SITES env (orphan). Re-add it to the env to reactivate, or use the Forget button to retire it permanently.`,
+      });
+    }
     try {
       db.prepare("DELETE FROM hub_sync_log WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
@@ -873,6 +902,89 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       syncAllSites().catch(err => console.error("force-resync error:", err));
       res.status(202).json({ ok: true });
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/orphan-sites — list sites that have been removed from
+  // HUB_SITES env (in_env = 0). Backs the admin "Orphan sites" section
+  // in Settings. Includes hub_records / hub_inventory row counts so
+  // the operator knows how much data the Forget cascade would remove.
+  router.get('/api/hub/orphan-sites', requireAuth, requireAdmin, (req, res) => {
+    try {
+      const orphans = db.prepare(`
+        SELECT id, slug, name, url, last_seen, removed_from_env_at
+        FROM hub_sites
+        WHERE in_env = 0
+        ORDER BY removed_from_env_at DESC NULLS LAST, name ASC
+      `).all();
+      const enriched = orphans.map((o) => {
+        const rec = db.prepare(`SELECT COUNT(*) AS n FROM hub_records WHERE site_id = ?`).get(o.id);
+        const inv = (() => {
+          try { return db.prepare(`SELECT COUNT(*) AS n FROM hub_inventory WHERE site_id = ?`).get(o.id); }
+          catch { return { n: 0 }; }
+        })();
+        return {
+          ...o,
+          record_count: rec?.n || 0,
+          inventory_count: inv?.n || 0,
+        };
+      });
+      res.json({ orphans: enriched });
+    } catch (err) {
+      try { logError('hub.orphan_sites', err); } catch {}
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // DELETE /api/hub/sites/:siteId/forget — admin-only, retires an
+  // orphaned site permanently. Cascades to hub_records + hub_inventory
+  // + hub_sync_log + hub_backup_integrity for that site. Refuses on
+  // non-orphans (the only way a site loses orphan status is via
+  // upsertSites putting it back, so refusing here protects against
+  // accidental "Forget" on a site that was just temporarily out of
+  // the env).
+  router.delete('/api/hub/sites/:siteId/forget', requireAuth, requireAdmin, (req, res) => {
+    const { siteId } = req.params;
+    const row = db.prepare(`SELECT id, slug, name, in_env FROM hub_sites WHERE id = ?`).get(siteId);
+    if (!row) return res.status(404).json({ error: `Site '${siteId}' not found` });
+    if (row.in_env !== 0) {
+      return res.status(409).json({
+        error: `Site '${row.name || row.slug || siteId}' is still in HUB_SITES env. Forget is only allowed for orphan rows. Remove the site from HUB_SITES env first, then try again.`,
+      });
+    }
+
+    let counts = {};
+    try {
+      const tx = db.transaction(() => {
+        // Order matters only for audit clarity — there are no FK
+        // constraints between these tables; the site_id columns are
+        // indexed but not declared as FOREIGN KEYs.
+        try { counts.records = db.prepare(`DELETE FROM hub_records WHERE site_id = ?`).run(siteId).changes; } catch { counts.records = 0; }
+        try { counts.inventory = db.prepare(`DELETE FROM hub_inventory WHERE site_id = ?`).run(siteId).changes; } catch { counts.inventory = 0; }
+        try { counts.sync_log = db.prepare(`DELETE FROM hub_sync_log WHERE site_id = ?`).run(siteId).changes; } catch { counts.sync_log = 0; }
+        try { counts.backup_integrity = db.prepare(`DELETE FROM hub_backup_integrity WHERE site_id = ?`).run(siteId).changes; } catch { counts.backup_integrity = 0; }
+        try { counts.bat_summary = db.prepare(`DELETE FROM hub_bat_summary WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_summary = 0; }
+        counts.site = db.prepare(`DELETE FROM hub_sites WHERE id = ?`).run(siteId).changes;
+      });
+      tx();
+
+      logHubAudit({
+        action: 'forget_orphan_site',
+        performedBy: req.currentUser?.email,
+        target: row.slug || siteId,
+        detail: JSON.stringify(counts),
+      });
+      logAudit({
+        req, action: 'hub_forget_orphan_site', resourceType: 'system',
+        resourceId: siteId, resourceName: row.name || row.slug || siteId,
+        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary`,
+        changes: { counts },
+      });
+
+      res.json({ ok: true, counts });
+    } catch (err) {
+      try { logError('hub.forget_orphan_site', err, { site_id: siteId }); } catch {}
       res.status(500).json({ error: err.message });
     }
   });
