@@ -1,8 +1,11 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import crypto from 'crypto';
+import { pipeline } from 'stream/promises';
 import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
+import { logAudit } from '../lib/audit.js';
 
 const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBackupAndFTP\\Db\\routines.db';
 const DEFAULT_SQLBACKUP_OBJECT_EXCLUDE_LIST = 'PPDdata';
@@ -238,6 +241,24 @@ export function createBackupRouter() {
     res.setHeader('X-Backup-Timestamp', new Date().toISOString());
     res.setHeader('X-Backup-Config-Mode', exportMode);
     res.send(payload);
+
+    // Audit trail: persist a record of every successful config export.
+    // The "user" is fundamentally the hub puller (token-auth, no user
+    // session). Use userOverride='system:reporting-token' so the audit
+    // row is consistent across pulls and a real user identity (if/when
+    // a manual ops download lands) shows up via req.currentUser instead.
+    try {
+      logAudit({
+        req,
+        action: 'backup_config_exported',
+        resourceType: 'site_config',
+        resourceId: process.env.SITE_ID || 'site',
+        resourceName: filename,
+        details: `mode=${exportMode}, bytes=${payload.length}`,
+        status: 'success',
+        userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+      });
+    } catch {}
   });
 
   // GET /api/backup/download
@@ -264,26 +285,74 @@ export function createBackupRouter() {
       const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0, 10)}.db`;
       const size = fs.statSync(tmpPath).size;
 
+      // Compute SHA-256 of the snapshot BEFORE streaming. The hub-side
+      // ingestion can compare its computed hash against this header to
+      // detect transport/read corruption immediately — separately from
+      // the SQLite-level PRAGMA integrity_check that happens later.
+      // Two checks catch different things:
+      //   - SHA-256 mismatch  → bytes differ between site and hub
+      //                         (network corruption, partial read,
+      //                         streaming bug, etc.)
+      //   - integrity_check fail → bytes match but SQLite structure
+      //                         is damaged (pre-existing on the site)
+      // TLS already provides wire-level integrity, so this is defence
+      // in depth — catches application-layer bugs the transport can't.
+      // Cost is one extra full-file read on the site side (~1-2s for
+      // a 200MB DB). Hub pulls hourly, so the latency is in the noise.
+      const hash = crypto.createHash('sha256');
+      await pipeline(fs.createReadStream(tmpPath), hash);
+      const sha256 = hash.digest('hex');
+
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.setHeader('Content-Length', String(size));
       res.setHeader('X-Backup-Site', process.env.SITE_ID || 'unknown');
       res.setHeader('X-Backup-Timestamp', new Date().toISOString());
       res.setHeader('X-Backup-Bytes', String(size));
+      res.setHeader('X-Backup-SHA256', sha256);
 
       const stream = fs.createReadStream(tmpPath);
       let cleaned = false;
+      let auditWritten = false;
       const cleanup = () => {
         if (cleaned) return; cleaned = true;
         if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
       };
+      const writeAudit = (status) => {
+        if (auditWritten) return; auditWritten = true;
+        // Audit trail: every download attempt that reached the streaming
+        // phase. Status reflects whether the stream completed (success)
+        // or the client disconnected / errored mid-stream (failure).
+        // Useful for forensics — "was the hub actually able to pull this
+        // backup last Tuesday?" without trawling Caddy access logs.
+        try {
+          logAudit({
+            req,
+            action: 'backup_db_exported',
+            resourceType: 'site_backup',
+            resourceId: process.env.SITE_ID || 'site',
+            resourceName: filename,
+            details: `bytes=${size}, sha256=${sha256.slice(0, 16)}…`,
+            status,
+            userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+          });
+        } catch {}
+      };
       stream.on('error', (err) => {
         console.error('[backup] Stream error:', err.message);
         cleanup();
+        writeAudit('failure');
         if (!res.headersSent) res.status(500).json({ error: 'Failed to stream snapshot' });
       });
-      stream.on('end', cleanup);
-      res.on('close', cleanup); // client disconnect
+      stream.on('end', () => { cleanup(); writeAudit('success'); });
+      res.on('close', () => {
+        cleanup();
+        // res.on('close') fires for both clean end and client disconnect.
+        // If we got the full stream-end first, writeAudit already ran.
+        // If not, the disconnect IS the audit event — record it as
+        // failure so the operator can spot interrupted pulls.
+        if (!auditWritten) writeAudit('failure');
+      });
       stream.pipe(res);
     } catch (err) {
       console.error('[backup] Snapshot/stream failed:', err.message);
