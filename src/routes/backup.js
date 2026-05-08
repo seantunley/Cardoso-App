@@ -203,12 +203,28 @@ function redactEnvFile(envText) {
 // error, but a process kill mid-snapshot would leave one behind. Run once at
 // module load.
 //
-// TTL is env-tunable. Default 1 hour. NaN guard so a typo in the env
-// doesn't silently disable cleanup (Math.max-with-parseInt-NaN returns
-// NaN, and Date.now() < NaN is always false → nothing ever gets cleaned).
+// TTL is env-tunable. Default 1 hour, floor 60 seconds.
+//
+// Two failure modes get handled differently:
+//   - parse fails (NaN, Infinity, missing value) → fall back to default
+//   - parsed value is below the floor              → CLAMP to the floor,
+//     not the default. An operator who sets `BACKUP_TMP_TTL_MS=30000`
+//     clearly wants quick cleanup; treating that as "invalid, use 1 hour"
+//     would make it appear that the env was ignored. Clamping to 60s
+//     respects the operator's intent while still preventing pathological
+//     near-zero values that would thrash the FS.
+//
+// Without this distinction, an earlier draft returned the default for
+// BOTH cases, so a low-but-valid setting silently delayed cleanup by an
+// hour — flagged in PR review.
 function _staleTtlMs() {
-  const n = parseInt(process.env.BACKUP_TMP_TTL_MS || `${60 * 60 * 1000}`, 10);
-  if (!Number.isFinite(n) || n < 60_000) return 60 * 60 * 1000; // floor 60s
+  const FLOOR = 60_000;       // 60 seconds — minimum sane cleanup interval
+  const DEFAULT = 60 * 60 * 1000; // 1 hour
+  const raw = process.env.BACKUP_TMP_TTL_MS;
+  if (raw === undefined || raw === '') return DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return DEFAULT;
+  if (n < FLOOR) return FLOOR;
   return n;
 }
 (function cleanupStaleSnapshots() {
