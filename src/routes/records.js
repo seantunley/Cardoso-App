@@ -788,13 +788,53 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
   // ==================== RECORD SEARCH / AGGREGATES ====================
 
+  // ── Customer lookup input normalization ──────────────────────────────────
+  //
+  // Two cleanups applied to every query string before it reaches SQL:
+  //   1. Length cap (256 chars). Real customer names + numbers are well
+  //      under 100 chars; anything bigger is either a paste-mistake or a
+  //      pathological payload (e.g. someone testing a very long string).
+  //      Capping protects the DB from gratuitously slow LIKE scans and
+  //      makes the SQLite parameter binding safer.
+  //   2. Whitespace collapse. Internal runs of spaces / tabs / newlines
+  //      collapse to a single space — so `'  100  WC'` and `'100 WC'`
+  //      hit the same row. Without this, a copy-paste from a wrapped
+  //      Excel cell would silently miss matches that should hit.
+  const MAX_QUERY_LENGTH = 256;
+  function _normalizeCustomerQuery(raw) {
+    if (typeof raw !== 'string') return '';
+    return raw.trim().replace(/\s+/g, ' ').slice(0, MAX_QUERY_LENGTH);
+  }
+
+  // ── Sub-account derivation contract ──────────────────────────────────────
+  //
+  // Cardoso recognises a customer as a "parent" when the customer_number
+  // matches /^\d+$/ — i.e. PURELY numeric. Sub-accounts of that parent are
+  // any customer_number whose leading digit-run equals the parent's number,
+  // followed by a non-digit character (e.g. parent '100' has sub-accounts
+  // '100A', '100-1', '100OC' but NOT '1001' which is a separate customer).
+  //
+  // This mirrors the BAT-style accounting scheme used at every site we
+  // currently onboard. Schemes the lookup does NOT recognise as having
+  // sub-accounts:
+  //   - Alpha-prefixed parents ('WC100')   — treated as plain customers
+  //   - Suffix-numbered parents ('100A')   — treated as plain customers
+  //   - Leading-zero parents ('00100')     — works as parent, but '00100'
+  //                                           and '100' are SEPARATE customers
+  //
+  // If a future site arrives with a non-numeric parent scheme, this
+  // assumption needs to be generalised — likely via a configurable
+  // extractor in bat_settings. Documented in docs/operator-runbook.md
+  // under the customer-management section.
+
   router.get(
     '/api/datarecord/customer-lookup',
     requireAuth,
     requirePermission('can_access_records', 'can_access_customer_search'),
     (req, res) => {
+      const startedAtMs = Date.now();
       try {
-        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        const query = _normalizeCustomerQuery(req.query.query);
 
         if (!query) {
           return res.status(400).json({ error: 'Query is required' });
@@ -816,6 +856,20 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         `).get(query, query, query, query);
 
         if (!record) {
+          // Structured info-level telemetry on every lookup. Lets an
+          // operator answer "are misses suddenly spiking?" or "is the
+          // p99 latency creeping up?" without trawling generic
+          // console.error output. level='warn' on slow lookups so they
+          // surface in the System Log even when the result is benign.
+          const elapsedMs = Date.now() - startedAtMs;
+          try {
+            logError(
+              'customer.lookup',
+              new Error(`miss in ${elapsedMs}ms`),
+              { query_length: query.length, hit: false, has_subaccounts: false, latency_ms: elapsedMs },
+              elapsedMs > 500 ? 'warn' : 'info',
+            );
+          } catch {}
           return res.json({ record: null, subAccounts: [] });
         }
 
@@ -842,12 +896,29 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             });
         }
 
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError(
+            'customer.lookup',
+            new Error(`hit in ${elapsedMs}ms`),
+            { query_length: query.length, hit: true, has_subaccounts: subAccounts.length > 0, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
+            elapsedMs > 500 ? 'warn' : 'info',
+          );
+        } catch {}
+
         res.json({
           record: expandedRecord,
           subAccounts,
         });
       } catch (error) {
-        console.error('Customer lookup error:', error);
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError('customer.lookup', error, {
+            query_length: typeof req.query.query === 'string' ? req.query.query.length : 0,
+            latency_ms: elapsedMs,
+            err_kind: error?.constructor?.name,
+          });
+        } catch {}
         res.status(500).json({ error: 'Failed to lookup customer' });
       }
     }
@@ -858,8 +929,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     requireAuth,
     requirePermission('can_access_records', 'can_access_customer_search'),
     (req, res) => {
+      const startedAtMs = Date.now();
       try {
-        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        // Same input normalization as customer-lookup — see _normalizeCustomerQuery
+        // notes above on the length cap and whitespace collapse.
+        const query = _normalizeCustomerQuery(req.query.query);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
 
         if (!query) {
@@ -898,11 +972,28 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LIMIT ?
         `).all(startsWith, startsWith, contains, contains, query, query, startsWith, startsWith, limit);
 
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError(
+            'customer.lookup.suggestions',
+            new Error(`${rows.length} hit(s) in ${elapsedMs}ms`),
+            { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
+            elapsedMs > 500 ? 'warn' : 'info',
+          );
+        } catch {}
+
         res.json({
           suggestions: rows.map((row) => expandDataRecord(row)),
         });
       } catch (error) {
-        console.error('Customer lookup suggestions error:', error);
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError('customer.lookup.suggestions', error, {
+            query_length: typeof req.query.query === 'string' ? req.query.query.length : 0,
+            latency_ms: elapsedMs,
+            err_kind: error?.constructor?.name,
+          });
+        } catch {}
         res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
       }
     }
