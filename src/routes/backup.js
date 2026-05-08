@@ -317,9 +317,29 @@ export function createBackupRouter() {
     let filename = null;        // populated after db.backup() returns
     let size = null;            // populated after statSync() runs
     let sha256 = null;          // populated after pipeline(... hash)
+    // The `cleaned` guard MUST only flip to true once we've actually had
+    // a tmpPath to delete. An earlier shape was
+    //   if (cleaned) return; cleaned = true;
+    //   if (tmpPath) fs.unlinkSync(tmpPath);
+    // — so a close event that fired early (client disconnect during
+    // db.backup() or the hash pass, BEFORE tmpPath was assigned) flipped
+    // cleaned=true immediately. Then when the snapshot file was actually
+    // created and the code reached `if (res.destroyed) { cleanup(); return; }`,
+    // cleanup early-returned because cleaned was already set, leaving the
+    // file orphaned in database/tmp-backups until the stale-file sweeper
+    // ran. Caught in PR review.
+    //
+    // The fixed guard: skip cleanup entirely when there's nothing to
+    // clean (tmpPath null), so cleaned only flips on the call that
+    // actually had a path to unlink. unlinkSync is wrapped in a
+    // try/catch so a second call after a successful unlink (file
+    // already gone) is harmless — `cleaned=true` is a defensive
+    // dedup, not a correctness requirement.
     const cleanup = () => {
-      if (cleaned) return; cleaned = true;
-      if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
+      if (cleaned) return;
+      if (!tmpPath) return; // nothing to clean yet — try again later
+      cleaned = true;
+      try { fs.unlinkSync(tmpPath); } catch {}
     };
     const writeAudit = (status) => {
       if (auditWritten) return; auditWritten = true;
