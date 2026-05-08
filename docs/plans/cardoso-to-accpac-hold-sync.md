@@ -416,6 +416,139 @@ not the contract weakened. The cost of these constraints is at most
 a handful of extra lines of code; the cost of relaxing them is the
 "bulk apocalypse" scenario this whole document exists to prevent.
 
+## Master enable switch (Settings → Accpac integration)
+
+In addition to the per-connection `can_write_hold` flag (rule #11
+in the constraints above), the entire Accpac write functionality is
+gated by a **single global on/off switch** in Settings. Default off.
+A site running this build with the switch off behaves exactly like
+a read-only install — no UI, no endpoints reachable, no executor
+loaded, no risk.
+
+The switch is the operator's "I have read the docs and understand
+what enabling this does" gesture. Without it, none of the Phase 2+
+features are accessible regardless of how the queue or per-connection
+flags are configured.
+
+### Storage
+
+```sql
+-- bat_settings is already the de-facto site-config k/v store
+-- (ocr_paused, sage_connection_id, invoice_in_digit_length, ...).
+-- Adding the master switch as another row keeps the surface area
+-- small.
+INSERT OR IGNORE INTO bat_settings (key, value)
+  VALUES ('accpac_write_enabled', 'false');
+```
+
+The setting is read at the top of every write-path entry point
+— the proposal-create endpoint, the approve endpoint, the executor
+itself. If `'false'`, the endpoints respond `403 Forbidden` with a
+specific message ("Accpac write functionality is disabled. Enable
+in Settings → Accpac integration."); the executor short-circuits
+to `failed_terminal` with the same reason.
+
+### UI flow (admin-only)
+
+The toggle lives in **Settings → Accpac integration** (a new tab,
+admin-only, hub-mode-aware so it appears on sites only). Layout:
+
+- Big red banner across the top of the section explaining what
+  enabling does in plain language: *"Enabling this allows Cardoso
+  to write back to Accpac. Currently the only field Cardoso writes
+  is `ARCUS.SWHOLD` (credit hold), and only via the proposal queue
+  with manual approval. Enabling does not auto-fire any holds —
+  it just unlocks the queue + approval flow."*
+- Current state pill: **DISABLED** (green/safe-looking) or
+  **ENABLED — Cardoso can write to Accpac** (amber/attention).
+- Last-changed line: *"Disabled by sean@…on 2026-05-08 14:32"* or
+  *"Enabled by sean@… on …"* — sourced from the audit log.
+
+### Enabling — double confirmation + password re-entry
+
+Clicking "Enable" opens a modal with three blocking steps:
+
+1. **Warning** — full prose:
+   > Enabling Accpac writes lets Cardoso modify the `ARCUS.SWHOLD`
+   > column in your Accpac database. Holds proposed by Cardoso
+   > rules will be queued for credit-controller approval before
+   > anything is written. No automatic writes. No other Accpac
+   > columns are touched. **You can disable this at any time and
+   > all queued proposals stop committing immediately.**
+   >
+   > A misconfigured rule, a tester forgetting to set
+   > `can_write_hold = 0` on a real connection, or a bug in the
+   > queue could in principle cause customer accounts to be put
+   > on hold. The constraints in [docs/plans/cardoso-to-accpac-hold-sync.md](./cardoso-to-accpac-hold-sync.md)
+   > make every one of those scenarios structurally hard, but
+   > nothing replaces operator vigilance.
+   >
+   > **Type your password below to confirm you are an
+   > authorised administrator and you understand the above.**
+
+2. **Password re-entry** — the operator types their own user
+   account's password into a regular password input. Server
+   verifies via `bcrypt.compare` against `user.password_hash`
+   (same path as `/api/auth/login`). Wrong password = no enable,
+   no setting written.
+
+3. **Final confirm button** — labelled `Enable Accpac writes` (not
+   "OK" or "Confirm" — the button text restates the action).
+   Click flips the bat_settings row to `'true'`.
+
+The endpoint that flips the flag (`POST /api/system/accpac-writes/enable`)
+itself requires:
+- `requireAuth` + `requireAdmin` middleware.
+- A re-verified password in the request body, server-checked.
+- Logs an `auditlog` row with `action: 'accpac_writes_enabled'` and
+  the actor's email, IP, and timestamp.
+
+### Disabling
+
+Disabling is a single click — no warning, no password. The whole
+point is that turning it off should be friction-free:
+
+- Operator clicks "Disable Accpac writes."
+- Server sets `bat_settings.accpac_write_enabled = 'false'`.
+- Audit row written.
+- Any in-flight `committed → failed_terminal` transitions
+  complete (the executor checks the flag before each write — so
+  if the flag flipped mid-batch, subsequent writes simply don't
+  happen).
+- A green badge on Operations → Alerts says "Accpac writes
+  disabled — N proposals still in queue, will commit when
+  re-enabled" so nothing is silently lost.
+
+The asymmetry is deliberate: enabling is a deliberate action with
+ceremony; disabling is the emergency stop and stays that way.
+
+### Defence-in-depth ordering
+
+When a write is attempted, the gates fire in this order. Failing
+any one returns `failed_terminal` with the specific reason — they
+don't cascade silently:
+
+1. **Master switch** (`bat_settings.accpac_write_enabled = 'true'`)
+   — set via Settings UI with password re-entry.
+2. **Per-connection flag** (`databaseconnection.can_write_hold = 1`)
+   — set via the Connections settings, audit-logged.
+3. **Proposal status** — must be `approved`, not `queued` or
+   `rejected`.
+4. **Eligibility filter** (auto-flag age, exclusion list, etc.)
+   — checked at enqueue time AND at commit time, since state can
+   change in between.
+5. **Pre-flight verify SELECT** — the row must exist, return one
+   row, with a captured before-value.
+6. **Executor write** — the `UPDATE ARCUS SET SWHOLD ...` only
+   runs after every gate above passes.
+7. **Post-write verify SELECT** — the row's `SWHOLD` must equal
+   what was set.
+
+That's seven independent checks for what is, technically, a single
+field flip. The cost is a handful of milliseconds and a few extra
+lines of code. The benefit is that no plausible failure mode
+results in unintended writes.
+
 ## Schema changes required
 
 Sketch only — don't act on these until each phase is approved. The
