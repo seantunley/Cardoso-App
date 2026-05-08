@@ -16,6 +16,77 @@ import ExtractionProgress from '@/components/reconciliation/ExtractionProgress';
 import DashboardOverview from '@/components/reconciliation/DashboardOverview';
 import { useColorScheme } from '@/lib/useColorScheme';
 
+// ── Sage status pill ──────────────────────────────────────────────────
+//
+// Surfaces the live Sage MSSQL connectivity state on the recon page so
+// an operator can spot "the credit-note refresh button is going to
+// fail" without having to click it first. Polls /api/bat/sage-health
+// every 60s — same cadence the admin layout's banner already uses,
+// so the request is effectively free (browser HTTP cache + server-side
+// state).
+//
+// States (from getSageHealth in src/services/batReconciliation.js):
+//   ok === true                    → green   "Sage OK"
+//   attention === true (≥5 fails)  → red     "Sage down Xm"
+//   ok === false (1-4 fails)       → amber   "Sage degraded"
+//   ok === null (no probe yet)     → grey    "Sage —"
+function SageStatusPill() {
+  const [health, setHealth] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const fetchHealth = async () => {
+      try {
+        const r = await fetch('/api/bat/sage-health', { credentials: 'include' });
+        if (!r.ok) return;
+        const data = await r.json();
+        if (!cancelled) setHealth(data);
+      } catch {
+        // Network error — leave the pill as 'unknown' rather than fake
+        // a status. The admin banner's separate poll will surface the
+        // outage if it's persistent.
+      }
+    };
+    fetchHealth();
+    const t = setInterval(fetchHealth, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
+  if (!health) return null;
+
+  let label, tone, tooltip;
+  if (health.attention) {
+    label = `Sage down ${health.downForMinutes ?? '?'}m`;
+    tone = 'bg-red-500/15 text-red-400 border-red-500/30';
+    tooltip = `${health.consecutiveFailures} consecutive probe failures. Last error: ${health.lastError || 'unknown'}. Last OK: ${health.lastOkAt || 'never'}.`;
+  } else if (health.ok === true) {
+    label = 'Sage OK';
+    tone = 'bg-green-500/15 text-green-400 border-green-500/30';
+    tooltip = `Last probe OK at ${health.lastOkAt ? new Date(health.lastOkAt).toLocaleTimeString() : 'unknown'}`;
+  } else if (health.ok === false) {
+    label = 'Sage degraded';
+    tone = 'bg-amber-500/15 text-amber-400 border-amber-500/30';
+    tooltip = `${health.consecutiveFailures} probe failure(s). Last OK: ${health.lastOkAt || 'never'}. ${health.lastError || ''}`;
+  } else {
+    label = 'Sage —';
+    tone = 'bg-slate-500/15 text-slate-400 border-slate-500/30';
+    tooltip = 'Sage health not yet probed.';
+  }
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[10px] uppercase tracking-wider ${tone}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+          {label}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 export default function Reconciliation() {
   const colorScheme = useColorScheme();
   const [view, setView] = useState('dashboard'); // dashboard | detail
@@ -559,6 +630,7 @@ export default function Reconciliation() {
               )}
               {view === 'detail' && <span className="text-border">·</span>}
               § BAT Reconciliation
+              <SageStatusPill />
             </div>
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               {view === 'detail' && selected ? (
