@@ -16,6 +16,18 @@ import { fireAlert, resolveAlerts } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
 
+// Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
+// the rule loop (evaluateAllRules, runs every minute) doesn't re-allocate
+// JS prepared-statement wrappers for the same SQL strings on every tick.
+// Lazy because some rules tolerate a missing job_runs table (PR #178 not
+// merged yet on a given install) by catching "no such table" — preparing
+// at module load would throw on those installs.
+const _stmts = {};
+function _prep(key, sql) {
+  if (!_stmts[key]) _stmts[key] = db.prepare(sql);
+  return _stmts[key];
+}
+
 // ── Rule: Sage MSSQL down ────────────────────────────────────────────────
 //
 // The Sage health probe (added in v2026.4.18, runs every 60s) tracks
@@ -65,7 +77,7 @@ async function ruleSageDown() {
 async function ruleBackupVerifyFailed() {
   let row;
   try {
-    row = db.prepare(`
+    row = _prep('backupVerifyLatest', `
       SELECT status, error_message, ended_at
       FROM job_runs
       WHERE name = 'backup-verify'
@@ -113,7 +125,7 @@ async function ruleJobFailureSpike() {
     // leak into the spike count. Match the stored format by computing the
     // cutoff as ISO in JS — both sides lexically sortable, indexes used.
     const oneHourAgoIso = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-    rows = db.prepare(`
+    rows = _prep('jobFailuresLastHour', `
       SELECT name, COUNT(*) AS fails
       FROM job_runs
       WHERE status = 'failed'
@@ -143,7 +155,7 @@ async function ruleJobFailureSpike() {
   // spiking. Query the active alert names and intersect with `spikingNames`.
   let activeRows;
   try {
-    activeRows = db.prepare(`
+    activeRows = _prep('activeJobFailureSpikes', `
       SELECT dedup_key FROM alerts
       WHERE resolved_at IS NULL AND dedup_key LIKE 'job-failure-spike:%'
     `).all();

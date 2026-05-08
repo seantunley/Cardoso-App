@@ -428,23 +428,43 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   }
 
   // Step 3: multi-engine OCR pipeline
+  //
+  // Per-PDF jpeg memo keyed by (angle, width, quality). The sharp
+  // pipeline is eager (decode → rotate → resize → encode) and engines
+  // with identical preprocessing — e.g. ocr.space/e1 and ocr.space/e2
+  // both use width=2000 quality=80 — would otherwise rebuild the same
+  // JPEG twice. Cache the Promise so a second caller awaits the same
+  // in-flight work instead of starting a duplicate pipeline.
+  // Tesseract has its own (greyscale/threshold) pipeline so it stays
+  // outside the cache.
+  const jpegCache = new Map();
+  const cachedJpeg = (angle, width, quality) => {
+    const key = `${angle}|${width}|${quality}`;
+    let p = jpegCache.get(key);
+    if (!p) {
+      p = sharp(imageBuffer).rotate(angle).resize({ width }).jpeg({ quality }).toBuffer();
+      jpegCache.set(key, p);
+    }
+    return p;
+  };
+
   const ocrEngines = [];
   if (googleVisionKey) {
     ocrEngines.push({
       name: 'GoogleVision',
       run: async (angle) => {
-        const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2400 }).jpeg({ quality: 85 }).toBuffer();
+        const jpeg = await cachedJpeg(angle, 2400, 85);
         return await ocrViaGoogleVision(jpeg, googleVisionKey);
       },
     });
   }
   ocrEngines.push(
     { name: 'ocr.space/e1', run: async (angle) => {
-      const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 80 }).toBuffer();
+      const jpeg = await cachedJpeg(angle, 2000, 80);
       return await ocrViaOcrSpaceEngine(jpeg, '1', ocrSpaceKey);
     }},
     { name: 'ocr.space/e3', run: async (angle) => {
-      const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 85 }).toBuffer();
+      const jpeg = await cachedJpeg(angle, 2000, 85);
       return await ocrViaOcrSpaceEngine(jpeg, '3', ocrSpaceKey);
     }},
     { name: 'Tesseract', run: async (angle) => {
@@ -462,7 +482,9 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
       return text;
     }},
     { name: 'ocr.space/e2', run: async (angle) => {
-      const jpeg = await sharp(imageBuffer).rotate(angle).resize({ width: 2000 }).jpeg({ quality: 80 }).toBuffer();
+      // Same preprocessing as ocr.space/e1 (width 2000, quality 80) —
+      // cached promise reused, sharp not invoked twice.
+      const jpeg = await cachedJpeg(angle, 2000, 80);
       return await ocrViaOcrSpaceEngine(jpeg, '2', ocrSpaceKey);
     }},
   );
