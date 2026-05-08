@@ -767,20 +767,26 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const isParent = /^\d+$/.test(customerNumber);
       let subAccounts = [];
       if (isParent) {
-        // GLOB pattern `<parent>[!0-9]*` means: literal parent digits, then
+        // GLOB pattern `<parent>[^0-9]*` means: literal parent digits, then
         // exactly one non-digit char, then anything. This filters at SQLite
         // level instead of the previous LIKE-prefix + JS regex post-filter
         // pattern, which pulled every prefix-match (e.g. parent "100"
         // dragged out 1001, 1002, 1003 …) just to throw them away in JS
-        // after parsing every JSON blob. GLOB-with-character-class does the
-        // same job in one query without the parse-then-discard cost.
-        // customerNumber is `^\d+$`-validated above so no GLOB-injection
-        // risk, but we bind it as a parameter anyway.
+        // after parsing every JSON blob.
+        //
+        // SQLite GLOB class-negation is `[^...]`, NOT `[!...]` (the
+        // `[!...]` form is shell glob syntax). An earlier draft of this
+        // change used `[!0-9]` which SQLite reads as the character class
+        // "literal !, 0–9" — exactly inverting the intent. Verified
+        // against better-sqlite3 with the parent test cases: `100`,
+        // `100A`, `100-1` are matches; `1001`, `1002` are not. customerNumber
+        // is `^\d+$`-validated above so no GLOB-injection risk, but bound
+        // as a parameter anyway.
         const prefixMatches = db.prepare(`
           SELECT * FROM hub_records
           WHERE site_id = ? AND TRIM(customer_number) GLOB ?
           ORDER BY customer_number ASC, id ASC
-        `).all(site_id, `${customerNumber}[!0-9]*`);
+        `).all(site_id, `${customerNumber}[^0-9]*`);
         subAccounts = prefixMatches.map(r => expandDataRecord(parseBlobs(r)));
       }
 
