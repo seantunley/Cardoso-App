@@ -44,7 +44,18 @@ function SageStatusPill() {
       try {
         const r = await fetch('/api/bat/sage-health', { credentials: 'include' });
         if (!r.ok) {
-          if (!cancelled) setFetchFailed(true);
+          // CRITICAL: clear `health` alongside flipping fetchFailed.
+          // If we only flipped the flag, a previously-fetched
+          // `{ ok: true }` would keep rendering the green "Sage OK"
+          // pill while the probe endpoint is currently unreachable —
+          // operator sees a healthy badge but the data is stale and
+          // we have no current ground truth. Reset to null so the
+          // render priority falls through to the unknown branch
+          // (which will use the fetchFailed tooltip).
+          if (!cancelled) {
+            setHealth(null);
+            setFetchFailed(true);
+          }
           return;
         }
         const data = await r.json();
@@ -53,10 +64,15 @@ function SageStatusPill() {
           setFetchFailed(false);
         }
       } catch {
-        // Network error (server down, offline, etc.) — flip fetchFailed
-        // so the pill renders the "unknown" branch with the
-        // probe-endpoint-specific tooltip instead of vanishing.
-        if (!cancelled) setFetchFailed(true);
+        // Network error (server down, offline, etc.) — same shape:
+        // clear stale health AND flip fetchFailed. The pill renders
+        // the unknown branch with the probe-endpoint-specific
+        // tooltip rather than continuing to display whatever the
+        // last successful poll returned.
+        if (!cancelled) {
+          setHealth(null);
+          setFetchFailed(true);
+        }
       }
     };
     fetchHealth();
