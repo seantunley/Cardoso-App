@@ -2168,26 +2168,37 @@ async function processQueue(reconId) {
   ) * 1024 * 1024;
   async function recycleLane(lane, reason) {
     try { await lane.worker.terminate(); } catch {}
+    // ONLY the worker recreation goes inside the try/catch that decides
+    // whether the lane retires. Observability (`logError`) is wrapped in
+    // its own try/catch so a transient error_log write failure can't
+    // promote into a worker-capacity failure — otherwise enough
+    // observability blips would retire every lane and stall the recon
+    // with rows still pending. The lane is "recycled successfully" the
+    // moment `new OcrLane()` returns; logging the event is a separate,
+    // best-effort concern.
+    const rssMbBefore = Math.round(process.memoryUsage().rss / 1024 / 1024);
     try {
       lane.worker = new OcrLane();
       lane.rowsProcessed = 0;
-      logError(
-        'bat.ocr.lane_recycle',
-        new Error(`Lane recycled (${reason}). RSS before recycle: ${Math.round(process.memoryUsage().rss / 1024 / 1024)}MB`),
-        {
-          reconciliation_id: reconId,
-          reason,
-          rss_mb_before: Math.round(process.memoryUsage().rss / 1024 / 1024),
-        },
-        'info',
-      );
-      return true;
     } catch (e) {
       console.error('[bat-ocr] Lane recycle failed:', e.message);
       try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId, recycle_reason: reason }); } catch {}
-      recordReconciliationError(reconId, `OCR lane crashed during recycle: ${e.message}`);
+      try { recordReconciliationError(reconId, `OCR lane crashed during recycle: ${e.message}`); } catch {}
       return false;
     }
+    try {
+      logError(
+        'bat.ocr.lane_recycle',
+        new Error(`Lane recycled (${reason}). RSS before recycle: ${rssMbBefore}MB`),
+        {
+          reconciliation_id: reconId,
+          reason,
+          rss_mb_before: rssMbBefore,
+        },
+        'info',
+      );
+    } catch {}
+    return true;
   }
 
   // Slow-row monitor: every 30s, scan currentlyProcessing and emit a System
