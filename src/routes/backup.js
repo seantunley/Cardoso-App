@@ -227,7 +227,14 @@ function _staleTtlMs() {
   if (n < FLOOR) return FLOOR;
   return n;
 }
-(function cleanupStaleSnapshots() {
+// Stale-snapshot cleanup. NOT invoked as a module-load IIFE here —
+// server.js calls dotenv.config() AFTER its imports finish, so module-load
+// time would always read process.env.BACKUP_TMP_TTL_MS as undefined and
+// silently fall back to the 1-hour default (the env override would be
+// dead-on-arrival). Same shape as the rate-limiter `max` issue caught in
+// PR review. Invoked instead from createBackupRouter(), which server.js
+// calls after dotenv has run.
+function cleanupStaleSnapshots() {
   try {
     const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
     if (!fs.existsSync(tmpDir)) return;
@@ -243,9 +250,14 @@ function _staleTtlMs() {
   } catch (err) {
     console.warn('[backup] Stale-snapshot cleanup failed:', err.message);
   }
-})();
+}
 
 export function createBackupRouter() {
+  // Run the stale-snapshot sweep once when the router is mounted.
+  // server.js calls this after dotenv.config(), so process.env reflects
+  // the operator's .env values by this point.
+  cleanupStaleSnapshots();
+
   const router = express.Router();
 
   // Apply Cache-Control: no-store + the standard reporting rate limiter

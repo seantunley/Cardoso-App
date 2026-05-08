@@ -69,8 +69,19 @@ export const reportingRateLimiter = rateLimit({
 // could rotate per request to bypass the 10/hour cap entirely.
 //
 // Cap is env-tunable so a small estate that schedules cycles more often can
-// dial it up. NaN guard: parseInt('garbage') returns NaN and Math.max(N, NaN)
-// returns NaN — leaving the comparison silently disabled. Validate explicitly.
+// dial it up. NaN guard: parseInt('garbage') returns NaN — without an
+// explicit isFinite check the value would silently freeze.
+//
+// CRITICAL: `max` MUST be a function, not a value. server.js calls
+// dotenv.config() AFTER all the imports finish (line 37 in server.js),
+// but this module is imported earlier at line 13. Evaluating
+// _parseHeavyMaxFromEnv() at module-load time would always read
+// process.env.BACKUP_HEAVY_MAX_PER_HOUR as undefined and freeze at the
+// default (10) — a site setting the override in .env would silently
+// keep getting 10 forever and start returning unexpected 429s on
+// legitimate hub pulls. express-rate-limit accepts a function for
+// `max` that gets evaluated per request, after dotenv has run. Caught
+// in PR review.
 function _parseHeavyMaxFromEnv() {
   const n = parseInt(process.env.BACKUP_HEAVY_MAX_PER_HOUR || '10', 10);
   if (!Number.isFinite(n) || n < 1) return 10;
@@ -79,7 +90,7 @@ function _parseHeavyMaxFromEnv() {
 
 export const backupHeavyRateLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour window
-  max: _parseHeavyMaxFromEnv(),
+  max: () => _parseHeavyMaxFromEnv(), // see comment above — must be lazy
   keyGenerator: _tokenOrIpKey,
   message: { error: 'Too many backup-export requests. Try again later.' },
   standardHeaders: true,
