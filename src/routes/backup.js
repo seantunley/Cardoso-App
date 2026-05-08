@@ -247,11 +247,21 @@ export function createBackupRouter() {
     // session). Use userOverride='system:reporting-token' so the audit
     // row is consistent across pulls and a real user identity (if/when
     // a manual ops download lands) shows up via req.currentUser instead.
+    //
+    // resourceType MUST match the auditlog CHECK constraint in
+    // src/db/schema.js — currently allows ('user','connection','record',
+    // 'rule','system'). An earlier draft used 'site_config' which fails
+    // the CHECK; logAudit catches insert errors internally (so it never
+    // breaks the actual export operation), but that means a typo here
+    // would silently drop every audit row with no error surfaced. The
+    // backup is site-wide system state, so 'system' is the right slot —
+    // the action ('backup_config_exported') and resourceName carry the
+    // backup-specific signal.
     try {
       logAudit({
         req,
         action: 'backup_config_exported',
-        resourceType: 'site_config',
+        resourceType: 'system',
         resourceId: process.env.SITE_ID || 'site',
         resourceName: filename,
         details: `mode=${exportMode}, bytes=${payload.length}`,
@@ -325,11 +335,16 @@ export function createBackupRouter() {
         // or the client disconnected / errored mid-stream (failure).
         // Useful for forensics — "was the hub actually able to pull this
         // backup last Tuesday?" without trawling Caddy access logs.
+        //
+        // resourceType: 'system' — see the matching note on the /config
+        // handler above. The auditlog CHECK constraint in schema.js
+        // restricts resource_type to a fixed set; 'site_backup' fails
+        // and logAudit silently swallows the insert error.
         try {
           logAudit({
             req,
             action: 'backup_db_exported',
-            resourceType: 'site_backup',
+            resourceType: 'system',
             resourceId: process.env.SITE_ID || 'site',
             resourceName: filename,
             details: `bytes=${size}, sha256=${sha256.slice(0, 16)}…`,
