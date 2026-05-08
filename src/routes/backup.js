@@ -281,6 +281,82 @@ export function createBackupRouter() {
   router.get('/api/backup/download', requireReportingToken, async (req, res) => {
     const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
     let tmpPath = null;
+
+    // Cleanup + audit state declared at the top of the handler so the
+    // res.on('close') listener (attached BEFORE any awaits below) can
+    // close over them. This matters because:
+    //
+    //   - db.backup(tmpPath) can take seconds on a large database
+    //   - awaiting pipeline(...) for the SHA-256 hash takes another
+    //     ~1-2s per 200MB
+    //
+    // If the client disconnects during either of those phases, res's
+    // 'close' event fires THEN. An earlier draft attached the listener
+    // only after both awaits completed, so a disconnect during the
+    // pre-stream work fired close before any listener existed and the
+    // backup_db_exported audit row never got written. Caught in PR
+    // review — moved listener attachment to before the first await.
+    let cleaned = false;
+    let auditWritten = false;
+    let filename = null;        // populated after db.backup() returns
+    let size = null;            // populated after statSync() runs
+    let sha256 = null;          // populated after pipeline(... hash)
+    const cleanup = () => {
+      if (cleaned) return; cleaned = true;
+      if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
+    };
+    const writeAudit = (status) => {
+      if (auditWritten) return; auditWritten = true;
+      // Audit trail: every download attempt that we became aware of —
+      // including ones that disconnected during snapshot/hash before
+      // we ever started streaming. Status reflects whether the
+      // response actually flushed to the client (success via
+      // res.on('finish')) or didn't (failure via res.on('close') OR
+      // stream error).
+      //
+      // resourceType: 'system' — auditlog CHECK constraint restricts
+      // resource_type to a fixed set; 'site_backup' fails and
+      // logAudit silently swallows the insert error.
+      //
+      // Some fields may be null on early-disconnect rows (filename
+      // until db.backup runs; size until statSync; sha256 until the
+      // hash pass completes). The details string adapts to whatever's
+      // available so the operator can still tell which phase the
+      // pull died in.
+      const detailParts = [];
+      if (size != null) detailParts.push(`bytes=${size}`);
+      if (sha256) detailParts.push(`sha256=${sha256.slice(0, 16)}…`);
+      if (status === 'failure' && !filename) detailParts.push('phase=pre-stream');
+      try {
+        logAudit({
+          req,
+          action: 'backup_db_exported',
+          resourceType: 'system',
+          resourceId: process.env.SITE_ID || 'site',
+          resourceName: filename || `cardoso-backup-${process.env.SITE_ID || 'site'}-pending`,
+          details: detailParts.join(', ') || null,
+          status,
+          userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+        });
+      } catch {}
+    };
+
+    // Lifecycle listeners attached IMMEDIATELY — BEFORE any awaits.
+    // res.on('close') covers disconnects during db.backup(), the
+    // hash pipeline, AND the streaming phase below. res.on('finish')
+    // is the success signal once the streamed response has actually
+    // flushed. Order on a clean response:
+    //   1. response fully flushed   → 'finish'  → writeAudit('success')
+    //   2. socket closed            → 'close'   → auditWritten guard skips
+    // On a mid-flight disconnect:
+    //   1. socket closed            → 'close'   → writeAudit('failure')
+    //      (no 'finish' was emitted)
+    res.on('finish', () => writeAudit('success'));
+    res.on('close', () => {
+      cleanup();
+      if (!auditWritten) writeAudit('failure');
+    });
+
     try {
       try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
@@ -292,8 +368,8 @@ export function createBackupRouter() {
       // (no separate WAL needed).
       await db.backup(tmpPath);
 
-      const filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0, 10)}.db`;
-      const size = fs.statSync(tmpPath).size;
+      filename = `cardoso-backup-${process.env.SITE_ID || 'site'}-${new Date().toISOString().slice(0, 10)}.db`;
+      size = fs.statSync(tmpPath).size;
 
       // Compute SHA-256 of the snapshot BEFORE streaming. The hub-side
       // ingestion can compare its computed hash against this header to
@@ -311,7 +387,16 @@ export function createBackupRouter() {
       // a 200MB DB). Hub pulls hourly, so the latency is in the noise.
       const hash = crypto.createHash('sha256');
       await pipeline(fs.createReadStream(tmpPath), hash);
-      const sha256 = hash.digest('hex');
+      sha256 = hash.digest('hex');
+
+      // If the client disconnected during db.backup() or the hash pass,
+      // res.on('close') has already fired writeAudit('failure'). Bail
+      // before sending headers — Express will throw if we try to write
+      // headers on a destroyed response.
+      if (res.destroyed) {
+        cleanup();
+        return;
+      }
 
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
@@ -322,70 +407,21 @@ export function createBackupRouter() {
       res.setHeader('X-Backup-SHA256', sha256);
 
       const stream = fs.createReadStream(tmpPath);
-      let cleaned = false;
-      let auditWritten = false;
-      const cleanup = () => {
-        if (cleaned) return; cleaned = true;
-        if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
-      };
-      const writeAudit = (status) => {
-        if (auditWritten) return; auditWritten = true;
-        // Audit trail: every download attempt that reached the streaming
-        // phase. Status reflects whether the stream completed (success)
-        // or the client disconnected / errored mid-stream (failure).
-        // Useful for forensics — "was the hub actually able to pull this
-        // backup last Tuesday?" without trawling Caddy access logs.
-        //
-        // resourceType: 'system' — see the matching note on the /config
-        // handler above. The auditlog CHECK constraint in schema.js
-        // restricts resource_type to a fixed set; 'site_backup' fails
-        // and logAudit silently swallows the insert error.
-        try {
-          logAudit({
-            req,
-            action: 'backup_db_exported',
-            resourceType: 'system',
-            resourceId: process.env.SITE_ID || 'site',
-            resourceName: filename,
-            details: `bytes=${size}, sha256=${sha256.slice(0, 16)}…`,
-            status,
-            userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
-          });
-        } catch {}
-      };
-      stream.on('error', (err) => {
-        console.error('[backup] Stream error:', err.message);
-        cleanup();
-        writeAudit('failure');
-        if (!res.headersSent) res.status(500).json({ error: 'Failed to stream snapshot' });
-      });
       // Clean up the temp file when the read finishes — but DON'T audit
       // success here. `stream.on('end')` only means the readable is
       // exhausted; the bytes can still be sitting in res's outbound
-      // buffer / TCP buffer / on the wire. If the client disconnects
-      // between readable-end and ServerResponse-finish, an early
-      // success-audit would be wrong (and the close-handler couldn't
-      // correct it because auditWritten would already be true), so
-      // an interrupted pull would be misclassified as success.
+      // buffer / TCP buffer / on the wire. The success audit is keyed
+      // off res.on('finish') (attached at the top of the handler).
       stream.on('end', cleanup);
-      // res.on('finish') fires only after the response is fully flushed
-      // to the socket — that's the actual "success" signal for
-      // backup_db_exported. It always fires before res.on('close') on
-      // a clean response, so the close-handler's auditWritten guard
-      // sees true and skips, exactly as intended.
-      res.on('finish', () => writeAudit('success'));
-      res.on('close', () => {
-        cleanup();
-        // Fires for both clean end and client disconnect. If 'finish'
-        // ran first the success audit is already in; otherwise this
-        // disconnect IS the audit event — record it as failure so the
-        // operator can spot interrupted pulls.
-        if (!auditWritten) writeAudit('failure');
-      });
       stream.pipe(res);
     } catch (err) {
       console.error('[backup] Snapshot/stream failed:', err.message);
-      if (tmpPath) { try { fs.unlinkSync(tmpPath); } catch {} }
+      cleanup();
+      // Pre-stream failure — write failure audit if the close-handler
+      // hasn't already done it. The early-attached res.on('close')
+      // listener will also fire when we send the 500 below, but it
+      // sees auditWritten=true and skips.
+      writeAudit('failure');
       if (!res.headersSent) res.status(500).json({ error: err.message });
     }
   });
