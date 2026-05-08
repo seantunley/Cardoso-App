@@ -19,6 +19,43 @@ accounts overnight, sales teams scream, controllers manually reverse
 it, trust evaporates. This document lays out the guard rails so the
 feature can ship without that being a likely outcome.
 
+## Revisions (2026-05-08, after external audit)
+
+Folded in from a code-review pass on the v1 plan:
+
+- **Idempotency** — added a unique partial index on
+  `pending_hold_actions(customer_number, connection_id)` filtered
+  to `status IN ('queued', 'approved')`. Without it, a rule that
+  evaluates per-record-on-sync would enqueue duplicate proposals
+  every cycle and the queue would fill with noise.
+- **Connection scoping** — `pending_hold_actions` now carries
+  `connection_id` (and `site_id` on the hub variant). Same `IDCUST`
+  text can mean different customers across two Sage instances; the
+  queue keys must distinguish.
+- **State-machine enforcement** — server-side `transitionStatus(from, to)`
+  helper enforces the legal transitions
+  (`queued → approved/rejected/expired → committed/failed_*`)
+  instead of relying on a `CHECK(status IN ...)` constraint that
+  would happily accept `committed → queued`.
+- **Failure state taxonomy** — replaced the free-text `result`
+  column with `failed_retryable` / `failed_terminal` enum values.
+  Cleaner observability; alerts can fire on terminal-failure spikes
+  separately from retryable ones.
+- **Single-phase write gate via config** — Phase 2 ships the executor
+  with `databaseconnection.can_write_hold = 0` on every connection
+  by default. Going from "queue working but no writes" to "writes
+  enabled on a test connection" is a config flip, not a re-release.
+  Avoids two builds for one logical step.
+- **Reconciliation as a real endpoint** — open question #5 (out-of-band
+  Accpac changes) is now an explicit deliverable: a periodic report
+  listing customers held in Accpac but not red in Cardoso (and vice
+  versa). Operator triages.
+- **Customer-exclusions ownership** — hub is authoritative for the
+  central list (push-to-sites pattern, like `autoflagrule`). Sites
+  can add local overrides flagged `source='local'`. Conflict
+  resolution is the **union** of both: if either says "exclude,"
+  the customer is excluded. Errs on the side of *not* taking action.
+
 ## Core principle
 
 **Cardoso proposes, Accpac disposes.**
@@ -80,21 +117,30 @@ This phase is purely additive and reversible. Operators get used to
 seeing the two values side by side for a week or two before any
 write capability turns on.
 
-### Phase 2 — manual proposals only
+### Phase 2 — manual proposals only (executor gated by config)
 
-- New table `pending_hold_actions(id, customer_number, proposed_by,
-  proposed_at, action ('hold'|'release'), source ('manual'|'rule'),
-  rule_id, reason, status ('queued'|'approved'|'rejected'|'committed'|'expired'),
-  approved_by, committed_at)`.
+- New table `pending_hold_actions(id, customer_number, connection_id,
+  proposed_by, proposed_at, action, source, rule_id, reason, status,
+  approved_by, committed_at, failure_reason)` — see the schema sketch
+  below for the full shape including the unique partial index.
 - New UI: "Propose hold in Accpac" button on red-flagged customer
   cards. Creates a `pending_hold_actions` row with `source='manual'`.
 - New "Holds pending" panel — credit controller review screen. Shows
   proposed actions with the customer's reason, balance, last invoice,
-  Cardoso flag history. Approve commits to `ARCUS.SWHOLD = 1`. Reject
-  marks the row rejected; no Accpac write.
+  Cardoso flag history. Approve **attempts** to commit to
+  `ARCUS.SWHOLD = 1`. Reject marks the row rejected; no Accpac write.
+- The executor itself is **gated by `databaseconnection.can_write_hold`**.
+  Default is 0 on every connection. The endpoint runs the executor,
+  but every write checks the flag — when 0, the executor is a no-op
+  that records `status='failed_terminal'` with reason "writes disabled
+  on connection." That lets the queue + approval UX bake in
+  production without any actual MSSQL writes happening, and turning
+  on writes for a test connection is a config flip, not a code release.
 - Auto-flag rules **do not** populate the queue yet.
 - Every commit writes an `auditlog` row plus a `pending_hold_actions`
-  status change.
+  status change. Server-side `transitionStatus(from, to)` helper
+  enforces the legal state transitions
+  (`queued → approved/rejected/expired → committed/failed_retryable/failed_terminal`).
 
 This phase introduces the write path under maximum human supervision.
 Bake for at least two weeks. The point is to discover edge cases
@@ -251,16 +297,22 @@ operator makes the call.
    hold (via the proposal queue), or only ever propose new holds?
    Symmetry says yes, operator preference says we'd want to keep this
    manual-only forever.
-5. **Out-of-band changes?** A controller might hold in Accpac without
+5. ~~**Out-of-band changes?** A controller might hold in Accpac without
    Cardoso ever proposing it. The reverse-direction reconciliation
    handles this — but what's the UI surface so the operator sees that
-   "Accpac is holding 5 customers Cardoso doesn't have flagged"?
+   "Accpac is holding 5 customers Cardoso doesn't have flagged"?~~
+   **Resolved (2026-05-08):** Phase 1 ships a
+   `GET /api/hold-reconciliation` endpoint backing an admin panel
+   that lists both directions of divergence. Operator triages from
+   the panel — no automatic action either way.
 
 ## Schema changes required
 
-Sketch only — don't act on these until each phase is approved.
+Sketch only — don't act on these until each phase is approved. The
+shape below incorporates the audit revisions (connection scoping,
+unique partial index, failure-state enum, exclusions ownership).
 
-```
+```sql
 -- Phase 1
 ALTER TABLE datarecord ADD COLUMN accpac_on_hold INTEGER DEFAULT 0;
 ALTER TABLE datarecord ADD COLUMN accpac_on_hold_synced_at TEXT;
@@ -273,43 +325,86 @@ CREATE TABLE pending_hold_actions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   customer_number TEXT NOT NULL,
   customer_name TEXT,
+  -- Which databaseconnection (= which Accpac instance) this proposal
+  -- targets. Required so the same IDCUST text in two ledgers stays
+  -- distinguishable, and so writes go through the can_write_hold
+  -- gate of the right connection.
+  connection_id INTEGER NOT NULL,
   action TEXT CHECK(action IN ('hold', 'release')) NOT NULL,
   source TEXT CHECK(source IN ('manual', 'rule')) NOT NULL,
   rule_id INTEGER,
   reason TEXT,
-  status TEXT CHECK(status IN ('queued','approved','rejected','committed','expired')) DEFAULT 'queued',
+  status TEXT CHECK(status IN (
+    'queued',
+    'approved',
+    'rejected',
+    'committed',
+    'expired',
+    'failed_retryable',
+    'failed_terminal'
+  )) DEFAULT 'queued',
   proposed_by TEXT NOT NULL,
   proposed_at TEXT NOT NULL,
   approved_by TEXT,
   approved_at TEXT,
   committed_at TEXT,
   not_before TEXT,
-  result TEXT
+  -- failure_reason captures the describeSqlError-shaped message when
+  -- status flips to failed_*. Operator-readable, no free-text result
+  -- mixed in with success cases.
+  failure_reason TEXT
 );
+
+-- Idempotency: at most one queued OR approved proposal per
+-- (customer, connection, action) at a time. Without this, a rule
+-- evaluating per-record-on-sync would enqueue duplicates every cycle.
+CREATE UNIQUE INDEX idx_pending_hold_unique_active
+  ON pending_hold_actions(customer_number, connection_id, action)
+  WHERE status IN ('queued', 'approved');
+
 CREATE INDEX idx_pending_hold_status ON pending_hold_actions(status, customer_number);
 
 CREATE TABLE customer_exclusions (
-  customer_number TEXT PRIMARY KEY,
+  customer_number TEXT NOT NULL,
+  -- 'hub' = pushed from the central list (read-only at sites);
+  -- 'local' = added at the site as a local override. Both apply
+  -- (exclusion union — if either says exclude, the customer is excluded).
+  source TEXT CHECK(source IN ('hub', 'local')) NOT NULL,
   reason TEXT,
   added_by TEXT,
-  added_at TEXT DEFAULT CURRENT_TIMESTAMP
+  added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (customer_number, source)
 );
 ```
 
 ## Implementation surface (ordered by phase)
 
-- **Phase 1**: `syncEngine.js` (extend ARCUS SELECT), `schema.js`/migration,
-  `HubDashboard.jsx` + customer card components (display + divergence
-  indicator).
-- **Phase 2**: new `holdProposal.js` service, new routes
+- **Phase 1**: `syncEngine.js` (extend ARCUS SELECT to include
+  `SWHOLD`), `schema.js` + migration, `HubDashboard.jsx` + customer
+  card components (display + divergence indicator). Add
+  reconciliation report endpoint
+  `GET /api/hold-reconciliation` returning two arrays:
+  `held_in_accpac_not_red_in_cardoso[]` and `red_in_cardoso_not_held[]`.
+  Backs an admin "Hold reconciliation" panel.
+- **Phase 2**: new `holdProposal.js` service with the
+  `transitionStatus(from, to)` state-machine helper and the
+  `enqueueProposal(customer, connection, …)` helper that respects
+  the unique partial index (returns the existing row instead of
+  failing on duplicate). New routes
   `POST /api/hold-proposals` (create), `GET /api/hold-proposals` (list),
   `POST /api/hold-proposals/:id/approve`, `POST /api/hold-proposals/:id/reject`.
   New `pending-holds-panel` component for credit controllers.
-  First MSSQL write path — needs a write-capable pool helper next to
-  `customerSqlPool.js` (read-only) with explicit `can_write_hold`
-  gating.
+  First MSSQL write path — new write-capable pool helper next to
+  `customerSqlPool.js` (read-only), with the executor checking
+  `databaseconnection.can_write_hold = 1` and recording
+  `failed_terminal` when the flag is off. The flag is the gate that
+  separates "queue working in production" from "writes happening to
+  Accpac" — flipping it for one test connection is the live-fire
+  test, not a separate code release.
 - **Phase 3**: extend `applyAutoFlagRulesToRecord` to also create
   `pending_hold_actions` rows when an eligible auto-red is set.
+  `enqueueProposal` makes this safe — duplicate-suppressing by
+  construction.
 - **Phase 4** (if ever): config flag per rule (`auto_commit_hold`),
   scheduler job that commits queued holds nightly.
 
@@ -323,7 +418,10 @@ CREATE TABLE customer_exclusions (
 | MSSQL permission issue on first write | Allow-list at connection level (#5); first write requires explicit operator action |
 | Audit can't tell why a hold was placed | Every commit writes both `pending_hold_actions` row and `auditlog` row with `flag_reason` and rule_id |
 | Hold released in Accpac out-of-band | Reverse-direction reconciliation surfaces it; operator decides |
-| Customer should never be held but rule keeps proposing | `customer_exclusions` table + per-record `never_auto_hold` |
+| Customer should never be held but rule keeps proposing | `customer_exclusions` (hub-pushed + site-local, exclusion-union) + per-record `never_auto_hold` |
+| Rule re-evaluation enqueues duplicate proposals | Unique partial index on `(customer_number, connection_id, action) WHERE status IN ('queued','approved')` — `enqueueProposal` returns the existing row instead of inserting a duplicate |
+| Write fails mid-batch and operator can't tell why | `failed_retryable` / `failed_terminal` enum + `failure_reason` text + per-state alert thresholds; terminal failures fire alerts via `alertRules.js` |
+| Multi-Sage site has same `IDCUST` across ledgers | `connection_id` mandatory on every queue + audit row; UI shows the connection name next to each proposal |
 
 ## What this plan deliberately doesn't cover
 
