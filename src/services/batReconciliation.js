@@ -2227,6 +2227,67 @@ async function processQueue(reconId) {
     2048, // default 2 GB
     256,  // floor 256 MB — anything lower would recycle constantly on a normal box
   ) * 1024 * 1024;
+  // Try to spawn a fresh OcrLane up to maxAttempts times with exponential
+  // backoff. Returns true on success, false after exhausting retries.
+  // Single-attempt failure was today's "all lanes retired" path: one
+  // transient hiccup during `new OcrLane()` was enough to permanently
+  // retire a lane, and four consecutive transient hiccups would kill a
+  // whole run. Retries with backoff catch the transient cases (file
+  // contention, antivirus scan, etc.) without permanently giving up.
+  async function tryLaneRecovery(lane, reconId, contextReason) {
+    const MAX_ATTEMPTS = 3;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+      try {
+        lane.worker = new OcrLane();
+        lane.rowsProcessed = 0;
+        if (attempt > 1) {
+          try {
+            logError(
+              'bat.ocr.lane_recovered',
+              new Error(`Lane recovered on attempt ${attempt}/${MAX_ATTEMPTS}`),
+              { reconciliation_id: reconId, attempt, max_attempts: MAX_ATTEMPTS, context: contextReason },
+              'info',
+            );
+          } catch {}
+        }
+        return true;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < MAX_ATTEMPTS) {
+          // 1s, 2s, 4s ceiling — gives transient FS / native-binding
+          // contention time to clear without making the operator wait
+          // forever.
+          const backoffMs = Math.min(1000 * Math.pow(2, attempt - 1), 4000);
+          try {
+            logError(
+              'bat.ocr.lane_recovery_retry',
+              e,
+              { reconciliation_id: reconId, attempt, max_attempts: MAX_ATTEMPTS, retry_in_ms: backoffMs, context: contextReason },
+              'warn',
+            );
+          } catch {}
+          await new Promise((r) => setTimeout(r, backoffMs));
+        }
+      }
+    }
+    // All attempts exhausted — surface as error and let the lane retire.
+    try {
+      logError(
+        'bat.ocr.lane_recreate',
+        lastErr,
+        { reconciliation_id: reconId, attempts_exhausted: MAX_ATTEMPTS, context: contextReason },
+      );
+    } catch {}
+    try {
+      recordReconciliationError(
+        reconId,
+        `OCR lane crashed after ${MAX_ATTEMPTS} retries: ${lastErr?.message || 'unknown'}`,
+      );
+    } catch {}
+    return false;
+  }
+
   async function recycleLane(lane, reason) {
     try { await lane.worker.terminate(); } catch {}
     // ONLY the worker recreation goes inside the try/catch that decides
@@ -2234,19 +2295,14 @@ async function processQueue(reconId) {
     // its own try/catch so a transient error_log write failure can't
     // promote into a worker-capacity failure — otherwise enough
     // observability blips would retire every lane and stall the recon
-    // with rows still pending. The lane is "recycled successfully" the
-    // moment `new OcrLane()` returns; logging the event is a separate,
-    // best-effort concern.
+    // with rows still pending.
+    //
+    // tryLaneRecovery handles up to 3 attempts with exponential backoff,
+    // so a single transient hiccup during `new OcrLane()` no longer
+    // permanently retires the lane.
     const rssMbBefore = Math.round(process.memoryUsage().rss / 1024 / 1024);
-    try {
-      lane.worker = new OcrLane();
-      lane.rowsProcessed = 0;
-    } catch (e) {
-      console.error('[bat-ocr] Lane recycle failed:', e.message);
-      try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId, recycle_reason: reason }); } catch {}
-      try { recordReconciliationError(reconId, `OCR lane crashed during recycle: ${e.message}`); } catch {}
-      return false;
-    }
+    const recovered = await tryLaneRecovery(lane, reconId, `recycle: ${reason}`);
+    if (!recovered) return false;
     try {
       logError(
         'bat.ocr.lane_recycle',
@@ -2357,6 +2413,28 @@ async function processQueue(reconId) {
     } catch { /* never let observability crash a real run */ }
   }, 60_000);
   if (typeof memoryMonitor.unref === 'function') memoryMonitor.unref();
+
+  // Circuit breaker: halt OCR if too many consecutive rows return readable
+  // text but no invoice-regex match. The signal that means "the regex
+  // doesn't recognise this supplier's invoice format" — exactly the
+  // failure mode that took down a production run today (INQ-prefixed
+  // numbers that the IN-only regex couldn't parse). Without this,
+  // every row in the queue walks the full engine cascade looking for a
+  // match it'll never find, blowing extract_total budget, exhausting
+  // lanes, and leaving the operator with no signal about what's wrong.
+  //
+  // Threshold tunable so a small recon doesn't auto-halt on a coincidence
+  // (default 5 = "if the first 5 rows all walk the cascade with text but
+  // no match, that's a regex problem, not bad luck").
+  const REGEX_STREAK_HALT_THRESHOLD = parsePositiveIntEnv(
+    process.env.OCR_REGEX_STREAK_HALT_THRESHOLD,
+    5,
+    2,
+  );
+  // The streak is shared across ALL lanes for this run — a regex problem
+  // would manifest on every lane simultaneously, so per-lane streaks
+  // would never trip the threshold individually.
+  let cascadeExhaustedStreak = 0;
 
   const runLane = async (lane) => {
     while (true) {
@@ -2478,6 +2556,10 @@ async function processQueue(reconId) {
             updateExtraction.run(invoiceNumber, 'found', previewPath, null, next.id);
             const traceTag = traceEngine ? ` [${traceSource}: ${traceEngine}@${traceAngle}]` : '';
             console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}${traceTag}`);
+            // Reset the cascade-exhausted streak on any successful match.
+            // The streak is the circuit-breaker signal — if it stays high,
+            // we halt the run; one match clears it.
+            cascadeExhaustedStreak = 0;
             try {
               logError(
                 'bat.ocr.match',
@@ -2498,6 +2580,51 @@ async function processQueue(reconId) {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
             console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
             if (engineError) recordReconciliationError(reconId, engineError);
+            // Cascade-exhausted streak — increments only when OCR genuinely
+            // walked the full engine list and got readable text but no
+            // regex match. Render failures, invalid PDFs, etc. don't count
+            // (those are different problems and don't indicate a regex
+            // issue). This is the signal that means "the regex doesn't
+            // recognise this site's invoice format" — easy to detect, easy
+            // to halt before burning the rest of the queue.
+            if (traceSource === 'cascade_exhausted') {
+              cascadeExhaustedStreak += 1;
+              if (cascadeExhaustedStreak >= REGEX_STREAK_HALT_THRESHOLD) {
+                // Halt the queue. setOcrPaused persists the pause flag in
+                // bat_settings so the operator-visible Pause toggle stays
+                // in sync, and pending rows survive a service restart in
+                // their pending state.
+                try { setOcrPaused(true); } catch {}
+                const haltMsg =
+                  `OCR auto-halted: ${cascadeExhaustedStreak} consecutive rows returned text but no invoice regex match. ` +
+                  `Likely cause: the supplier's invoice number format isn't recognised by findInvoiceNumber. ` +
+                  `Inspect a recent bat.ocr.engine_no_match log entry's text_preview field, then update the regex / restart.`;
+                try {
+                  logError(
+                    'bat.ocr.regex_streak_halt',
+                    new Error(haltMsg),
+                    {
+                      reconciliation_id: reconId,
+                      streak: cascadeExhaustedStreak,
+                      threshold: REGEX_STREAK_HALT_THRESHOLD,
+                      last_extraction_id: next.id,
+                      last_store_name: next.store_name,
+                    },
+                    'error',
+                  );
+                } catch {}
+                try { recordReconciliationError(reconId, haltMsg); } catch {}
+                // Reset the streak so when OCR resumes it gets a fresh
+                // window before halting again — operator may have updated
+                // the regex.
+                cascadeExhaustedStreak = 0;
+              }
+            } else {
+              // Non-cascade-exhausted not_found (e.g. render_failed, invalid
+              // PDF) doesn't indicate a regex problem — reset the streak so
+              // unrelated failures don't accidentally trigger the halt.
+              cascadeExhaustedStreak = 0;
+            }
           }
           emitExtractionUpdate(reconId);
         } catch (err) {
@@ -2533,8 +2660,25 @@ async function processQueue(reconId) {
             console.log(`[bat-ocr] id=${next.id} interrupted by pause — leaving 'pending' for retry on resume`);
             emitExtractionUpdate(reconId);
           } else {
+            // Even on exception (timeout, worker exit, lane crash), the
+            // worker may have already written a preview JPEG to
+            // previewDir before the failure — `preview_save` runs
+            // BEFORE the engine cascade in extractInvoiceFromPdf. Salvage
+            // the path so the operator can manually look at the page
+            // and enter the invoice number, instead of seeing "failed"
+            // with no way to recover.
+            //
+            // Naming convention: `<extractionId>.jpg` in previewDir.
+            // existsSync is sync but cheap — single fs.stat. The
+            // COALESCE in updateExtraction's UPDATE statement preserves
+            // any prior preview if the file isn't there now.
+            let salvagedPreview = null;
             try {
-              updateExtraction.run(null, 'failed', null, String(err.message || 'Unknown error').slice(0, 1000), next.id);
+              const candidate = path.join(previewDir, `${next.id}.jpg`);
+              if (fs.existsSync(candidate)) salvagedPreview = `${next.id}.jpg`;
+            } catch {}
+            try {
+              updateExtraction.run(null, 'failed', salvagedPreview, String(err.message || 'Unknown error').slice(0, 1000), next.id);
             } catch (writeErr) {
               // If the row UPDATE itself fails, we MUST surface that — otherwise
               // the lane silently fails to mark the row 'failed' and processQueue
@@ -2545,21 +2689,18 @@ async function processQueue(reconId) {
             emitExtractionUpdate(reconId);
           }
 
-          // Lane is dead (timeout or worker crash) — replace it.
+          // Lane is dead (timeout or worker crash) — replace it via the
+          // retry helper so a single transient hiccup during
+          // `new OcrLane()` doesn't permanently retire the lane.
           if (lane.worker.dead) {
             try { await lane.worker.terminate(); } catch {}
-            try {
-              lane.worker = new OcrLane();
-              // Fresh worker, reset the recycle budget — this counts as
-              // a recycle even though it was triggered by a crash, not
-              // by the row/RSS budget.
-              lane.rowsProcessed = 0;
-            } catch (e) {
-              console.error('[bat-ocr] Lane recreation failed:', e.message);
-              try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId }); } catch {}
-              recordReconciliationError(reconId, `OCR lane crashed: ${e.message}`);
+            // tryLaneRecovery does its own retry-with-backoff and
+            // already calls logError + recordReconciliationError on
+            // exhaustion, so we just check the boolean return.
+            const recovered = await tryLaneRecovery(lane, reconId, 'dead-worker recreate');
+            if (!recovered) {
               inFlight.delete(next.id);
-              return; // lane retires
+              return; // lane retires after exhausted retries
             }
           }
         }
