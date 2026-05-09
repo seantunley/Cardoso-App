@@ -788,13 +788,53 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
   // ==================== RECORD SEARCH / AGGREGATES ====================
 
+  // ── Customer lookup input normalization ──────────────────────────────────
+  //
+  // Two cleanups applied to every query string before it reaches SQL:
+  //   1. Length cap (256 chars). Real customer names + numbers are well
+  //      under 100 chars; anything bigger is either a paste-mistake or a
+  //      pathological payload (e.g. someone testing a very long string).
+  //      Capping protects the DB from gratuitously slow LIKE scans and
+  //      makes the SQLite parameter binding safer.
+  //   2. Whitespace collapse. Internal runs of spaces / tabs / newlines
+  //      collapse to a single space — so `'  100  WC'` and `'100 WC'`
+  //      hit the same row. Without this, a copy-paste from a wrapped
+  //      Excel cell would silently miss matches that should hit.
+  const MAX_QUERY_LENGTH = 256;
+  function _normalizeCustomerQuery(raw) {
+    if (typeof raw !== 'string') return '';
+    return raw.trim().replace(/\s+/g, ' ').slice(0, MAX_QUERY_LENGTH);
+  }
+
+  // ── Sub-account derivation contract ──────────────────────────────────────
+  //
+  // Cardoso recognises a customer as a "parent" when the customer_number
+  // matches /^\d+$/ — i.e. PURELY numeric. Sub-accounts of that parent are
+  // any customer_number whose leading digit-run equals the parent's number,
+  // followed by a non-digit character (e.g. parent '100' has sub-accounts
+  // '100A', '100-1', '100OC' but NOT '1001' which is a separate customer).
+  //
+  // This mirrors the BAT-style accounting scheme used at every site we
+  // currently onboard. Schemes the lookup does NOT recognise as having
+  // sub-accounts:
+  //   - Alpha-prefixed parents ('WC100')   — treated as plain customers
+  //   - Suffix-numbered parents ('100A')   — treated as plain customers
+  //   - Leading-zero parents ('00100')     — works as parent, but '00100'
+  //                                           and '100' are SEPARATE customers
+  //
+  // If a future site arrives with a non-numeric parent scheme, this
+  // assumption needs to be generalised — likely via a configurable
+  // extractor in bat_settings. Documented in docs/operator-runbook.md
+  // under the customer-management section.
+
   router.get(
     '/api/datarecord/customer-lookup',
     requireAuth,
     requirePermission('can_access_records', 'can_access_customer_search'),
     (req, res) => {
+      const startedAtMs = Date.now();
       try {
-        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        const query = _normalizeCustomerQuery(req.query.query);
 
         if (!query) {
           return res.status(400).json({ error: 'Query is required' });
@@ -815,7 +855,28 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LIMIT 1
         `).get(query, query, query, query);
 
+        // Telemetry policy: only log SLOW or ERRORED lookups via logError.
+        // logError performs sync file append + sync SQLite insert + stderr
+        // mirror per call (see src/lib/errorLog.js, which explicitly
+        // documents itself as acceptable only because callers are
+        // infrequent). Calling it on every successful lookup would turn
+        // a hot path into repeated sync I/O — flagged in PR review.
+        // Slow-or-error remains rare enough to survive the cost, and is
+        // the only signal an operator actually needs to act on.
+        const SLOW_LOOKUP_MS = 500;
+
         if (!record) {
+          const elapsedMs = Date.now() - startedAtMs;
+          if (elapsedMs > SLOW_LOOKUP_MS) {
+            try {
+              logError(
+                'customer.lookup.slow',
+                new Error(`slow miss in ${elapsedMs}ms`),
+                { query_length: query.length, hit: false, latency_ms: elapsedMs },
+                'warn',
+              );
+            } catch {}
+          }
           return res.json({ record: null, subAccounts: [] });
         }
 
@@ -842,12 +903,31 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             });
         }
 
+        const elapsedMs = Date.now() - startedAtMs;
+        if (elapsedMs > SLOW_LOOKUP_MS) {
+          try {
+            logError(
+              'customer.lookup.slow',
+              new Error(`slow hit in ${elapsedMs}ms`),
+              { query_length: query.length, hit: true, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
+              'warn',
+            );
+          } catch {}
+        }
+
         res.json({
           record: expandedRecord,
           subAccounts,
         });
       } catch (error) {
-        console.error('Customer lookup error:', error);
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError('customer.lookup', error, {
+            query_length: typeof req.query.query === 'string' ? req.query.query.length : 0,
+            latency_ms: elapsedMs,
+            err_kind: error?.constructor?.name,
+          });
+        } catch {}
         res.status(500).json({ error: 'Failed to lookup customer' });
       }
     }
@@ -858,8 +938,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     requireAuth,
     requirePermission('can_access_records', 'can_access_customer_search'),
     (req, res) => {
+      const startedAtMs = Date.now();
       try {
-        const query = typeof req.query.query === 'string' ? req.query.query.trim() : '';
+        // Same input normalization as customer-lookup — see _normalizeCustomerQuery
+        // notes above on the length cap and whitespace collapse.
+        const query = _normalizeCustomerQuery(req.query.query);
         const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 50);
 
         if (!query) {
@@ -898,11 +981,37 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LIMIT ?
         `).all(startsWith, startsWith, contains, contains, query, query, startsWith, startsWith, limit);
 
+        // SLOW-ONLY telemetry — see policy comment on /customer-lookup
+        // above. The suggestions endpoint is the actual hot path
+        // (debounced typeahead, fires on every keystroke after 300ms),
+        // so per-call sync I/O via logError would be a real
+        // user-facing latency hit and would bloat error_log fast.
+        // Only the slow-tail surfaces as an early-warning signal.
+        const elapsedMs = Date.now() - startedAtMs;
+        const SLOW_SUGGESTIONS_MS = 500;
+        if (elapsedMs > SLOW_SUGGESTIONS_MS) {
+          try {
+            logError(
+              'customer.lookup.suggestions.slow',
+              new Error(`slow suggestions in ${elapsedMs}ms`),
+              { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
+              'warn',
+            );
+          } catch {}
+        }
+
         res.json({
           suggestions: rows.map((row) => expandDataRecord(row)),
         });
       } catch (error) {
-        console.error('Customer lookup suggestions error:', error);
+        const elapsedMs = Date.now() - startedAtMs;
+        try {
+          logError('customer.lookup.suggestions', error, {
+            query_length: typeof req.query.query === 'string' ? req.query.query.length : 0,
+            latency_ms: elapsedMs,
+            err_kind: error?.constructor?.name,
+          });
+        } catch {}
         res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
       }
     }
