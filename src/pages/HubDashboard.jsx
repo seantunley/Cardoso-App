@@ -63,15 +63,53 @@ function getSinceDate(rangeValue) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
+// Returns null when last_accpac_synced_at is missing OR fresh (≤24h),
+// otherwise the human-readable age. The card uses the return value as
+// a "should I look stressed about this" signal.
+function accpacStaleness(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const ms = Date.now() - t;
+  const hours = ms / (60 * 60 * 1000);
+  if (hours <= 24) return null;
+  if (hours < 48) return "1 day stale";
+  return `${Math.floor(hours / 24)} days stale`;
+}
+
 // Memoised so a parent re-render (search-typing, dateRange flip, kpis poll)
 // doesn't re-render every tile when the props for *this* tile haven't
 // shape-changed. The parent already wraps onFlagClick / onResync with
 // useCallback so the prop identity is stable across renders.
-const SiteCard = memo(function SiteCard({ site, onFlagClick, onResync }) {
+//
+// NOTE on the props list: this destructure was the load-bearing thing
+// that broke during the #200 ↔ #198 merge — the merged file kept the
+// JSX body that references onTriggerAccpacSync / accpacSyncingSiteId
+// (and locals derived from them) but the destructure dropped the props
+// and the locals never got recreated, throwing ReferenceError on every
+// site-card render. Restored as a hotfix.
+const SiteCard = memo(function SiteCard({
+  site,
+  onFlagClick,
+  onResync,
+  onTriggerAccpacSync,
+  accpacSyncingSiteId,
+}) {
   const isOnline = site.status === "ok" || site.status === "online";
   const isOrphan = site.is_orphan === true;
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
+  // accpacStatus drives the colour-coding in the sync footer below.
+  // 'ok' | 'error' | 'never_synced' | null — site-side reports it.
+  const accpacStatus = site.last_accpac_status;
+  // stale → human-readable age string when the last accpac sync is older
+  // than 24h, otherwise null. Used to flip the footer-line colour to
+  // amber and append "· N days stale" to the timestamp.
+  const stale = accpacStaleness(site.last_accpac_synced_at);
+  // accpacIsRunning is true while a "Sync from Accpac" trigger is in
+  // flight to THIS site (the parent tracks the in-flight site id in
+  // accpacSyncingSiteId). Disables the button + spins the icon.
+  const accpacIsRunning = accpacSyncingSiteId === site.site_id;
   // Days since the row was orphaned, for the pill tooltip. Numeric so
   // the operator sees "removed 12 days ago" rather than a raw ISO.
   const orphanedAgoDays = site.removed_from_env_at
@@ -252,9 +290,13 @@ const SiteCard = memo(function SiteCard({ site, onFlagClick, onResync }) {
           </div>
           <button
             onClick={(e) => { e.stopPropagation(); onTriggerAccpacSync(site); }}
-            disabled={accpacIsRunning}
+            disabled={accpacIsRunning || isOrphan}
             className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[32px] disabled:opacity-50 disabled:cursor-wait"
-            title={`Trigger an Accpac/Sage sync at ${site.site_name || site.site_slug}`}
+            title={
+              isOrphan
+                ? "Site is orphaned — re-add to HUB_SITES env to reactivate"
+                : `Trigger an Accpac/Sage sync at ${site.site_name || site.site_slug}`
+            }
           >
             <RefreshCw className={cn("h-3 w-3", accpacIsRunning && "animate-spin")} />
             {accpacIsRunning ? 'Syncing…' : 'Sync from Accpac'}
