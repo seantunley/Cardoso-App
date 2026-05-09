@@ -63,10 +63,27 @@ function getSinceDate(rangeValue) {
 
 // ─── site card ──────────────────────────────────────────────────────────────
 
-function SiteCard({ site, onFlagClick, onResync }) {
+// Returns null when last_accpac_synced_at is missing OR fresh (≤24h),
+// otherwise the human-readable age. The card uses the return value as
+// a "should I look stressed about this" signal.
+function accpacStaleness(iso) {
+  if (!iso) return null;
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return null;
+  const ms = Date.now() - t;
+  const hours = ms / (60 * 60 * 1000);
+  if (hours <= 24) return null;
+  if (hours < 48) return "1 day stale";
+  return `${Math.floor(hours / 24)} days stale`;
+}
+
+function SiteCard({ site, onFlagClick, onResync, onTriggerAccpacSync, accpacSyncingSiteId }) {
   const isOnline = site.status === "ok" || site.status === "online";
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
+  const accpacStatus = site.last_accpac_status; // 'ok' | 'error' | 'never_synced' | null
+  const stale = accpacStaleness(site.last_accpac_synced_at);
+  const accpacIsRunning = accpacSyncingSiteId === site.site_id;
   return (
     <div
       className="relative border border-border bg-card p-4 space-y-3 transition-all hover:border-[var(--phosphor)] overflow-hidden"
@@ -164,11 +181,55 @@ function SiteCard({ site, onFlagClick, onResync }) {
         <p className="text-sm text-muted-foreground">No KPI data yet</p>
       )}
 
-      {site.last_seen && (
-        <p className="text-[10px] text-muted-foreground/60">
-          Last sync: {new Date(site.last_seen).toLocaleString()}
-        </p>
-      )}
+      {/* Sync footer.
+          Top line: when the SITE last refreshed from Accpac/Sage —
+          this is the "is the data actually current?" answer the
+          operator cares about. Status colour codes the line:
+            ok    → muted green tone
+            error → destructive red, with the actual error reason below
+            stale (>24h) → amber warning
+            never_synced or null → muted, "—".
+          Bottom line: when the HUB last pulled from the site
+          (last_seen). Keeps the technical breadcrumb for support
+          without conflating it with data freshness.
+          Trailing button: "Sync from Accpac" — fires the trigger
+          endpoint. Disabled while a sync is in flight to that site. */}
+      <div className="space-y-1 pt-1 border-t border-border/40">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col leading-tight">
+            <span className={cn(
+              "text-[10px]",
+              accpacStatus === 'error' ? "text-rose-400" :
+              stale ? "text-amber-400" :
+              site.last_accpac_synced_at ? "text-muted-foreground/80" : "text-muted-foreground/50",
+            )}>
+              {site.last_accpac_synced_at
+                ? `Accpac sync: ${new Date(site.last_accpac_synced_at).toLocaleString()}${stale ? ` · ${stale}` : ''}`
+                : 'Accpac sync: — (not yet reported)'}
+            </span>
+            {site.last_seen && (
+              <span className="text-[10px] text-muted-foreground/50">
+                Hub pull: {new Date(site.last_seen).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onTriggerAccpacSync(site); }}
+            disabled={accpacIsRunning}
+            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[32px] disabled:opacity-50 disabled:cursor-wait"
+            title={`Trigger an Accpac/Sage sync at ${site.site_name || site.site_slug}`}
+          >
+            <RefreshCw className={cn("h-3 w-3", accpacIsRunning && "animate-spin")} />
+            {accpacIsRunning ? 'Syncing…' : 'Sync from Accpac'}
+          </button>
+        </div>
+        {accpacStatus === 'error' && site.last_accpac_error && (
+          <div className="flex items-start gap-1.5 text-[10px] text-rose-400/90 break-words">
+            <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+            <span>{site.last_accpac_error}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -605,6 +666,11 @@ export default function HubDashboard() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
   const [dateRange, setDateRange] = useState("all");
+  // Tracks the site whose Accpac sync is currently in flight, so the
+  // matching tile shows "Syncing…" + spinner. Single string instead of a
+  // Set because hub→site triggers serially (and the UI fires on click,
+  // not bulk). null when nothing is running.
+  const [accpacSyncingSiteId, setAccpacSyncingSiteId] = useState(null);
 
   // Flag drill-down
   const [flagModal, setFlagModal] = useState({ open: false, color: null, siteName: "", siteId: null });
@@ -662,6 +728,58 @@ export default function HubDashboard() {
       setTimeout(() => fetchAll(), 5000);
     } catch (err) {
       toast.error(humanizeApiError(err, `resync ${name}`));
+    }
+  };
+
+  // Triggers an Accpac/Sage sync at the named site. The hub forwards
+  // to the site's /api/hub/trigger-accpac-sync, which loops over every
+  // active non-BAT-only connection and calls runConnectionImport.
+  // Blocks for up to 5 min on the server; UI shows a spinner on the
+  // matching tile until the response lands.
+  //
+  // After it returns, kick off fetchAll() on a delay so the next
+  // hub-pull cycle (every 5 min in hub mode) has a chance to land
+  // and refresh last_accpac_synced_at on the tile.
+  const triggerAccpacSync = async (site) => {
+    const name = site.site_name || site.site_slug;
+    setAccpacSyncingSiteId(site.site_id);
+    toast(`Triggering Accpac sync at ${name}…`);
+    try {
+      const res = await fetch(`/api/hub/sites/${site.site_id}/trigger-accpac-sync`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+
+      const failed = (body.results || []).filter(r => !r.ok);
+      if (failed.length === 0) {
+        toast.success(`${name}: ${body.succeeded}/${body.total} connection(s) synced from Accpac`);
+      } else {
+        // Surface the first failure verbatim — describeSqlError already
+        // wrapped it on the site side. Operator gets the actionable reason
+        // ("Login failed (wrong username or password) [ELOGIN]") instead of
+        // a generic "sync failed".
+        const first = failed[0];
+        toast.error(`${name}: ${first.name} — ${first.message}`);
+      }
+      // The hub's trigger endpoint chains a syncSite() after the site
+      // finishes, so hub_sites.last_accpac_* is already up to date by
+      // the time we get here. fetchAll runs immediately — no fixed
+      // setTimeout that used to "guess" when the next scheduler tick
+      // would land (and made the manual button look ineffective for
+      // up to 5 minutes on a quiet day).
+      if (body.hub_refresh_error) {
+        // Trigger succeeded but the chained hub-pull didn't. Dashboard
+        // still re-fetches; operator just sees a heads-up so they
+        // aren't surprised if the tile timestamp lags briefly.
+        toast(`Refresh of hub data lagged: ${body.hub_refresh_error}`);
+      }
+      fetchAll();
+    } catch (err) {
+      toast.error(humanizeApiError(err, `trigger Accpac sync at ${name}`));
+    } finally {
+      setAccpacSyncingSiteId(null);
     }
   };
 
@@ -741,7 +859,16 @@ export default function HubDashboard() {
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-4">§ Sites · {sites.length}</div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
-            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} onResync={resyncSite} />)}
+            {sites.map(s => (
+              <SiteCard
+                key={s.site_id}
+                site={s}
+                onFlagClick={handleFlagClick}
+                onResync={resyncSite}
+                onTriggerAccpacSync={triggerAccpacSync}
+                accpacSyncingSiteId={accpacSyncingSiteId}
+              />
+            ))}
           </div>
         </div>
       ) : (

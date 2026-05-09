@@ -10,7 +10,8 @@ import bcrypt from 'bcryptjs';
 import { readdirSync, statSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSite, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
 import { logAudit } from '../lib/audit.js';
@@ -403,7 +404,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     // Narrow column list — UI listing only needs these fields
     const rawSites = db.prepare(
-      'SELECT id, slug, name, url, last_seen, status, last_kpis FROM hub_sites'
+      `SELECT id, slug, name, url, last_seen, status, last_kpis,
+              last_accpac_synced_at, last_accpac_status, last_accpac_error
+       FROM hub_sites`
     ).all();
     const mapped = rawSites.map((s) => ({
       site_id: s.id,
@@ -414,6 +417,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       last_seen: s.last_seen,
       status: s.status,
       last_kpis: s.last_kpis ? JSON.parse(s.last_kpis) : null,
+      // Site→Accpac freshness — distinct from last_seen which is the
+      // hub→site timestamp. The dashboard tile uses these to flag
+      // stale-data and surface Accpac errors visibly.
+      last_accpac_synced_at: s.last_accpac_synced_at || null,
+      last_accpac_status: s.last_accpac_status || null,
+      last_accpac_error: s.last_accpac_error || null,
     }));
     // Returns JSON array — compatible with both the UI and hub-pull-backups.ps1
     res.json(mapped);
@@ -521,7 +530,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let allSites = [];
     // Narrow column list — KPI aggregator only needs these fields
-    try { allSites = db.prepare('SELECT id, slug, name, status, last_seen FROM hub_sites').all(); } catch {}
+    try { allSites = db.prepare(`
+      SELECT id, slug, name, status, last_seen,
+             last_accpac_synced_at, last_accpac_status, last_accpac_error
+      FROM hub_sites
+    `).all(); } catch {}
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
@@ -555,6 +568,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         site_name: s.name,
         status: s.status,
         last_seen: s.last_seen,
+        // Site→Accpac freshness (vs last_seen which is hub→site).
+        // Surfaced on the dashboard tile so operators see when the
+        // SOURCE data was last refreshed, not just when the hub
+        // last pulled. See migration v62 for the column rationale.
+        last_accpac_synced_at: s.last_accpac_synced_at || null,
+        last_accpac_status: s.last_accpac_status || null,
+        last_accpac_error: s.last_accpac_error || null,
         kpis: {
           total_records: siteTotal?.count || 0,
           records_by_flag: siteFlags,
@@ -1373,6 +1393,115 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // POST /api/hub/sites/:siteId/trigger-accpac-sync — admin-only.
+  // Fans out a "refresh from Accpac now" request to a single site.
+  // The hub forwards to the site's own /api/hub/trigger-accpac-sync
+  // (registered on every install via createReceiveUsersRouter), which
+  // calls runConnectionImport for every active non-BAT-only connection.
+  //
+  // Generous 5-minute timeout — a real Accpac pull on a slow site can
+  // take a minute or two per connection, and this endpoint blocks
+  // until every per-connection sync has settled. After it returns,
+  // the hub-side syncSite scheduler will pick up the freshly-updated
+  // datarecord on its next tick (every 5 min in hub mode), so the
+  // dashboard shows the new last_accpac_synced_at within ~5 min.
+  router.post('/api/hub/sites/:siteId/trigger-accpac-sync', requireAuth, requireAdmin, async (req, res) => {
+    const { siteId } = req.params;
+    const site = db.prepare(`SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?`).get(siteId);
+    if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
+    if (!site.url || !site.token) {
+      return res.status(400).json({ error: `Site '${site.slug}' has no URL or token configured.` });
+    }
+
+    const url = `${site.url}/api/hub/trigger-accpac-sync`;
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Reporting-Token': site.token,
+        },
+        signal: AbortSignal.timeout(5 * 60 * 1000),
+      });
+      const body = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        const reason = body.error || `HTTP ${r.status}`;
+        logAudit({
+          req, action: 'hub_trigger_accpac_sync', resourceType: 'site',
+          resourceId: site.id, resourceName: site.name || site.slug,
+          details: `Trigger failed: ${reason}`, status: 'failure',
+        });
+        return res.status(r.status).json({ ok: false, error: reason, ...body });
+      }
+      logAudit({
+        req, action: 'hub_trigger_accpac_sync', resourceType: 'site',
+        resourceId: site.id, resourceName: site.name || site.slug,
+        details: `${body.succeeded || 0}/${body.total || 0} connection(s) synced`,
+        changes: { results: body.results },
+      });
+
+      // Site has finished its Accpac sync. The hub_sites row is still
+      // stale at this point — `last_accpac_synced_at` won't update
+      // until the next 5-min hub→site scheduler tick re-pulls the
+      // site's KPIs. That made the manual button look ineffective:
+      // operator clicks Sync, response says success, tile keeps the
+      // old timestamp until the scheduler caught up minutes later.
+      //
+      // Chain a syncSite call here so by the time we respond, the
+      // hub has already pulled the freshly-updated kpis. Wrapped in a
+      // try/catch — if the hub-pull fails for some reason, the trigger
+      // itself still succeeded, so we report partial success rather
+      // than 502. The client's fetchAll then sees the up-to-date row.
+      //
+      // Use the DB row directly — earlier this looked up the site in
+      // HUB_SITES (the env-derived in-memory list), but the two can
+      // drift: hub_sites is upserted from HUB_SITES on boot but stale
+      // rows are never pruned, and a site-config change between boots
+      // leaves the table with rows the env no longer knows about. The
+      // trigger above already happily forwards to site.url, so the
+      // refresh should trust the same row instead of silently skipping
+      // when HUB_SITES.find() misses (which would leave the dashboard
+      // freshness fields stale indefinitely).
+      // Important: syncSite() does NOT throw on pull failures — it
+      // catches internally, sets the hub_sites row to status='error',
+      // and returns { error } in its result object. The earlier
+      // try/catch-only check missed every soft failure, so the client
+      // would receive hub_refresh_ok=true even when the chained pull
+      // had silently failed and the dashboard would keep showing stale
+      // last_accpac_* values until the next scheduler tick. Check both
+      // the return value AND the catch (defence in depth — if a
+      // future refactor makes syncSite throw, this still works).
+      let hubPullOk = true;
+      let hubPullError = null;
+      try {
+        const refreshResult = await syncSite(site);
+        if (refreshResult?.error) {
+          hubPullOk = false;
+          hubPullError = String(refreshResult.error);
+        }
+      } catch (pullErr) {
+        hubPullOk = false;
+        hubPullError = pullErr?.message || String(pullErr);
+        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch {}
+      }
+
+      res.json({
+        ...body,
+        hub_refresh_ok: hubPullOk,
+        hub_refresh_error: hubPullError,
+      });
+    } catch (err) {
+      const friendly = describeFetchError(err, url);
+      logError('hub.trigger_accpac_sync', err, { site_id: site.id, site_url: site.url, friendly });
+      logAudit({
+        req, action: 'hub_trigger_accpac_sync', resourceType: 'site',
+        resourceId: site.id, resourceName: site.name || site.slug,
+        details: friendly, status: 'failure',
+      });
+      res.status(502).json({ ok: false, error: friendly });
+    }
+  });
+
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
   // See createReceiveUsersRouter() below — mounted separately in server.js.
 
@@ -1591,6 +1720,79 @@ export function createReceiveUsersRouter() {
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // POST /api/hub/trigger-accpac-sync — site-side. Hub posts here to
+  // ask the site to refresh from Accpac/Sage. The site loops over its
+  // active non-BAT-only connections and calls runConnectionImport for
+  // each. Per-connection acquireSyncLock means firing this while a
+  // scheduled sync is already running is a no-op for that connection,
+  // not a double-pull.
+  //
+  // Auth: same X-Reporting-Token the hub uses for receive-users etc.
+  // Response: { ok, results: [{ connection_id, name, ok, message }] }
+  // Returns once every per-connection sync has settled (success or
+  // error). Hub-side this is wrapped with a generous timeout because
+  // a real Accpac pull can take 10s-2min depending on table size.
+  router.post('/api/hub/trigger-accpac-sync', async (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    let conns;
+    try {
+      conns = db.prepare(`
+        SELECT id, name FROM databaseconnection
+        WHERE status IN ('active', 'error') AND COALESCE(is_bat_only, 0) = 0
+        ORDER BY id
+      `).all();
+    } catch (err) {
+      return res.status(500).json({ error: `Failed to read connections: ${err.message}` });
+    }
+
+    if (conns.length === 0) {
+      return res.status(400).json({
+        error: 'No active non-BAT-only connections configured on this site.',
+        ok: false, results: [],
+      });
+    }
+
+    const results = [];
+    for (const c of conns) {
+      try {
+        const r = await runConnectionImport(c.id);
+        results.push({
+          connection_id: c.id,
+          name: c.name,
+          ok: r?.success !== false,
+          message: r?.message || `Imported ${r?.imported ?? 0} record(s)`,
+          imported: r?.imported ?? null,
+        });
+      } catch (err) {
+        // runConnectionImport throws on hard failures. The error has
+        // already been persisted to databaseconnection.last_error and
+        // syncrun (with a describeSqlError-shaped message via #192's
+        // audit). Surface it back to the hub so the operator sees the
+        // same string the System Log will show.
+        results.push({
+          connection_id: c.id,
+          name: c.name,
+          ok: false,
+          message: err.message || 'Sync failed',
+        });
+      }
+    }
+
+    const okCount = results.filter(r => r.ok).length;
+    res.json({
+      ok: okCount > 0,
+      total: results.length,
+      succeeded: okCount,
+      failed: results.length - okCount,
+      results,
+    });
   });
 
   return router;
