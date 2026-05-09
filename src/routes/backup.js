@@ -11,14 +11,62 @@ const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBack
 const DEFAULT_SQLBACKUP_OBJECT_EXCLUDE_LIST = 'PPDdata';
 const SENSITIVE_ENV_KEY_PATTERN = /(SECRET|TOKEN|PASSWORD|PASS|KEY|PRIVATE|CERT|COOKIE|SESSION|AUTH)/i;
 
+// Match URL-style userinfo embedded in a value: scheme://user:pass@host
+// Used to redact secrets that hide inside URL keys not caught by the
+// key-name pattern above (e.g. DATABASE_URL=postgres://app:hunter2@db/x).
+const URL_USERINFO_PATTERN = /([a-z][a-z0-9+\-.]*:\/\/)([^/\s:@]+):([^/\s@]+)@/gi;
+
+// PEM-style heredoc value markers — when an env value spans multiple lines
+// (a wrapped private key, certificate, etc.), the line-by-line redactor
+// would only blank the first line. We detect the begin marker on a value
+// and treat everything up to the matching end marker as one redactable unit.
+const PEM_BEGIN_RE = /-----BEGIN [A-Z0-9 ]+-----/;
+const PEM_END_RE   = /-----END [A-Z0-9 ]+-----/;
+
+function _safeIp(req) {
+  // Use req.ip (Express respects the trust-proxy setting in server.js); fall
+  // back to socket address. Truncated to keep audit / log payloads small.
+  try { return String(req?.ip || req?.socket?.remoteAddress || 'unknown').slice(0, 64); }
+  catch { return 'unknown'; }
+}
+
 function requireReportingToken(req, res, next) {
   const token = req.headers['x-reporting-token'];
   const expectedToken = process.env.REPORTING_TOKEN;
 
   if (!expectedToken || token !== expectedToken) {
+    // Log auth failures so probing / brute-force attempts against the
+    // backup endpoints are visible in the System Log (and via the
+    // securitySignals 401 counter). NEVER log the supplied token —
+    // even truncated/hashed forms can leak information about the
+    // probe pattern. Just record the fact, the route, and the IP.
+    try {
+      logError(
+        'backup.auth_failed',
+        new Error(`Unauthorized backup request to ${req.path}`),
+        {
+          route: req.path,
+          ip: _safeIp(req),
+          ua: String(req.get('user-agent') || '').slice(0, 200),
+          token_present: !!token,
+          token_correct_shape: typeof token === 'string' && token.length > 0,
+        },
+        'warn',
+      );
+    } catch {}
     return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
   }
 
+  next();
+}
+
+// Apply Cache-Control: no-store to every backup endpoint. The download
+// and config responses contain sensitive data that should never be cached
+// by intermediaries; the status endpoints are time-sensitive enough that
+// caching is also undesirable. One mw covers all routes.
+function noStore(req, res, next) {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
   next();
 }
 
@@ -59,29 +107,139 @@ function getBackupConfigExportMode() {
   return process.env.NODE_ENV === 'production' ? 'redacted' : 'full';
 }
 
+// Redact sensitive content from a .env file before exposing it. The original
+// version was key-name only — values like
+//   DATABASE_URL=postgres://app:hunter2@db/x
+// passed through untouched because `URL` isn't in the SENSITIVE_ENV_KEY_PATTERN.
+// Audit caught this as a real leak surface. The hardened version applies
+// three independent passes:
+//
+//   1. Key-name redaction (unchanged) — replaces the entire value when the
+//      key matches SENSITIVE_ENV_KEY_PATTERN. Catches the obvious cases:
+//      JWT_SECRET, SESSION_SECRET, REPORTING_TOKEN, etc.
+//
+//   2. URL userinfo redaction — within any value that survived #1, strip
+//      embedded credentials of the form `scheme://user:pass@host`. The
+//      hostname remains visible (operators want to know "where does that
+//      URL point"); only the user and password are blanked.
+//
+//   3. Multi-line PEM block redaction — values that begin with -----BEGIN ...-----
+//      are kept as-is for the marker line but every subsequent line up to
+//      the matching -----END ...----- is replaced with a single
+//      __REDACTED_PEM_BODY__ marker. The naive line-by-line approach left
+//      the body of multi-line keys exposed.
+//
+// All three passes run in order so a redacted multi-line key whose key-name
+// also matches #1 still ends up with the value blanked entirely.
+function redactValueUrls(value) {
+  return String(value).replace(URL_USERINFO_PATTERN, '$1__REDACTED__:__REDACTED__@');
+}
+
 function redactEnvFile(envText) {
-  return String(envText || '')
-    .split(/\r?\n/)
-    .map((line) => {
-      if (!line || line.trim().startsWith('#')) return line;
-      const idx = line.indexOf('=');
-      if (idx === -1) return line;
-      const key = line.slice(0, idx).trim();
-      if (!SENSITIVE_ENV_KEY_PATTERN.test(key)) return line;
-      return `${key}=__REDACTED__`;
-    })
-    .join('\n');
+  const lines = String(envText || '').split(/\r?\n/);
+  const out = [];
+  let inPemBlock = false;
+
+  for (const line of lines) {
+    // Inside a multi-line PEM body, drop lines until we hit the end marker.
+    // A single placeholder for the first dropped line keeps the file shape
+    // intact and signals to the reader that something was there.
+    if (inPemBlock) {
+      if (PEM_END_RE.test(line)) {
+        inPemBlock = false;
+        out.push(line); // keep the END marker
+      } else if (out[out.length - 1] !== '__REDACTED_PEM_BODY__') {
+        out.push('__REDACTED_PEM_BODY__');
+      }
+      continue;
+    }
+
+    if (!line || line.trim().startsWith('#')) {
+      out.push(line);
+      continue;
+    }
+
+    const idx = line.indexOf('=');
+    if (idx === -1) {
+      out.push(line);
+      continue;
+    }
+
+    const key = line.slice(0, idx).trim();
+    let value = line.slice(idx + 1);
+
+    // Pass 1 — key name match.
+    if (SENSITIVE_ENV_KEY_PATTERN.test(key)) {
+      out.push(`${key}=__REDACTED__`);
+      // If the redacted value is the start of a PEM block (e.g.
+      // PRIVATE_KEY="-----BEGIN ...-----), enter PEM-skip mode so the
+      // wrapped body lines that follow are also redacted.
+      if (PEM_BEGIN_RE.test(value)) inPemBlock = true;
+      continue;
+    }
+
+    // Pass 2 — URL userinfo match within a value the key-pass kept.
+    if (URL_USERINFO_PATTERN.test(value)) {
+      // Reset lastIndex because the .test() call above advances it for
+      // the global flag. Without this, .replace would skip the first match.
+      URL_USERINFO_PATTERN.lastIndex = 0;
+      value = redactValueUrls(value);
+    }
+
+    // Pass 3 — PEM begin marker on the value (multi-line key/cert).
+    if (PEM_BEGIN_RE.test(value)) {
+      // The line itself stays, but mark that we're inside a PEM body so
+      // subsequent lines get squashed.
+      inPemBlock = true;
+    }
+
+    out.push(`${key}=${value}`);
+  }
+
+  return out.join('\n');
 }
 
 // Clean up any stale snapshot files left behind from a crashed previous run.
 // The /api/backup/download handler unlinks its temp file on success or stream
 // error, but a process kill mid-snapshot would leave one behind. Run once at
 // module load.
-(function cleanupStaleSnapshots() {
+//
+// TTL is env-tunable. Default 1 hour, floor 60 seconds.
+//
+// Two failure modes get handled differently:
+//   - parse fails (NaN, Infinity, missing value) → fall back to default
+//   - parsed value is below the floor              → CLAMP to the floor,
+//     not the default. An operator who sets `BACKUP_TMP_TTL_MS=30000`
+//     clearly wants quick cleanup; treating that as "invalid, use 1 hour"
+//     would make it appear that the env was ignored. Clamping to 60s
+//     respects the operator's intent while still preventing pathological
+//     near-zero values that would thrash the FS.
+//
+// Without this distinction, an earlier draft returned the default for
+// BOTH cases, so a low-but-valid setting silently delayed cleanup by an
+// hour — flagged in PR review.
+function _staleTtlMs() {
+  const FLOOR = 60_000;       // 60 seconds — minimum sane cleanup interval
+  const DEFAULT = 60 * 60 * 1000; // 1 hour
+  const raw = process.env.BACKUP_TMP_TTL_MS;
+  if (raw === undefined || raw === '') return DEFAULT;
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return DEFAULT;
+  if (n < FLOOR) return FLOOR;
+  return n;
+}
+// Stale-snapshot cleanup. NOT invoked as a module-load IIFE here —
+// server.js calls dotenv.config() AFTER its imports finish, so module-load
+// time would always read process.env.BACKUP_TMP_TTL_MS as undefined and
+// silently fall back to the 1-hour default (the env override would be
+// dead-on-arrival). Same shape as the rate-limiter `max` issue caught in
+// PR review. Invoked instead from createBackupRouter(), which server.js
+// calls after dotenv has run.
+function cleanupStaleSnapshots() {
   try {
     const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
     if (!fs.existsSync(tmpDir)) return;
-    const cutoff = Date.now() - 60 * 60 * 1000; // 1 hour
+    const cutoff = Date.now() - _staleTtlMs();
     let removed = 0;
     for (const f of fs.readdirSync(tmpDir)) {
       const p = path.join(tmpDir, f);
@@ -93,13 +251,23 @@ function redactEnvFile(envText) {
   } catch (err) {
     console.warn('[backup] Stale-snapshot cleanup failed:', err.message);
   }
-})();
+}
 
 export function createBackupRouter() {
+  // Run the stale-snapshot sweep once when the router is mounted.
+  // server.js calls this after dotenv.config(), so process.env reflects
+  // the operator's .env values by this point.
+  cleanupStaleSnapshots();
+
   const router = express.Router();
 
+  // Apply Cache-Control: no-store + the standard reporting rate limiter
+  // to every backup endpoint. The heavy endpoints layer the stricter
+  // backupHeavyRateLimiter on top.
+  router.use(noStore);
+
   // GET /api/backup/status
-  router.get('/api/backup/status', requireReportingToken, (req, res) => {
+  router.get('/api/backup/status', reportingRateLimiter, requireReportingToken, (req, res) => {
     const backupDir = path.resolve(path.dirname(dbPath), 'backups');
 
     let lastBackup = null;
@@ -132,7 +300,7 @@ export function createBackupRouter() {
   });
 
   // GET /api/backup/sql-status
-  router.get('/api/backup/sql-status', requireReportingToken, (req, res) => {
+  router.get('/api/backup/sql-status', reportingRateLimiter, requireReportingToken, (req, res) => {
     const routinesDbPath = getSqlBackupRoutinesDbPath();
 
     if (process.platform !== 'win32') {
@@ -219,8 +387,10 @@ export function createBackupRouter() {
   });
 
   // GET /api/backup/config
-  // Returns the site .env file for disaster recovery. Token-protected.
-  router.get('/api/backup/config', requireReportingToken, (req, res) => {
+  // Returns the site .env file for disaster recovery. Token-protected
+  // and rate-limited (heavy endpoint: 10/hour by default; env-tunable
+  // via BACKUP_HEAVY_MAX_PER_HOUR).
+  router.get('/api/backup/config', backupHeavyRateLimiter, requireReportingToken, (req, res) => {
     const exportMode = getBackupConfigExportMode();
     if (exportMode === 'disabled') {
       return res.status(403).json({ error: 'Backup config export is disabled on this site' });
@@ -294,7 +464,7 @@ export function createBackupRouter() {
   // that would fail PRAGMA integrity_check on the hub side and get renamed
   // to .corrupt. Now we use SQLite's online backup API to write a snapshot
   // to a temp file, stream that, then delete it. Safe under concurrent writes.
-  router.get('/api/backup/download', requireReportingToken, async (req, res) => {
+  router.get('/api/backup/download', backupHeavyRateLimiter, requireReportingToken, async (req, res) => {
     const tmpDir = path.join(process.cwd(), 'database', 'tmp-backups');
     let tmpPath = null;
 

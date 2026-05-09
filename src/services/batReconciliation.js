@@ -1957,6 +1957,14 @@ class OcrLane {
         const err = new Error(msg.error?.message || 'Unknown OCR worker error');
         if (msg.error?.stack) err.stack = msg.error.stack;
         if (msg.error?.tierError) err.tierError = true;
+        // Propagate the structured fields the worker now emits with
+        // every error (code='OCR_TIMEOUT' / stage / timeoutMs). Lets
+        // downstream callers classify failures without parsing
+        // err.message — see the no-regex-on-message contract added
+        // alongside the trace artifact.
+        if (msg.error?.code) err.code = msg.error.code;
+        if (msg.error?.stage) err.stage = msg.error.stage;
+        if (msg.error?.timeoutMs) err.timeoutMs = msg.error.timeoutMs;
         slot.reject(err);
       }
     });
@@ -2007,7 +2015,16 @@ class OcrLane {
           // gets recreated rather than reused with a stuck call.
           this.dead = true;
           try { this.worker.terminate(); } catch {}
-          reject(new Error('PDF timeout'));
+          // Same structured shape as the worker-side timeouts, so
+          // classification works identically whether the timeout fired
+          // inside the worker (worker.code='OCR_TIMEOUT') or because
+          // the lane itself ran out of patience waiting for the worker
+          // to respond.
+          const e = new Error('PDF timeout');
+          e.code = 'OCR_TIMEOUT';
+          e.stage = 'lane_timeout';
+          e.timeoutMs = timeoutMs;
+          reject(e);
         }
       }, timeoutMs);
       this.pending.set(id, {
@@ -2115,7 +2132,91 @@ async function processQueue(reconId) {
   const ocrSpaceKey = getOcrSpaceKey();
   const inDigitLength = getInvoiceInDigitLength();
 
-  const lanes = Array.from({ length: N }, () => ({ worker: new OcrLane() }));
+  // Each lane carries its own row-count counter so we can recycle the
+  // worker thread after a budget of rows. See `recycleLane` below for why.
+  const lanes = Array.from({ length: N }, () => ({ worker: new OcrLane(), rowsProcessed: 0 }));
+
+  // ── Periodic worker recycle ────────────────────────────────────────────
+  //
+  // Why: sharp (libvips), node-canvas (cairo), and pdfjs all allocate
+  // native memory outside V8's accounting. V8 has no GC pressure on it,
+  // so the buffers accumulate across rows in a single long-lived worker
+  // thread. Operator metric `bat.ocr.memory` showed RSS climbing to
+  // 17.9 GB at t+420s with only 47 MB on the JS heap and 7 MB tracked
+  // as `external` — i.e. ~17.9 GB of unmanaged off-heap allocation.
+  // Symptom-side: rows started taking 79+ seconds and PDF timeouts
+  // spiked because the OS was swap-thrashing or near it.
+  //
+  // Fix: recycle the lane after a budget of rows (or when the process
+  // RSS crosses a high-water mark). Each recycle is `worker.terminate()`
+  // + `new OcrLane()` — the OS reclaims ALL native memory that worker
+  // was holding when its process exits. Cost is the lane init time
+  // (~1s for sharp/pdfjs/tesseract), which over the course of a 1000-row
+  // recon is in the noise (~4% wallclock at recycle-every-25-rows).
+  //
+  // Two triggers:
+  //   - rowsProcessed budget — predictable, bounded leak budget.
+  //   - RSS budget — belt-and-braces against pathological PDFs that
+  //     leak more per row than usual. Shared across all lanes (RSS is
+  //     process-wide), so one lane crossing the threshold causes its
+  //     own recycle; the others recycle on their own row count.
+  //
+  // Tunable via env so an operator can dial them down on a smaller box.
+  //
+  // NaN guard: `parseInt('abc', 10)` returns NaN, and `Math.max(1, NaN)`
+  // returns NaN — not 1. Then every `>= NaN` check downstream is always
+  // false, which would silently disable the recycle mechanism if a typo
+  // landed in the env. Use a parse-then-validate helper that falls back
+  // to the default for any non-finite or sub-floor value.
+  const parsePositiveIntEnv = (envVal, defaultVal, floor) => {
+    const n = parseInt(envVal, 10);
+    if (!Number.isFinite(n) || n < floor) return defaultVal;
+    return n;
+  };
+  const ROW_RECYCLE_BUDGET = parsePositiveIntEnv(
+    process.env.OCR_LANE_ROW_BUDGET,
+    25, // default
+    1,  // floor — anything < 1 makes no sense
+  );
+  const RSS_RECYCLE_THRESHOLD_BYTES = parsePositiveIntEnv(
+    process.env.OCR_LANE_RSS_BUDGET_MB,
+    2048, // default 2 GB
+    256,  // floor 256 MB — anything lower would recycle constantly on a normal box
+  ) * 1024 * 1024;
+  async function recycleLane(lane, reason) {
+    try { await lane.worker.terminate(); } catch {}
+    // ONLY the worker recreation goes inside the try/catch that decides
+    // whether the lane retires. Observability (`logError`) is wrapped in
+    // its own try/catch so a transient error_log write failure can't
+    // promote into a worker-capacity failure — otherwise enough
+    // observability blips would retire every lane and stall the recon
+    // with rows still pending. The lane is "recycled successfully" the
+    // moment `new OcrLane()` returns; logging the event is a separate,
+    // best-effort concern.
+    const rssMbBefore = Math.round(process.memoryUsage().rss / 1024 / 1024);
+    try {
+      lane.worker = new OcrLane();
+      lane.rowsProcessed = 0;
+    } catch (e) {
+      console.error('[bat-ocr] Lane recycle failed:', e.message);
+      try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId, recycle_reason: reason }); } catch {}
+      try { recordReconciliationError(reconId, `OCR lane crashed during recycle: ${e.message}`); } catch {}
+      return false;
+    }
+    try {
+      logError(
+        'bat.ocr.lane_recycle',
+        new Error(`Lane recycled (${reason}). RSS before recycle: ${rssMbBefore}MB`),
+        {
+          reconciliation_id: reconId,
+          reason,
+          rss_mb_before: rssMbBefore,
+        },
+        'info',
+      );
+    } catch {}
+    return true;
+  }
 
   // Slow-row monitor: every 30s, scan currentlyProcessing and emit a System
   // Log warning for any row past the SLOW_ROW_THRESHOLD. Tracks per-row
@@ -2320,13 +2421,38 @@ async function processQueue(reconId) {
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
           const engineError = result?.error ?? null;
+          // Trace artifact added in the OCR observability batch — lets
+          // an operator answer "which engine produced this number" when
+          // a recon row is later disputed. Logged inline for now;
+          // persisted alongside bat_extractions in a follow-up migration
+          // if/when the audit UI grows a "show source" affordance.
+          const traceSource = result?.source || null;
+          const traceEngine = result?.engine || null;
+          const traceAngle = result?.angle ?? null;
 
           if (invoiceNumber) {
             updateExtraction.run(invoiceNumber, 'found', previewPath, null, next.id);
-            console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}`);
+            const traceTag = traceEngine ? ` [${traceSource}: ${traceEngine}@${traceAngle}]` : '';
+            console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}${traceTag}`);
+            try {
+              logError(
+                'bat.ocr.match',
+                new Error(`id=${next.id} matched ${invoiceNumber} via ${traceSource || 'unknown'}${traceEngine ? `:${traceEngine}@${traceAngle}` : ''}`),
+                {
+                  reconciliation_id: reconId,
+                  extraction_id: next.id,
+                  store_name: next.store_name,
+                  invoice: invoiceNumber,
+                  source: traceSource,
+                  engine: traceEngine,
+                  angle: traceAngle,
+                },
+                'info',
+              );
+            } catch {}
           } else {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
-            console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}`);
+            console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
             if (engineError) recordReconciliationError(reconId, engineError);
           }
           emitExtractionUpdate(reconId);
@@ -2380,6 +2506,10 @@ async function processQueue(reconId) {
             try { await lane.worker.terminate(); } catch {}
             try {
               lane.worker = new OcrLane();
+              // Fresh worker, reset the recycle budget — this counts as
+              // a recycle even though it was triggered by a crash, not
+              // by the row/RSS budget.
+              lane.rowsProcessed = 0;
             } catch (e) {
               console.error('[bat-ocr] Lane recreation failed:', e.message);
               try { logError('bat.ocr.lane_recreate', e, { reconciliation_id: reconId }); } catch {}
@@ -2393,6 +2523,24 @@ async function processQueue(reconId) {
         inFlight.delete(next.id);
         currentlyProcessing.delete(next.id);
         lastWarnedAt.delete(next.id);
+
+        // Periodic recycle. Only fires when the lane's worker is still
+        // alive — if the dead-worker catch above already replaced it,
+        // `lane.rowsProcessed` was reset there and we won't recycle again
+        // immediately. We recycle BEFORE the next claimNext() so the
+        // next row gets a fresh worker; this avoids running the recycle
+        // while a row is in-flight.
+        if (!lane.worker.dead) {
+          lane.rowsProcessed = (lane.rowsProcessed || 0) + 1;
+          const rss = process.memoryUsage().rss;
+          if (lane.rowsProcessed >= ROW_RECYCLE_BUDGET) {
+            const ok = await recycleLane(lane, `row_budget (processed ${lane.rowsProcessed} rows)`);
+            if (!ok) { inFlight.delete(next.id); return; } // lane retires
+          } else if (rss >= RSS_RECYCLE_THRESHOLD_BYTES) {
+            const ok = await recycleLane(lane, `rss_budget (RSS ${Math.round(rss / 1024 / 1024)}MB ≥ ${Math.round(RSS_RECYCLE_THRESHOLD_BYTES / 1024 / 1024)}MB)`);
+            if (!ok) { inFlight.delete(next.id); return; }
+          }
+        }
       }
     }
   };

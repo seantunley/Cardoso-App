@@ -22,6 +22,18 @@ function buildStatements(db) {
   stmts.clearAutoFlag        = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE id = ? AND auto_flagged = 1");
   stmts.clearAllAutoFlags    = db.prepare("UPDATE datarecord SET flag_color = NULL, flag_reason = NULL, auto_flagged = 0, flag_source = NULL WHERE auto_flagged = 1");
 
+  // Sync-engine prepared statements are NOT created here — see syncEngine.js.
+  // An earlier draft of this PR added them to buildStatements, but
+  // buildStatements is invoked at module load via the import chain
+  // `server → scheduler → syncEngine`, which runs BEFORE
+  // initSchema/runMigrations in server.js. On a site upgrading from a
+  // pre-v41 database the eager prepare of `flag_snapshots` queries
+  // boot-failed with `no such table: flag_snapshots` before the migration
+  // could create it. The sync statements live in a lazy module-level
+  // cache in syncEngine.js so the first prepare runs after migrations
+  // have completed — same perf benefit (one prepare per process) without
+  // the boot-order dependency.
+
   if (process.env.HUB_MODE === 'true') {
     stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
     stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');

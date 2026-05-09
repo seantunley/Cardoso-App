@@ -18,6 +18,105 @@ import { describeSqlError } from '../lib/errorDescribe.js';
 // ── Statements prepared once at module level (not per-sync) ────────────────
 const stmts = buildStatements(db);
 
+// ── Sync-specific prepared statements: lazy-prepared on first sync ────────
+// These reference tables (specifically `flag_snapshots`, added in migration
+// v41) that may not exist when this module is imported. The import chain
+// `server → scheduler → syncEngine` runs before `initSchema/runMigrations`
+// in server.js, so eager-preparing here boot-fails on a site upgrading
+// from a pre-v41 database. Lazy-prepare instead — the first call inside
+// runConnectionImport happens long after migrations complete, and each
+// statement is then cached for the lifetime of the process.
+const _syncStmts = {};
+function getSyncStmt(key) {
+  if (_syncStmts[key]) return _syncStmts[key];
+  _syncStmts[key] = db.prepare(_SYNC_SQL[key]);
+  return _syncStmts[key];
+}
+const _SYNC_SQL = {
+  syncUpdateRecord: `
+    UPDATE datarecord
+    SET
+      created_by = ?,
+      customer_number = ?,
+      customer_name = ?,
+      age_analysis = ?,
+      age_current = ?,
+      age_7_days = ?,
+      age_14_days = ?,
+      age_21_days = ?,
+      outstanding_balance = ?,
+      source_id = ?,
+      source_table = ?,
+      data = ?,
+      local_fields = ?,
+      unpaid_invoices = ?,
+      receipts = ?,
+      terms = ?,
+      sales_rep = ?,
+      account_type = ?,
+      flag_color = ?,
+      flag_reason = ?,
+      flag_created_by = ?,
+      note = ?,
+      custom_field_1 = ?,
+      custom_field_2 = ?,
+      custom_field_3 = ?,
+      synced_at = ?,
+      updated_date = ?
+    WHERE id = ?
+  `,
+  syncInsertRecord: `
+    INSERT INTO datarecord (
+      created_by,
+      customer_number,
+      customer_name,
+      age_analysis,
+      age_current,
+      age_7_days,
+      age_14_days,
+      age_21_days,
+      outstanding_balance,
+      source_id,
+      source_table,
+      data,
+      local_fields,
+      unpaid_invoices,
+      receipts,
+      terms,
+      sales_rep,
+      account_type,
+      note,
+      custom_field_1,
+      custom_field_2,
+      custom_field_3,
+      synced_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `,
+  syncUpsertInventory: `
+    INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(source_table, item_number) DO UPDATE SET
+      item_description=excluded.item_description,
+      qty_on_hand=excluded.qty_on_hand,
+      last_cost=excluded.last_cost,
+      price_list=excluded.price_list,
+      price=excluded.price,
+      stocking_uom=excluded.stocking_uom,
+      commodity=excluded.commodity,
+      inventory_value=excluded.inventory_value,
+      updated_date=excluded.updated_date
+  `,
+  syncUpdateRecordFlag: `UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`,
+  findFlagSnapshot: `
+    SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
+    FROM flag_snapshots WHERE customer_number = ? LIMIT 1
+  `,
+  restoreFlagSnapshot: `
+    UPDATE datarecord SET flag_color = ?, flag_reason = ?, flag_created_by = ?, flag_source = ?, auto_flagged = ?, note = ? WHERE id = ?
+  `,
+  deleteFlagSnapshot: `DELETE FROM flag_snapshots WHERE customer_number = ?`,
+};
+
 const activeSyncs = new Set();
 
 function acquireSyncLock(connectionId) {
@@ -98,66 +197,12 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
 
     let importedCount = 0;
 
-    const updateExistingRecord = db.prepare(`
-      UPDATE datarecord
-      SET
-        created_by = ?,
-        customer_number = ?,
-        customer_name = ?,
-        age_analysis = ?,
-        age_current = ?,
-        age_7_days = ?,
-        age_14_days = ?,
-        age_21_days = ?,
-        outstanding_balance = ?,
-        source_id = ?,
-        source_table = ?,
-        data = ?,
-        local_fields = ?,
-        unpaid_invoices = ?,
-        receipts = ?,
-        terms = ?,
-        sales_rep = ?,
-        account_type = ?,
-        flag_color = ?,
-        flag_reason = ?,
-        flag_created_by = ?,
-        note = ?,
-        custom_field_1 = ?,
-        custom_field_2 = ?,
-        custom_field_3 = ?,
-        synced_at = ?,
-        updated_date = ?
-      WHERE id = ?
-    `);
-
-    const insertNewRecord = db.prepare(`
-      INSERT INTO datarecord (
-        created_by,
-        customer_number,
-        customer_name,
-        age_analysis,
-        age_current,
-        age_7_days,
-        age_14_days,
-        age_21_days,
-        outstanding_balance,
-        source_id,
-        source_table,
-        data,
-        local_fields,
-        unpaid_invoices,
-        receipts,
-        terms,
-        sales_rep,
-        account_type,
-        note,
-        custom_field_1,
-        custom_field_2,
-        custom_field_3,
-        synced_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    // Hot-path write statements lazy-prepared on first call (see _SYNC_SQL
+    // at the top of this file). Aliased locally so the call sites below
+    // stay readable. The first-call cost is one prepare; everything after
+    // hits the cached statement.
+    const updateExistingRecord = getSyncStmt('syncUpdateRecord');
+    const insertNewRecord = getSyncStmt('syncInsertRecord');
 
     const inventoryMappingConfig = {
       item_number:      { fallbacks: ['item_number', 'Item Number', 'ItemNumber', 'ITEM_NUMBER', 'ItemNo', 'ITEMNO', 'item_no'] },
@@ -171,20 +216,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       inventory_value:  { fallbacks: ['inventory_value', 'InventoryValue', 'TotalInventoryValueAtCost', 'TotalValue', 'inventory_value_at_cost'] },
     };
 
-    const upsertInventoryRecord = db.prepare(`
-      INSERT INTO inventoryrecord (source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, updated_date)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(source_table, item_number) DO UPDATE SET
-        item_description=excluded.item_description,
-        qty_on_hand=excluded.qty_on_hand,
-        last_cost=excluded.last_cost,
-        price_list=excluded.price_list,
-        price=excluded.price,
-        stocking_uom=excluded.stocking_uom,
-        commodity=excluded.commodity,
-        inventory_value=excluded.inventory_value,
-        updated_date=excluded.updated_date
-    `);
+    const upsertInventoryRecord = getSyncStmt('syncUpsertInventory');
 
     const runInventoryRows = (rows, sourceName, mappings = {}) => {
       const syncTimestamp = new Date().toISOString();
@@ -253,19 +285,14 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       // Load active auto-flag rules once for the entire sync batch
       const activeAutoFlagRules = stmts.activeAutoFlagRules.all();
 
-      const updateRecordFlag = db.prepare(`
-        UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?
-      `);
-
-      // Restore preserved flags from clear-data snapshots
-      const findFlagSnapshot = db.prepare(`
-        SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
-        FROM flag_snapshots WHERE customer_number = ? LIMIT 1
-      `);
-      const restoreFlag = db.prepare(`
-        UPDATE datarecord SET flag_color = ?, flag_reason = ?, flag_created_by = ?, flag_source = ?, auto_flagged = ?, note = ? WHERE id = ?
-      `);
-      const deleteFlagSnapshot = db.prepare(`DELETE FROM flag_snapshots WHERE customer_number = ?`);
+      // Flag-snapshot helpers — lazy-prepared (see _SYNC_SQL). These hit
+      // the `flag_snapshots` table which migration v41 creates; lazy
+      // because syncEngine.js is imported before initSchema runs in
+      // server.js, so eager prepares boot-fail on pre-v41 upgrades.
+      const updateRecordFlag = getSyncStmt('syncUpdateRecordFlag');
+      const findFlagSnapshot = getSyncStmt('findFlagSnapshot');
+      const restoreFlag = getSyncStmt('restoreFlagSnapshot');
+      const deleteFlagSnapshot = getSyncStmt('deleteFlagSnapshot');
 
       let diagLogged = false;
       let syncUpdated = 0;
@@ -404,12 +431,38 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               baseRecordData.custom_field_3 ?? null,
               baseRecordData.synced_at
             );
-            // Use the rowid from the insert result — safe across concurrent writes
-            let newRecord = null;
-            try {
-              const newId = insertResult.lastInsertRowid;
-              newRecord = db.prepare('SELECT * FROM datarecord WHERE id = ?').get(newId);
-            } catch (_) {}
+            // We already have every column we just wrote — no need to
+            // round-trip the DB to read it back. On a 5K-record initial
+            // sync this saves 5K SELECTs (one per insert). Build the
+            // record from baseRecordData + the new id, but FIRST seed
+            // the SQLite-backed defaults so auto-flag rules that condition
+            // on those fields behave the same as they would after a
+            // SELECT * round-trip.
+            //
+            // schema.js datarecord defaults:
+            //   flag_color  TEXT  DEFAULT 'none'
+            //   auto_flagged INT  DEFAULT 0
+            //   local_fields TEXT DEFAULT '{}'
+            //   flag_source  TEXT DEFAULT NULL
+            //   created_date / updated_date  TEXT DEFAULT CURRENT_TIMESTAMP
+            //
+            // Without these, a rule like `flag_color is_empty` or
+            // `auto_flagged equals 0` evaluates differently for fresh
+            // rows (undefined → empty / not-equal-to-'0') vs the same row
+            // re-evaluated on a subsequent sync ('none' / '0' from the DB).
+            // Spread `baseRecordData` AFTER so any column the connector
+            // actually wrote wins over the default.
+            const nowIso = new Date().toISOString();
+            const newRecord = {
+              flag_color: 'none',
+              auto_flagged: 0,
+              local_fields: '{}',
+              flag_source: null,
+              created_date: nowIso,
+              updated_date: nowIso,
+              ...baseRecordData,
+              id: insertResult.lastInsertRowid,
+            };
 
             // Restore preserved flags from a previous clear-data operation
             const customerNum = String(baseRecordData.customer_number ?? '');
@@ -483,15 +536,29 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
 
       if (connConfig.record_type === 'inventory') {
         runInventoryRows(rows, sourceName, queryFieldMappings);
-        // Prune items no longer returned by the query (upsert-then-prune keeps data live)
+        // Prune items no longer returned by the query (upsert-then-prune
+        // keeps data live). Previously built a `NOT IN (?, ?, ?, …)` with
+        // up to 5K placeholders — the SQL string changed every sync (so
+        // better-sqlite3's text-cache couldn't reuse it) and the planner
+        // can't use the index against an N-element IN list. Stage to a
+        // TEMP TABLE inside one transaction: parse-once SQL, index-friendly
+        // anti-join, no per-sync placeholder explosion.
         const freshItemNumbers = rows.map(r =>
           String(getMappedOrFallbackValue(r, queryFieldMappings, 'item_number', inventoryMappingConfig.item_number.fallbacks) || '')
         ).filter(Boolean);
         if (freshItemNumbers.length > 0) {
-          const placeholders = freshItemNumbers.map(() => '?').join(',');
-          db.prepare(
-            `DELETE FROM inventoryrecord WHERE source_table = ? AND item_number NOT IN (${placeholders})`
-          ).run(sourceName, ...freshItemNumbers);
+          const pruneViaTempTable = db.transaction((items) => {
+            db.exec('CREATE TEMP TABLE IF NOT EXISTS _sync_prune_inventory(item_number TEXT PRIMARY KEY)');
+            db.exec('DELETE FROM _sync_prune_inventory');
+            const insertTemp = db.prepare('INSERT OR IGNORE INTO _sync_prune_inventory(item_number) VALUES (?)');
+            for (const item of items) insertTemp.run(item);
+            db.prepare(`
+              DELETE FROM inventoryrecord
+              WHERE source_table = ?
+                AND item_number NOT IN (SELECT item_number FROM _sync_prune_inventory)
+            `).run(sourceName);
+          });
+          pruneViaTempTable(freshItemNumbers);
         }
       } else {
         runWriteRows(rows, sourceName, queryFieldMappings, queryIndexField);
