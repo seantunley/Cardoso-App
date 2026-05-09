@@ -33,9 +33,21 @@ const { previewDir } = workerData || {};
 // edge cases (worker terminate races) have left lanes hung at 9+ minutes.
 // These per-call abort signals are the real fix; the parent timeout stays
 // as a backstop.
+// All timeout errors emitted in this worker are tagged with a structured
+// code so downstream lifecycle decisions (self-terminate, lane recycle,
+// classification) don't depend on regex-matching the message text. The
+// human-readable message is preserved for logs.
+function makeTimeoutError(stage, timeoutMs) {
+  const err = new Error(`Timeout after ${timeoutMs}ms in stage: ${stage}`);
+  err.code = 'OCR_TIMEOUT';
+  err.stage = stage;
+  err.timeoutMs = timeoutMs;
+  return err;
+}
+
 async function fetchWithTimeout(url, opts = {}, timeoutMs = 30_000) {
   const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs);
+  const t = setTimeout(() => ctrl.abort(makeTimeoutError('fetch', timeoutMs)), timeoutMs);
   try {
     return await fetch(url, { ...opts, signal: ctrl.signal });
   } finally {
@@ -50,10 +62,7 @@ async function fetchWithTimeout(url, opts = {}, timeoutMs = 30_000) {
 // sees exactly which stage is wedged.
 function withTimeout(promise, timeoutMs, label) {
   return new Promise((resolve, reject) => {
-    const t = setTimeout(
-      () => reject(new Error(`Timeout after ${timeoutMs}ms in stage: ${label}`)),
-      timeoutMs,
-    );
+    const t = setTimeout(() => reject(makeTimeoutError(label, timeoutMs)), timeoutMs);
     Promise.resolve(promise).then(
       (v) => { clearTimeout(t); resolve(v); },
       (e) => { clearTimeout(t); reject(e); },
@@ -480,7 +489,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   const buffer = await fetchBoundedBuffer(response, _MAX_PDF_BYTES);
 
   if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
-    return { invoice: null, previewPath: null };
+    return { invoice: null, previewPath: null, source: 'invalid_pdf' };
   }
 
   const isLarge = buffer.length > 2 * 1024 * 1024;
@@ -511,7 +520,14 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         try { await pdfDoc.destroy(); } catch {}
       }
     })(), 20_000, 'pdf_text');
-    if (result?.invoice) return { invoice: result.invoice, previewPath: null };
+    if (result?.invoice) {
+      // pdf_text-layer hit (no rasterisation, no OCR engine). Recorded
+      // with source='pdf_text' so audit / forensics can distinguish
+      // text-layer matches from OCR-cascade matches — the former is
+      // ~free and ~always correct; the latter is OCR'd text and worth
+      // a human glance.
+      return { invoice: result.invoice, previewPath: null, source: 'pdf_text', engine: 'pdfjs', angle: 0 };
+    }
   } catch (err) {
     // Forward to parent — visible in System Log, doesn't abort the row
     // (we still try image render below).
@@ -538,7 +554,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   try {
     imageBuffer = await withTimeout(pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0), 30_000, 'render');
   } catch (err) {
-    return { invoice: null, previewPath: null, error: `Render failed: ${err.message}` };
+    return { invoice: null, previewPath: null, source: 'render_failed', error: `Render failed: ${err.message}` };
   }
 
   const sharp = await getSharp();
@@ -672,7 +688,12 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           continue;
         }
         const invoice = findInvoiceNumber(text, inDigitLength);
-        if (invoice) return { invoice, previewPath };
+        if (invoice) {
+          // OCR-cascade hit. Engine + angle let the operator audit
+          // "which path produced this number" — useful when a row's
+          // invoice is later disputed in BAT reconciliation.
+          return { invoice, previewPath, source: 'ocr_cascade', engine: engine.name, angle };
+        }
         // Text was returned but findInvoiceNumber couldn't parse an invoice
         // number out of it. This is the most-likely cause of "everything
         // times out at extract_total" on a site where OCR is configured
@@ -724,7 +745,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     }
   }
 
-  return { invoice: null, previewPath, error: tierError };
+  return { invoice: null, previewPath, source: 'cascade_exhausted', error: tierError };
 }
 
 // ── Message dispatch ─────────────────────────────────────────────────────────
@@ -764,9 +785,20 @@ parentPort.on('message', async (msg) => {
       // message before the result so the parent's `currentlyProcessing`
       // entry shows the failed stage on the way out.
       emitProgress(id, 'failed');
+      // Pass the structured code/stage through the postMessage so the
+      // parent can classify without parsing message text. Worker_threads
+      // serialise plain objects, not Error instances, so we copy the
+      // enumerable fields explicitly.
       parentPort.postMessage({
         type: 'result', id, ok: false,
-        error: { message: err.message, stack: err.stack, tierError: !!err.tierError },
+        error: {
+          message: err.message,
+          stack: err.stack,
+          code: err.code,
+          stage: err.stage,
+          timeoutMs: err.timeoutMs,
+          tierError: !!err.tierError,
+        },
       });
       // Self-terminate after any timeout-class error.
       //
@@ -789,10 +821,14 @@ parentPort.on('message', async (msg) => {
       //
       // setImmediate gives postMessage above a tick to flush before we
       // exit, so the parent reliably gets the result message.
-      const msg = String(err?.message || '');
-      const isTimeoutKind =
-        /Timeout in stage:|extract_total|tesseract_init|engine:/.test(msg);
-      if (isTimeoutKind) {
+      //
+      // Switched from regex-matching the error message to a structured
+      // err.code check. The previous form
+      //   /Timeout in stage:|extract_total|tesseract_init|engine:/.test(msg)
+      // would silently disable self-termination if a future code change
+      // reworded any of those four substrings — and the worker would
+      // then hang on to native memory across calls.
+      if (err?.code === 'OCR_TIMEOUT') {
         setImmediate(() => process.exit(1));
       }
     }

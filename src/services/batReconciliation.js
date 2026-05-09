@@ -1957,6 +1957,14 @@ class OcrLane {
         const err = new Error(msg.error?.message || 'Unknown OCR worker error');
         if (msg.error?.stack) err.stack = msg.error.stack;
         if (msg.error?.tierError) err.tierError = true;
+        // Propagate the structured fields the worker now emits with
+        // every error (code='OCR_TIMEOUT' / stage / timeoutMs). Lets
+        // downstream callers classify failures without parsing
+        // err.message — see the no-regex-on-message contract added
+        // alongside the trace artifact.
+        if (msg.error?.code) err.code = msg.error.code;
+        if (msg.error?.stage) err.stage = msg.error.stage;
+        if (msg.error?.timeoutMs) err.timeoutMs = msg.error.timeoutMs;
         slot.reject(err);
       }
     });
@@ -2007,7 +2015,16 @@ class OcrLane {
           // gets recreated rather than reused with a stuck call.
           this.dead = true;
           try { this.worker.terminate(); } catch {}
-          reject(new Error('PDF timeout'));
+          // Same structured shape as the worker-side timeouts, so
+          // classification works identically whether the timeout fired
+          // inside the worker (worker.code='OCR_TIMEOUT') or because
+          // the lane itself ran out of patience waiting for the worker
+          // to respond.
+          const e = new Error('PDF timeout');
+          e.code = 'OCR_TIMEOUT';
+          e.stage = 'lane_timeout';
+          e.timeoutMs = timeoutMs;
+          reject(e);
         }
       }, timeoutMs);
       this.pending.set(id, {
@@ -2404,13 +2421,38 @@ async function processQueue(reconId) {
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
           const engineError = result?.error ?? null;
+          // Trace artifact added in the OCR observability batch — lets
+          // an operator answer "which engine produced this number" when
+          // a recon row is later disputed. Logged inline for now;
+          // persisted alongside bat_extractions in a follow-up migration
+          // if/when the audit UI grows a "show source" affordance.
+          const traceSource = result?.source || null;
+          const traceEngine = result?.engine || null;
+          const traceAngle = result?.angle ?? null;
 
           if (invoiceNumber) {
             updateExtraction.run(invoiceNumber, 'found', previewPath, null, next.id);
-            console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}`);
+            const traceTag = traceEngine ? ` [${traceSource}: ${traceEngine}@${traceAngle}]` : '';
+            console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}${traceTag}`);
+            try {
+              logError(
+                'bat.ocr.match',
+                new Error(`id=${next.id} matched ${invoiceNumber} via ${traceSource || 'unknown'}${traceEngine ? `:${traceEngine}@${traceAngle}` : ''}`),
+                {
+                  reconciliation_id: reconId,
+                  extraction_id: next.id,
+                  store_name: next.store_name,
+                  invoice: invoiceNumber,
+                  source: traceSource,
+                  engine: traceEngine,
+                  angle: traceAngle,
+                },
+                'info',
+              );
+            } catch {}
           } else {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
-            console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}`);
+            console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
             if (engineError) recordReconciliationError(reconId, engineError);
           }
           emitExtractionUpdate(reconId);
