@@ -588,6 +588,12 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
       }
       setSuggestions([]);
       setShowSuggestions(false);
+      // Clear loading explicitly: the aborted request's `finally` will
+      // see `abortRef.current === null` (no longer matches its own
+      // controller) and skip its own setLoading(false). Without this
+      // the spinner sticks until the next successful search resolves.
+      // Caught in PR review.
+      setLoading(false);
       return;
     }
 
@@ -651,6 +657,10 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
       }
       setSuggestions([]);
       setShowSuggestions(false);
+      // Same reason as the searchRecords empty bail: the aborted
+      // controller's finally won't clear loading because abortRef no
+      // longer matches it, so we have to do it here explicitly.
+      setLoading(false);
       return;
     }
     // 300ms debounce — operator typing speed is ~120ms/char on a familiar
