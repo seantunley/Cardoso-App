@@ -116,6 +116,14 @@ async function getTesseract() {
 async function getSharp() {
   if (_sharp) return _sharp;
   _sharp = (await import('sharp')).default;
+  // Disable libvips's operation cache. The default holds up to 50 MB of
+  // cached intermediate buffers across sharp calls. For OCR pipelines
+  // the cache hit ratio is negligible (each page is unique) so the cache
+  // is mostly a memory sink that contributes to the leak signature seen
+  // in `bat.ocr.memory` metrics. The lane-level recycle in
+  // batReconciliation.js still runs as the primary defence; this just
+  // removes one source of growth.
+  try { _sharp.cache(false); } catch {}
   return _sharp;
 }
 

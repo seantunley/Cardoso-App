@@ -1110,6 +1110,62 @@ export function createReportingRouter({ requireAuth }) {
       if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
     }
 
+    // Site→Accpac freshness + status. The hub reads these so it can show
+    // "your data is 2 days stale" or "Accpac sync failing: ELOGIN" on the
+    // customer-management tile, instead of just the hub→site sync time
+    // which can be misleadingly recent. We aggregate across active
+    // non-BAT-only connections (BAT-only feeds the BAT module's own
+    // pool, not datarecord — including it would muddy the freshness
+    // signal that customer data depends on).
+    //
+    // Aggregation:
+    //   - synced_at = MAX(last_sync)        — most recent successful run
+    //   - status    = error  if ANY active non-BAT-only conn is 'error'
+    //                 ok     if at least one has last_sync != null
+    //                 never_synced  otherwise
+    //   - error     = the most recent non-null last_error (or syncrun
+    //                 message if databaseconnection didn't capture one)
+    let accpacSyncedAt = null;
+    let accpacStatus = 'never_synced';
+    let accpacError = null;
+    try {
+      const conns = db.prepare(`
+        SELECT name, status, last_sync, last_error, updated_date
+        FROM databaseconnection
+        WHERE status IN ('active', 'error') AND COALESCE(is_bat_only, 0) = 0
+      `).all();
+
+      let mostRecentSyncMs = 0;
+      let anyError = null;
+      let anyOk = false;
+      for (const c of conns) {
+        if (c.last_sync) {
+          anyOk = true;
+          const t = Date.parse(c.last_sync);
+          if (Number.isFinite(t) && t > mostRecentSyncMs) {
+            mostRecentSyncMs = t;
+            accpacSyncedAt = c.last_sync;
+          }
+        }
+        if (c.status === 'error') {
+          accpacStatus = 'error';
+          // Prefer the connection with the freshest updated_date for
+          // the error message — that's the most recent failure.
+          if (!anyError || (c.updated_date && c.updated_date > anyError._when)) {
+            anyError = { msg: c.last_error || 'Unknown error', _when: c.updated_date };
+          }
+        }
+      }
+      if (accpacStatus !== 'error' && anyOk) accpacStatus = 'ok';
+      if (anyError) accpacError = String(anyError.msg).slice(0, 500);
+    } catch (err) {
+      // Don't fail the kpis response if the accpac aggregation throws —
+      // surface it as an error in the response so the operator sees
+      // "something's odd with sync state" without the whole tile failing.
+      accpacStatus = 'error';
+      accpacError = `Failed to read connection state: ${err.message}`;
+    }
+
     res.json({
       site_id: SITE_ID,
       site_slug: SITE_SLUG,
@@ -1117,6 +1173,12 @@ export function createReportingRouter({ requireAuth }) {
       records_by_flag: flagCounts,
       last_sync_at: lastSync?.completed_at || null,
       active_connections: activeConns.count,
+      // Site→Accpac freshness — distinct from hub→site (last_sync_at
+      // above is the most recent syncrun completion, which conflates
+      // both directions historically). Hub UI uses these three:
+      site_accpac_last_synced_at: accpacSyncedAt,
+      site_accpac_status: accpacStatus,
+      site_accpac_error: accpacError,
       generated_at: new Date().toISOString(),
     });
   });

@@ -442,9 +442,30 @@ export async function syncCreditLogicFromHub({ triggeredBy = "scheduler" } = {})
 export async function pushCreditLogicToSites({ siteIds = null } = {}) {
   ensureCreditLogicBootstrap();
   const latest = getActiveCreditLogicVersion();
-  const rows = Array.isArray(siteIds) && siteIds.length > 0
-    ? db.prepare(`SELECT id, slug, name, url, token FROM hub_sites WHERE id IN (${siteIds.map(() => "?").join(",")})`).all(...siteIds)
-    : db.prepare(`SELECT id, slug, name, url, token FROM hub_sites ORDER BY name ASC, slug ASC`).all();
+  const allRows = Array.isArray(siteIds) && siteIds.length > 0
+    ? db.prepare(`SELECT id, slug, name, url, token, in_env FROM hub_sites WHERE id IN (${siteIds.map(() => "?").join(",")})`).all(...siteIds)
+    : db.prepare(`SELECT id, slug, name, url, token, in_env FROM hub_sites ORDER BY name ASC, slug ASC`).all();
+
+  // Split orphans out so they're explicitly skipped (and visible in the
+  // response) rather than silently included in the fan-out. The
+  // hub_sites row still has a URL + token from when it was active, so
+  // the fetch would happily forward — but the site config is no longer
+  // in HUB_SITES env, so any operator/automation push there is almost
+  // certainly a mistake.
+  const rows = allRows.filter((s) => s.in_env !== 0);
+  const skipped = allRows
+    .filter((s) => s.in_env === 0)
+    .map((s) => ({
+      siteId: s.id,
+      siteSlug: s.slug,
+      siteName: s.name,
+      ok: false,
+      logicVersion: null,
+      syncStatus: 'skipped_orphan',
+      driftStatus: 'orphan',
+      lastSyncedAt: null,
+      error: `Site '${s.name || s.slug}' is no longer in HUB_SITES env (orphan). Re-add to env to reactivate, or use Forget to retire.`,
+    }));
 
   const results = await Promise.all(rows.map(async (site) => {
     const url = `${site.url}/api/hub/receive-credit-logic`;
@@ -475,5 +496,16 @@ export async function pushCreditLogicToSites({ siteIds = null } = {}) {
     }
   }));
 
-  return { version: latest.version, pushed: results.filter((row) => row.ok).length, failed: results.filter((row) => !row.ok).length, results };
+  // Combine real results with the orphan skip rows so the response
+  // tells the whole story. `pushed` and `failed` are unchanged
+  // (orphans aren't counted as failures); `skipped_orphan` is a new
+  // tally the UI can show as a separate badge.
+  const combined = [...results, ...skipped];
+  return {
+    version: latest.version,
+    pushed: results.filter((row) => row.ok).length,
+    failed: results.filter((row) => !row.ok).length,
+    skipped_orphan: skipped.length,
+    results: combined,
+  };
 }

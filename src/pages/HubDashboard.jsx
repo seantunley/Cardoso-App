@@ -69,41 +69,91 @@ function getSinceDate(rangeValue) {
 // useCallback so the prop identity is stable across renders.
 const SiteCard = memo(function SiteCard({ site, onFlagClick, onResync }) {
   const isOnline = site.status === "ok" || site.status === "online";
+  const isOrphan = site.is_orphan === true;
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
+  // Days since the row was orphaned, for the pill tooltip. Numeric so
+  // the operator sees "removed 12 days ago" rather than a raw ISO.
+  const orphanedAgoDays = site.removed_from_env_at
+    ? Math.max(0, Math.floor((Date.now() - new Date(site.removed_from_env_at).getTime()) / (24 * 60 * 60 * 1000)))
+    : null;
   return (
     <div
-      className="relative border border-border bg-card p-4 space-y-3 transition-all hover:border-[var(--phosphor)] overflow-hidden"
+      className={cn(
+        "relative border bg-card p-4 space-y-3 transition-all overflow-hidden",
+        isOrphan ? "border-amber-500/40 hover:border-amber-500/60" : "border-border hover:border-[var(--phosphor)]",
+      )}
       style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
     >
       <div
         className="absolute left-0 right-0 bottom-0 h-[2px]"
         style={{
-          background: isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
-          boxShadow: isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
+          background: isOrphan
+            ? "hsl(38 92% 50%)"
+            : isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
+          boxShadow: isOrphan
+            ? "0 0 10px hsla(38,92%,50%,0.3)"
+            : isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
         }}
       />
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
-          <span className="font-display text-lg text-foreground leading-none">{site.site_name || site.site_slug}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); onResync(site); }}
-            aria-label="Force resync this site"
-            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[36px]"
-            title={`Resync ${site.site_name || site.site_slug}`}
-          >
-            <RefreshCw className="h-3 w-3" />
-            Resync
-          </button>
-          <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
-            {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-            {isOnline ? "Online" : "Offline"}
+      {/* Header — status is the visual anchor on the LEFT (large dot +
+          state word + optional ORPHAN pill); site name sits below as a
+          calmer label; Resync is a small icon-only button in the
+          top-right corner so it doesn't compete for attention. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isOrphan ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-400"
+                title={
+                  orphanedAgoDays != null
+                    ? `Removed from HUB_SITES env ${orphanedAgoDays} day${orphanedAgoDays === 1 ? '' : 's'} ago. Read-only — re-add to env to reactivate, or use Forget to retire.`
+                    : 'Removed from HUB_SITES env. Read-only — re-add to env to reactivate, or use Forget to retire.'
+                }
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                ORPHAN
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold uppercase tracking-wider",
+                  isOnline
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                    : "border-rose-500/30 bg-rose-500/10 text-rose-400",
+                )}
+              >
+                {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                {isOnline ? "Online" : "Offline"}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.5} />
+            <span className="font-display text-lg text-foreground leading-none truncate">
+              {site.site_name || site.site_slug}
+            </span>
           </div>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onResync(site); }}
+          aria-label="Force resync this site"
+          disabled={isOrphan}
+          className={cn(
+            "shrink-0 flex items-center justify-center rounded-md border h-8 w-8 transition-colors",
+            isOrphan
+              ? "border-border/50 text-muted-foreground/30 cursor-not-allowed"
+              : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+          title={
+            isOrphan
+              ? "Site is orphaned — re-add to HUB_SITES env to reactivate"
+              : `Resync ${site.site_name || site.site_slug}`
+          }
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {site.kpis ? (
@@ -168,11 +218,55 @@ const SiteCard = memo(function SiteCard({ site, onFlagClick, onResync }) {
         <p className="text-sm text-muted-foreground">No KPI data yet</p>
       )}
 
-      {site.last_seen && (
-        <p className="text-[10px] text-muted-foreground/60">
-          Last sync: {new Date(site.last_seen).toLocaleString()}
-        </p>
-      )}
+      {/* Sync footer.
+          Top line: when the SITE last refreshed from Accpac/Sage —
+          this is the "is the data actually current?" answer the
+          operator cares about. Status colour codes the line:
+            ok    → muted green tone
+            error → destructive red, with the actual error reason below
+            stale (>24h) → amber warning
+            never_synced or null → muted, "—".
+          Bottom line: when the HUB last pulled from the site
+          (last_seen). Keeps the technical breadcrumb for support
+          without conflating it with data freshness.
+          Trailing button: "Sync from Accpac" — fires the trigger
+          endpoint. Disabled while a sync is in flight to that site. */}
+      <div className="space-y-1 pt-1 border-t border-border/40">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex flex-col leading-tight">
+            <span className={cn(
+              "text-[10px]",
+              accpacStatus === 'error' ? "text-rose-400" :
+              stale ? "text-amber-400" :
+              site.last_accpac_synced_at ? "text-muted-foreground/80" : "text-muted-foreground/50",
+            )}>
+              {site.last_accpac_synced_at
+                ? `Accpac sync: ${new Date(site.last_accpac_synced_at).toLocaleString()}${stale ? ` · ${stale}` : ''}`
+                : 'Accpac sync: — (not yet reported)'}
+            </span>
+            {site.last_seen && (
+              <span className="text-[10px] text-muted-foreground/50">
+                Hub pull: {new Date(site.last_seen).toLocaleString()}
+              </span>
+            )}
+          </div>
+          <button
+            onClick={(e) => { e.stopPropagation(); onTriggerAccpacSync(site); }}
+            disabled={accpacIsRunning}
+            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[32px] disabled:opacity-50 disabled:cursor-wait"
+            title={`Trigger an Accpac/Sage sync at ${site.site_name || site.site_slug}`}
+          >
+            <RefreshCw className={cn("h-3 w-3", accpacIsRunning && "animate-spin")} />
+            {accpacIsRunning ? 'Syncing…' : 'Sync from Accpac'}
+          </button>
+        </div>
+        {accpacStatus === 'error' && site.last_accpac_error && (
+          <div className="flex items-start gap-1.5 text-[10px] text-rose-400/90 break-words">
+            <AlertCircle className="h-3 w-3 shrink-0 mt-0.5" />
+            <span>{site.last_accpac_error}</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 });
@@ -628,6 +722,11 @@ export default function HubDashboard() {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState(null);
   const [dateRange, setDateRange] = useState("all");
+  // Tracks the site whose Accpac sync is currently in flight, so the
+  // matching tile shows "Syncing…" + spinner. Single string instead of a
+  // Set because hub→site triggers serially (and the UI fires on click,
+  // not bulk). null when nothing is running.
+  const [accpacSyncingSiteId, setAccpacSyncingSiteId] = useState(null);
 
   // Flag drill-down
   const [flagModal, setFlagModal] = useState({ open: false, color: null, siteName: "", siteId: null });
@@ -685,6 +784,58 @@ export default function HubDashboard() {
       setTimeout(() => fetchAll(), 5000);
     } catch (err) {
       toast.error(humanizeApiError(err, `resync ${name}`));
+    }
+  };
+
+  // Triggers an Accpac/Sage sync at the named site. The hub forwards
+  // to the site's /api/hub/trigger-accpac-sync, which loops over every
+  // active non-BAT-only connection and calls runConnectionImport.
+  // Blocks for up to 5 min on the server; UI shows a spinner on the
+  // matching tile until the response lands.
+  //
+  // After it returns, kick off fetchAll() on a delay so the next
+  // hub-pull cycle (every 5 min in hub mode) has a chance to land
+  // and refresh last_accpac_synced_at on the tile.
+  const triggerAccpacSync = async (site) => {
+    const name = site.site_name || site.site_slug;
+    setAccpacSyncingSiteId(site.site_id);
+    toast(`Triggering Accpac sync at ${name}…`);
+    try {
+      const res = await fetch(`/api/hub/sites/${site.site_id}/trigger-accpac-sync`, {
+        method: 'POST',
+        credentials: 'include',
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+
+      const failed = (body.results || []).filter(r => !r.ok);
+      if (failed.length === 0) {
+        toast.success(`${name}: ${body.succeeded}/${body.total} connection(s) synced from Accpac`);
+      } else {
+        // Surface the first failure verbatim — describeSqlError already
+        // wrapped it on the site side. Operator gets the actionable reason
+        // ("Login failed (wrong username or password) [ELOGIN]") instead of
+        // a generic "sync failed".
+        const first = failed[0];
+        toast.error(`${name}: ${first.name} — ${first.message}`);
+      }
+      // The hub's trigger endpoint chains a syncSite() after the site
+      // finishes, so hub_sites.last_accpac_* is already up to date by
+      // the time we get here. fetchAll runs immediately — no fixed
+      // setTimeout that used to "guess" when the next scheduler tick
+      // would land (and made the manual button look ineffective for
+      // up to 5 minutes on a quiet day).
+      if (body.hub_refresh_error) {
+        // Trigger succeeded but the chained hub-pull didn't. Dashboard
+        // still re-fetches; operator just sees a heads-up so they
+        // aren't surprised if the tile timestamp lags briefly.
+        toast(`Refresh of hub data lagged: ${body.hub_refresh_error}`);
+      }
+      fetchAll();
+    } catch (err) {
+      toast.error(humanizeApiError(err, `trigger Accpac sync at ${name}`));
+    } finally {
+      setAccpacSyncingSiteId(null);
     }
   };
 
@@ -764,7 +915,16 @@ export default function HubDashboard() {
         <div>
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-4">§ Sites · {sites.length}</div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
-            {sites.map(s => <SiteCard key={s.site_id} site={s} onFlagClick={handleFlagClick} onResync={resyncSite} />)}
+            {sites.map(s => (
+              <SiteCard
+                key={s.site_id}
+                site={s}
+                onFlagClick={handleFlagClick}
+                onResync={resyncSite}
+                onTriggerAccpacSync={triggerAccpacSync}
+                accpacSyncingSiteId={accpacSyncingSiteId}
+              />
+            ))}
           </div>
         </div>
       ) : (

@@ -224,8 +224,17 @@ function initSchema(db) {
         logic_sync_status TEXT DEFAULT 'never_synced',
         logic_last_error TEXT,
         logic_last_synced_at TEXT,
-        logic_status_updated_at TEXT
+        logic_status_updated_at TEXT,
+        -- Soft-tombstone for env drift. upsertSites flips in_env=0 on
+        -- any row whose id dropped out of HUB_SITES (and stamps
+        -- removed_from_env_at). Read endpoints still serve the row so
+        -- it appears in the dashboard with an "ORPHAN" pill; write
+        -- endpoints (trigger-accpac-sync, force-resync, push-*) refuse
+        -- with 409. Migration v63 adds these to existing hub installs.
+        in_env INTEGER NOT NULL DEFAULT 1,
+        removed_from_env_at TEXT
       );
+      CREATE INDEX IF NOT EXISTS idx_hub_sites_in_env ON hub_sites(in_env);
 
       CREATE TABLE IF NOT EXISTS credit_logic_versions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
