@@ -183,14 +183,25 @@ async function ocrViaGoogleVision(imageBuffer, apiKey) {
       features: [{ type: 'TEXT_DETECTION', maxResults: 1 }],
     }],
   };
-  const res = await fetchWithTimeout(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+  // Send the API key as a header instead of a query string. Earlier the
+  // call was `...?key=${apiKey}` which leaks the credential into anything
+  // that captures full URLs along the path (proxy access logs, Tailscale
+  // flow records, ntopng, error stacks that include the request URL).
+  // `X-Goog-API-Key` is the documented header form for the same auth.
+  const res = await fetchWithTimeout('https://vision.googleapis.com/v1/images:annotate', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Goog-API-Key': apiKey,
+    },
     body: JSON.stringify(body),
   }, 45_000);
   if (!res.ok) {
     const err = await res.text();
-    throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 200)}`);
+    // Cap response-body inclusion tighter (was 200 chars). Google's error
+    // payloads echo the request shape but not the API key — still, keep
+    // it as small as possible while still being diagnostically useful.
+    throw new Error(`Google Vision HTTP ${res.status}: ${err.substring(0, 120)}`);
   }
   const data = await res.json();
   // Top-level error envelope. Returned with HTTP 200 when the request itself
@@ -329,9 +340,132 @@ function findInvoiceNumber(text, inDigitLength = 9) {
   return null;
 }
 
+// ── pdfUrl validation (defense in depth) ─────────────────────────────────────
+//
+// pdfUrl is supplied by the parent process, derived from BAT supplier
+// spreadsheets. Suppliers host invoices on public CDN/SharePoint —
+// nothing legitimate should ever resolve to a private/loopback/Tailscale
+// range. Without a guard here, a tampered spreadsheet entry could turn
+// the OCR pipeline into an SSRF probe of the internal LAN.
+//
+// Layered defence:
+//   1. Require https:// — no http: PDF URLs from any real supplier.
+//   2. Reject literal-IP hosts in private/loopback/link-local/Tailscale ranges.
+//   3. Optional hostname allowlist (env OCR_PDF_ALLOWED_HOSTS=cdn.example.com,*.foo.com).
+//      When set, the URL must match one entry.
+//
+// Residual risk: DNS rebinding (attacker-controlled domain resolving to a
+// private IP). The hostname allowlist mitigates this in practice — an
+// attacker domain isn't on the list. Stronger defence (custom dispatcher
+// that re-checks resolved IP) is deferred until a supplier shape forces it.
+const _PRIVATE_IPV4 = [
+  /^127\./,                             // loopback
+  /^10\./,                              // RFC1918
+  /^172\.(1[6-9]|2[0-9]|3[0-1])\./,     // RFC1918
+  /^192\.168\./,                        // RFC1918
+  /^169\.254\./,                        // link-local
+  /^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\./, // Tailscale CGNAT 100.64.0.0/10
+  /^0\./,                               // 0.0.0.0/8 (unspecified)
+];
+const _PRIVATE_IPV6_PREFIXES = ['::1', 'fc', 'fd', 'fe80']; // loopback, ULA, link-local
+
+function _isPrivateOrLoopbackHost(hostname) {
+  // Node's URL parser KEEPS brackets around IPv6 literals in .hostname
+  // (e.g. `new URL('https://[::1]/').hostname === '[::1]'`). Strip them
+  // before any comparison or the prefix tests below silently pass.
+  let lower = hostname.toLowerCase();
+  if (lower.startsWith('[') && lower.endsWith(']')) lower = lower.slice(1, -1);
+  if (lower === 'localhost') return true;
+  if (lower === '::1') return true;
+  // IPv4 literal
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(lower)) {
+    return _PRIVATE_IPV4.some(re => re.test(lower));
+  }
+  // IPv6 literal — match by prefix
+  if (lower.includes(':')) {
+    return _PRIVATE_IPV6_PREFIXES.some(p => lower.startsWith(p));
+  }
+  return false;
+}
+
+function _hostMatchesAllowEntry(host, entry) {
+  const h = host.toLowerCase();
+  const e = entry.toLowerCase();
+  if (e.startsWith('*.')) {
+    const suffix = e.slice(1); // ".example.com"
+    return h.endsWith(suffix) && h !== suffix.slice(1);
+  }
+  return h === e;
+}
+
+function isAllowedPdfUrl(pdfUrl, allowedHostsEnv) {
+  let u;
+  try { u = new URL(pdfUrl); } catch { return { ok: false, reason: 'malformed_url' }; }
+  if (u.protocol !== 'https:') return { ok: false, reason: `protocol_not_https (${u.protocol})` };
+  if (_isPrivateOrLoopbackHost(u.hostname)) return { ok: false, reason: `host_in_private_range (${u.hostname})` };
+  const allowed = (allowedHostsEnv || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (allowed.length > 0) {
+    const matches = allowed.some(entry => _hostMatchesAllowEntry(u.hostname, entry));
+    if (!matches) return { ok: false, reason: `host_not_in_allowlist (${u.hostname})` };
+  }
+  return { ok: true };
+}
+
+// ── Bounded streamed download ────────────────────────────────────────────────
+//
+// Replaces `await response.arrayBuffer()`. Two reasons:
+//   1. Content-Length header (when present) lets us reject early without
+//      consuming the body.
+//   2. Streaming with a running byte ceiling protects against missing or
+//      lying content-length — a misbehaving CDN that streams forever, or a
+//      200-OK HTML error page that's 50MB, would otherwise buffer the whole
+//      thing into memory before any sanity check fires.
+async function fetchBoundedBuffer(response, maxBytes) {
+  const reportedLen = parseInt(response.headers.get('content-length') || '', 10);
+  if (Number.isFinite(reportedLen) && reportedLen > maxBytes) {
+    throw new Error(`PDF size ${reportedLen} exceeds limit ${maxBytes}`);
+  }
+  if (!response.body) {
+    // Fallback for environments where streaming isn't available.
+    const buf = Buffer.from(await response.arrayBuffer());
+    if (buf.length > maxBytes) throw new Error(`PDF size ${buf.length} exceeds limit ${maxBytes}`);
+    return buf;
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try { await reader.cancel(); } catch {}
+        throw new Error(`PDF size exceeds limit ${maxBytes} (cancelled at ${total} bytes)`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try { reader.releaseLock(); } catch {}
+  }
+  return Buffer.concat(chunks.map(c => Buffer.from(c)));
+}
+
 // ── Main extraction entry point ──────────────────────────────────────────────
 
+const _MAX_PDF_BYTES = (() => {
+  const n = parseInt(process.env.OCR_MAX_PDF_MB || '25', 10);
+  if (!Number.isFinite(n) || n < 1) return 25 * 1024 * 1024;
+  return n * 1024 * 1024;
+})();
+
 async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId, inDigitLength = 9) {
+  // SSRF guard — see isAllowedPdfUrl above.
+  const urlCheck = isAllowedPdfUrl(pdfUrl, process.env.OCR_PDF_ALLOWED_HOSTS);
+  if (!urlCheck.ok) {
+    throw new Error(`PDF URL rejected: ${urlCheck.reason}`);
+  }
+
   // Download — strict timeout. PODs are typically <2MB and live on
   // Microsoft 365 / SharePoint. A stuck connection here used to wedge a
   // whole lane until the parent's 120s backstop fired.
@@ -343,7 +477,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     throw new Error(`Download failed: ${err.message}`);
   }
   if (!response.ok) throw new Error(`Failed to download PDF: ${response.status}`);
-  const buffer = Buffer.from(await response.arrayBuffer());
+  const buffer = await fetchBoundedBuffer(response, _MAX_PDF_BYTES);
 
   if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
     return { invoice: null, previewPath: null };
