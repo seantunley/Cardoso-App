@@ -298,6 +298,22 @@ function findInvoiceNumber(text, inDigitLength = 9) {
   const longMatch = cleaned.match(/\b(18\d{8,10})\b/);
   if (longMatch) return 'IN' + longMatch[1].substring(2);
 
+  // INQ-prefixed (Cardoso outbound invoice format on some sites).
+  // Must come BEFORE the IN-prefixed match below — INQ would otherwise
+  // partially match IN and return without the Q. Real-world example
+  // from a SASOL DELIGHT MARSHALL POD: GoogleVision read "INQ0214536"
+  // perfectly but findInvoiceNumber dropped it because no INQ pattern
+  // existed and IN\d{8,10} didn't match (Q breaks the digit run).
+  // Result: every row from this customer walked the entire engine
+  // cascade looking for a match it'd never find, hitting extract_total
+  // timeouts and retiring lanes after enough cycles.
+  // No padding — INQ uses a 7-digit canonical that may differ from the
+  // IN-prefix sites' inDigitLength.
+  const inqMatch = cleaned.match(/\bINQ\s*(\d{6,10})\b/i);
+  if (inqMatch) {
+    return `INQ${inqMatch[1]}`;
+  }
+
   // IN-prefixed long. Range widened from {8,9} to {8,10} for the
   // post-rollover 10-digit form. Padding to the per-site canonical length
   // (`inDigitLength`, default 9): a one-short read is treated as a
