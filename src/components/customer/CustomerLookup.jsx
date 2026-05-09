@@ -75,55 +75,162 @@ function PaymentHistoryChartsLazy(props) {
   );
 }
 
+// ── flattenRecord — field-policy fallback ──────────────────────────────────
+//
+// Pre-refactor history (mid-2025): this function used a mix of `||` and `??`
+// for fallback semantics, which produced inconsistent behaviour across
+// fields. Code-review caught it — `outstanding_balance ?? data.outstanding_balance`
+// preserves a real zero, but `age_current || data.age_current` would treat
+// the string '0' as truthy yet treat `0` (number) or `''` as falsy. Each
+// field had been added one at a time without thinking about the policy.
+//
+// The fix is one place: a small set of named policies, each with explicit
+// fallback semantics. Every field declares which policy it uses; the
+// flattener iterates the schema. Adding a field = one entry, not five
+// `||` / `??` decisions.
+//
+// LEGACY FALLBACK NOTE — `record.data` is the deprecated JSON-blob column
+// from a previous shape of `datarecord`. New syncs no longer write to it;
+// it's preserved here as a fallback so historical rows still render correctly.
+// Once `SELECT COUNT(*) FROM datarecord WHERE data IS NOT NULL AND data != '{}'
+// AND data != '' AND updated_date > date('now', '-30 days')` returns 0 for
+// every site, the whole `data?.X` half of every fallback can be deleted —
+// `expandDataRecord` server-side already supplies the canonical fields.
+//
+//
+// Policies:
+//   text     — string-typed fields. Fallback when value is null, undefined,
+//              OR empty string. Treats '' the same as missing because the
+//              UI's intent for an empty customer_name is "show the fallback,"
+//              not "render an empty cell."
+//   numeric  — number-typed (or numeric-string) fields. Fallback ONLY when
+//              null/undefined. A real `0` is preserved (R 0.00 is a valid
+//              outstanding balance). Empty string from Sage's age columns
+//              (which are TEXT in datarecord) IS treated as missing — the
+//              canonical Sage shape for "no balance" is null, not ''.
+//   nullable — like text but the final default is null instead of undefined.
+//              Used for fields where the UI explicitly conditions on `=== null`.
+//   enumDef  — like text but with an explicit default value (e.g. 'none' for
+//              flag_color). The default applies after both record and data
+//              have been checked.
+const FIELD_POLICY = {
+  text: 'text',
+  numeric: 'numeric',
+  nullable: 'nullable',
+  enumDef: 'enumDef',
+};
+
+// Single source of truth for which fields get which policy. Order doesn't
+// matter at runtime; alphabetical for readability.
+const FIELD_POLICIES = {
+  account_type:                  { policy: FIELD_POLICY.nullable },
+  age_14_days:                   { policy: FIELD_POLICY.text },
+  age_21_days:                   { policy: FIELD_POLICY.text },
+  age_7_days:                    { policy: FIELD_POLICY.text },
+  age_analysis:                  { policy: FIELD_POLICY.text },
+  age_current:                   { policy: FIELD_POLICY.text },
+  customer_name:                 { policy: FIELD_POLICY.text },
+  customer_number:               { policy: FIELD_POLICY.text },
+  flag_color:                    { policy: FIELD_POLICY.enumDef, default: 'none' },
+  flag_created_by:               { policy: FIELD_POLICY.nullable },
+  flag_reason:                   { policy: FIELD_POLICY.enumDef, default: '' },
+  outstanding_balance:           { policy: FIELD_POLICY.numeric },
+  sales_rep:                     { policy: FIELD_POLICY.nullable },
+  terms:                         { policy: FIELD_POLICY.nullable },
+};
+
+// Generate the unpaid-invoice / receipt families programmatically. Five
+// slots each, three sub-keys (number, amount, date) — repeating these in
+// FIELD_POLICIES verbatim was the largest source of copy-paste drift in
+// the original.
+for (let n = 1; n <= 5; n++) {
+  FIELD_POLICIES[`last_unpaid_invoice_${n}`]        = { policy: FIELD_POLICY.text };
+  FIELD_POLICIES[`last_unpaid_invoice_${n}_amount`] = { policy: FIELD_POLICY.text };
+  FIELD_POLICIES[`last_unpaid_invoice_${n}_date`]   = { policy: FIELD_POLICY.text };
+  FIELD_POLICIES[`last_receipt_${n}`]               = { policy: FIELD_POLICY.text };
+  FIELD_POLICIES[`last_receipt_${n}_amount`]        = { policy: FIELD_POLICY.text };
+  FIELD_POLICIES[`last_receipt_${n}_date`]          = { policy: FIELD_POLICY.text };
+}
+
+// Two legacy shapes the original flattener handled inline: an older sync
+// wrote `last_unpaid_invoice_date` (singular, no slot index) instead of
+// `last_unpaid_invoice_1_date`, and `last_receipt_number` / `_amount` /
+// `_date` instead of the `_1` versions. Capture them as named extras so
+// the policy schema stays clean.
+const LEGACY_FALLBACKS = {
+  last_unpaid_invoice_1_date: ['last_unpaid_invoice_date'],
+  last_receipt_1:             ['last_receipt_number'],
+  last_receipt_1_amount:      ['last_receipt_amount'],
+  last_receipt_1_date:        ['last_receipt_date'],
+};
+
+function _isMissingForText(value) {
+  return value === undefined || value === null || value === '';
+}
+function _isMissingForNumeric(value) {
+  // Treat empty string as missing for numeric fields too. Sage age/balance
+  // columns are TEXT-typed in datarecord but the Sage convention for
+  // "nothing there" is null; some upstream CSVs occasionally come through
+  // as ''. Both should fall through to the fallback.
+  return value === undefined || value === null || value === '';
+}
+
+function _resolveField(record, fieldName, policySpec) {
+  const dataObj = record?.data;
+  // Build the candidate chain in fallback order. The order MUST match the
+  // pre-refactor original:
+  //
+  //   1. record.canonical          — newest top-level column
+  //   2. record.data.canonical     — newest value inside the legacy data blob
+  //   3. record.legacy             — old top-level alias (e.g. last_receipt_number)
+  //   4. record.data.legacy        — old name inside the legacy data blob
+  //
+  // The reordering matters on upgraded DBs that still carry stale legacy
+  // columns from the v2 backfill. If `record.legacy` were checked BEFORE
+  // `record.data.canonical`, a stale `last_receipt_number` could shadow a
+  // freshly-synced `data.last_receipt_1` and render outdated receipt /
+  // invoice details. Caught in PR #212 review — an earlier draft of this
+  // refactor had aliases-on-record sandwiched between `record.canonical`
+  // and `data.canonical`, which inverted the original semantics.
+  const aliases = LEGACY_FALLBACKS[fieldName] || [];
+  const candidates = [
+    record?.[fieldName],
+    dataObj?.[fieldName],
+    ...aliases.map((alias) => record?.[alias]),
+    ...aliases.map((alias) => dataObj?.[alias]),
+  ];
+  const isMissing = policySpec.policy === FIELD_POLICY.numeric
+    ? _isMissingForNumeric
+    : _isMissingForText;
+
+  for (const candidate of candidates) {
+    if (!isMissing(candidate)) return candidate;
+  }
+
+  // Apply policy-specific final default.
+  switch (policySpec.policy) {
+    case FIELD_POLICY.enumDef:
+      return policySpec.default;
+    case FIELD_POLICY.numeric:
+    case FIELD_POLICY.nullable:
+      return null;
+    case FIELD_POLICY.text:
+    default:
+      // Original behaviour: text fields with no value fall through to
+      // undefined (the spread doesn't set them). Preserve that by
+      // returning undefined — callers that want a string default should
+      // use enumDef with default: ''.
+      return undefined;
+  }
+}
+
 function flattenRecord(record) {
-  return {
-    ...record,
-    customer_number: record.customer_number || record.data?.customer_number,
-    customer_name: record.customer_name || record.data?.customer_name,
-    age_analysis: record.age_analysis || record.data?.age_analysis,
-    age_current: record.age_current || record.data?.age_current,
-    age_7_days: record.age_7_days || record.data?.age_7_days,
-    age_14_days: record.age_14_days || record.data?.age_14_days,
-    age_21_days: record.age_21_days || record.data?.age_21_days,
-    flag_color: record.flag_color || record.data?.flag_color || "none",
-    flag_reason: record.flag_reason || record.data?.flag_reason || "",
-    flag_created_by: record.flag_created_by || record.data?.flag_created_by || null,
-    last_unpaid_invoice_1: record.last_unpaid_invoice_1 || record.data?.last_unpaid_invoice_1,
-    last_unpaid_invoice_1_amount: record.last_unpaid_invoice_1_amount || record.data?.last_unpaid_invoice_1_amount,
-    last_unpaid_invoice_1_date: record.last_unpaid_invoice_1_date || record.data?.last_unpaid_invoice_1_date || record.last_unpaid_invoice_date || record.data?.last_unpaid_invoice_date,
-    last_unpaid_invoice_2: record.last_unpaid_invoice_2 || record.data?.last_unpaid_invoice_2,
-    last_unpaid_invoice_2_amount: record.last_unpaid_invoice_2_amount || record.data?.last_unpaid_invoice_2_amount,
-    last_unpaid_invoice_2_date: record.last_unpaid_invoice_2_date || record.data?.last_unpaid_invoice_2_date,
-    last_unpaid_invoice_3: record.last_unpaid_invoice_3 || record.data?.last_unpaid_invoice_3,
-    last_unpaid_invoice_3_amount: record.last_unpaid_invoice_3_amount || record.data?.last_unpaid_invoice_3_amount,
-    last_unpaid_invoice_3_date: record.last_unpaid_invoice_3_date || record.data?.last_unpaid_invoice_3_date,
-    last_unpaid_invoice_4: record.last_unpaid_invoice_4 || record.data?.last_unpaid_invoice_4,
-    last_unpaid_invoice_4_amount: record.last_unpaid_invoice_4_amount || record.data?.last_unpaid_invoice_4_amount,
-    last_unpaid_invoice_4_date: record.last_unpaid_invoice_4_date || record.data?.last_unpaid_invoice_4_date,
-    last_unpaid_invoice_5: record.last_unpaid_invoice_5 || record.data?.last_unpaid_invoice_5,
-    last_unpaid_invoice_5_amount: record.last_unpaid_invoice_5_amount || record.data?.last_unpaid_invoice_5_amount,
-    last_unpaid_invoice_5_date: record.last_unpaid_invoice_5_date || record.data?.last_unpaid_invoice_5_date,
-    last_receipt_1: record.last_receipt_1 || record.data?.last_receipt_1 || record.last_receipt_number || record.data?.last_receipt_number,
-    last_receipt_1_amount: record.last_receipt_1_amount || record.data?.last_receipt_1_amount || record.last_receipt_amount || record.data?.last_receipt_amount,
-    last_receipt_1_date: record.last_receipt_1_date || record.data?.last_receipt_1_date || record.last_receipt_date || record.data?.last_receipt_date,
-    last_receipt_2: record.last_receipt_2 || record.data?.last_receipt_2,
-    last_receipt_2_amount: record.last_receipt_2_amount || record.data?.last_receipt_2_amount,
-    last_receipt_2_date: record.last_receipt_2_date || record.data?.last_receipt_2_date,
-    last_receipt_3: record.last_receipt_3 || record.data?.last_receipt_3,
-    last_receipt_3_amount: record.last_receipt_3_amount || record.data?.last_receipt_3_amount,
-    last_receipt_3_date: record.last_receipt_3_date || record.data?.last_receipt_3_date,
-    last_receipt_4: record.last_receipt_4 || record.data?.last_receipt_4,
-    last_receipt_4_amount: record.last_receipt_4_amount || record.data?.last_receipt_4_amount,
-    last_receipt_4_date: record.last_receipt_4_date || record.data?.last_receipt_4_date,
-    last_receipt_5: record.last_receipt_5 || record.data?.last_receipt_5,
-    last_receipt_5_amount: record.last_receipt_5_amount || record.data?.last_receipt_5_amount,
-    last_receipt_5_date: record.last_receipt_5_date || record.data?.last_receipt_5_date,
-    outstanding_balance:
-      record.outstanding_balance ?? record.data?.outstanding_balance,
-    sales_rep: record.sales_rep || record.data?.sales_rep || null,
-    account_type: record.account_type || record.data?.account_type || null,
-    terms: record.terms || record.data?.terms || null,
-  };
+  if (!record || typeof record !== 'object') return record;
+  const flat = { ...record };
+  for (const [fieldName, policySpec] of Object.entries(FIELD_POLICIES)) {
+    flat[fieldName] = _resolveField(record, fieldName, policySpec);
+  }
+  return flat;
 }
 
 function getVisibleAccountType(accountType) {
