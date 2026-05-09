@@ -471,9 +471,17 @@ async function fetchBoundedBuffer(response, maxBytes) {
 
 // ── Main extraction entry point ──────────────────────────────────────────────
 
+// Default cap raised from 25 to 100 MB. The original 25 MB ceiling
+// was set by #207 against the typical POD-scan size (~2 MB) but real
+// BAT PODs can exceed 25 MB on high-resolution multi-page scans —
+// extraction id=280 was 39.6 MB and got rejected. 100 MB is well
+// above any legitimate POD while still protecting against the
+// original attack shapes (hostile CDN streaming forever, 50 MB
+// HTML error pages, etc.). Operators can tighten via env if they
+// know their PODs run smaller.
 const _MAX_PDF_BYTES = (() => {
-  const n = parseInt(process.env.OCR_MAX_PDF_MB || '25', 10);
-  if (!Number.isFinite(n) || n < 1) return 25 * 1024 * 1024;
+  const n = parseInt(process.env.OCR_MAX_PDF_MB || '100', 10);
+  if (!Number.isFinite(n) || n < 1) return 100 * 1024 * 1024;
   return n * 1024 * 1024;
 })();
 
