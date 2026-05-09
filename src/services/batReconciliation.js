@@ -995,7 +995,11 @@ function setSageCacheMeta(key, value) {
     db.prepare(`INSERT INTO bat_sage_cache_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
       .run(key, value);
-  } catch (e) { console.error('[bat-sage-cache] meta write failed:', e.message); }
+  } catch (e) {
+    // Persist as System Log entry rather than just stderr — operator
+    // needs to see this when triaging "why is the cache always stale".
+    try { logError('bat.sage_cache.meta_write', e, { key }); } catch {}
+  }
 }
 
 export async function refreshSageWeekTotalsCache() {
@@ -1492,7 +1496,16 @@ export function retryNotFound(reconId) {
 async function runGoogleVisionRetry(reconId, rows) {
   if (!getGoogleVisionKey()) {
     const msg = 'Google Vision retry skipped: GOOGLE_VISION_KEY not set';
-    console.error(`[bat-gv] ${msg}`);
+    // Operator-actionable misconfiguration — persist so it surfaces
+    // in System Log, not just stderr.
+    try {
+      logError(
+        'bat.gv_retry.skipped_no_key',
+        new Error(msg),
+        { reconciliation_id: reconId, row_count: rows?.length || 0 },
+        'warn',
+      );
+    } catch {}
     recordReconciliationError(reconId, msg);
     return;
   }
@@ -1503,7 +1516,14 @@ async function runGoogleVisionRetry(reconId, rows) {
   try {
     await runGoogleVisionRetryInner(reconId, rows);
   } catch (err) {
-    console.error('[bat-gv] Retry pass crashed:', err.message);
+    // Crash here is a real bug — preserve full stack via logError
+    // rather than the truncated console.error message.
+    try {
+      logError('bat.gv_retry.crashed', err, {
+        reconciliation_id: reconId,
+        row_count: rows?.length || 0,
+      });
+    } catch {}
     recordReconciliationError(reconId, `Google Vision retry crashed: ${err.message}`);
   }
 }
@@ -1620,7 +1640,9 @@ export function setOcrPaused(v) {
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(next ? '1' : '0');
   } catch (err) {
-    console.error('[bat-ocr] Failed to persist pause state:', err.message);
+    // logError persists to System Log; the previous console.error
+    // duplicate ran alongside it just to mirror to stderr, which
+    // logError already does internally.
     try { logError('bat-ocr.pause', err, { paused: next }); } catch {}
   }
   try {
@@ -1642,7 +1664,8 @@ function startExtractionWorker(reconId) {
   try { logError('bat-ocr.worker', new Error(`Worker started for reconciliation ${reconId}`), { reconciliation_id: reconId }, 'info'); } catch {}
 
   processQueue(reconId).catch(err => {
-    console.error('[bat-ocr] Worker crashed:', err.message);
+    // logError mirrors to stderr internally so the previous
+    // console.error duplicate is unnecessary.
     try { logError('bat-ocr.worker', err, { reconciliation_id: reconId, phase: 'crash' }); } catch {}
     recordReconciliationError(reconId, `Worker crashed: ${err.message}`);
   }).finally(() => {
