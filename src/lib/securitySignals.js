@@ -128,12 +128,13 @@ export function getSecuritySignals() {
   // dashboard (and ruleSecuritySignals) could fire alerts on yesterday's
   // activity long after it ended. startedAtMs is cached on each bucket
   // at create time, so this filter is cheap.
+  //
+  // Single-pass aggregation: no sort + filter array materialisation.
+  // The previous version did `[...buckets.keys()].sort().filter(...)`
+  // then iterated. Order doesn't matter for sums and we don't keep the
+  // intermediate array, so iterate `buckets.values()` directly and skip
+  // the per-call O(N log N) sort + the array allocation.
   const cutoffMs = Date.now() - WINDOW_MINUTES * 60 * 1000;
-  const windowKeys = [...buckets.keys()].sort().filter((k) => {
-    const b = buckets.get(k);
-    return b && b.startedAtMs >= cutoffMs;
-  });
-
   const totals = {
     requests: 0,
     status_401: 0,
@@ -145,9 +146,8 @@ export function getSecuritySignals() {
     avg_latency_ms: 0,
   };
   let latencyTotal = 0;
-
-  for (const key of windowKeys) {
-    const b = buckets.get(key);
+  for (const b of buckets.values()) {
+    if (b.startedAtMs < cutoffMs) continue;
     totals.requests += b.requests;
     totals.status_401 += b.status_401;
     totals.status_403 += b.status_403;
