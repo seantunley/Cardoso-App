@@ -79,44 +79,91 @@ function accpacStaleness(iso) {
 
 function SiteCard({ site, onFlagClick, onResync, onTriggerAccpacSync, accpacSyncingSiteId }) {
   const isOnline = site.status === "ok" || site.status === "online";
+  const isOrphan = site.is_orphan === true;
   const flags = site.kpis?.records_by_flag || {};
   const total = site.kpis?.total_records ?? null;
-  const accpacStatus = site.last_accpac_status; // 'ok' | 'error' | 'never_synced' | null
-  const stale = accpacStaleness(site.last_accpac_synced_at);
-  const accpacIsRunning = accpacSyncingSiteId === site.site_id;
+  // Days since the row was orphaned, for the pill tooltip. Numeric so
+  // the operator sees "removed 12 days ago" rather than a raw ISO.
+  const orphanedAgoDays = site.removed_from_env_at
+    ? Math.max(0, Math.floor((Date.now() - new Date(site.removed_from_env_at).getTime()) / (24 * 60 * 60 * 1000)))
+    : null;
   return (
     <div
-      className="relative border border-border bg-card p-4 space-y-3 transition-all hover:border-[var(--phosphor)] overflow-hidden"
+      className={cn(
+        "relative border bg-card p-4 space-y-3 transition-all overflow-hidden",
+        isOrphan ? "border-amber-500/40 hover:border-amber-500/60" : "border-border hover:border-[var(--phosphor)]",
+      )}
       style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
     >
       <div
         className="absolute left-0 right-0 bottom-0 h-[2px]"
         style={{
-          background: isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
-          boxShadow: isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
+          background: isOrphan
+            ? "hsl(38 92% 50%)"
+            : isOnline ? "hsl(145 55% 45%)" : "hsl(var(--destructive))",
+          boxShadow: isOrphan
+            ? "0 0 10px hsla(38,92%,50%,0.3)"
+            : isOnline ? "0 0 10px hsla(145,55%,45%,0.3)" : "0 0 10px hsla(0,72%,50%,0.3)",
         }}
       />
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-muted-foreground" strokeWidth={1.5} />
-          <span className="font-display text-lg text-foreground leading-none">{site.site_name || site.site_slug}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => { e.stopPropagation(); onResync(site); }}
-            aria-label="Force resync this site"
-            className="flex items-center gap-1 rounded-md border border-border px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors min-h-[36px]"
-            title={`Resync ${site.site_name || site.site_slug}`}
-          >
-            <RefreshCw className="h-3 w-3" />
-            Resync
-          </button>
-          <div className={cn("flex items-center gap-1.5 text-xs font-medium", isOnline ? "text-green-500" : "text-muted-foreground")}>
-            {isOnline ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-            {isOnline ? "Online" : "Offline"}
+      {/* Header — status is the visual anchor on the LEFT (large dot +
+          state word + optional ORPHAN pill); site name sits below as a
+          calmer label; Resync is a small icon-only button in the
+          top-right corner so it doesn't compete for attention. */}
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 flex-wrap">
+            {isOrphan ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-amber-400"
+                title={
+                  orphanedAgoDays != null
+                    ? `Removed from HUB_SITES env ${orphanedAgoDays} day${orphanedAgoDays === 1 ? '' : 's'} ago. Read-only — re-add to env to reactivate, or use Forget to retire.`
+                    : 'Removed from HUB_SITES env. Read-only — re-add to env to reactivate, or use Forget to retire.'
+                }
+              >
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-400" />
+                ORPHAN
+              </span>
+            ) : (
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-semibold uppercase tracking-wider",
+                  isOnline
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                    : "border-rose-500/30 bg-rose-500/10 text-rose-400",
+                )}
+              >
+                {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
+                {isOnline ? "Online" : "Offline"}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 min-w-0">
+            <Building2 className="h-4 w-4 text-muted-foreground shrink-0" strokeWidth={1.5} />
+            <span className="font-display text-lg text-foreground leading-none truncate">
+              {site.site_name || site.site_slug}
+            </span>
           </div>
         </div>
+        <button
+          onClick={(e) => { e.stopPropagation(); onResync(site); }}
+          aria-label="Force resync this site"
+          disabled={isOrphan}
+          className={cn(
+            "shrink-0 flex items-center justify-center rounded-md border h-8 w-8 transition-colors",
+            isOrphan
+              ? "border-border/50 text-muted-foreground/30 cursor-not-allowed"
+              : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
+          )}
+          title={
+            isOrphan
+              ? "Site is orphaned — re-add to HUB_SITES env to reactivate"
+              : `Resync ${site.site_name || site.site_slug}`
+          }
+        >
+          <RefreshCw className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {site.kpis ? (
