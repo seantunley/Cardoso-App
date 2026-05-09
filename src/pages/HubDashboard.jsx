@@ -608,35 +608,101 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
   const [modalRecord, setModalRecord] = useState(null);
   const [modalOpen, setModalOpen] = useState(false);
   const inputRef = useRef(null);
+  // Tracks the AbortController for the currently in-flight /api/hub/records
+  // request so we can cancel it when:
+  //   - a newer search supersedes it (typeahead — older request stale)
+  //   - the input is cleared (its result would repopulate an empty box)
+  //   - the component unmounts
+  // Without this, an in-flight fetch from a previous non-empty query
+  // could resolve AFTER the user cleared the input and repopulate
+  // suggestions/showSuggestions with stale matches — visible until the
+  // next keystroke. Caught in PR review.
+  const abortRef = useRef(null);
 
   // Server-side search: query the API when the user types, filtered by site
   const searchRecords = useCallback(async (searchQuery, siteId) => {
-    if (!searchQuery.trim()) { setSuggestions([]); setShowSuggestions(false); return; }
+    if (!searchQuery.trim()) {
+      // Abort any in-flight request — its result would land on an empty
+      // input box and repopulate stale suggestions.
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch {}
+        abortRef.current = null;
+      }
+      setSuggestions([]);
+      setShowSuggestions(false);
+      // Clear loading explicitly: the aborted request's `finally` will
+      // see `abortRef.current === null` (no longer matches its own
+      // controller) and skip its own setLoading(false). Without this
+      // the spinner sticks until the next successful search resolves.
+      // Caught in PR review.
+      setLoading(false);
+      return;
+    }
+
+    // Cancel the previous in-flight fetch before starting a new one. The
+    // controller stays attached to `abortRef` so a later cancel target
+    // (empty input, unmount) can find it.
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch {}
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     try {
       const params = new URLSearchParams({ search: searchQuery.trim(), limit: 20 });
       if (siteId) params.set("site_id", siteId);
-      const res = await fetch(`/api/hub/records?${params}`, { credentials: "include" });
+      const res = await fetch(`/api/hub/records?${params}`, {
+        credentials: "include",
+        signal: controller.signal,
+      });
+      // Belt-and-suspenders: even if the abort signal fired AFTER the
+      // fetch resolved (race window where the controller was superseded
+      // but the fetch is mid-decode), a freshness check against
+      // abortRef stops a stale result writing state.
+      if (controller.signal.aborted || abortRef.current !== controller) return;
       if (res.ok) {
         const data = await res.json();
+        if (controller.signal.aborted || abortRef.current !== controller) return;
         setSuggestions((data.records || []).map(r => ({ record: r, score: 1 })));
         setSelectedIdx(-1);
         setShowSuggestions((data.records || []).length > 0);
       }
+    } catch (err) {
+      // AbortError is expected for the cancellation paths above; swallow it.
+      // Anything else can fall through silently — the previous suggestion
+      // shape is preserved for the user.
+      if (err?.name !== 'AbortError') {
+        // Non-abort errors are intentionally not surfaced to the UI here
+        // (typeahead is forgiving by design); they're just not allowed
+        // to crash the search box.
+      }
     } finally {
-      setLoading(false);
+      // Only clear loading if we're still the active request. Otherwise
+      // a faster newer request would have its loading=true overwritten
+      // by an older request's finally.
+      if (abortRef.current === controller) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
-    // Skip the schedule entirely on empty/whitespace-only input. Previously
-    // every empty-query render still scheduled a timeout that called
-    // searchRecords (which then bailed via the in-function trim check),
-    // burning React state-flips for no reason. Now the empty path clears
-    // suggestions synchronously and stops there.
+    // Skip the schedule entirely on empty/whitespace-only input. The empty
+    // branch in searchRecords aborts any in-flight request first so a
+    // late-arriving response from a previous non-empty query can't
+    // repopulate the just-cleared box.
     if (!query.trim()) {
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch {}
+        abortRef.current = null;
+      }
       setSuggestions([]);
       setShowSuggestions(false);
+      // Same reason as the searchRecords empty bail: the aborted
+      // controller's finally won't clear loading because abortRef no
+      // longer matches it, so we have to do it here explicitly.
+      setLoading(false);
       return;
     }
     // 300ms debounce — operator typing speed is ~120ms/char on a familiar
@@ -645,6 +711,18 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
     const timeout = setTimeout(() => searchRecords(query, selectedSiteId), 300);
     return () => clearTimeout(timeout);
   }, [query, selectedSiteId, searchRecords]);
+
+  // Abort any in-flight request on unmount so its result can't land on
+  // an unmounted component (React would warn, and worse — the state-set
+  // would be wasted work).
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch {}
+        abortRef.current = null;
+      }
+    };
+  }, []);
 
   const openRecord = (r) => {
     const site = sites.find(s => s.site_id === r.site_id);
