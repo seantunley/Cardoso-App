@@ -538,30 +538,35 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
-    const totals = since
-      ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY flag_color').all(since)
-      : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records GROUP BY flag_color').all();
-    const totalRecords = since
-      ? db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE updated_date >= ?').get(since)
-      : db.prepare('SELECT COUNT(*) as count FROM hub_records').get();
+
+    // ── KPI rollup (one query, in-JS pivot) ─────────────────────────────
+    // Previously did 1 + 3 + (sites × 2) = up to 19 queries on an 8-site
+    // hub for what is essentially a two-axis aggregation. Collapse to a
+    // single GROUP BY (site_id, flag_color) and pivot in JS — the
+    // dashboard fires this on every poll + every dateRange flip, so
+    // shaving the per-call cost matters.
+    const flagBreakdownRows = since
+      ? db.prepare('SELECT site_id, flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY site_id, flag_color').all(since)
+      : db.prepare('SELECT site_id, flag_color, COUNT(*) as count FROM hub_records GROUP BY site_id, flag_color').all();
 
     const flagTotals = { none: 0, red: 0, orange: 0, green: 0 };
-    for (const row of totals) {
-      if (row.flag_color in flagTotals) flagTotals[row.flag_color] = row.count;
+    let totalRecordsCount = 0;
+    const perSiteAgg = new Map(); // site_id → { total, flags }
+    for (const row of flagBreakdownRows) {
+      const count = row.count || 0;
+      totalRecordsCount += count;
+      if (row.flag_color in flagTotals) flagTotals[row.flag_color] += count;
+      let agg = perSiteAgg.get(row.site_id);
+      if (!agg) {
+        agg = { total: 0, flags: { none: 0, red: 0, orange: 0, green: 0 } };
+        perSiteAgg.set(row.site_id, agg);
+      }
+      agg.total += count;
+      if (row.flag_color in agg.flags) agg.flags[row.flag_color] += count;
     }
 
     const perSite = sites.map(s => {
-      // Live count from hub_records instead of stale last_kpis cache
-      const siteTotal = since
-        ? db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE site_id = ? AND updated_date >= ?').get(s.id, since)
-        : db.prepare('SELECT COUNT(*) as count FROM hub_records WHERE site_id = ?').get(s.id);
-      const siteFlagRows = since
-        ? db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE site_id = ? AND updated_date >= ? GROUP BY flag_color').all(s.id, since)
-        : db.prepare('SELECT flag_color, COUNT(*) as count FROM hub_records WHERE site_id = ? GROUP BY flag_color').all(s.id);
-      const siteFlags = { none: 0, red: 0, orange: 0, green: 0 };
-      for (const row of siteFlagRows) {
-        if (row.flag_color in siteFlags) siteFlags[row.flag_color] = row.count;
-      }
+      const agg = perSiteAgg.get(s.id);
       return {
         site_id: s.id,
         site_slug: s.slug,
@@ -574,14 +579,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         is_orphan: s.in_env === 0,
         removed_from_env_at: s.removed_from_env_at || null,
         kpis: {
-          total_records: siteTotal?.count || 0,
-          records_by_flag: siteFlags,
+          total_records: agg?.total || 0,
+          records_by_flag: agg?.flags || { none: 0, red: 0, orange: 0, green: 0 },
         },
       };
     });
 
     res.json({
-      total_records: totalRecords.count,
+      total_records: totalRecordsCount,
       records_by_flag: flagTotals,
       sites: perSite,
       since,

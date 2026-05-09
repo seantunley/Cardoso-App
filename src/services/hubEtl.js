@@ -229,28 +229,54 @@ async function syncSite(site) {
       }
     });
 
-    let offset = 0;
-    let hasMore = true;
-    while (hasMore) {
+    // Depth-2 pipeline: while the better-sqlite3 transaction inserts page N,
+    // page N+1 is fetched in parallel. Insert order is preserved (we await
+    // pages in offset order) so this is safe — the transaction for page N
+    // is committed before page N+1 inserts. On a 5K-record site that's
+    // 5 pages × ~RTT/2 saved instead of fully serialised round-trips.
+    const fetchRecordsPage = async (pageOffset) => {
       const ctrl3 = new AbortController();
       const t3 = setTimeout(() => ctrl3.abort(), 10000);
-      const pageUrl = `${site.url}/api/reporting/records${sinceParam}${sinceParam ? '&' : '?'}offset=${offset}&limit=1000`;
-      const recRes = await fetch(pageUrl, { headers, signal: ctrl3.signal });
-      clearTimeout(t3);
-      if (!recRes.ok) throw new Error(`Records fetch failed at offset ${offset}: HTTP ${recRes.status}`);
-      const recData = await recRes.json();
-      if (recData.records && recData.records.length > 0) {
-        // Log first record diagnostics for account_type/sales_rep tracing
+      const pageUrl = `${site.url}/api/reporting/records${sinceParam}${sinceParam ? '&' : '?'}offset=${pageOffset}&limit=1000`;
+      try {
+        const recRes = await fetch(pageUrl, { headers, signal: ctrl3.signal });
+        clearTimeout(t3);
+        if (!recRes.ok) throw new Error(`Records fetch failed at offset ${pageOffset}: HTTP ${recRes.status}`);
+        return await recRes.json();
+      } finally {
+        clearTimeout(t3);
+      }
+    };
+    // Attach a no-op .catch() to every prefetched-but-not-yet-awaited
+    // promise so that if `insertMany` throws (SQLite I/O / locking
+    // error), the abandoned fetch's eventual rejection doesn't surface
+    // as an unhandledRejection. The .catch chain creates a sibling
+    // handler — when we DO await the original promise on the next
+    // iteration, errors still propagate normally.
+    const guardOrphan = (p) => { if (p) p.catch(() => {}); return p; };
+
+    let offset = 0;
+    let nextRecordsPromise = guardOrphan(fetchRecordsPage(0));
+    while (true) {
+      const recData = await nextRecordsPromise;
+      const records = recData?.records || [];
+      // Kick off the next page fetch BEFORE the synchronous insert so the
+      // network round-trip overlaps with the better-sqlite3 transaction.
+      const consumed = records.length;
+      const willHaveMore = recData?.has_more === true && consumed > 0;
+      nextRecordsPromise = willHaveMore ? guardOrphan(fetchRecordsPage(offset + consumed)) : null;
+
+      if (consumed > 0) {
         if (offset === 0) {
-          const sample = recData.records[0];
+          const sample = records[0];
           console.log(`[hub-etl-diag] Site ${site.name}: first record keys:`, Object.keys(sample).join(', '));
           console.log(`[hub-etl-diag] Site ${site.name}: account_type=${JSON.stringify(sample.account_type)}, sales_rep=${JSON.stringify(sample.sales_rep)}`);
         }
-        insertMany(recData.records);
-        recordsFetched += recData.records.length;
-        offset += recData.records.length;
+        insertMany(records);
+        recordsFetched += consumed;
+        offset += consumed;
       }
-      hasMore = recData.has_more === true;
+      if (!nextRecordsPromise) break;
     }
 
     // Inventory — full refresh
@@ -286,23 +312,38 @@ async function syncSite(site) {
         });
       }
     });
-    const syncedItemNumbers = [];
-    let invOffset = 0;
-    let invHasMore = true;
-    while (invHasMore) {
+    // Same depth-2 pipeline pattern as the records loop above — overlap the
+    // next page fetch with the current page's insert transaction.
+    const fetchInvPage = async (pageOffset) => {
       const ctrlInv = new AbortController();
       const tInv = setTimeout(() => ctrlInv.abort(), 10000);
-      const invUrl = `${site.url}/api/reporting/inventory?offset=${invOffset}&limit=1000`;
-      const invRes = await fetch(invUrl, { headers, signal: ctrlInv.signal });
-      clearTimeout(tInv);
-      if (!invRes.ok) throw new Error(`Inventory fetch failed at offset ${invOffset}: HTTP ${invRes.status}`);
-      const invData = await invRes.json();
-      if (invData.records && invData.records.length > 0) {
-        insertInventory(invData.records);
-        invData.records.forEach(r => { if (r.item_number) syncedItemNumbers.push(r.item_number); });
-        invOffset += invData.records.length;
+      const invUrl = `${site.url}/api/reporting/inventory?offset=${pageOffset}&limit=1000`;
+      try {
+        const invRes = await fetch(invUrl, { headers, signal: ctrlInv.signal });
+        clearTimeout(tInv);
+        if (!invRes.ok) throw new Error(`Inventory fetch failed at offset ${pageOffset}: HTTP ${invRes.status}`);
+        return await invRes.json();
+      } finally {
+        clearTimeout(tInv);
       }
-      invHasMore = invData.has_more === true;
+    };
+    const syncedItemNumbers = [];
+    let invOffset = 0;
+    // Same orphan-rejection guard pattern as the records loop above —
+    // see the comment around guardOrphan().
+    let nextInvPromise = guardOrphan(fetchInvPage(0));
+    while (true) {
+      const invData = await nextInvPromise;
+      const invRecords = invData?.records || [];
+      const consumed = invRecords.length;
+      const willHaveMore = invData?.has_more === true && consumed > 0;
+      nextInvPromise = willHaveMore ? guardOrphan(fetchInvPage(invOffset + consumed)) : null;
+      if (consumed > 0) {
+        insertInventory(invRecords);
+        for (const r of invRecords) { if (r.item_number) syncedItemNumbers.push(r.item_number); }
+        invOffset += consumed;
+      }
+      if (!nextInvPromise) break;
     }
     // Prune hub_inventory rows no longer in the site's query (upsert-then-prune)
     if (syncedItemNumbers.length > 0) {
@@ -518,36 +559,44 @@ async function runHubBackupPull() {
         // whole DB in memory. A 200 MB site DB used to spike RSS by 200 MB
         // and block the event loop during the sync writeFileSync.
         await pipeline(Readable.fromWeb(upstream.body), createWriteStream(file));
-        const integrity = await checkBackupIntegrity(site.id, file);
-        console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
 
-        // Also pull the site's .env config alongside the db so disaster
-        // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
-        // will return 403 — log and continue. Whether secrets are redacted
-        // depends on the site's BACKUP_CONFIG_EXPORT_MODE setting.
-        try {
-          const envCtrl = new AbortController();
-          const envTimeout = setTimeout(() => envCtrl.abort(), 30_000);
-          const envRes = await fetch(`${site.url}/api/backup/config`, {
-            headers: { 'x-reporting-token': site.token || '' },
-            signal: envCtrl.signal,
-          });
-          clearTimeout(envTimeout);
-          if (envRes.ok) {
-            const envText = await envRes.text();
-            const mode = envRes.headers.get('x-backup-config-mode') || 'unknown';
-            const envFile = path.join(dir, `config-${site.id}-${ts}.env`);
-            writeFileSync(envFile, envText, 'utf8');
-            console.log(`[HUB BACKUP] ${site.name}: saved .env config (${envText.length} bytes, mode=${mode})`);
-          } else if (envRes.status === 403) {
-            console.log(`[HUB BACKUP] ${site.name}: .env export disabled on site (BACKUP_CONFIG_EXPORT_MODE=disabled)`);
-          } else {
-            console.warn(`[HUB BACKUP] ${site.name}: .env fetch HTTP ${envRes.status}`);
+        // Two independent post-pipeline tasks: integrity check (local file
+        // I/O + SQLite) and .env config fetch (HTTP round-trip to the site).
+        // They share no state, so run them in parallel — saves the env
+        // round-trip per site, which on a Tailscale link is ~50–500ms.
+        const integrityP = checkBackupIntegrity(site.id, file);
+        const envP = (async () => {
+          // Also pull the site's .env config alongside the db so disaster
+          // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
+          // will return 403 — log and continue. Whether secrets are redacted
+          // depends on the site's BACKUP_CONFIG_EXPORT_MODE setting.
+          try {
+            const envCtrl = new AbortController();
+            const envTimeout = setTimeout(() => envCtrl.abort(), 30_000);
+            const envRes = await fetch(`${site.url}/api/backup/config`, {
+              headers: { 'x-reporting-token': site.token || '' },
+              signal: envCtrl.signal,
+            });
+            clearTimeout(envTimeout);
+            if (envRes.ok) {
+              const envText = await envRes.text();
+              const mode = envRes.headers.get('x-backup-config-mode') || 'unknown';
+              const envFile = path.join(dir, `config-${site.id}-${ts}.env`);
+              writeFileSync(envFile, envText, 'utf8');
+              console.log(`[HUB BACKUP] ${site.name}: saved .env config (${envText.length} bytes, mode=${mode})`);
+            } else if (envRes.status === 403) {
+              console.log(`[HUB BACKUP] ${site.name}: .env export disabled on site (BACKUP_CONFIG_EXPORT_MODE=disabled)`);
+            } else {
+              console.warn(`[HUB BACKUP] ${site.name}: .env fetch HTTP ${envRes.status}`);
+            }
+          } catch (envErr) {
+            // Don't let a config-pull failure mark the whole site backup as failed.
+            console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed — ${describeFetchError(envErr, `${site.url}/api/backup/config`)}`);
           }
-        } catch (envErr) {
-          // Don't let a config-pull failure mark the whole site backup as failed.
-          console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed — ${describeFetchError(envErr, `${site.url}/api/backup/config`)}`);
-        }
+        })();
+
+        const [integrity] = await Promise.all([integrityP, envP]);
+        console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
       } catch (err) {
         const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
         logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
@@ -562,10 +611,16 @@ async function runHubBackupPull() {
 
 // --- Site ping ---
 // Pings each site by hitting /api/health and records online/offline status.
+//
+// Pings are HTTP-only and have no shared mutable state across sites, so they
+// run in parallel via Promise.allSettled — wallclock drops from
+// Σ(latencies + 5s_for_each_offline_site) to max(latencies). DB writes happen
+// after each ping resolves; better-sqlite3 is synchronous so writes
+// interleave naturally without a transaction.
 export async function pingAllSites() {
   if (!HUB_SITES.length) return;
   const now = new Date().toISOString();
-  for (const site of HUB_SITES) {
+  await Promise.allSettled(HUB_SITES.map(async (site) => {
     let online = false;
     let latency_ms = null;
     const t0 = Date.now();
@@ -600,7 +655,7 @@ export async function pingAllSites() {
       console.error(`[HUB PING] DB error for ${site.slug}:`, e.message);
     }
     console.log(`[HUB PING] ${site.slug}: ${online ? 'online' : 'OFFLINE'} ${latency_ms != null ? latency_ms + 'ms' : '(timeout)'}`);
-  }
+  }));
 }
 
 export { initHubTables, initHubSiteRegistry, syncAllSites, syncSite, runHubBackupPull, HUB_SITES };
