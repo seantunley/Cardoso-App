@@ -410,7 +410,16 @@ function _hostMatchesAllowEntry(host, entry) {
 function isAllowedPdfUrl(pdfUrl, allowedHostsEnv) {
   let u;
   try { u = new URL(pdfUrl); } catch { return { ok: false, reason: 'malformed_url' }; }
-  if (u.protocol !== 'https:') return { ok: false, reason: `protocol_not_https (${u.protocol})` };
+  // Allow http: and https: only — reject ftp:, file:, gopher:, etc.
+  // The original 2026.5.2 cut required https: only, but the BAT supplier
+  // hosts PODs over plain HTTP. The HTTPS-only check rejected every
+  // legitimate row in production, so OCR was completely dead until
+  // operators applied a manual PowerShell patch on the install.
+  // The private-IP guard below remains the primary SSRF defence —
+  // protocol scheme alone doesn't tell us anything about the target.
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    return { ok: false, reason: `protocol_unsupported (${u.protocol})` };
+  }
   if (_isPrivateOrLoopbackHost(u.hostname)) return { ok: false, reason: `host_in_private_range (${u.hostname})` };
   const allowed = (allowedHostsEnv || '').split(',').map(s => s.trim()).filter(Boolean);
   if (allowed.length > 0) {
