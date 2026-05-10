@@ -82,35 +82,49 @@ export default function SystemLogPanel() {
   const rows = data?.rows || [];
   const sources = data?.sources || [];
 
-  // Group consecutive same-source rows whose normalised messages match.
-  // "Consecutive" is the right granularity: rows are returned ordered
-  // newest-first, so a different topic appearing between two PDF-timeout
-  // rows breaks the group naturally — important things never get hidden
-  // inside a group, they're always a fresh row of their own. The new
-  // topic floats to the top in red instead of being lost inside a
-  // "× 6 PDF timeout" badge.
+  // Group same-source rows whose normalised messages match — globally
+  // across the visible window, NOT only when consecutive. The previous
+  // consecutive-only algorithm fell over the moment two sites failed
+  // in alternating cycles ("Welkom timeout, Ermelo timeout, Welkom
+  // timeout, …") because no two same-shape rows were ever adjacent —
+  // the operator saw 30+ rows where they should have seen 2 groups.
+  //
+  // Global grouping does NOT hide brand-new errors: a fresh signature
+  // becomes its own group, and groups are sorted by the timestamp of
+  // their newest member, so anything new floats to the top exactly
+  // like a fresh row would. The "important things never get hidden"
+  // property the consecutive version aimed for is preserved without
+  // requiring adjacency — the only thing that ever joins an existing
+  // group is another row with the SAME normalised message + source.
   //
   // Each group's representative row is the most recent one (rows[0])
   // since the API returns DESC order; the earliest is rows[length-1],
-  // and the badge shows both timestamps when the group spans more than
-  // the same minute.
+  // and the badge shows both timestamps when the group spans more
+  // than the same minute. Within a group, rows stay newest-first.
   const groups = useMemo(() => {
     if (!dedupeOn) {
       // Pass-through: every row is its own "group" of size 1, so the
       // render path is uniform regardless of dedupe state.
       return rows.map((r) => ({ key: String(r.id), source: r.source, rows: [r] }));
     }
-    const out = [];
+    const byKey = new Map();
     for (const r of rows) {
       const groupKey = `${r.source}|${_normaliseForGrouping(r.message)}`;
-      const last = out[out.length - 1];
-      if (last && last.key === groupKey) {
-        last.rows.push(r);
+      const existing = byKey.get(groupKey);
+      if (existing) {
+        existing.rows.push(r);
       } else {
-        out.push({ key: groupKey, source: r.source, rows: [r] });
+        byKey.set(groupKey, { key: groupKey, source: r.source, rows: [r] });
       }
     }
-    return out;
+    // Sort by newest member of each group so the freshest activity
+    // stays at the top of the table. Rows within each group are
+    // already newest-first because we iterated `rows` in order.
+    return Array.from(byKey.values()).sort((a, b) => {
+      const aT = new Date(a.rows[0].occurred_at).getTime();
+      const bT = new Date(b.rows[0].occurred_at).getTime();
+      return bT - aT;
+    });
   }, [rows, dedupeOn]);
 
   // Render-time helper — short relative range like "16:35→16:48" or
