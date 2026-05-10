@@ -3167,23 +3167,35 @@ async function processQueue(reconId) {
           // retry helper so a single transient hiccup during
           // `new OcrLane()` doesn't permanently retire the lane.
           if (lane.worker.dead) {
-            // Per-URL skip on hard kill: if this URL caused the lane to
-            // be wedged (parent-side PDF_TIMEOUT fired and we had to
-            // terminate the worker), add it to wedgedUrls so the rest
-            // of the run skips other rows that point at the same PDF.
+            // Per-URL skip on hard kill — but ONLY when the wedge was in
+            // the render stage. A lane is also marked dead for many
+            // non-PDF causes:
+            //   - extract_total / engine:* timeouts (Google Vision slow,
+            //     ocr.space rate-limited, Tesseract crash)
+            //   - tesseract_init / canvas init failures
+            //   - generic worker crashes during the cascade
+            // In all those cases the URL is fine; blacklisting it would
+            // incorrectly drain other rows pointing at the same PDF
+            // during a transient API/network incident. The wedge we
+            // actually want to blacklist is pdfjs+node-canvas blocking
+            // the worker thread inside render — that's the case where
+            // the same URL will reliably wedge another lane if we hand
+            // it back. Gate on the row's last reported stage being
+            // 'render' (set by emitProgress just before page.render).
+            //
             // Done BEFORE tryLaneRecovery so even a recovery failure
             // still records the bad URL for the next run that picks
             // up where we left off.
-            if (next.pdf_url) {
+            if (next.pdf_url && stuckStage === 'render') {
               wedgedUrls.add(next.pdf_url);
               try {
                 logError(
                   'bat.ocr.url_blacklisted',
                   new Error(
-                    `PDF URL added to per-run skip list because the OCR worker wedged on it ` +
-                    `and required a hard kill (parent-side PDF_TIMEOUT fired after ${PDF_TIMEOUT}ms). ` +
-                    `Future rows in this run with the same URL will be failed fast without ` +
-                    `another render attempt. URL: ${next.pdf_url}. ` +
+                    `PDF URL added to per-run skip list because the OCR worker wedged in the render stage ` +
+                    `and required a hard kill (parent-side PDF_TIMEOUT fired after ${PDF_TIMEOUT}ms while the ` +
+                    `worker was still inside pdfjs/node-canvas). Future rows in this run with the same URL ` +
+                    `will be failed fast without another render attempt. URL: ${next.pdf_url}. ` +
                     `Operator action: this PDF has malformed content, an unusual viewport ` +
                     `(banner format, multi-page-merged), or hits a known pdfjs/node-canvas bug ` +
                     `that blocks the worker thread synchronously inside native code. Download the ` +
@@ -3192,6 +3204,29 @@ async function processQueue(reconId) {
                   ),
                   { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
                   'warn',
+                );
+              } catch {}
+            } else if (next.pdf_url) {
+              // Lane died in a non-render stage (or stage attribution
+              // was lost). Don't blacklist the URL — but log the lane
+              // death with stage attribution so the operator can see
+              // WHICH stage failed when triaging. Distinguishes "this
+              // PDF is poison" from "OCR provider X is having a moment"
+              // or "the worker crashed mid-engine-call".
+              try {
+                logError(
+                  'bat.ocr.lane_died_non_render',
+                  new Error(
+                    `OCR lane died after extract failure on row ${next.id}, but the failure was NOT in the render ` +
+                    `stage — last reported stage was '${stuckStage || 'unknown'}'. The PDF URL is NOT being blacklisted ` +
+                    `(non-render lane deaths are usually transient: OCR provider slowness, engine timeouts, network ` +
+                    `blips, Tesseract crashes). Other rows pointing at the same URL will retry normally. ` +
+                    `URL: ${next.pdf_url}. ` +
+                    `Operator action: if you see clusters of these on the same engine name, check that engine's ` +
+                    `health (Google Vision quota, ocr.space rate-limit window, etc.).`
+                  ),
+                  { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
+                  'info',
                 );
               } catch {}
             }
