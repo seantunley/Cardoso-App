@@ -23,7 +23,7 @@ import {
   Zap, Plus,
   RefreshCw, AlertCircle, CheckCircle2, Clock, LogIn, ClipboardList,
   Download, Upload, GitBranch, Send, Info, Workflow, AlertTriangle,
-  Lock, ShieldCheck, ShieldAlert, ExternalLink, Save,
+  Lock, ShieldCheck, ShieldAlert, ExternalLink, Save, Database,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -808,6 +808,56 @@ function MaintenanceTab() {
   const [backupPasswordError, setBackupPasswordError] = useState('');
   const [backupResult, setBackupResult] = useState(null);
 
+  // Compact-database state. Originally added in PR #246 but the
+  // merge of PR #248 (Backup-now) silently dropped these declarations
+  // while leaving the matching dialog JSX intact, breaking the entire
+  // Maintenance tab with ReferenceError on first render. Restored
+  // here. Codex catch — same merge-loss class as the v62 migration
+  // (PR #228), backup.js imports (PR #223), SiteCard accpac vars
+  // (PR #221), and auditlog CHECK (PR #235).
+  const [compactOpen, setCompactOpen] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const [compactPassword, setCompactPassword] = useState('');
+  const [compactPasswordError, setCompactPasswordError] = useState('');
+  const [compactResult, setCompactResult] = useState(null);
+
+  const handleCompactDatabase = async () => {
+    if (!compactPassword) {
+      setCompactPasswordError('Password is required');
+      return;
+    }
+    setCompactPasswordError('');
+    setCompacting(true);
+    try {
+      const r = await fetch('/api/maintenance/compact-database', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: compactPassword }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (r.status === 401) {
+          setCompactPasswordError(d.error || 'Incorrect password');
+          return;
+        }
+        throw new Error(d.error || 'Compact database failed');
+      }
+      setCompactResult(d);
+      setCompactOpen(false);
+      setCompactPassword('');
+      const integrity = d.integrity_ok ? '' : ' (⚠ post-VACUUM integrity check FAILED — see audit log)';
+      toast.success(
+        `Database compacted: ${d.size_before_mb} MB → ${d.size_after_mb} MB ` +
+        `(reclaimed ${d.reclaimed_mb} MB) in ${(d.elapsed_ms / 1000).toFixed(1)}s${integrity}`,
+      );
+    } catch (e) {
+      toast.error(e.message || 'Compact database failed');
+    } finally {
+      setCompacting(false);
+    }
+  };
+
   const handleBackupNow = async () => {
     if (!backupPassword) {
       setBackupPasswordError('Password is required');
@@ -959,6 +1009,49 @@ function MaintenanceTab() {
         >
           <Save className="h-3.5 w-3.5 mr-1.5" />
           {backingUp ? 'Backing up...' : 'Backup now'}
+        </Button>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Compact database</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Reclaims disk space freed by previously-deleted records by rewriting the database
+            file. <strong className="text-foreground">Non-destructive</strong> — every current row
+            is preserved. The app may briefly slow down during the operation (typically a
+            few seconds; up to a few minutes on a recently-bloated database).
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            A backup is taken first as a safety net, and integrity checks run before AND
+            after to catch any corruption. The backup file stays on disk so you can restore
+            it manually if anything else goes wrong.
+          </p>
+        </div>
+        {compactResult && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs space-y-1">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-medium">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Last run: {compactResult.size_before_mb} MB → {compactResult.size_after_mb} MB
+              <span className="text-emerald-600 dark:text-emerald-400">
+                (reclaimed {compactResult.reclaimed_mb} MB)
+              </span>
+            </div>
+            <div className="text-muted-foreground">
+              Took {(compactResult.elapsed_ms / 1000).toFixed(1)}s · Integrity check: {compactResult.integrity_ok ? '✓ OK' : '✗ FAILED'}
+            </div>
+            <div className="text-muted-foreground">
+              Backup saved as <code className="bg-muted px-1.5 py-0.5 rounded">{compactResult.backup_filename}</code>
+            </div>
+          </div>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setCompactOpen(true)}
+          disabled={loadingPreview || applying || clearingImported || compacting || backingUp}
+        >
+          <Database className="h-3.5 w-3.5 mr-1.5" />
+          {compacting ? 'Compacting...' : 'Compact database'}
         </Button>
       </div>
 
