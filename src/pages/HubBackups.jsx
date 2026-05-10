@@ -163,7 +163,11 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
             {site.error}
           </div>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
+          // Single-column layout post-tabs: only one of the two backup
+          // blocks renders per site card. Conditional below picks the
+          // App or SQL block based on the `view` prop.
+          <div className="grid gap-4">
+            {view === 'app' && (
             <div className={`rounded-xl border bg-background/80 p-4 ${meta.cls}`}>
               {/* ── App Backup header ── */}
               <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
@@ -231,7 +235,8 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 </Button>
               </div>
             </div>
-
+            )}
+            {view === 'sql' && (
             <div className={`rounded-xl border bg-background/80 p-4 ${sqlMeta.cls}`}>
               {/* ── SQL Backup header ── */}
               <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
@@ -291,6 +296,7 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 <p className="text-xs text-slate-500">{site.sql_backup?.message || "No DAT backup objects found."}</p>
               )}
             </div>
+            )}
           </div>
         )}
       </div>
