@@ -2580,13 +2580,24 @@ async function processQueue(reconId) {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
             console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
             if (engineError) recordReconciliationError(reconId, engineError);
-            // Cascade-exhausted streak — increments only when OCR genuinely
-            // walked the full engine list and got readable text but no
-            // regex match. Render failures, invalid PDFs, etc. don't count
-            // (those are different problems and don't indicate a regex
-            // issue). This is the signal that means "the regex doesn't
-            // recognise this site's invoice format" — easy to detect, easy
-            // to halt before burning the rest of the queue.
+            // Cascade-exhausted streak — increments ONLY when at least
+            // one engine returned readable text (≥20 chars) and the
+            // regex couldn't pull an invoice out. The worker emits
+            // source='cascade_exhausted' for that case specifically;
+            // when every engine errored / returned short_text / was
+            // rate-limited, the worker emits source='all_engines_failed'
+            // instead, which we don't count.
+            //
+            // Why the split matters: counting all-engines-failed rows
+            // would cause the breaker to halt OCR after a cascade of
+            // engine failures (rate-limit storm, GV quota burst,
+            // network blip) and then mislead the operator into
+            // investigating the regex when the actual cause was upstream
+            // engine availability. Healthy retries should NOT trip the
+            // halt; a real regex mismatch should.
+            //
+            // Render failures, invalid PDFs etc. also don't count
+            // (different sources entirely).
             if (traceSource === 'cascade_exhausted') {
               cascadeExhaustedStreak += 1;
               if (cascadeExhaustedStreak >= REGEX_STREAK_HALT_THRESHOLD) {

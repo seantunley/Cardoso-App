@@ -683,6 +683,14 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   );
 
   let tierError = null;
+  // Track whether ANY engine in this row's cascade returned readable
+  // text that simply didn't match the invoice regex. Drives the source
+  // value at the bottom — distinguishes "regex problem" from "engines
+  // are all down". A row where every engine errored / returned <20
+  // chars / was rate-limited yields source='all_engines_failed' so
+  // the parent's regex-streak circuit breaker doesn't count it (those
+  // are healthy retry candidates, not regex misses).
+  let sawReadableText = false;
   for (const engine of ocrEngines) {
     // Per-engine cooldown — when this engine returned a rate-limit
     // response (HTTP 429 / ocr.space E552) on a recent row, skip it for
@@ -743,6 +751,10 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           } catch {}
           continue;
         }
+        // Mark that this row got at least one engine's worth of readable
+        // text — so when the cascade exits without a match, we can tell
+        // the parent it was a regex miss (not an all-engines-down miss).
+        sawReadableText = true;
         const invoice = findInvoiceNumber(text, inDigitLength);
         if (invoice) {
           // OCR-cascade hit. Engine + angle let the operator audit
@@ -810,7 +822,27 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     }
   }
 
-  return { invoice: null, previewPath, source: 'cascade_exhausted', error: tierError };
+  // Two distinct exit states:
+  //
+  //   cascade_exhausted   — at least one engine returned readable text
+  //                         (≥20 chars) but findInvoiceNumber couldn't
+  //                         pull an invoice out. THIS is the regex-
+  //                         mismatch signal the parent's circuit
+  //                         breaker watches for.
+  //
+  //   all_engines_failed  — no engine got past the readable-text bar.
+  //                         Could be every engine throwing (network /
+  //                         API tier / rate limit), short_text from
+  //                         every engine, or all-cooldown skips.
+  //                         These rows are healthy retry candidates;
+  //                         the parent's regex-streak counter does
+  //                         NOT increment on them.
+  return {
+    invoice: null,
+    previewPath,
+    source: sawReadableText ? 'cascade_exhausted' : 'all_engines_failed',
+    error: tierError,
+  };
 }
 
 // ── Message dispatch ─────────────────────────────────────────────────────────
