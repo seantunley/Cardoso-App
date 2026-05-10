@@ -62,12 +62,18 @@ end-of-lifed or a more serious CVE lands.
 measurable with `npm run typecheck:legacy`; after the React 19 ref-as-prop
 codemod it sits at roughly 1800 errors.
 
-The initial checked surface is intentionally small and clean:
+The checked surface (grows with each ratchet PR):
 
+- `src/lib/app-params.js`
+- `src/lib/clientLog.js`
 - `src/lib/dates.js`
+- `src/lib/humanizeApiError.js`
 - `src/lib/isoWeek.js`
 - `src/lib/manualFlagMessages.js`
 - `src/lib/permissions.js`
+- `src/lib/query-client.js`
+- `src/lib/useColorScheme.js`
+- `src/lib/utils.js`
 - `src/utils/index.ts`
 
 Cleanup path:
@@ -75,6 +81,19 @@ Cleanup path:
 2. When a source file is cleaned, add it to `tsconfig.typecheck.json`.
 3. Periodically run `npm run typecheck:legacy -- --pretty false` to choose
    the next highest-value bucket.
+
+Next-bucket candidates (cheap, ~3-9 errors each):
+- `src/lib/errorDescribe.js` (9, mostly TS7006 implicit-any)
+- `src/lib/useColumnWidths.js` (9, TS7006)
+
+Pricier but still bounded:
+- `src/lib/errorLog.js` (43)
+- `src/lib/retention.js` (47)
+
+Heavy lift (skip until the cheap wins are gone):
+- `src/lib/alertRules.js` (373)
+- `src/components/settings/SettingsPanel.jsx` (235)
+- `src/pages/Reconciliation.jsx` (174)
 
 ---
 

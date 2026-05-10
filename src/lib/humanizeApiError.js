@@ -17,6 +17,10 @@
 // "create connection". The helper prefixes it with "Couldn't " — so don't
 // pass "Saving" or "Couldn't save", just "save".
 
+/**
+ * @param {{ message?: string } | null | undefined} err
+ * @param {string} [op]
+ */
 export function humanizeApiError(err, op) {
   const verb = op ? `Couldn't ${op}` : "Request failed";
 
