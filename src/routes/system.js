@@ -1155,6 +1155,124 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // POST /api/maintenance/backup-now — admin-only, password-confirmed.
+  // Creates a fresh backup snapshot in database/backups/ and (best-
+  // effort) notifies the hub so it pulls the new file immediately
+  // instead of waiting for the next 03:00 cron.
+  //
+  // Backup itself is purely additive (new file, never overwrites or
+  // deletes the live DB), but we keep the password confirm to match
+  // the rest of the maintenance UX and so the audit row reflects an
+  // explicit operator action.
+  //
+  // The hub-notify step is best-effort: a notify failure (HUB_URL
+  // unset, hub unreachable, hub returns 4xx/5xx) still reports the
+  // local backup as successful. The hub's daily cron will pick the
+  // file up at 03:00 regardless. Operator sees the notify-failure
+  // reason in the response so they know whether to chase it.
+  router.post('/api/maintenance/backup-now', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(400).json({
+          error: 'Backup-now is site-only. The hub does not maintain its own database backup via this endpoint.',
+        });
+      }
+
+      const { password } = req.body || {};
+      if (!password) {
+        return res.status(400).json({ error: 'Password is required.' });
+      }
+      const user = db.prepare('SELECT * FROM "user" WHERE id = ?').get(req.currentUser.id);
+      if (!user || !user.password_hash) {
+        return res.status(401).json({ error: 'Unable to verify user.' });
+      }
+      const valid = await bcrypt.compare(password, user.password_hash);
+      if (!valid) {
+        return res.status(401).json({ error: 'Incorrect password.' });
+      }
+
+      // Inline backup using the same shape as scheduler.runLocalBackup
+      // (which we don't import to avoid a circular routes↔scheduler
+      // dependency). Async backup() is safe with concurrent writes.
+      const dbPath = process.env.DB_PATH || './database/cardoso.db';
+      const resolvedDbPath = path.resolve(dbPath);
+      const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch {}
+      const siteId = process.env.SITE_ID || 'site';
+      const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
+      const t0 = Date.now();
+      await db.backup(destPath);
+      const elapsedMs = Date.now() - t0;
+      const sizeBytes = fs.statSync(destPath).size;
+
+      // Best-effort hub notify. HUB_URL must be configured and the
+      // site must have its own REPORTING_TOKEN to authenticate (the
+      // hub matches inbound tokens against HUB_SITES[].token).
+      let hubNotified = false;
+      let hubError = null;
+      const hubUrl = process.env.HUB_URL;
+      const reportingToken = process.env.REPORTING_TOKEN;
+      if (!hubUrl) {
+        hubError = 'HUB_URL not configured on this site — hub will pick up the backup on its next scheduled cron tick (default 03:00 daily).';
+      } else if (!reportingToken) {
+        hubError = 'REPORTING_TOKEN not configured on this site — cannot authenticate to the hub. Backup is on disk locally; hub will pick it up on its next scheduled cron tick.';
+      } else {
+        try {
+          const ctrl = new AbortController();
+          const timeout = setTimeout(() => ctrl.abort(), 6 * 60 * 1000); // 6 min — pull can take 5
+          const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/notify-backup-ready`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-reporting-token': reportingToken,
+            },
+            body: JSON.stringify({ filename: path.basename(destPath), size_bytes: sizeBytes }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(timeout);
+          if (r.ok) {
+            hubNotified = true;
+          } else {
+            const body = await r.json().catch(() => ({}));
+            hubError = `Hub responded ${r.status}: ${body.error || 'unknown'}. The local backup succeeded; hub will retry on its next cron tick.`;
+          }
+        } catch (notifyErr) {
+          hubError = `Hub notification failed: ${notifyErr.message}. The local backup succeeded; hub will pick it up on its next cron tick.`;
+        }
+      }
+
+      logAudit({
+        req,
+        action: 'backup_now',
+        resourceType: 'system',
+        resourceName: 'Manual database backup',
+        details:
+          `Backup created: ${path.basename(destPath)} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB) in ${(elapsedMs / 1000).toFixed(1)}s. ` +
+          `Hub notified: ${hubNotified}${hubError ? ` (${hubError})` : ''}.`,
+        changes: {
+          backup_filename: path.basename(destPath),
+          size_bytes: sizeBytes,
+          elapsed_ms: elapsedMs,
+          hub_notified: hubNotified,
+        },
+      });
+
+      res.json({
+        ok: true,
+        backup_filename: path.basename(destPath),
+        size_mb: Math.round((sizeBytes / 1024 / 1024) * 10) / 10,
+        elapsed_ms: elapsedMs,
+        hub_notified: hubNotified,
+        hub_error: hubError,
+      });
+    } catch (error) {
+      console.error('[maintenance] backup-now failed:', error.message);
+      try { logError('maintenance.backup_now', error); } catch {}
+      res.status(500).json({ error: error.message || 'Failed to create backup' });
+    }
+  });
+
   router.post('/api/maintenance/clear-imported-data', requireAuth, requireAdmin, async (req, res) => {
     try {
       if (process.env.HUB_MODE === 'true') {

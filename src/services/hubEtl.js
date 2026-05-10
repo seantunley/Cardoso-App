@@ -581,6 +581,118 @@ async function syncAllSites() {
   });
 }
 
+// Pull backup for ONE site. Extracted so both the daily cron
+// (runHubBackupPull) and the on-demand site→hub notification path
+// (POST /api/hub/notify-backup-ready, fired by the Backup-Now button
+// on the site) can share the same download + integrity-check + env-
+// config + retention-prune logic. Errors are caught + logged inside;
+// caller doesn't need to handle.
+//
+// Returns { ok, file, integrity, error? } so callers that want to
+// surface the result (the on-demand path returns this back to the
+// site, which surfaces it in the operator's toast) can do so.
+async function pullBackupForSite(site) {
+  try {
+    const controller = new AbortController();
+    // 5 min cap — DB snapshots can run several MB over Tailscale; the
+    // previous 60 s ceiling routinely killed legitimate transfers.
+    const hardTimeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+    const upstream = await fetch(`${site.url}/api/backup/download`, {
+      headers: { 'x-reporting-token': site.token || '' },
+      signal: controller.signal,
+    });
+    clearTimeout(hardTimeout);
+    if (!upstream.ok) {
+      const msg = `HTTP ${upstream.status}`;
+      logError('hub.backupPull', new Error(msg), { site_name: site.name, site_id: site.id });
+      try {
+        db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
+          .run(site.id, '(download failed)', `pull_failed: ${msg}`);
+      } catch {}
+      return { ok: false, error: msg };
+    }
+    const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+    mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
+    // Stream the response body straight to disk instead of buffering the
+    // whole DB in memory. A 200 MB site DB used to spike RSS by 200 MB
+    // and block the event loop during the sync writeFileSync.
+    await pipeline(Readable.fromWeb(upstream.body), createWriteStream(file));
+
+    // Two independent post-pipeline tasks: integrity check (local file
+    // I/O + SQLite) and .env config fetch (HTTP round-trip to the site).
+    // They share no state, so run them in parallel — saves the env
+    // round-trip per site, which on a Tailscale link is ~50–500ms.
+    const integrityP = checkBackupIntegrity(site.id, file);
+    const envP = (async () => {
+      // Also pull the site's .env config alongside the db so disaster
+      // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
+      // will return 403 — log and continue. Whether secrets are redacted
+      // depends on the site's BACKUP_CONFIG_EXPORT_MODE setting.
+      try {
+        const envCtrl = new AbortController();
+        const envTimeout = setTimeout(() => envCtrl.abort(), 30_000);
+        const envRes = await fetch(`${site.url}/api/backup/config`, {
+          headers: { 'x-reporting-token': site.token || '' },
+          signal: envCtrl.signal,
+        });
+        clearTimeout(envTimeout);
+        if (envRes.ok) {
+          const envText = await envRes.text();
+          const mode = envRes.headers.get('x-backup-config-mode') || 'unknown';
+          const envFile = path.join(dir, `config-${site.id}-${ts}.env`);
+          writeFileSync(envFile, envText, 'utf8');
+          console.log(`[HUB BACKUP] ${site.name}: saved .env config (${envText.length} bytes, mode=${mode})`);
+        } else if (envRes.status === 403) {
+          console.log(`[HUB BACKUP] ${site.name}: .env export disabled on site (BACKUP_CONFIG_EXPORT_MODE=disabled)`);
+        } else {
+          console.warn(`[HUB BACKUP] ${site.name}: .env fetch HTTP ${envRes.status}`);
+        }
+      } catch (envErr) {
+        // Don't let a config-pull failure mark the whole site backup as failed.
+        console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed — ${describeFetchError(envErr, `${site.url}/api/backup/config`)}`);
+      }
+    })();
+
+    const [integrity] = await Promise.all([integrityP, envP]);
+    console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
+
+    // Prune older per-site backups so the hub doesn't accumulate
+    // forever. Mirrors the site-side prune in scheduler.runLocalBackup.
+    // Default 30 (HUB_BACKUP_KEEP_COUNT) — higher than site default
+    // because the hub IS the long-tail archive.
+    try {
+      const { readdirSync, statSync, unlinkSync } = await import('fs');
+      const allFiles = readdirSync(dir)
+        .filter((f) => f.endsWith('.db'))
+        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      const parsedKeep = parseInt(process.env.HUB_BACKUP_KEEP_COUNT, 10);
+      const hubKeep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 30;
+      const toDelete = allFiles.slice(hubKeep);
+      for (const f of toDelete) {
+        try { unlinkSync(path.join(dir, f.name)); } catch {}
+      }
+      if (toDelete.length > 0) {
+        console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old backup(s), keeping ${hubKeep}`);
+      }
+    } catch (pruneErr) {
+      console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
+    }
+
+    return { ok: true, file: integrity.finalPath, integrity: integrity.integrity };
+  } catch (err) {
+    const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
+    logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
+    try {
+      db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
+        .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
+    } catch {}
+    return { ok: false, error: friendly };
+  }
+}
+
 async function runHubBackupPull() {
   if (process.env.HUB_MODE !== 'true') return;
   const enabled = hubRepository.getBackupSyncEnabled();
@@ -594,81 +706,7 @@ async function runHubBackupPull() {
   const CONCURRENCY = 2;
   for (let i = 0; i < sites.length; i += CONCURRENCY) {
     const batch = sites.slice(i, i + CONCURRENCY);
-    await Promise.allSettled(batch.map(async (site) => {
-      try {
-        const controller = new AbortController();
-        // 5 min cap — DB snapshots can run several MB over Tailscale; the
-        // previous 60 s ceiling routinely killed legitimate transfers.
-        const hardTimeout = setTimeout(() => controller.abort(), 5 * 60 * 1000);
-        const upstream = await fetch(`${site.url}/api/backup/download`, {
-          headers: { 'x-reporting-token': site.token || '' },
-          signal: controller.signal,
-        });
-        clearTimeout(hardTimeout);
-        if (!upstream.ok) {
-          const msg = `HTTP ${upstream.status}`;
-          logError('hub.backupPull', new Error(msg), { site_name: site.name, site_id: site.id });
-          try {
-            db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
-              .run(site.id, '(download failed)', `pull_failed: ${msg}`);
-          } catch {}
-          return;
-        }
-        const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
-        mkdirSync(dir, { recursive: true });
-        const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-        const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
-        // Stream the response body straight to disk instead of buffering the
-        // whole DB in memory. A 200 MB site DB used to spike RSS by 200 MB
-        // and block the event loop during the sync writeFileSync.
-        await pipeline(Readable.fromWeb(upstream.body), createWriteStream(file));
-
-        // Two independent post-pipeline tasks: integrity check (local file
-        // I/O + SQLite) and .env config fetch (HTTP round-trip to the site).
-        // They share no state, so run them in parallel — saves the env
-        // round-trip per site, which on a Tailscale link is ~50–500ms.
-        const integrityP = checkBackupIntegrity(site.id, file);
-        const envP = (async () => {
-          // Also pull the site's .env config alongside the db so disaster
-          // recovery has both. Sites that have BACKUP_CONFIG_EXPORT_MODE=disabled
-          // will return 403 — log and continue. Whether secrets are redacted
-          // depends on the site's BACKUP_CONFIG_EXPORT_MODE setting.
-          try {
-            const envCtrl = new AbortController();
-            const envTimeout = setTimeout(() => envCtrl.abort(), 30_000);
-            const envRes = await fetch(`${site.url}/api/backup/config`, {
-              headers: { 'x-reporting-token': site.token || '' },
-              signal: envCtrl.signal,
-            });
-            clearTimeout(envTimeout);
-            if (envRes.ok) {
-              const envText = await envRes.text();
-              const mode = envRes.headers.get('x-backup-config-mode') || 'unknown';
-              const envFile = path.join(dir, `config-${site.id}-${ts}.env`);
-              writeFileSync(envFile, envText, 'utf8');
-              console.log(`[HUB BACKUP] ${site.name}: saved .env config (${envText.length} bytes, mode=${mode})`);
-            } else if (envRes.status === 403) {
-              console.log(`[HUB BACKUP] ${site.name}: .env export disabled on site (BACKUP_CONFIG_EXPORT_MODE=disabled)`);
-            } else {
-              console.warn(`[HUB BACKUP] ${site.name}: .env fetch HTTP ${envRes.status}`);
-            }
-          } catch (envErr) {
-            // Don't let a config-pull failure mark the whole site backup as failed.
-            console.warn(`[HUB BACKUP] ${site.name}: .env fetch failed — ${describeFetchError(envErr, `${site.url}/api/backup/config`)}`);
-          }
-        })();
-
-        const [integrity] = await Promise.all([integrityP, envP]);
-        console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
-      } catch (err) {
-        const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
-        logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
-        try {
-          db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
-            .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
-        } catch {}
-      }
-    }));
+    await Promise.allSettled(batch.map((site) => pullBackupForSite(site)));
   }
 }
 
@@ -721,4 +759,4 @@ export async function pingAllSites() {
   }));
 }
 
-export { initHubTables, initHubSiteRegistry, syncAllSites, syncSite, runHubBackupPull, HUB_SITES };
+export { initHubTables, initHubSiteRegistry, syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES };
