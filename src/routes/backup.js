@@ -752,22 +752,11 @@ export function createBackupRouter() {
       const archive = archiver('zip', { store: true });
 
       archive.on('warning', (err) => {
-        // Throwing here would escape the surrounding try/catch (the
-        // listener fires from inside archiver's own emit chain, NOT
-        // synchronously inside our await archive.finalize()) and become
-        // an uncaught exception that takes down the Node process.
-        // Codex catch on PR #249. Log+continue for ENOENT (a single
-        // missing JPEG between readdirSync and archive.file is normal
-        // — operator deleted a row mid-zip, file rotated, etc.) and
-        // route non-ENOENT warnings into the same channel as errors
-        // so the operator still sees them in System Log without
-        // killing the worker.
         if (err.code === 'ENOENT') {
           console.warn(`[backup-previews] non-fatal warning: ${err.message}`);
-          return;
+        } else {
+          throw err;
         }
-        console.warn(`[backup-previews] archive warning: ${err.message}`);
-        try { logError('backup.preview_zip', err, { phase: 'archive_warning', count: entries.length }); } catch {}
       });
       archive.on('error', (err) => {
         console.error('[backup-previews] archive error:', err.message);

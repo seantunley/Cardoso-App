@@ -5,10 +5,10 @@ import { useState, useCallback, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload, ShieldCheck,
+  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload, ShieldCheck, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
@@ -90,12 +90,7 @@ function Stat({ label, value, sub }) {
   );
 }
 
-// view: 'app' | 'sql' — controls which backup-type block renders inside
-// the per-site card. The header (site name + status badges) stays the
-// same in both views so the operator's eye-train of "which sites need
-// attention" carries across tab switches. Default 'app' for callers
-// that don't pass a view (back-compat with any external embedding).
-function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, view = 'app' }) {
+function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, onRestore }) {
   const meta = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon = meta.icon;
   const lb = site.last_backup;
@@ -227,6 +222,17 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                     ? <><RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />Downloading…</>
                     : <><Download className="mr-1.5 h-3 w-3" />Pull .env</>}
                 </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!site.url}
+                  onClick={() => onRestore(site)}
+                  className="h-7 border-rose-500/40 px-3 text-xs text-rose-400 hover:text-rose-300 hover:border-rose-500/60"
+                  title="Push a snapshot from the hub back to this site"
+                >
+                  <Upload className="mr-1.5 h-3 w-3" />
+                  Restore…
+                </Button>
               </div>
             </div>
             )}
@@ -333,6 +339,83 @@ export default function HubBackups() {
   const [syncEnabled, setSyncEnabled] = useState(true);
   const [togglingSync, setTogglingSync] = useState(false);
   const [pullingNow, setPullingNow] = useState(false);
+
+  // Restore modal state. Open when operator clicks "Restore…" on a
+  // site card. Loads snapshots-list for that site, lets operator pick
+  // one + password, posts to /api/hub/sites/:id/restore.
+  const [restoreSite, setRestoreSite] = useState(null);
+  const [restoreSnapshots, setRestoreSnapshots] = useState(null);
+  const [restoreLoadingList, setRestoreLoadingList] = useState(false);
+  const [restoreSelected, setRestoreSelected] = useState(null);
+  const [restoreIncludePreviews, setRestoreIncludePreviews] = useState(true);
+  const [restorePassword, setRestorePassword] = useState('');
+  const [restorePasswordError, setRestorePasswordError] = useState('');
+  const [restoring, setRestoring] = useState(false);
+
+  const openRestoreModal = useCallback((site) => {
+    setRestoreSite(site);
+    setRestoreSelected(null);
+    setRestoreSnapshots(null);
+    setRestorePassword('');
+    setRestorePasswordError('');
+    setRestoreIncludePreviews(true);
+    setRestoreLoadingList(true);
+    fetch(`/api/hub/sites/${encodeURIComponent(site.site_id)}/snapshots`, { credentials: 'include' })
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const d = await r.json();
+        setRestoreSnapshots(d.snapshots || []);
+      })
+      .catch((err) => {
+        toast({ title: 'Failed to load snapshots', description: err.message, variant: 'destructive' });
+        setRestoreSnapshots([]);
+      })
+      .finally(() => setRestoreLoadingList(false));
+  }, [toast]);
+
+  const closeRestoreModal = useCallback(() => {
+    if (restoring) return; // can't cancel mid-restore
+    setRestoreSite(null);
+    setRestoreSelected(null);
+    setRestoreSnapshots(null);
+    setRestorePassword('');
+    setRestorePasswordError('');
+  }, [restoring]);
+
+  const handleRestoreSubmit = useCallback(async () => {
+    if (!restoreSite || !restoreSelected) return;
+    if (!restorePassword) { setRestorePasswordError('Password is required'); return; }
+    setRestorePasswordError('');
+    setRestoring(true);
+    try {
+      const r = await fetch(`/api/hub/sites/${encodeURIComponent(restoreSite.site_id)}/restore`, {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          snapshot_filename: restoreSelected.filename,
+          include_previews: restoreIncludePreviews && !!restoreSelected.previews_filename,
+          password: restorePassword,
+        }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        if (r.status === 401) { setRestorePasswordError(d.error || 'Incorrect password'); return; }
+        throw new Error(d.error || `HTTP ${r.status}`);
+      }
+      toast({
+        title: 'Restore initiated',
+        description: `${restoreSite.site_name || restoreSite.site_id}: site is stopping, swapping files, and restarting. Watch the tile.`,
+      });
+      setRestoreSite(null);
+      setRestoreSelected(null);
+      setRestorePassword('');
+    } catch (err) {
+      toast({ title: 'Restore failed', description: err.message, variant: 'destructive' });
+    } finally {
+      setRestoring(false);
+    }
+  }, [restoreSite, restoreSelected, restoreIncludePreviews, restorePassword, toast]);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["hub-backup-status"],
@@ -513,50 +596,20 @@ export default function HubBackups() {
             ) : (
               <>
                 <SummaryBar sites={sites} />
-                {/* Tabs split the per-site cards by backup type. The
-                    same five status tiles above cover both — the tabs
-                    only filter the detail blocks underneath. Operator
-                    sees App Backup info OR SQL Backup info per site,
-                    not both stacked side-by-side, which is what the
-                    pre-tabs layout did. */}
-                <Tabs defaultValue="app" className="w-full">
-                  <TabsList className="grid w-full max-w-md grid-cols-2 mb-4">
-                    <TabsTrigger value="app">App Backup</TabsTrigger>
-                    <TabsTrigger value="sql">SQL Backup</TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="app" className="mt-0">
-                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                      {sites.map((site) => (
-                        <SiteCard
-                          key={site.site_id}
-                          site={site}
-                          hubData={hubBackupMap[site.site_id]}
-                          onDownload={handleDownload}
-                          downloading={downloading}
-                          onDownloadConfig={handleDownloadConfig}
-                          downloadingConfig={downloadingConfig}
-                          view="app"
-                        />
-                      ))}
-                    </div>
-                  </TabsContent>
-                  <TabsContent value="sql" className="mt-0">
-                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                      {sites.map((site) => (
-                        <SiteCard
-                          key={site.site_id}
-                          site={site}
-                          hubData={hubBackupMap[site.site_id]}
-                          onDownload={handleDownload}
-                          downloading={downloading}
-                          onDownloadConfig={handleDownloadConfig}
-                          downloadingConfig={downloadingConfig}
-                          view="sql"
-                        />
-                      ))}
-                    </div>
-                  </TabsContent>
-                </Tabs>
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  {sites.map((site) => (
+                    <SiteCard
+                      key={site.site_id}
+                      site={site}
+                      hubData={hubBackupMap[site.site_id]}
+                      onDownload={handleDownload}
+                      downloading={downloading}
+                      onDownloadConfig={handleDownloadConfig}
+                      downloadingConfig={downloadingConfig}
+                      onRestore={openRestoreModal}
+                    />
+                  ))}
+                </div>
                 <p className="text-xs text-slate-600 mt-6 text-center">
                   Auto-refreshes every 60s · File backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h · SQL attention = failed, unavailable, or no successful full DAT backup within 24h
                 </p>
@@ -565,6 +618,117 @@ export default function HubBackups() {
           </>
         )}
       </div>
+
+      {/* Restore modal — opens when operator clicks Restore on a site card.
+          Lists snapshots the hub has for that site, lets operator pick one,
+          confirm with password, then pushes to the site. */}
+      <Dialog open={!!restoreSite} onOpenChange={(open) => { if (!open) closeRestoreModal(); }}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Restore {restoreSite?.site_name || restoreSite?.site_id}?
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <div className="rounded-lg border border-rose-500/40 bg-rose-500/5 p-3 text-rose-200 text-xs space-y-1">
+              <div className="font-medium">⚠ This replaces the live database on the site.</div>
+              <ul className="list-disc pl-5 space-y-0.5">
+                <li>Site service stops, file swaps, integrity check, restarts</li>
+                <li>Current cardoso.db saved as <code className="bg-black/30 px-1 py-0.5 rounded text-[10px]">cardoso.db.before-restore-&lt;ts&gt;</code> — manual rollback possible</li>
+                <li>If integrity check fails, restore auto-rolls back</li>
+                <li>Site is offline for ~30s during the swap</li>
+              </ul>
+            </div>
+
+            <div>
+              <div className="text-xs font-medium text-foreground mb-2">Pick a snapshot to restore from:</div>
+              {restoreLoadingList ? (
+                <div className="text-xs text-muted-foreground">Loading snapshots from the hub…</div>
+              ) : !restoreSnapshots || restoreSnapshots.length === 0 ? (
+                <div className="text-xs text-muted-foreground rounded border border-dashed border-border p-3">
+                  No snapshots available for this site on the hub yet.
+                </div>
+              ) : (
+                <div className="max-h-64 overflow-y-auto rounded border border-border">
+                  {restoreSnapshots.map((snap) => {
+                    const isSel = restoreSelected?.filename === snap.filename;
+                    const sizeMb = snap.size_bytes != null ? (snap.size_bytes / 1024 / 1024).toFixed(1) : '?';
+                    const previewSize = snap.previews_size_bytes != null ? `+ previews ${(snap.previews_size_bytes / 1024 / 1024).toFixed(1)} MB` : 'no previews';
+                    const integrityCls = snap.integrity === 'ok' ? 'text-emerald-400' : snap.integrity ? 'text-rose-400' : 'text-muted-foreground';
+                    return (
+                      <button
+                        key={snap.filename}
+                        type="button"
+                        onClick={() => setRestoreSelected(snap)}
+                        className={`w-full text-left px-3 py-2 border-b border-border last:border-0 hover:bg-muted/30 ${isSel ? 'bg-accent/10 border-l-2 border-l-accent' : ''}`}
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="font-mono text-[11px] text-foreground truncate">{snap.filename}</span>
+                          <span className={`text-[10px] font-mono ${integrityCls}`}>{snap.integrity || 'unchecked'}</span>
+                        </div>
+                        <div className="text-[10px] text-muted-foreground">
+                          {snap.mtime ? new Date(snap.mtime).toLocaleString() : 'unknown date'} · {sizeMb} MB · {previewSize}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {restoreSelected?.previews_filename && (
+              <label className="flex items-start gap-2 text-xs text-muted-foreground cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={restoreIncludePreviews}
+                  onChange={(e) => setRestoreIncludePreviews(e.target.checked)}
+                  className="mt-0.5 h-3.5 w-3.5 rounded border-border accent-foreground cursor-pointer"
+                  disabled={restoring}
+                />
+                <span>
+                  Also restore BAT preview JPEGs from this snapshot
+                  ({(restoreSelected.previews_size_bytes / 1024 / 1024).toFixed(1)} MB).
+                  Without this, the site keeps its current uploads/bat-previews/.
+                </span>
+              </label>
+            )}
+
+            {restoreSelected && !restoreSelected.previews_filename && (
+              <div className="text-[11px] text-amber-400/80">
+                ⓘ This snapshot doesn't have a matching previews zip on the hub. Only the database will be restored.
+              </div>
+            )}
+
+            <div className="space-y-1.5 pt-2 border-t border-border">
+              <label htmlFor="restore-password" className="text-xs font-medium text-foreground">Confirm your password</label>
+              <input
+                id="restore-password"
+                type="password"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Enter your password"
+                value={restorePassword}
+                onChange={(e) => { setRestorePassword(e.target.value); setRestorePasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && restorePassword && restoreSelected) handleRestoreSubmit(); }}
+                disabled={restoring}
+                autoComplete="current-password"
+              />
+              {restorePasswordError && <p className="text-xs text-rose-400">{restorePasswordError}</p>}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={closeRestoreModal} disabled={restoring}>Cancel</Button>
+              <Button
+                variant="destructive"
+                onClick={handleRestoreSubmit}
+                disabled={restoring || !restoreSelected || !restorePassword}
+              >
+                <Upload className="mr-1.5 h-3.5 w-3.5" />
+                {restoring ? 'Pushing restore…' : 'Yes, restore this site'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
