@@ -15,7 +15,7 @@
 //   - What did recent reconciliations finish with?
 //   - What's in the System Log specifically about OCR?
 
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
@@ -124,12 +124,11 @@ export default function OcrPanel() {
     refetchInterval: 30_000,
   });
 
-  // Filtered System Log — we use the existing /api/error-log endpoint and
-  // either narrow to a specific bat.ocr.* topic via ?source=, or pull
-  // everything and client-side filter to bat.ocr.* / bat-ocr.* prefixes.
-  // The all-OCR view is the common case so we keep client-side filter on
-  // a higher limit; the per-topic view uses the server-side filter for
-  // efficiency.
+  // Filtered System Log — uses the existing /api/error-log endpoint with
+  // the prefixes= filter so the row limit applies to OCR-only topics
+  // (otherwise a noisy non-OCR source could fill the 300-row cap before
+  // enough bat.ocr.* entries reach us). Per-topic view (logSource set)
+  // still uses ?source= for an exact match.
   const ocrLog = useQuery({
     queryKey: ['ocr-log', logSource, logWindow],
     queryFn: async () => {
@@ -137,6 +136,7 @@ export default function OcrPanel() {
       params.set('limit', '300');
       params.set('sinceHours', String(logWindow));
       if (logSource) params.set('source', logSource);
+      else params.set('prefixes', 'bat.ocr.,bat-ocr.');
       const r = await fetch(`/api/error-log?${params}`, { credentials: 'include' });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Failed to load log');
@@ -145,17 +145,9 @@ export default function OcrPanel() {
     refetchInterval: 15_000,
   });
 
-  const visibleLogRows = useMemo(() => {
-    const rows = ocrLog.data?.rows || [];
-    if (logSource) return rows;
-    return rows.filter(r => r.source && (r.source.startsWith('bat.ocr.') || r.source.startsWith('bat-ocr.')));
-  }, [ocrLog.data, logSource]);
-
-  // Topic dropdown options derived from the all-source list, narrowed to OCR
-  const ocrTopicOptions = useMemo(() => {
-    const sources = ocrLog.data?.sources || [];
-    return sources.filter(s => s.source && (s.source.startsWith('bat.ocr.') || s.source.startsWith('bat-ocr.')));
-  }, [ocrLog.data]);
+  // Server already filtered — no client-side prefix narrowing needed.
+  const visibleLogRows = ocrLog.data?.rows || [];
+  const ocrTopicOptions = ocrLog.data?.sources || [];
 
   const pauseMutation = useMutation({
     mutationFn: async (paused) => {
