@@ -1778,9 +1778,42 @@ function buildMigrations(db) {
       },
     },
     {
-      // Note: this version assumes PR #198 (v62 hub_sites_accpac_freshness)
-      // lands first. If this PR merges first, bump this number above
-      // whatever PR #198 ends up using.
+      // Restored after the v62 entry was lost in a merge between PR #198,
+      // PR #200, and PR #214 — production hubs upgrading to 2026.5.2 hit
+      // "no such column: last_accpac_synced_at" on every hub.sync tick
+      // because hubEtl.js / routes/hub.js / HubDashboard.jsx all reference
+      // these three columns that the v62 migration was supposed to add.
+      // Idempotent (ensureColumn) so re-running on installs that already
+      // got the column some other way is a no-op.
+      version: 62,
+      name: 'hub_sites_accpac_freshness',
+      up() {
+        // The hub's customer-management page used to show `last_seen` as
+        // the freshness metric, but that's "when did the hub last reach
+        // the site", not "when did the site last sync from Accpac". The
+        // dashboard tile now surfaces the latter — the operator-relevant
+        // signal for "is the data on this tile stale?".
+        //
+        // Three columns:
+        //   - last_accpac_synced_at: most recent SUCCESSFUL Accpac sync
+        //     (max of databaseconnection.last_sync across active
+        //     non-BAT-only connections).
+        //   - last_accpac_status: 'ok' | 'error' | 'never_synced'.
+        //   - last_accpac_error: short user-facing reason via
+        //     describeSqlError when status='error'.
+        //
+        // hub-only — gated on hub_sites table existing, so non-hub
+        // installs are a no-op (the column is meaningless without the
+        // table).
+        const hubSitesExists = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='hub_sites'`).get();
+        if (hubSitesExists) {
+          ensureColumn(db, 'hub_sites', 'last_accpac_synced_at', 'TEXT');
+          ensureColumn(db, 'hub_sites', 'last_accpac_status',     'TEXT');
+          ensureColumn(db, 'hub_sites', 'last_accpac_error',      'TEXT');
+        }
+      },
+    },
+    {
       version: 63,
       name: 'hub_sites_orphan_tombstone',
       up() {
