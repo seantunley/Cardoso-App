@@ -1,8 +1,13 @@
+/** @param {unknown} flaggedBy */
 export function formatFlagActor(flaggedBy) {
   const value = String(flaggedBy || '').trim();
   return value || null;
 }
 
+/**
+ * @param {unknown} flagColor
+ * @param {unknown} flaggedBy
+ */
 export function buildManualFlagSummary(flagColor, flaggedBy) {
   const actor = formatFlagActor(flaggedBy);
   const color = flagColor === 'red' ? 'red' : 'orange';
@@ -14,6 +19,10 @@ export function buildManualFlagSummary(flagColor, flaggedBy) {
   return `This customer has been manually flagged ${color}${actorText}. ${followUp}`;
 }
 
+/**
+ * @param {unknown} flagColor
+ * @param {unknown} flaggedBy
+ */
 export function buildManualFlagFactor(flagColor, flaggedBy) {
   const actor = formatFlagActor(flaggedBy);
   const color = flagColor === 'red' ? 'red' : 'orange';

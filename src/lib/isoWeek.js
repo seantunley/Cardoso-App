@@ -19,6 +19,11 @@
 // {year, week} pair always satisfies 1 <= week <= 53 and is the ISO
 // year/week the date actually belongs to (NOT the calendar year).
 
+/**
+ * @typedef {Date | string | number} IsoDateInput
+ * @typedef {{ year: number, month: number, day: number }} Ymd
+ */
+
 // Coerce the various accepted shapes into a {year, month, day} calendar
 // triple. Different input shapes get different treatment so the calendar
 // date never shifts across host timezones (Codex catch on PR #232:
@@ -38,6 +43,10 @@
 //     LOCAL components — for our UI, "what calendar day did this
 //     happen on" is the operator-local day, which is what local
 //     components give us.
+/**
+ * @param {IsoDateInput} input
+ * @returns {Ymd}
+ */
 function _coerceToYmd(input) {
   if (typeof input === 'string') {
     // Bare YYYY-MM-DD (with optional T/time after) — parse directly so
@@ -83,6 +92,10 @@ function _coerceToYmd(input) {
 // and yielded W52/2025 instead of W1/2026. Local components capture
 // the operator's intended calendar day; once we have that triple, the
 // week-shift math runs in UTC so DST and tz arithmetic don't bite.
+/**
+ * @param {IsoDateInput} input
+ * @returns {{ year: number, week: number }}
+ */
 export function isoWeek(input) {
   const { year, month, day } = _coerceToYmd(input);
   const d = new Date(Date.UTC(year, month, day));
@@ -94,7 +107,7 @@ export function isoWeek(input) {
   // Week number: days from Jan 1 of ISO year to this Thursday, divided
   // by 7, plus 1 (week 1 contains Jan 4).
   const yearStart = new Date(Date.UTC(isoYear, 0, 1));
-  const weekNumber = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+  const weekNumber = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return { year: isoYear, week: weekNumber };
 }
 
@@ -103,11 +116,13 @@ export function isoWeek(input) {
 // week_number or fed into a (week, year)-keyed query — calendar year
 // and ISO year disagree on Dec 29-31 of years where Jan 1 falls on
 // Mon-Wed (e.g. Dec 31 2025 has ISO year 2026).
+/** @param {IsoDateInput} input */
 export function isoYear(input) {
   return isoWeek(input).year;
 }
 
 // Convenience: just the ISO week number of a date.
+/** @param {IsoDateInput} input */
 export function isoWeekNumber(input) {
   return isoWeek(input).week;
 }
@@ -123,6 +138,7 @@ export function currentIsoWeek() {
 // falls on Wed). Used by report generators that need to enumerate
 // weeks of a year — without this, naively assuming 52 misses the W53
 // in years like 2026 and creates a silent gap.
+/** @param {number} year */
 export function weeksInIsoYear(year) {
   // ISO trick: Dec 28 is always in the last week of its ISO year.
   // (Equivalently: Dec 28's ISO week count IS the year's max week.)
@@ -137,6 +153,11 @@ export function weeksInIsoYear(year) {
 //
 // Algorithm: Jan 4 is always in ISO week 1. Find the Monday of week 1,
 // then add (week-1)*7 + (weekday-1) days.
+/**
+ * @param {number} year
+ * @param {number} week
+ * @param {number} [weekday]
+ */
 export function dateFromIso(year, week, weekday = 1) {
   if (!Number.isFinite(year) || !Number.isFinite(week) || week < 1 || week > 53) {
     throw new Error(`dateFromIso: invalid (year=${year}, week=${week})`);

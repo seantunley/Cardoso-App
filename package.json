@@ -13,7 +13,8 @@
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p ./jsconfig.json",
+    "typecheck": "tsc -p ./tsconfig.typecheck.json",
+    "typecheck:legacy": "tsc -p ./jsconfig.json",
     "preview": "vite preview",
     "hub:postgres:bootstrap": "node scripts/hub-postgres-bootstrap.mjs",
     "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs"
