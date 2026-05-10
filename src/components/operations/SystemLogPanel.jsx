@@ -22,18 +22,21 @@ export default function SystemLogPanel() {
       const params = new URLSearchParams();
       params.set("limit", "500");
       params.set("sinceHours", String(sinceHours));
-      if (sourceFilter) {
-        // Operator picked a specific topic — show it even if it's an
-        // OCR topic that the default-view filter would hide. The server
-        // honours `source=` over `exclude_prefixes=` so this just works.
-        params.set("source", sourceFilter);
-      } else {
-        // OCR has its own dedicated Operations tab. Hide bat.ocr.* and
-        // bat-ocr.* from the System Log default view so the same entry
-        // doesn't appear on two screens. Server-side filter so the
-        // 500-row cap applies to non-OCR topics.
-        params.set("exclude_prefixes", "bat.ocr.,bat-ocr.");
-      }
+      // ALWAYS send exclude_prefixes — even when a specific source is
+      // selected. The server applies it to two queries:
+      //   1. The rows query: `source=` overrides exclude_prefixes here
+      //      (so picking a source still works as expected — Operator
+      //      can still drill into anything via direct URL).
+      //   2. The sources aggregate (powering the dropdown): the
+      //      exclude_prefixes filter is applied unconditionally so OCR
+      //      topics never re-appear in the dropdown after the operator
+      //      picks a non-OCR source.
+      // Previous version only sent exclude_prefixes when sourceFilter was
+      // empty, which let the next refetch's sources list re-introduce
+      // bat.ocr.* topics whenever the operator drilled into a specific
+      // source — Codex catch on PR #229.
+      params.set("exclude_prefixes", "bat.ocr.,bat-ocr.");
+      if (sourceFilter) params.set("source", sourceFilter);
       const r = await fetch(`/api/error-log?${params}`, { credentials: "include" });
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || "Failed to load");
