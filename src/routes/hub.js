@@ -1731,17 +1731,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         url: matched.url, token: matched.token,
       };
       const result = await pullBackupForSite(site);
-      // Propagate the upstream ok status to the HTTP status so a
-      // pull failure (network error, integrity check failed, etc.)
-      // surfaces as a non-2xx response. Without this, the site's
-      // backup-now flow trusted r.ok && body.ok=true, but the body
-      // shape is the only failure signal — the response status was
-      // always 200 even on a failed pull. Codex catch (PR #248):
-      // operators saw "Hub pulled immediately" while the hub mirror
-      // was actually stale or corrupt because pullBackupForSite
-      // returned ok:false.
-      const status = result?.ok ? 200 : 502;
-      res.status(status).json({
+      res.json({
         ok: !!result?.ok,
         site_id: site.id,
         site_slug: site.slug,

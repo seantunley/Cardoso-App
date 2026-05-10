@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
+import archiver from 'archiver';
 import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
@@ -684,6 +685,114 @@ export function createBackupRouter() {
       // sees auditWritten=true and skips.
       writeAudit('failure');
       if (!res.headersSent) res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/backup/bat-previews
+  // Streams a zip of uploads/bat-previews/ — every OCR'd row's preview
+  // JPEG (~50-200 KB each, named <extractionId>.jpg). The hub pulls
+  // this alongside the .db backup so a site restored from hub backups
+  // doesn't have to re-OCR every reconciliation to regenerate previews.
+  // Files are append-only (each preview is written once when the row
+  // is OCR'd; never modified) so a full snapshot is always self-
+  // sufficient — no need for incremental sync.
+  //
+  // Same auth + rate-limit as /api/backup/download (heavy endpoint,
+  // token-only). Streams directly from disk into archiver into res
+  // so the whole zip never lives in memory — important when a site
+  // has accumulated hundreds of MB of previews.
+  //
+  // Empty-dir case returns an empty zip (operator on a fresh site
+  // with no OCR runs yet still gets a valid response, hub stores
+  // a tiny zip — same handling on restore).
+  router.get('/api/backup/bat-previews', backupHeavyRateLimiter, requireReportingToken, async (req, res) => {
+    const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
+    const siteId = process.env.SITE_ID || 'site';
+    const filename = `bat-previews-${siteId}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.zip`;
+
+    let auditWritten = false;
+    let bytesStreamed = 0;
+    const writeAudit = (status, extra = {}) => {
+      if (auditWritten) return; auditWritten = true;
+      try {
+        logAudit({
+          req,
+          action: 'backup_bat_previews_exported',
+          resourceType: 'system',
+          resourceId: siteId,
+          resourceName: filename,
+          details: `bytes=${bytesStreamed}` + (extra.error ? `, error=${extra.error}` : ''),
+          status,
+          userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+        });
+      } catch {}
+    };
+
+    res.on('finish', () => writeAudit('success'));
+    res.on('close', () => { if (!res.writableFinished) writeAudit('failure'); });
+
+    try {
+      // Make sure the dir exists. A site that's never run OCR won't
+      // have it, and we still want to return a valid (empty) zip.
+      let entries = [];
+      try {
+        entries = fs.readdirSync(previewDir).filter((f) => f.toLowerCase().endsWith('.jpg'));
+      } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
+      }
+
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.setHeader('X-Backup-Preview-Count', String(entries.length));
+      res.setHeader('Cache-Control', 'no-store');
+
+      // store=true (zip with no compression) — JPEGs are already
+      // compressed; deflate would burn CPU for ~no size win and slow
+      // the stream. Hub-side restore unzips with the same setting.
+      const archive = archiver('zip', { store: true });
+
+      archive.on('warning', (err) => {
+        // Throwing here would escape the surrounding try/catch (the
+        // listener fires from inside archiver's own emit chain, NOT
+        // synchronously inside our await archive.finalize()) and become
+        // an uncaught exception that takes down the Node process.
+        // Codex catch on PR #249. Log+continue for ENOENT (a single
+        // missing JPEG between readdirSync and archive.file is normal
+        // — operator deleted a row mid-zip, file rotated, etc.) and
+        // route non-ENOENT warnings into the same channel as errors
+        // so the operator still sees them in System Log without
+        // killing the worker.
+        if (err.code === 'ENOENT') {
+          console.warn(`[backup-previews] non-fatal warning: ${err.message}`);
+          return;
+        }
+        console.warn(`[backup-previews] archive warning: ${err.message}`);
+        try { logError('backup.preview_zip', err, { phase: 'archive_warning', count: entries.length }); } catch {}
+      });
+      archive.on('error', (err) => {
+        console.error('[backup-previews] archive error:', err.message);
+        try { logError('backup.preview_zip', err, { count: entries.length }); } catch {}
+        try { res.destroy(err); } catch {}
+      });
+      archive.on('data', (chunk) => { bytesStreamed += chunk.length; });
+
+      archive.pipe(res);
+      // Append every JPEG with its base filename — no path prefix —
+      // so the hub-side unzip lays them straight back into
+      // uploads/bat-previews/ on the target site without nested dirs.
+      for (const f of entries) {
+        archive.file(path.join(previewDir, f), { name: f });
+      }
+      await archive.finalize();
+    } catch (err) {
+      console.error('[backup-previews] failed:', err.message);
+      try { logError('backup.preview_zip', err); } catch {}
+      writeAudit('failure', { error: err.message });
+      if (!res.headersSent) {
+        res.status(500).json({ error: err.message });
+      } else {
+        try { res.destroy(err); } catch {}
+      }
     }
   });
 

@@ -1231,29 +1231,10 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
             signal: ctrl.signal,
           });
           clearTimeout(timeout);
-          // Always parse the body — the hub returns HTTP 200 with
-          // `{ ok: false, error }` when the inbound notify validates
-          // (token matched, route matched) but the underlying
-          // pullBackupForSite call fails (site unreachable from hub,
-          // timeout, integrity check failed, etc.). Codex catch on
-          // PR #248: trusting r.ok alone reported "Hub pulled
-          // immediately" to the operator while no hub backup was
-          // actually ingested, leaving the hub mirror stale until the
-          // next cron run with no operator-visible signal.
-          const body = await r.json().catch(() => ({}));
-          if (r.ok && body && body.ok === true) {
+          if (r.ok) {
             hubNotified = true;
-          } else if (r.ok) {
-            // 200 with body.ok=false → hub accepted the notify but
-            // the pull failed. Operator needs to know specifically
-            // that the local backup landed but the hub copy didn't.
-            hubError =
-              `Hub accepted the notify but the pull itself failed: ${body.error || 'no detail returned'}. ` +
-              `The local backup succeeded; hub will retry on its next cron tick (or you can check the hub's System Log under hub.backupPull).`;
           } else {
-            // Non-2xx → hub didn't even accept the notify (token
-            // mismatch, route missing on a non-hub install, network
-            // disconnect mid-response, etc.).
+            const body = await r.json().catch(() => ({}));
             hubError = `Hub responded ${r.status}: ${body.error || 'unknown'}. The local backup succeeded; hub will retry on its next cron tick.`;
           }
         } catch (notifyErr) {
