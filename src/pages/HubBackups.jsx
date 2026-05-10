@@ -8,6 +8,7 @@ import {
   AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload, ShieldCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
@@ -89,7 +90,12 @@ function Stat({ label, value, sub }) {
   );
 }
 
-function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig }) {
+// view: 'app' | 'sql' — controls which backup-type block renders inside
+// the per-site card. The header (site name + status badges) stays the
+// same in both views so the operator's eye-train of "which sites need
+// attention" carries across tab switches. Default 'app' for callers
+// that don't pass a view (back-compat with any external embedding).
+function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, view = 'app' }) {
   const meta = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon = meta.icon;
   const lb = site.last_backup;
@@ -162,7 +168,11 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
             {site.error}
           </div>
         ) : (
-          <div className="grid gap-4 xl:grid-cols-2">
+          // Single-column layout post-tabs: only one of the two backup
+          // blocks renders per site card. Conditional below picks the
+          // App or SQL block based on the `view` prop.
+          <div className="grid gap-4">
+            {view === 'app' && (
             <div className={`rounded-xl border bg-background/80 p-4 ${meta.cls}`}>
               {/* ── App Backup header ── */}
               <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
@@ -219,7 +229,8 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 </Button>
               </div>
             </div>
-
+            )}
+            {view === 'sql' && (
             <div className={`rounded-xl border bg-background/80 p-4 ${sqlMeta.cls}`}>
               {/* ── SQL Backup header ── */}
               <div className="mb-4 flex items-center justify-between gap-3 pb-3 border-b border-border/40">
@@ -279,6 +290,7 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 <p className="text-xs text-slate-500">{site.sql_backup?.message || "No DAT backup objects found."}</p>
               )}
             </div>
+            )}
           </div>
         )}
       </div>
@@ -501,19 +513,50 @@ export default function HubBackups() {
             ) : (
               <>
                 <SummaryBar sites={sites} />
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                  {sites.map((site) => (
-                    <SiteCard
-                      key={site.site_id}
-                      site={site}
-                      hubData={hubBackupMap[site.site_id]}
-                      onDownload={handleDownload}
-                      downloading={downloading}
-                      onDownloadConfig={handleDownloadConfig}
-                      downloadingConfig={downloadingConfig}
-                    />
-                  ))}
-                </div>
+                {/* Tabs split the per-site cards by backup type. The
+                    same five status tiles above cover both — the tabs
+                    only filter the detail blocks underneath. Operator
+                    sees App Backup info OR SQL Backup info per site,
+                    not both stacked side-by-side, which is what the
+                    pre-tabs layout did. */}
+                <Tabs defaultValue="app" className="w-full">
+                  <TabsList className="grid w-full max-w-md grid-cols-2 mb-4">
+                    <TabsTrigger value="app">App Backup</TabsTrigger>
+                    <TabsTrigger value="sql">SQL Backup</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="app" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          view="app"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="sql" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          view="sql"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                </Tabs>
                 <p className="text-xs text-slate-600 mt-6 text-center">
                   Auto-refreshes every 60s · File backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h · SQL attention = failed, unavailable, or no successful full DAT backup within 24h
                 </p>
