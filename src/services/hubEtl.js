@@ -658,30 +658,96 @@ async function pullBackupForSite(site) {
     const [integrity] = await Promise.all([integrityP, envP]);
     console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
 
+    // BAT preview JPEGs — stored on the site at uploads/bat-previews/
+    // (one <extractionId>.jpg per OCR'd row). Without these, restoring
+    // a site from a hub backup would lose every preview the operator
+    // can use to manually enter an invoice number when OCR didn't
+    // match. The site exposes them as a streaming zip via
+    // /api/backup/bat-previews; we save it alongside the .db. Sized
+    // generously (5 min timeout) because previews dirs run 100-500 MB.
+    //
+    // Best-effort: a sites that's never run OCR returns an empty zip
+    // (200 with X-Backup-Preview-Count: 0). A failure here doesn't
+    // fail the whole backup; we still have the .db + .env. Operator
+    // restoring will see the empty/missing zip and know they have no
+    // previews to restore — better than the .db pull silently failing
+    // because of a previews issue.
+    let previewsResult = { ok: false, count: 0 };
+    try {
+      const prevCtrl = new AbortController();
+      const prevTimeout = setTimeout(() => prevCtrl.abort(), 5 * 60 * 1000);
+      const prevRes = await fetch(`${site.url}/api/backup/bat-previews`, {
+        headers: { 'x-reporting-token': site.token || '' },
+        signal: prevCtrl.signal,
+      });
+      clearTimeout(prevTimeout);
+      if (prevRes.ok) {
+        const previewCount = parseInt(prevRes.headers.get('x-backup-preview-count') || '0', 10);
+        const previewFile = path.join(dir, `bat-previews-${site.id}-${ts}.zip`);
+        await pipeline(Readable.fromWeb(prevRes.body), createWriteStream(previewFile));
+        const { statSync } = await import('fs');
+        const previewSize = statSync(previewFile).size;
+        console.log(`[HUB BACKUP] ${site.name}: BAT previews saved (${previewCount} files, ${(previewSize / 1024 / 1024).toFixed(1)} MB)`);
+        previewsResult = { ok: true, count: previewCount, size: previewSize, file: previewFile };
+      } else {
+        console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch HTTP ${prevRes.status} — skipping (existing previews on hub remain)`);
+      }
+    } catch (prevErr) {
+      console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
+    }
+
     // Prune older per-site backups so the hub doesn't accumulate
     // forever. Mirrors the site-side prune in scheduler.runLocalBackup.
     // Default 30 (HUB_BACKUP_KEEP_COUNT) — higher than site default
     // because the hub IS the long-tail archive.
+    //
+    // BAT preview zips are pruned separately at a SHALLOWER depth
+    // (HUB_BAT_PREVIEWS_KEEP, default 3) because previews are
+    // append-only on the site (each preview is written once when its
+    // row is OCR'd) so the LATEST zip already covers all historical
+    // extractions — keeping 30 zips would burn ~5 GB of hub disk
+    // (typical zip is 100-200 MB) for no recovery benefit. Operator
+    // can dial up via the env var if they want belt-and-braces.
     try {
       const { readdirSync, statSync, unlinkSync } = await import('fs');
-      const allFiles = readdirSync(dir)
+
+      const dbFiles = readdirSync(dir)
         .filter((f) => f.endsWith('.db'))
         .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
         .sort((a, b) => b.mtime - a.mtime);
-      const parsedKeep = parseInt(process.env.HUB_BACKUP_KEEP_COUNT, 10);
-      const hubKeep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 30;
-      const toDelete = allFiles.slice(hubKeep);
-      for (const f of toDelete) {
+      const parsedDbKeep = parseInt(process.env.HUB_BACKUP_KEEP_COUNT, 10);
+      const dbKeep = Number.isFinite(parsedDbKeep) && parsedDbKeep >= 1 ? parsedDbKeep : 30;
+      const dbToDelete = dbFiles.slice(dbKeep);
+      for (const f of dbToDelete) {
         try { unlinkSync(path.join(dir, f.name)); } catch {}
       }
-      if (toDelete.length > 0) {
-        console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old backup(s), keeping ${hubKeep}`);
+      if (dbToDelete.length > 0) {
+        console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
+      }
+
+      const previewZips = readdirSync(dir)
+        .filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'))
+        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+        .sort((a, b) => b.mtime - a.mtime);
+      const parsedPrevKeep = parseInt(process.env.HUB_BAT_PREVIEWS_KEEP, 10);
+      const prevKeep = Number.isFinite(parsedPrevKeep) && parsedPrevKeep >= 1 ? parsedPrevKeep : 3;
+      const prevToDelete = previewZips.slice(prevKeep);
+      for (const f of prevToDelete) {
+        try { unlinkSync(path.join(dir, f.name)); } catch {}
+      }
+      if (prevToDelete.length > 0) {
+        console.log(`[HUB BACKUP] ${site.name}: pruned ${prevToDelete.length} old preview zip(s), keeping ${prevKeep}`);
       }
     } catch (pruneErr) {
       console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
     }
 
-    return { ok: true, file: integrity.finalPath, integrity: integrity.integrity };
+    return {
+      ok: true,
+      file: integrity.finalPath,
+      integrity: integrity.integrity,
+      previews: previewsResult,
+    };
   } catch (err) {
     const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
     logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
