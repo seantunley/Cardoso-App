@@ -383,20 +383,26 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     // because our topic names are dot-/dash-separated identifiers — no
     // % or _ in any topic — but we strip those defensively anyway so a
     // future topic naming choice can't accidentally widen the filter.
-    let prefixes = null;
-    if (typeof req.query.prefixes === 'string' && req.query.prefixes.trim()) {
-      prefixes = req.query.prefixes
+    // ?exclude_prefixes=bat.ocr.,bat-ocr. — symmetric inverse of prefixes.
+    // Used by the System Log panel to hide topics that already have a
+    // dedicated tab (today: OCR), so the operator doesn't see the same
+    // entry on two screens. Same parsing/safety bounds as prefixes.
+    const parsePrefixList = (raw) => {
+      if (typeof raw !== 'string' || !raw.trim()) return null;
+      const list = raw
         .split(',')
         .map(p => p.trim().slice(0, 60))
         .filter(Boolean)
         .map(p => p.replace(/[%_]/g, ''))
         .slice(0, 5);
-      if (prefixes.length === 0) prefixes = null;
-    }
+      return list.length === 0 ? null : list;
+    };
+    const prefixes = parsePrefixList(req.query.prefixes);
+    const excludePrefixes = parsePrefixList(req.query.exclude_prefixes);
     try {
       const where = ["occurred_at >= datetime('now', ?)"];
       const args = [`-${sinceHours} hours`];
-      // Build the prefix clause once and reuse for both the rows query
+      // Build the prefix clauses once and reuse for both the rows query
       // (whose limit Codex was worried about) and the sources aggregate
       // (so the dropdown counts match what's actually visible).
       let prefixClause = '';
@@ -405,14 +411,28 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         prefixClause = `(${prefixes.map(() => 'source LIKE ?').join(' OR ')})`;
         for (const p of prefixes) prefixArgs.push(`${p}%`);
       }
+      let excludeClause = '';
+      const excludeArgs = [];
+      if (excludePrefixes) {
+        excludeClause = `(${excludePrefixes.map(() => 'source NOT LIKE ?').join(' AND ')})`;
+        for (const p of excludePrefixes) excludeArgs.push(`${p}%`);
+      }
       if (source) {
-        // Explicit single-source filter wins over prefix — used when
-        // the operator picks a specific topic from the dropdown.
+        // Explicit single-source filter wins over both prefix lists —
+        // used when the operator picks a specific topic from the
+        // dropdown. We honour their choice even if it would have been
+        // hidden by exclude_prefixes.
         where.push('source = ?');
         args.push(source);
-      } else if (prefixClause) {
-        where.push(prefixClause);
-        args.push(...prefixArgs);
+      } else {
+        if (prefixClause) {
+          where.push(prefixClause);
+          args.push(...prefixArgs);
+        }
+        if (excludeClause) {
+          where.push(excludeClause);
+          args.push(...excludeArgs);
+        }
       }
       const rows = db.prepare(`
         SELECT id, source, level, message, stack, context, occurred_at
@@ -426,6 +446,10 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       if (prefixClause) {
         sourceWhere.push(prefixClause);
         sourceArgs.push(...prefixArgs);
+      }
+      if (excludeClause) {
+        sourceWhere.push(excludeClause);
+        sourceArgs.push(...excludeArgs);
       }
       const sources = db.prepare(`
         SELECT source, COUNT(*) AS n
