@@ -298,6 +298,22 @@ function findInvoiceNumber(text, inDigitLength = 9) {
   const longMatch = cleaned.match(/\b(18\d{8,10})\b/);
   if (longMatch) return 'IN' + longMatch[1].substring(2);
 
+  // INQ-prefixed (Cardoso outbound invoice format on some sites).
+  // Must come BEFORE the IN-prefixed match below — INQ would otherwise
+  // partially match IN and return without the Q. Real-world example
+  // from a SASOL DELIGHT MARSHALL POD: GoogleVision read "INQ0214536"
+  // perfectly but findInvoiceNumber dropped it because no INQ pattern
+  // existed and IN\d{8,10} didn't match (Q breaks the digit run).
+  // Result: every row from this customer walked the entire engine
+  // cascade looking for a match it'd never find, hitting extract_total
+  // timeouts and retiring lanes after enough cycles.
+  // No padding — INQ uses a 7-digit canonical that may differ from the
+  // IN-prefix sites' inDigitLength.
+  const inqMatch = cleaned.match(/\bINQ\s*(\d{6,10})\b/i);
+  if (inqMatch) {
+    return `INQ${inqMatch[1]}`;
+  }
+
   // IN-prefixed long. Range widened from {8,9} to {8,10} for the
   // post-rollover 10-digit form. Padding to the per-site canonical length
   // (`inDigitLength`, default 9): a one-short read is treated as a
@@ -410,7 +426,16 @@ function _hostMatchesAllowEntry(host, entry) {
 function isAllowedPdfUrl(pdfUrl, allowedHostsEnv) {
   let u;
   try { u = new URL(pdfUrl); } catch { return { ok: false, reason: 'malformed_url' }; }
-  if (u.protocol !== 'https:') return { ok: false, reason: `protocol_not_https (${u.protocol})` };
+  // Allow http: and https: only — reject ftp:, file:, gopher:, etc.
+  // The original 2026.5.2 cut required https: only, but the BAT supplier
+  // hosts PODs over plain HTTP. The HTTPS-only check rejected every
+  // legitimate row in production, so OCR was completely dead until
+  // operators applied a manual PowerShell patch on the install.
+  // The private-IP guard below remains the primary SSRF defence —
+  // protocol scheme alone doesn't tell us anything about the target.
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    return { ok: false, reason: `protocol_unsupported (${u.protocol})` };
+  }
   if (_isPrivateOrLoopbackHost(u.hostname)) return { ok: false, reason: `host_in_private_range (${u.hostname})` };
   const allowed = (allowedHostsEnv || '').split(',').map(s => s.trim()).filter(Boolean);
   if (allowed.length > 0) {
@@ -462,9 +487,17 @@ async function fetchBoundedBuffer(response, maxBytes) {
 
 // ── Main extraction entry point ──────────────────────────────────────────────
 
+// Default cap raised from 25 to 100 MB. The original 25 MB ceiling
+// was set by #207 against the typical POD-scan size (~2 MB) but real
+// BAT PODs can exceed 25 MB on high-resolution multi-page scans —
+// extraction id=280 was 39.6 MB and got rejected. 100 MB is well
+// above any legitimate POD while still protecting against the
+// original attack shapes (hostile CDN streaming forever, 50 MB
+// HTML error pages, etc.). Operators can tighten via env if they
+// know their PODs run smaller.
 const _MAX_PDF_BYTES = (() => {
-  const n = parseInt(process.env.OCR_MAX_PDF_MB || '25', 10);
-  if (!Number.isFinite(n) || n < 1) return 25 * 1024 * 1024;
+  const n = parseInt(process.env.OCR_MAX_PDF_MB || '100', 10);
+  if (!Number.isFinite(n) || n < 1) return 100 * 1024 * 1024;
   return n * 1024 * 1024;
 })();
 
