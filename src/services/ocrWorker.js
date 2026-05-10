@@ -201,19 +201,58 @@ async function getCanvas() {
 // Long-term plan: migrate to a Node-native PDF engine (pdfium-binary or
 // poppler) that doesn't depend on browser APIs. See docs/plans/pdf-engine-migration.md
 // for scope. Until that lands, this pin is load-bearing.
-async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
+// Cap the rendered raster width so a single PDF page can't consume
+// hundreds of MB of native memory. Buffer size is width × height × 4
+// bytes (RGBA); at 6000×8000 that's 192MB *uncompressed*, and
+// node-canvas keeps the full bitmap allocated until toBuffer returns.
+// On the production hub we observed RSS 2.8GB after 5 rows on a queue
+// of large-format POD PDFs, with the lane-recycle watchdog losing the
+// race to the next render.
+//
+// Env override for sites with a different OCR-quality / memory tradeoff.
+// 2400px is comfortably inside Google Vision's recommended input range
+// (1024–2400) and gives Tesseract enough resolution for invoice-number
+// text, while bounding raw RGBA at ~2400 × 3400 × 4 = 32 MB per page.
+const MAX_RENDER_WIDTH = Math.max(800, parseInt(process.env.OCR_MAX_RENDER_WIDTH || '2400', 10));
+
+async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
   const pdfjsLib = await getPdfjs();
   const { createCanvas } = await getCanvas();
 
   const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
-  const canvas = createCanvas(viewport.width, viewport.height);
-  const context = canvas.getContext('2d');
-  await page.render({ canvasContext: context, viewport }).promise;
-  await pdfDoc.destroy();
-
-  return canvas.toBuffer('image/png');
+  let canvas = null;
+  try {
+    const page = await pdfDoc.getPage(pageNum);
+    // Compute the actual scale we'll use. Start from requestedScale but
+    // step down if the resulting width would exceed MAX_RENDER_WIDTH.
+    // For a "normal" A4 POD (viewport.width ≈ 595 at scale 1.0) this
+    // leaves the requested scale alone; for an A3 / non-standard large
+    // page the scale gets capped down so the buffer stays bounded.
+    const baseViewport = page.getViewport({ scale: 1.0 });
+    const widthCappedScale = MAX_RENDER_WIDTH / baseViewport.width;
+    const scale = Math.min(requestedScale, widthCappedScale);
+    const viewport = page.getViewport({ scale });
+    canvas = createCanvas(viewport.width, viewport.height);
+    const context = canvas.getContext('2d');
+    await page.render({ canvasContext: context, viewport }).promise;
+    // JPEG, not PNG. PNG keeps the raster in memory longer through its
+    // encoder (DEFLATE pipeline) and produces much larger payloads —
+    // the engines (GV / ocr.space) don't benefit from PNG's
+    // losslessness on document scans, and the smaller JPEG is faster
+    // to base64-encode and POST. Quality 85 is the standard
+    // "perceptually lossless for documents" level.
+    const out = canvas.toBuffer('image/jpeg', { quality: 0.85 });
+    return out;
+  } finally {
+    // Explicit teardown to nudge node-canvas's native allocator. Without
+    // this, the canvas object stays referenced until V8 GC decides to
+    // collect it, which can be many seconds after the function returns
+    // — and during a tight render loop those seconds compound across
+    // rows. Zeroing the dimensions tells node-canvas to release the
+    // backing pixel buffer immediately.
+    try { if (canvas) { canvas.width = 0; canvas.height = 0; } } catch { /* canvas may be null on early throw */ }
+    try { await pdfDoc.destroy(); } catch { /* destroy can throw on already-destroyed; ignore */ }
+  }
 }
 
 // ── OCR engines ──────────────────────────────────────────────────────────────
