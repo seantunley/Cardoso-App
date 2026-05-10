@@ -1502,10 +1502,13 @@ export function getOcrSnapshot() {
         year: haltRow.year,
         message: haltRow.last_error,
         occurred_at: haltRow.last_error_at,
-        // Operator can clear iff OCR is currently paused (otherwise the
-        // halt isn't actually in force — they may have already cleared it
-        // and just haven't refreshed the page).
-        can_clear: ocrPaused,
+        // Always clearable — even if ocrPaused is somehow false (stale
+        // marker, manual API call, race), the right action is still to
+        // clear the marker so the panel doesn't keep showing a halt that
+        // isn't in force. The clearOcrHalt path is idempotent: it wipes
+        // the marker, sets paused=false, and resumes — safe to invoke
+        // regardless of current state.
+        can_clear: true,
       };
     }
   } catch { /* not fatal — surface no halt rather than crash */ }

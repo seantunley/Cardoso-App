@@ -230,19 +230,28 @@ export default function OcrPanel() {
               <RefreshCw className={`w-3.5 h-3.5 mr-1.5 ${snapshot.isRefetching ? 'animate-spin' : ''}`} />
               Refresh
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => pauseMutation.mutate(!snap?.paused)}
-              disabled={pauseMutation.isPending || isLoadingSnap}
-              className="border-border"
-            >
-              {snap?.paused ? (
-                <><Play className="w-3.5 h-3.5 mr-1.5" /> Resume</>
-              ) : (
-                <><Pause className="w-3.5 h-3.5 mr-1.5" /> Pause</>
-              )}
-            </Button>
+            {/* When an auto-halt is in force, the regular Pause/Resume
+                button is hidden — resuming via /api/bat/ocr-pause flips
+                the pause flag but doesn't clear last_error, leaving the
+                halt banner stuck and the audited Clear-halt action
+                bypassed. The "Clear halt + resume" button in the halt
+                banner becomes the only resume path, which is what we
+                want: every halt-recovery shows up in the audit log. */}
+            {!snap?.halt && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => pauseMutation.mutate(!snap?.paused)}
+                disabled={pauseMutation.isPending || isLoadingSnap}
+                className="border-border"
+              >
+                {snap?.paused ? (
+                  <><Play className="w-3.5 h-3.5 mr-1.5" /> Resume</>
+                ) : (
+                  <><Pause className="w-3.5 h-3.5 mr-1.5" /> Pause</>
+                )}
+              </Button>
+            )}
           </div>
         </div>
 
