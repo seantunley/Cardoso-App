@@ -150,24 +150,18 @@ jobs:
         # Hash a normalized view of `packages` instead, with the root entry's
         # version stripped — that way the hash only changes when dependencies
         # actually change.
+        #
+        # Implemented in Node, NOT PowerShell. Windows PowerShell 5.1 (the
+        # runner's default `powershell.exe`) cannot parse package-lock.json
+        # via ConvertFrom-Json — the root `packages[""]` empty-string key
+        # is rejected as an invalid PSCustomObject property name and the
+        # whole pipeline fails with "Cannot process argument because the
+        # value of argument 'name' is not valid". PS 7's -AsHashtable
+        # would work but isn't the default shell here. Node is already
+        # installed for the rest of the pipeline and JSON.parse handles
+        # empty keys fine.
         run: |
-          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json
-          $normalized = [ordered]@{}
-          foreach ($prop in ($lock.packages.PSObject.Properties | Sort-Object Name)) {
-            $value = $prop.Value
-            if ($prop.Name -eq '') {
-              # Root entry mirrors package.json — drop fields that change with a
-              # version bump but have no effect on installed node_modules.
-              $value = $value | Select-Object * -ExcludeProperty version
-            }
-            $normalized[$prop.Name] = $value
-          }
-          $json  = $normalized | ConvertTo-Json -Depth 100 -Compress
-          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
-          $sha   = [System.Security.Cryptography.SHA256]::Create()
-          $hash  = ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLower()
-          echo "lock_hash=$hash" >> $env:GITHUB_OUTPUT
-          Write-Host "lock_hash=$hash"
+          node scripts/compute-lock-hash.cjs
         shell: powershell
 
       - name: Build delta app zip
