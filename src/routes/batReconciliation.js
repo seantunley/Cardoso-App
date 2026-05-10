@@ -48,6 +48,10 @@ import {
   resumeExtractionWorker,
   extractionEvents,
   getSageHealth,
+  getOcrSnapshot,
+  getOcrCounters,
+  getRecentBatReconciliations,
+  clearOcrHalt,
 } from '../services/batReconciliation.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
@@ -603,6 +607,58 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       });
     }
     res.json({ paused: isOcrPaused(), resumed });
+  });
+
+  // ── Operations OCR tab — admin-only fleet-wide OCR introspection ─────────
+  // Snapshot, counters, recent-runs, clear-halt. Distinct from the BAT page
+  // routes (which are scoped per-reconciliation). Polled by OcrPanel.jsx
+  // every ~2s — keep them cheap (single-table SELECTs, no joins to large
+  // tables, no expensive aggregations beyond what the schema indexes back).
+
+  router.get('/api/bat/ocr-snapshot', ...gate, requireAdmin, (req, res) => {
+    try {
+      res.json(getOcrSnapshot());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/bat/ocr-counters', ...gate, requireAdmin, (req, res) => {
+    const windowHours = parseInt(req.query.window, 10) || 1;
+    try {
+      res.json(getOcrCounters({ windowHours }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/bat/ocr-recent-runs', ...gate, requireAdmin, (req, res) => {
+    const limit = parseInt(req.query.limit, 10) || 20;
+    try {
+      res.json({ rows: getRecentBatReconciliations(limit) });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Operator action: clear the regex auto-halt + resume worker. Audited so
+  // the chain "halt fired → operator inspected text_preview → cleared and
+  // resumed" stays reconstructable from System Log + Audit Log.
+  router.post('/api/bat/ocr-clear-halt', ...gate, requireAdmin, (req, res) => {
+    const reconId = parseInt(req.body?.reconciliation_id, 10) || null;
+    try {
+      const result = clearOcrHalt({ reconId });
+      logAudit({
+        req,
+        action: 'ocr_clear_halt',
+        resourceType: 'system',
+        resourceName: 'OCR halt',
+        details: `Cleared regex auto-halt${reconId ? ` for recon ${reconId}` : ''}${result.resumed ? ' (worker resumed)' : ''}`,
+      });
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   router.post('/api/bat/reconciliation/:id/refresh-sage', ...gate, async (req, res) => {
