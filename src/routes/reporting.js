@@ -9,6 +9,13 @@ import db from '../db/index.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
+// Shared "last paid week" / "last BAT week" helpers — same source the
+// site's own /api/bat/week-status endpoint uses, so the per-site tile
+// the hub renders ALWAYS matches what the site shows on its own UI.
+// See the helpers' docstrings in src/services/batReconciliation.js for
+// the architectural rule (hub mirrors site; never inline a parallel
+// SELECT here or the two views can drift again).
+import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/batReconciliation.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
@@ -1313,30 +1320,19 @@ export function createReportingRouter({ requireAuth }) {
       ).get(summary_year);
       const missing_weeks_count = missingWeeksRow?.c || 0;
 
-      // Last paid week = highest week with Sage credit notes posted in the
-      // current year. Read from bat_sage_week_cache directly so we capture
-      // weeks Sage paid even when no BAT recon has been uploaded yet.
-      const lastPaid = prep(
-        `SELECT year, week_number
-         FROM bat_sage_week_cache
-         WHERE year = ?
-         ORDER BY week_number DESC
-         LIMIT 1`
-      ).get(summary_year);
+      // SHARED helpers — the SAME functions /api/bat/week-status uses on
+      // the site's own UI. This is the single source of truth: if the
+      // site says "Last paid: W19/2026" on its own page, the hub MUST
+      // see the same value here. Inlining a SELECT was the previous
+      // pattern and it diverged from the site (W44/2026 on hub, W10/2027
+      // on site, both wrong) because the two paths drifted in scoping.
+      // Don't reintroduce a local SELECT here; extend the helpers
+      // instead.
+      const lastPaid = getLastPaidSageWeek();
       const last_paid_week = lastPaid?.week_number ?? null;
       const last_paid_year = lastPaid?.year ?? null;
 
-      // Last BAT week = highest week_number in bat_reconciliations for the
-      // current year. The week the operator most recently uploaded — paired
-      // with last_paid_week so an operator can see at a glance whether
-      // BAT side is keeping pace with Sage.
-      const lastBat = prep(
-        `SELECT year, week_number
-         FROM bat_reconciliations
-         WHERE year = ?
-         ORDER BY week_number DESC
-         LIMIT 1`
-      ).get(summary_year);
+      const lastBat = getLastBatReconciliationWeek();
       const last_bat_week = lastBat?.week_number ?? null;
       const last_bat_year = lastBat?.year ?? null;
 

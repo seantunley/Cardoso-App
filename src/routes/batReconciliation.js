@@ -38,6 +38,7 @@ import {
   countUnsuccessfulExtractions,
   resetSagePool,
   getCachedSageWeekTotals,
+  getLastPaidSageWeek,
   getSageCacheMeta,
   refreshSageWeekTotalsCache,
   generateCardosoInvoicesFromSage,
@@ -468,15 +469,13 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const sageWeekTotals = getCachedSageWeekTotals();
     const cacheMeta = getSageCacheMeta();
     const sageError = cacheMeta.last_status === 'error' ? cacheMeta.last_error : null;
-    let lastWeekPaid = null;
-    let lastWeekPaidYear = null;
-    if (sageWeekTotals.length > 0) {
-      const latest = sageWeekTotals.slice().sort((a, b) =>
-        a.year !== b.year ? b.year - a.year : b.week_number - a.week_number
-      )[0];
-      lastWeekPaid = latest.week_number;
-      lastWeekPaidYear = latest.year;
-    }
+    // SHARED helper — same source the hub-export endpoint uses, so the
+    // site's own UI tile and the hub's per-site tile cannot diverge for
+    // this value. See getLastPaidSageWeek's docstring for why this exists
+    // as a helper instead of being inlined as a SELECT here.
+    const lastPaid = getLastPaidSageWeek();
+    const lastWeekPaid = lastPaid?.week_number ?? null;
+    const lastWeekPaidYear = lastPaid?.year ?? null;
 
     const sagePaidWeeks = sageWeekTotals.map(w => w.week_number);
     // Missing weeks are scoped to the CURRENT ISO YEAR only, and only up to
