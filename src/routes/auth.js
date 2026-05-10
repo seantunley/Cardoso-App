@@ -6,6 +6,25 @@ import { explainPermission } from '../lib/permissions.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 
+// Pull the absolute session expiry off the current request and attach
+// it to the user payload as session_expires_at (ISO). The frontend
+// SessionExpiryWatcher uses this to start the 5-minute warning
+// countdown — every endpoint that returns the *currently authenticated
+// user* MUST route the payload through this helper, otherwise the
+// watcher stays dormant on that flow and the operator gets silently
+// logged out at cookie expiry, which is the exact failure this feature
+// exists to prevent. Specifically: /api/auth/login, /api/auth/me,
+// /api/auth/hub-token-login, /api/auth/set-initial-password — anywhere
+// the response sets a session AND returns a user object the client
+// stores into AuthContext.user.
+function withSessionExpiry(req, userObj) {
+  if (!userObj) return userObj;
+  const session_expires_at = req.session?.cookie?.expires
+    ? new Date(req.session.cookie.expires).toISOString()
+    : null;
+  return { ...userObj, session_expires_at };
+}
+
 /**
  * Creates the auth and user routes router.
  * @param {{ db, stmts, getUserById, requireAuth, requireAdmin, requireSelfOrAdmin, loginLimiter }} deps
@@ -89,12 +108,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         }
       }
 
-      const session_expires_at = req.session?.cookie?.expires
-        ? new Date(req.session.cookie.expires).toISOString()
-        : null;
       res.json({
         success: true,
-        user: { ...sanitizeUser(user), session_expires_at },
+        user: withSessionExpiry(req, sanitizeUser(user)),
       });
     } catch (error) {
       console.error(`Login error (phase=${phase}):`, error);
@@ -157,8 +173,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       // Create session
       req.session.userId = user.id;
 
-      // Return success with sanitized user (Hub will redirect to dashboard)
-      res.json({ success: true, user: sanitizeUser(user) });
+      // Return success with sanitized user (Hub will redirect to dashboard).
+      // withSessionExpiry attaches session_expires_at so the SessionExpiry
+      // watcher engages on hub-token logins (a JWT-issued auto-login still
+      // sets a 12h cookie like a regular login).
+      res.json({ success: true, user: withSessionExpiry(req, sanitizeUser(user)) });
     } catch (err) {
       console.error('[hub-token-login] error:', err);
       try { logError('auth.hub_token_login', err); } catch {}
@@ -215,7 +234,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         }
       }
 
-      res.json({ success: true, user: sanitizeUser(user) });
+      res.json({ success: true, user: withSessionExpiry(req, sanitizeUser(user)) });
     } catch (err) {
       console.error('set-initial-password error:', err);
       res.status(500).json({ error: 'Failed to set password' });
@@ -223,16 +242,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
   });
 
   router.get('/api/auth/me', requireAuth, (req, res) => {
-    // Include the absolute session expiry so the client-side SessionExpiry
-    // watcher can warn the operator before the cookie's maxAge hits zero.
-    // express-session sets cookie.expires when the cookie is created/saved;
-    // with rolling: false (our default), this is a fixed timestamp set at
-    // login and not extended by activity. Send it as ISO so the client can
-    // count down without trusting client clock drift relative to login.
-    const session_expires_at = req.session?.cookie?.expires
-      ? new Date(req.session.cookie.expires).toISOString()
-      : null;
-    res.json({ ...req.currentUser, session_expires_at });
+    res.json(withSessionExpiry(req, req.currentUser));
   });
 
   // Session extension — bumps the cookie's maxAge so the absolute expiry
