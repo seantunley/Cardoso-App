@@ -1041,6 +1041,60 @@ function MaintenanceTab() {
         </Button>
       </div>
 
+      <Dialog open={compactOpen} onOpenChange={(open) => { setCompactOpen(open); if (!open) { setCompactPassword(''); setCompactPasswordError(''); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Compact the database?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              This rewrites the database file to reclaim disk space freed by previously-deleted
+              records. <strong className="text-foreground">It does NOT remove any current data</strong>
+              {' '}— every row in every table is preserved.
+            </p>
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-amber-700 dark:text-amber-300 text-xs space-y-1">
+              <div className="font-medium">During the operation:</div>
+              <ul className="list-disc pl-5 space-y-0.5">
+                <li>The database is exclusively locked — other users may briefly see slow responses</li>
+                <li>Typical run is a few seconds; up to a few minutes on a heavily-bloated DB</li>
+                <li>The service stays running throughout — no restart needed</li>
+              </ul>
+            </div>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+              <div className="font-medium text-foreground">Safety steps run automatically:</div>
+              <ul className="list-disc pl-5 space-y-0.5">
+                <li>A timestamped backup of the live database is saved to <code className="bg-muted px-1 py-0.5 rounded text-[10px]">database/</code> first</li>
+                <li>Pre-VACUUM integrity check — refuses if the database is already corrupt</li>
+                <li>Post-VACUUM integrity check — surfaces any new issue immediately</li>
+                <li>Full audit-log entry recording the before/after sizes and your password-confirmed action</li>
+              </ul>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="compact-password" className="text-xs font-medium text-foreground">Confirm your password</label>
+              <input
+                id="compact-password"
+                type="password"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Enter your password"
+                value={compactPassword}
+                onChange={(e) => { setCompactPassword(e.target.value); setCompactPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && compactPassword) handleCompactDatabase(); }}
+                disabled={compacting}
+                autoComplete="current-password"
+              />
+              {compactPasswordError && <p className="text-xs text-destructive">{compactPasswordError}</p>}
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setCompactOpen(false)} disabled={compacting}>Cancel</Button>
+              <Button onClick={handleCompactDatabase} disabled={compacting || !compactPassword}>
+                <Database className="h-3.5 w-3.5 mr-1.5" />
+                {compacting ? 'Compacting...' : 'Yes, compact the database'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={clearImportedOpen} onOpenChange={(open) => { setClearImportedOpen(open); if (!open) { setClearPassword(''); setClearPasswordError(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
