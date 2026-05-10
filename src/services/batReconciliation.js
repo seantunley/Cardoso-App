@@ -885,22 +885,25 @@ export async function querySageCreditNotes(weekNumber, year) {
     attributed AS (
       SELECT *,
         CASE
-          -- Late-posted W49+ line at the very start of an ISO year → previous
-          -- year. e.g. desc "WEEK 51" with doc_date Jan 5 (ISO W1) → previous
-          -- calendar year.
+          -- desc_week far AHEAD of ISO_WEEK(doc_date) → previous year.
+          -- See querySageWeekTotals for the full reasoning. Same shape
+          -- here so totals (querySageWeekTotals) and per-line details
+          -- (this query) agree on which year a line belongs to.
           --
-          -- Tightened from `desc_week > ISO_week + 4` to require BOTH ends to
-          -- be near the year boundary. The looser pre-fix gate fired for any
-          -- old desc_week posted later in the same year — a "WEEK 10" line
-          -- posted in May became year+1 (next year), feeding the phantom
-          -- W10/2027 row that broke the site dashboard. Kept symmetric with
-          -- querySageWeekTotals (totals + details must agree on which year
-          -- a year-straddling line belongs to).
-          WHEN DATEPART(ISO_WEEK, doc_date) <= 4 AND desc_week >= 49
+          -- Initial fix to the W10/2027 phantom tightened both branches
+          -- symmetrically (required doc_date AND desc_week to both be
+          -- near the year boundary). That regressed the legitimate
+          -- cross-year-lag case: a W52 credit note posted in February
+          -- (W6) was no longer attributed to the previous year, so
+          -- prior-year cache totals were silently understated. Restored
+          -- this branch to the pre-fix threshold; only the year+1 branch
+          -- below stays tightened.
+          WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
-          -- Early-posted W1-4 line at the very end of an ISO year → next
-          -- year. e.g. desc "WEEK 1" with doc_date Dec 28 (ISO W52/53) → next
-          -- calendar year.
+          -- desc_week far BEHIND ISO_WEEK(doc_date) → next year.
+          -- ONLY at the end of the year. See querySageWeekTotals for
+          -- why the symmetric "behind" gate is too eager and how it
+          -- created the phantom W10/2027 row mid-year.
           WHEN DATEPART(ISO_WEEK, doc_date) >= 49 AND desc_week <= 4
             THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
@@ -967,28 +970,44 @@ export async function querySageWeekTotals() {
     attributed AS (
       SELECT
         CASE
-          -- Late-posted high-numbered week → previous year.
+          -- desc_week far AHEAD of ISO_WEEK(doc_date) → previous year.
           --
-          -- ONLY fires when doc_date is at the very start of an ISO year
-          -- (week ≤ 4) AND desc_week is at the very end (≥ 49). This is
-          -- the genuine year-straddling case: a "WEEK 51" credit note
-          -- posted on Jan 5 belongs to the previous calendar year.
+          -- A credit note can't legitimately reference future activity.
+          -- So when desc_week sits well past the current ISO week of
+          -- doc_date, the only sane interpretation is that desc_week
+          -- belongs to the previous calendar year. Examples that this
+          -- correctly handles:
+          --   - Jan 5 (W1) with desc_week=52 → W52 of previous year
+          --   - Feb 10 (W6) with desc_week=49 → W49 of previous year
+          --     (cross-year accounting lag: late posting of Dec activity)
+          --   - May 4 (W18) with desc_week=24 → W24 of previous year
+          --     (data-entry error: operator typo or stale Sage line —
+          --     attributing to last year is closer to truth than calling
+          --     it future-dated activity in the current year)
+          -- The +4 buffer absorbs same-year mid-week posting lag without
+          -- triggering the rule (e.g. W10 posted in W12).
           --
-          -- Pre-fix the gate was `desc_week > ISO_week + 4`, which fired
-          -- for ANY late-posted desc_week regardless of how far from the
-          -- year boundary doc_date was. Result: a "WEEK 44" credit note
-          -- posted in May was attributed to the previous year (or, on
-          -- the symmetric branch below, a "WEEK 10" credit note posted
-          -- in May became year+1 = next year). The phantom W10/2027 row
-          -- on the site dashboard came from exactly this misfire.
-          WHEN DATEPART(ISO_WEEK, doc_date) <= 4 AND desc_week >= 49
+          -- This branch is unchanged from the pre-fix shape — the
+          -- regression was on the year+1 branch below. Initial fix to
+          -- the W10/2027 bug tightened both sides symmetrically, but
+          -- that broke legitimate cross-year lag (Codex catch).
+          WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
-          -- Early-posted low-numbered week → next year.
+          -- desc_week far BEHIND ISO_WEEK(doc_date) → next year.
           --
-          -- Symmetric: ONLY fires when doc_date is at the very end of
-          -- an ISO year (week ≥ 49) AND desc_week is at the very start
-          -- (≤ 4). E.g. a "WEEK 1" credit note posted on Dec 28 belongs
-          -- to next calendar year.
+          -- Pre-fix this fired for any "behind" desc_week, e.g. May (W19)
+          -- with desc_week=10 → year+1 = next year, creating the phantom
+          -- W10/2027 row that broke the site dashboard. The interpretation
+          -- was wrong: a desc_week in the past of the current ISO week is
+          -- usually just a normal in-year late posting (W10 posted in W19
+          -- means "10 weeks late posting of W10 activity", year unchanged).
+          --
+          -- The only legitimate next-year case is the narrow
+          -- end-of-year-anticipating-next-year scenario: a "WEEK 1" credit
+          -- note pre-posted on Dec 28 (W52/53) so the W1 recon next year
+          -- has a Sage line waiting for it. Restrict the rule to that
+          -- case alone (doc_date in W49+ AND desc_week in 1-4); everything
+          -- else falls through to YEAR(doc_date).
           WHEN DATEPART(ISO_WEEK, doc_date) >= 49 AND desc_week <= 4
             THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
