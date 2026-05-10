@@ -79,6 +79,41 @@ function emitProgress(id, stage) {
   try { parentPort.postMessage({ type: 'progress', id, stage }); } catch {}
 }
 
+// ── Per-engine rate-limit cooldown ──────────────────────────────────────────
+//
+// When an engine returns a rate-limit response (HTTP 429 from any engine
+// or ocr.space's E552 inner code), park it for ENGINE_COOLDOWN_MS. The
+// cascade skips a cooled engine before calling it, emitting an info-level
+// engine_error so the operator sees the skip in System Log.
+//
+// Why this matters: today's production trace showed the cascade firing
+// ocr.space/e3 against every row even after E552 came back, burning the
+// per-engine 60 s timeout × 12 cascade slots × every row. Result: rows
+// blew extract_total (90 s), workers self-terminated, lanes retired.
+// One engine being rate-limited shouldn't kill the run for every other
+// row; cooldown breaks that cascade.
+//
+// Per-worker state — with 4 lanes, each worker independently learns the
+// cooldown within a few rows. The staggering is fine because the cooldown
+// is short relative to a recon run.
+const ENGINE_COOLDOWN_MS = 60_000;
+const _engineCooldowns = new Map(); // engineName → expiresAtMs
+
+function isEngineCool(name) {
+  const expiresAt = _engineCooldowns.get(name);
+  if (!expiresAt) return false;
+  if (Date.now() < expiresAt) return true;
+  _engineCooldowns.delete(name);
+  return false;
+}
+function markEngineCooldown(name) {
+  _engineCooldowns.set(name, Date.now() + ENGINE_COOLDOWN_MS);
+}
+function isRateLimitError(err) {
+  const msg = String(err?.message || '');
+  return /HTTP 429|E552|rate.?limit/i.test(msg);
+}
+
 let _tesseract = null;
 let _sharp = null;
 let _pdfjs = null;
@@ -681,7 +716,36 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   );
 
   let tierError = null;
+  // Track whether ANY engine in this row's cascade returned readable
+  // text that simply didn't match the invoice regex. Drives the source
+  // value at the bottom — distinguishes "regex problem" from "engines
+  // are all down". A row where every engine errored / returned <20
+  // chars / was rate-limited yields source='all_engines_failed' so
+  // the parent's regex-streak circuit breaker doesn't count it (those
+  // are healthy retry candidates, not regex misses).
+  let sawReadableText = false;
   for (const engine of ocrEngines) {
+    // Per-engine cooldown — when this engine returned a rate-limit
+    // response (HTTP 429 / ocr.space E552) on a recent row, skip it for
+    // the remainder of the cooldown window. Stops the cascade burning
+    // extract_total budget on an engine that's actively rate-limiting,
+    // and emits an info-level engine_failed so the operator can see
+    // why the engine was skipped.
+    if (isEngineCool(engine.name)) {
+      try {
+        parentPort.postMessage({
+          type: 'engine_error',
+          id: msgId,
+          engine: engine.name,
+          angle: 0,
+          stage: `engine:${engine.name}@cooldown`,
+          message: `Skipped — rate-limit cooldown active (until ${new Date(_engineCooldowns.get(engine.name)).toISOString()})`,
+          tierError: false,
+          cooldown: true,
+        });
+      } catch {}
+      continue;
+    }
     for (const angle of [0, 90]) {
       // Stage label includes engine + rotation so the operator can see e.g.
       // "engine:Tesseract@90" in the UI when an OCR call is the slow one.
@@ -720,6 +784,10 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           } catch {}
           continue;
         }
+        // Mark that this row got at least one engine's worth of readable
+        // text — so when the cascade exits without a match, we can tell
+        // the parent it was a regex miss (not an all-engines-down miss).
+        sawReadableText = true;
         const invoice = findInvoiceNumber(text, inDigitLength);
         if (invoice) {
           // OCR-cascade hit. Engine + angle let the operator audit
@@ -757,6 +825,11 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         // the cascade silently moved to ocr.space and the operator never
         // saw why. The parent translates these into bat.ocr.engine_failed
         // System Log entries.
+        // Rate-limited? Park the engine so the next row skips it before
+        // burning another 60s wedge. Catches both HTTP 429 (most engines)
+        // and ocr.space's E552 inner code.
+        const rateLimited = isRateLimitError(err);
+        if (rateLimited) markEngineCooldown(engine.name);
         try {
           parentPort.postMessage({
             type: 'engine_error',
@@ -766,6 +839,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
             stage: stageLabel,
             message: String(err?.message || err).slice(0, 500),
             tierError: !!err?.tierError,
+            rateLimited,
           });
         } catch {}
         if (err.tierError && !tierError) tierError = `${engine.name}: ${err.message}`;
@@ -774,11 +848,34 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           try { await _tesseract.terminate().catch(() => {}); } catch {}
           _tesseract = null;
         }
+        // After marking cooldown, no point trying angle 90 of the same
+        // engine immediately — break out to the next engine.
+        if (rateLimited) break;
       }
     }
   }
 
-  return { invoice: null, previewPath, source: 'cascade_exhausted', error: tierError };
+  // Two distinct exit states:
+  //
+  //   cascade_exhausted   — at least one engine returned readable text
+  //                         (≥20 chars) but findInvoiceNumber couldn't
+  //                         pull an invoice out. THIS is the regex-
+  //                         mismatch signal the parent's circuit
+  //                         breaker watches for.
+  //
+  //   all_engines_failed  — no engine got past the readable-text bar.
+  //                         Could be every engine throwing (network /
+  //                         API tier / rate limit), short_text from
+  //                         every engine, or all-cooldown skips.
+  //                         These rows are healthy retry candidates;
+  //                         the parent's regex-streak counter does
+  //                         NOT increment on them.
+  return {
+    invoice: null,
+    previewPath,
+    source: sawReadableText ? 'cascade_exhausted' : 'all_engines_failed',
+    error: tierError,
+  };
 }
 
 // ── Message dispatch ─────────────────────────────────────────────────────────
