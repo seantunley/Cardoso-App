@@ -155,14 +155,26 @@ export async function runLocalBackup() {
     await db.backup(destPath);
     console.log(`[backup] Saved to ${destPath}`);
 
-    // Prune: keep last 30
+    // Prune: keep last 6 by default (one week of daily backups). Override
+    // via BACKUP_KEEP_COUNT env. Was 30 originally — but on a site that
+    // hits multi-GB cardoso.db (the production case that prompted PR #245),
+    // 30 daily backups = 30× the live DB size in idle storage, which adds
+    // up fast. The hub-side mirror in hub-backups/ provides the long-tail
+    // archive (its own retention controlled by HUB_BACKUP_KEEP_COUNT —
+    // see runHubBackupPull in services/hubEtl.js); the site itself only
+    // needs enough to recover from "yesterday looked weird, restore last
+    // week's snapshot" scenarios.
+    //
+    // NaN-guard: parseInt('abc', 10) returns NaN; default if so. Floor of
+    // 1 because keeping zero backups defeats the purpose.
     const { readdirSync, statSync, unlinkSync } = await import('fs');
     const files = readdirSync(backupDir)
       .filter((f) => f.endsWith('.db'))
       .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime);
 
-    const keep = parseInt(process.env.BACKUP_KEEP_COUNT || '30', 10);
+    const parsedKeep = parseInt(process.env.BACKUP_KEEP_COUNT, 10);
+    const keep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 6;
     files.slice(keep).forEach((f) => {
       try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
     });
