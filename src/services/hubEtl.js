@@ -687,6 +687,39 @@ async function runHubBackupPull() {
 
         const [integrity] = await Promise.all([integrityP, envP]);
         console.log(`[HUB BACKUP] ${site.name}: streamed -> ${integrity.finalPath} [${integrity.integrity}]`);
+
+        // Prune older per-site backups so the hub doesn't accumulate
+        // forever. Hub keeps more than the site default (sites prune to
+        // 6 — see scheduler.js runLocalBackup) because the hub IS the
+        // long-tail archive: an operator restoring "what did this site
+        // look like 3 weeks ago" should find it here, not on the site
+        // box. Default 30 = roughly a month's worth at one daily pull.
+        // Override via HUB_BACKUP_KEEP_COUNT.
+        //
+        // Per-site, sorted by mtime (newest first), .db files only
+        // (.env config files and any .corrupt-marked failed snapshots
+        // stay — those are tiny and useful for forensics). NaN-guard
+        // mirrors the site-side prune. Best-effort: a unlink failure
+        // (file in use, AV holding the handle) just logs and moves on,
+        // we'll catch it on the next cycle.
+        try {
+          const { readdirSync, statSync, unlinkSync } = await import('fs');
+          const allFiles = readdirSync(dir)
+            .filter((f) => f.endsWith('.db'))
+            .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+            .sort((a, b) => b.mtime - a.mtime);
+          const parsedKeep = parseInt(process.env.HUB_BACKUP_KEEP_COUNT, 10);
+          const hubKeep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 30;
+          const toDelete = allFiles.slice(hubKeep);
+          for (const f of toDelete) {
+            try { unlinkSync(path.join(dir, f.name)); } catch {}
+          }
+          if (toDelete.length > 0) {
+            console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old backup(s), keeping ${hubKeep}`);
+          }
+        } catch (pruneErr) {
+          console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
+        }
       } catch (err) {
         const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
         logError('hub.backupPull', err, { site_name: site.name, site_id: site.id, site_url: site.url, friendly });
