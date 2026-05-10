@@ -2167,10 +2167,24 @@ async function processQueue(reconId) {
     "SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending' ORDER BY id LIMIT ?"
   );
   const inFlight = new Set();
+  // Each row claimed by a lane gets a monotonically-increasing claim
+  // sequence so the streak breaker can apply outcomes in queue order
+  // (NOT lane-completion order). With OCR_CONCURRENCY > 1, a slow row
+  // claimed earlier can finish AFTER a faster row claimed later — if
+  // we tallied the streak as completions arrived, a late-arriving
+  // success could fail to reset the counter before three later
+  // cascade_exhausted completions trip the halt, and vice-versa. The
+  // sequence + drain pattern (see recordOutcome below) makes the
+  // breaker deterministic regardless of completion timing.
+  let nextClaimSeq = 0;
   const claimNext = () => {
     const candidates = claimNextStmt.all(reconId, OCR_CONCURRENCY * 4);
     for (const row of candidates) {
-      if (!inFlight.has(row.id)) { inFlight.add(row.id); return row; }
+      if (!inFlight.has(row.id)) {
+        inFlight.add(row.id);
+        row._claimSeq = nextClaimSeq++;
+        return row;
+      }
     }
     return null;
   };
@@ -2448,6 +2462,68 @@ async function processQueue(reconId) {
   // toward investigating lane recreation rather than the regex.
   let regexHaltTriggered = false;
 
+  // In-order outcome drain. Lanes call recordOutcome(seq, kind, ctx) when
+  // a row resolves; outcomes buffer until the next-expected sequence
+  // arrives, then drain in queue order applying each to the streak.
+  // This is the fix for the concurrency bug where lane-completion order
+  // diverged from queue order with OCR_CONCURRENCY > 1.
+  //
+  // kind values:
+  //   'matched'           — invoice found → reset streak
+  //   'cascade_exhausted' — text returned, no regex match → +1, may halt
+  //   'reset'             — non-cascade not_found (render fail, invalid
+  //                          PDF, etc.) → reset; not a regex signal but
+  //                          previous behavior reset and we preserve it
+  //   'noop'              — exception / pause-during-flight → leave
+  //                          streak alone; we have no regex signal from
+  //                          this row, but don't punish a prior streak
+  //                          either
+  let nextResolveSeq = 0;
+  const pendingOutcomes = new Map();
+  const recordOutcome = (seq, kind, ctx) => {
+    pendingOutcomes.set(seq, { kind, ...(ctx || {}) });
+    while (pendingOutcomes.has(nextResolveSeq)) {
+      const o = pendingOutcomes.get(nextResolveSeq);
+      pendingOutcomes.delete(nextResolveSeq);
+      nextResolveSeq += 1;
+      if (o.kind === 'matched' || o.kind === 'reset') {
+        cascadeExhaustedStreak = 0;
+      } else if (o.kind === 'cascade_exhausted') {
+        cascadeExhaustedStreak += 1;
+        if (cascadeExhaustedStreak >= REGEX_STREAK_HALT_THRESHOLD && !regexHaltTriggered) {
+          // Halt the queue. setOcrPaused persists the pause flag in
+          // bat_settings so the operator-visible Pause toggle stays in
+          // sync, and pending rows survive a service restart in their
+          // pending state.
+          try { setOcrPaused(true); } catch {}
+          regexHaltTriggered = true;
+          const haltMsg =
+            `OCR auto-halted: ${cascadeExhaustedStreak} consecutive rows returned text but no invoice regex match. ` +
+            `Likely cause: the supplier's invoice number format isn't recognised by findInvoiceNumber. ` +
+            `Inspect a recent bat.ocr.engine_no_match log entry's text_preview field, then update the regex / restart.`;
+          try {
+            logError(
+              'bat.ocr.regex_streak_halt',
+              new Error(haltMsg),
+              {
+                reconciliation_id: reconId,
+                streak: cascadeExhaustedStreak,
+                threshold: REGEX_STREAK_HALT_THRESHOLD,
+                last_extraction_id: o.extraction_id,
+                last_store_name: o.store_name,
+              },
+              'error',
+            );
+          } catch {}
+          try { recordReconciliationError(reconId, haltMsg); } catch {}
+          // Reset so a future resume gets a fresh window.
+          cascadeExhaustedStreak = 0;
+        }
+      }
+      // 'noop' just advances the pointer.
+    }
+  };
+
   const runLane = async (lane) => {
     while (true) {
       if (ocrPaused) {
@@ -2591,10 +2667,7 @@ async function processQueue(reconId) {
             updateExtraction.run(invoiceNumber, 'found', previewPath, null, next.id);
             const traceTag = traceEngine ? ` [${traceSource}: ${traceEngine}@${traceAngle}]` : '';
             console.log(`[bat-ocr] id=${next.id} -> ${invoiceNumber}${traceTag}`);
-            // Reset the cascade-exhausted streak on any successful match.
-            // The streak is the circuit-breaker signal — if it stays high,
-            // we halt the run; one match clears it.
-            cascadeExhaustedStreak = 0;
+            recordOutcome(next._claimSeq, 'matched');
             try {
               logError(
                 'bat.ocr.match',
@@ -2615,62 +2688,18 @@ async function processQueue(reconId) {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
             console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
             if (engineError) recordReconciliationError(reconId, engineError);
-            // Cascade-exhausted streak — increments ONLY when at least
-            // one engine returned readable text (≥20 chars) and the
-            // regex couldn't pull an invoice out. The worker emits
-            // source='cascade_exhausted' for that case specifically;
-            // when every engine errored / returned short_text / was
-            // rate-limited, the worker emits source='all_engines_failed'
-            // instead, which we don't count.
-            //
-            // Why the split matters: counting all-engines-failed rows
-            // would cause the breaker to halt OCR after a cascade of
-            // engine failures (rate-limit storm, GV quota burst,
-            // network blip) and then mislead the operator into
-            // investigating the regex when the actual cause was upstream
-            // engine availability. Healthy retries should NOT trip the
-            // halt; a real regex mismatch should.
-            //
-            // Render failures, invalid PDFs etc. also don't count
-            // (different sources entirely).
+            // Streak signal selection — see recordOutcome above for
+            // semantics. Only 'cascade_exhausted' (engine returned ≥20
+            // chars, regex didn't match) feeds the breaker; every other
+            // not_found shape resets, because they don't tell us anything
+            // about regex health (engine outages, render failures, etc.).
             if (traceSource === 'cascade_exhausted') {
-              cascadeExhaustedStreak += 1;
-              if (cascadeExhaustedStreak >= REGEX_STREAK_HALT_THRESHOLD) {
-                // Halt the queue. setOcrPaused persists the pause flag in
-                // bat_settings so the operator-visible Pause toggle stays
-                // in sync, and pending rows survive a service restart in
-                // their pending state.
-                try { setOcrPaused(true); } catch {}
-                regexHaltTriggered = true;
-                const haltMsg =
-                  `OCR auto-halted: ${cascadeExhaustedStreak} consecutive rows returned text but no invoice regex match. ` +
-                  `Likely cause: the supplier's invoice number format isn't recognised by findInvoiceNumber. ` +
-                  `Inspect a recent bat.ocr.engine_no_match log entry's text_preview field, then update the regex / restart.`;
-                try {
-                  logError(
-                    'bat.ocr.regex_streak_halt',
-                    new Error(haltMsg),
-                    {
-                      reconciliation_id: reconId,
-                      streak: cascadeExhaustedStreak,
-                      threshold: REGEX_STREAK_HALT_THRESHOLD,
-                      last_extraction_id: next.id,
-                      last_store_name: next.store_name,
-                    },
-                    'error',
-                  );
-                } catch {}
-                try { recordReconciliationError(reconId, haltMsg); } catch {}
-                // Reset the streak so when OCR resumes it gets a fresh
-                // window before halting again — operator may have updated
-                // the regex.
-                cascadeExhaustedStreak = 0;
-              }
+              recordOutcome(next._claimSeq, 'cascade_exhausted', {
+                extraction_id: next.id,
+                store_name: next.store_name,
+              });
             } else {
-              // Non-cascade-exhausted not_found (e.g. render_failed, invalid
-              // PDF) doesn't indicate a regex problem — reset the streak so
-              // unrelated failures don't accidentally trigger the halt.
-              cascadeExhaustedStreak = 0;
+              recordOutcome(next._claimSeq, 'reset');
             }
           }
           emitExtractionUpdate(reconId);
@@ -2705,6 +2734,13 @@ async function processQueue(reconId) {
           // 'pending' for the next run to pick up.
           if (ocrPaused) {
             console.log(`[bat-ocr] id=${next.id} interrupted by pause — leaving 'pending' for retry on resume`);
+            // 'noop' so the in-order drain pointer advances past this
+            // seq even though the row will be re-claimed in a later run.
+            // Without it, any later cascade_exhausted outcome with a
+            // higher seq would buffer forever and the breaker wouldn't
+            // see it. (In practice the lane exits right after pause, but
+            // marking is cheap and removes the assumption.)
+            recordOutcome(next._claimSeq, 'noop');
             emitExtractionUpdate(reconId);
           } else {
             // Even on exception (timeout, worker exit, lane crash), the
@@ -2739,6 +2775,11 @@ async function processQueue(reconId) {
               try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {}
             }
             recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
+            // 'noop' so the in-order drain pointer advances. An exception
+            // tells us nothing about regex health (the cascade may not
+            // have even run), so we don't increment OR reset the streak
+            // — just step over this row.
+            recordOutcome(next._claimSeq, 'noop');
             emitExtractionUpdate(reconId);
           }
 
