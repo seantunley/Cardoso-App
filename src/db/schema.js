@@ -232,7 +232,18 @@ function initSchema(db) {
         -- endpoints (trigger-accpac-sync, force-resync, push-*) refuse
         -- with 409. Migration v63 adds these to existing hub installs.
         in_env INTEGER NOT NULL DEFAULT 1,
-        removed_from_env_at TEXT
+        removed_from_env_at TEXT,
+        -- Accpac freshness signal. Migration v62 ensureColumns these on
+        -- existing hub installs; for fresh installs they need to be in
+        -- the canonical CREATE TABLE because runMigrations runs BEFORE
+        -- this CREATE TABLE statement (line 206 vs 212), so v62's
+        -- gate-on-table-exists no-ops and records itself as applied
+        -- before hub_sites exists. Without these columns here, fresh
+        -- hub installs would permanently miss last_accpac_* and every
+        -- hub.sync UPDATE would crash with "no such column".
+        last_accpac_synced_at TEXT,
+        last_accpac_status TEXT,
+        last_accpac_error TEXT
       );
       CREATE INDEX IF NOT EXISTS idx_hub_sites_in_env ON hub_sites(in_env);
 
