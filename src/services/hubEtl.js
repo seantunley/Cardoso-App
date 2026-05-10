@@ -463,21 +463,48 @@ async function syncSite(site) {
     // (vs last_seen which is when the HUB last pulled). last_accpac_status
     // drives the tile colour; last_accpac_error gives the operator the
     // actual reason ("ELOGIN", "ESOCKET", etc. via describeSqlError).
+    //
+    // last_accpac_synced_at and last_accpac_status use COALESCE so a
+    // null kpis value (kpis call returned ok but the site has no
+    // non-BAT-only connections, so this field is genuinely empty in
+    // the response) does NOT wipe a valid existing value. Without
+    // COALESCE, the optimistic stamp from the trigger flow (PR #238)
+    // had a useful lifetime of "until the next syncSite tick" — at
+    // most 5 minutes, after which a successful sync that lacked the
+    // field erased it back to null and the operator's tile reverted
+    // to "(not yet reported)". Same protection covers a stamp the hub
+    // pulled successfully on a previous tick: if the site momentarily
+    // stops reporting it, we keep the last known good value rather
+    // than erasing it.
+    //
+    // last_accpac_error needs three-way logic, not COALESCE:
+    //   - new error in kpis → store it (replace any stale prior error)
+    //   - kpis explicitly status='ok' AND no error → clear (the prior
+    //     cause is no longer current; leaving it shown would mislead)
+    //   - null kpis / unknown → preserve (we have no signal either way)
+    const kpisAccpacAt     = kpis?.site_accpac_last_synced_at || null;
+    const kpisAccpacStatus = kpis?.site_accpac_status         || null;
+    const kpisAccpacError  = kpis?.site_accpac_error          || null;
     db.prepare(`
       UPDATE hub_sites SET
         last_seen = ?,
         last_kpis = ?,
         status = 'ok',
-        last_accpac_synced_at = ?,
-        last_accpac_status = ?,
-        last_accpac_error = ?
+        last_accpac_synced_at = COALESCE(?, last_accpac_synced_at),
+        last_accpac_status    = COALESCE(?, last_accpac_status),
+        last_accpac_error     = CASE
+                                  WHEN ? IS NOT NULL THEN ?      -- new error reported → store it
+                                  WHEN ? = 'ok'      THEN NULL   -- kpis explicitly OK → clear stale error
+                                  ELSE last_accpac_error          -- null kpis or unknown → preserve
+                                END
       WHERE id = ?
     `).run(
       new Date().toISOString(),
       kpis ? JSON.stringify(kpis) : null,
-      kpis?.site_accpac_last_synced_at || null,
-      kpis?.site_accpac_status || null,
-      kpis?.site_accpac_error || null,
+      kpisAccpacAt,
+      kpisAccpacStatus,
+      kpisAccpacError, kpisAccpacError,
+      kpisAccpacStatus,
       site.id,
     );
 
