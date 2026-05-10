@@ -226,6 +226,35 @@ const MAX_RENDER_WIDTH = Number.isFinite(_envMaxRenderWidth) && _envMaxRenderWid
   ? Math.max(MIN_RENDER_WIDTH, _envMaxRenderWidth)
   : DEFAULT_MAX_RENDER_WIDTH;
 
+// Total raster pixels cap. Width-only capping was insufficient — a tall
+// A3 POD at 2400px wide is still ~12 MP, and that's enough to wedge
+// node-canvas on production hubs even after PR #230. Cap total area too
+// so the chosen scale steps down for tall pages, not just wide ones.
+// Buffer = pixels × 4 bytes (RGBA), so 6 MP ≈ 24 MB peak per render.
+const DEFAULT_MAX_RENDER_PIXELS = 6_000_000;
+const MIN_RENDER_PIXELS = 800 * 800;
+const _envMaxRenderPixels = parseInt(process.env.OCR_MAX_RENDER_PIXELS ?? '', 10);
+const MAX_RENDER_PIXELS = Number.isFinite(_envMaxRenderPixels) && _envMaxRenderPixels > 0
+  ? Math.max(MIN_RENDER_PIXELS, _envMaxRenderPixels)
+  : DEFAULT_MAX_RENDER_PIXELS;
+
+// Height cap separate from width — A4 portrait at the width cap is ~3400px
+// tall, but multi-page-merged or banner-format PDFs run 8000+px at the
+// same width.
+const DEFAULT_MAX_RENDER_HEIGHT = 4000;
+const MIN_RENDER_HEIGHT = 800;
+const _envMaxRenderHeight = parseInt(process.env.OCR_MAX_RENDER_HEIGHT ?? '', 10);
+const MAX_RENDER_HEIGHT = Number.isFinite(_envMaxRenderHeight) && _envMaxRenderHeight > 0
+  ? Math.max(MIN_RENDER_HEIGHT, _envMaxRenderHeight)
+  : DEFAULT_MAX_RENDER_HEIGHT;
+
+// Floor scale below which we refuse to render. A render at scale < 0.3
+// makes invoice numbers unreadable, so handing the page to pdfjs at that
+// scale is strictly worse than refusing — the operator at least sees a
+// loud reason in the System Log instead of waiting 2 minutes for the
+// inevitable parent-side PDF_TIMEOUT.
+const MIN_RENDER_SCALE = 0.3;
+
 async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
   const pdfjsLib = await getPdfjs();
   const { createCanvas } = await getCanvas();
@@ -234,14 +263,46 @@ async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
   let canvas = null;
   try {
     const page = await pdfDoc.getPage(pageNum);
-    // Compute the actual scale we'll use. Start from requestedScale but
-    // step down if the resulting width would exceed MAX_RENDER_WIDTH.
-    // For a "normal" A4 POD (viewport.width ≈ 595 at scale 1.0) this
-    // leaves the requested scale alone; for an A3 / non-standard large
-    // page the scale gets capped down so the buffer stays bounded.
+    // Compute the actual scale by capping against ALL three limits
+    // (width, height, total pixels). The previous width-only cap let
+    // tall A3 / banner-format PODs through at 12+ MP, which is what
+    // wedged production after PR #230 — node-canvas blocks the worker
+    // thread synchronously on those, and the in-worker render timeout
+    // can't fire while native code holds the JS event loop.
     const baseViewport = page.getViewport({ scale: 1.0 });
-    const widthCappedScale = MAX_RENDER_WIDTH / baseViewport.width;
-    const scale = Math.min(requestedScale, widthCappedScale);
+    const widthCap  = MAX_RENDER_WIDTH  / baseViewport.width;
+    const heightCap = MAX_RENDER_HEIGHT / baseViewport.height;
+    // Pixel area scales as scale², so the scale that lands at exactly
+    // MAX_RENDER_PIXELS is sqrt(MAX_PIXELS / baseArea).
+    const baseArea = baseViewport.width * baseViewport.height;
+    const pixelCap = Math.sqrt(MAX_RENDER_PIXELS / baseArea);
+    const scale = Math.min(requestedScale, widthCap, heightCap, pixelCap);
+
+    // Refuse to render if the chosen scale would shrink the page below
+    // the OCR-readable floor. Sending such a page into pdfjs+node-canvas
+    // is strictly worse than refusing — the operator gets a loud,
+    // structured reason in System Log instead of waiting 2 minutes for
+    // the parent-side PDF_TIMEOUT, and the worker thread stays free to
+    // process the rest of the queue.
+    if (scale < MIN_RENDER_SCALE) {
+      const baseW  = Math.round(baseViewport.width);
+      const baseH  = Math.round(baseViewport.height);
+      const baseMP = (baseArea / 1_000_000).toFixed(1);
+      const maxMP  = (MAX_RENDER_PIXELS / 1_000_000).toFixed(1);
+      throw new Error(
+        `PDF page ${pageNum} is too large to render safely. ` +
+        `Native page size is ${baseW}×${baseH} (${baseMP} megapixels at scale 1.0). ` +
+        `The largest scale that fits within the configured caps ` +
+        `(width ${MAX_RENDER_WIDTH}px, height ${MAX_RENDER_HEIGHT}px, total ${maxMP} megapixels) ` +
+        `would be ${scale.toFixed(3)}, which is below the OCR-readable floor of ${MIN_RENDER_SCALE}. ` +
+        `Skipping this page rather than handing it to pdfjs/node-canvas — those would wedge ` +
+        `the worker thread inside native code and the in-worker timeout cannot abort native ` +
+        `calls. Operator action: this PDF is most likely a malformed or banner-format document; ` +
+        `download the URL and inspect it. To accept very large pages anyway, raise ` +
+        `OCR_MAX_RENDER_PIXELS in the site's .env (e.g. set it to 12000000 for 12 MP).`
+      );
+    }
+
     const viewport = page.getViewport({ scale });
     canvas = createCanvas(viewport.width, viewport.height);
     const context = canvas.getContext('2d');
@@ -672,7 +733,39 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   try {
     imageBuffer = await withTimeout(pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0), 30_000, 'render');
   } catch (err) {
-    return { invoice: null, previewPath: null, source: 'render_failed', error: `Render failed: ${err.message}` };
+    // Verbose, plain-English error so the operator can triage from System
+    // Log alone. Three patterns the caller will see:
+    //   - "Timeout after 30000ms in stage: render" → in-worker timeout fired
+    //     (rare on real wedges — JS can't fire a setTimeout while pdfjs is
+    //     in node-canvas native code, so this usually only fires on the
+    //     "tame slow" cases).
+    //   - "PDF page N is too large to render safely..." → preflight reject
+    //     from pdfPageToImage (the new behaviour). Already verbose.
+    //   - Anything else → pdfjs internal error, message preserved verbatim.
+    const stage = err?.stage || 'render';
+    const isTimeout = err?.code === 'OCR_TIMEOUT';
+    const isPreflightReject = String(err?.message || '').startsWith('PDF page ');
+    let detail;
+    if (isPreflightReject) {
+      detail = err.message; // already operator-readable
+    } else if (isTimeout) {
+      detail =
+        `In-worker ${stage}-stage timeout fired after ${err.timeoutMs}ms but this rarely actually ` +
+        `aborts pdfjs+node-canvas — the native render call typically holds the JS event loop, ` +
+        `so the parent-side 120s PDF_TIMEOUT in batReconciliation.js is the real recovery here. ` +
+        `If this URL keeps wedging, it has been added to the per-run skip list to stop it ` +
+        `grinding the rest of the queue. Operator action: download the PDF URL manually and ` +
+        `inspect it; common culprits are banner-format documents, scans with very large ` +
+        `embedded images, or malformed pages that hit a known pdfjs bug.`;
+    } else {
+      detail = `Underlying error: ${err?.message || String(err)}`;
+    }
+    return {
+      invoice: null,
+      previewPath: null,
+      source: 'render_failed',
+      error: `Render of PDF page 1 failed in the OCR worker. URL: ${pdfUrl}. ${detail}`,
+    };
   }
 
   const sharp = await getSharp();

@@ -488,7 +488,70 @@ async function syncSite(site) {
     // a single funnel.
     syncError = describeFetchError(err, site.url);
     db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
-    logError('hub.sync', err, { site_slug: site.slug, site_id: site.id, site_url: site.url });
+
+    // Verbose, plain-English log so an operator can triage from the System
+    // Log alone without source-diving. Default fetch errors ("fetch failed",
+    // "This operation was aborted") are too cryptic — they don't say which
+    // site, which fetch, or what to do about it.
+    const raw = String(err?.message || err);
+    const siteLabel = site.name || site.slug;
+    let friendlyMsg;
+    if (/aborted/i.test(raw)) {
+      friendlyMsg =
+        `Hub-to-site sync timed out for site "${siteLabel}" at ${site.url}. ` +
+        `One of the fetches (health check, KPIs, records, inventory, or BAT summary) didn't ` +
+        `respond within its timeout window — the site service either took too long to answer ` +
+        `or the network link is slow. ` +
+        `Likely causes: (1) the site service is hung or under heavy load — open Operations on ` +
+        `the site box and check OCR / sync activity, (2) the network link to the site is slow ` +
+        `or down — verify Tailscale / VPN connectivity from the hub, (3) the site box is in ` +
+        `low-resource swap-thrash. ` +
+        `Test from the hub: curl ${site.url}/api/reporting/health -H 'x-reporting-token: <token>'`;
+    } else if (/fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|EHOSTUNREACH|ENETUNREACH/i.test(raw)) {
+      friendlyMsg =
+        `Hub-to-site sync could not reach site "${siteLabel}" at ${site.url}. ` +
+        `The TCP connection failed before any HTTP exchange — the site service is not listening ` +
+        `on this URL. ` +
+        `Most likely cause: the Cardoso service was wiped on the site box (a known bug in pre-` +
+        `2026.5.4 installers removed the service before extracting new files; if extraction failed, ` +
+        `the service was never recreated — fixed in PR #234). ` +
+        `Operator action: log into the site machine and run "Get-Service CardosoCigarettes". ` +
+        `If the service is missing, re-run the latest CardosoSetup-vX.X.X.exe on the site box ` +
+        `to reinstall. If the service is present but stopped, start it; if it crashes on start, ` +
+        `check ${site.url ? new URL(site.url).host : 'site'}'s logs/service-error.log. ` +
+        `Underlying error: ${raw}.`;
+    } else if (/no such column/i.test(raw)) {
+      friendlyMsg =
+        `Hub-to-site sync failed for site "${siteLabel}" with a SQL schema error. ` +
+        `Underlying error: ${raw}. ` +
+        `This means a database migration didn't run on this hub — most commonly the lost v62 ` +
+        `migration (added back in PR #228 / release 2026.5.3) for the last_accpac_synced_at columns. ` +
+        `Operator action: confirm the hub itself is on 2026.5.3 or later (Operations → Updates), ` +
+        `then restart the Cardoso service on the hub so migrations re-run on boot.`;
+    } else if (/CHECK constraint failed/i.test(raw)) {
+      friendlyMsg =
+        `Hub-to-site sync failed for site "${siteLabel}" with a SQL CHECK-constraint error. ` +
+        `Underlying error: ${raw}. ` +
+        `A code path tried to write a value that the schema CHECK doesn't allow — usually because ` +
+        `a feature added a new value (e.g. resource_type='site') without coordinating a schema ` +
+        `migration. Operator action: check that the hub is on the latest release; if it is, this ` +
+        `may be a fresh constraint regression and should be reported.`;
+    } else {
+      friendlyMsg =
+        `Hub-to-site sync failed for site "${siteLabel}" at ${site.url}. ` +
+        `Underlying error did not match a known pattern. Raw error: ${raw}. ` +
+        `Check the site's own System Log (open ${site.url} → Operations → System Log) for the ` +
+        `corresponding inbound failure, and verify the site service is healthy.`;
+    }
+    logError('hub.sync', new Error(friendlyMsg), {
+      site_slug: site.slug,
+      site_id: site.id,
+      site_name: site.name,
+      site_url: site.url,
+      raw_error: raw,
+      err_kind: err?.constructor?.name,
+      err_code: err?.code,
+    });
   }
 
   db.prepare(`

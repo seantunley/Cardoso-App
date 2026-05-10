@@ -2637,8 +2637,25 @@ async function processQueue(reconId) {
   );
   const RSS_RECYCLE_THRESHOLD_BYTES = parsePositiveIntEnv(
     process.env.OCR_LANE_RSS_BUDGET_MB,
-    2048, // default 2 GB
+    1200, // default 1.2 GB. Was 2 GB pre-2026.5.4 but production traces
+          // showed RSS climbing back to 2.4 GB within ~37s of a 2 GB-
+          // triggered recycle — the native leak rate (in pdfjs/node-canvas/
+          // sharp) consistently outran recycle at 2 GB. Firing earlier
+          // gives the recycle a chance to catch the worker BEFORE the
+          // wedge, not after.
     256,  // floor 256 MB — anything lower would recycle constantly on a normal box
+  ) * 1024 * 1024;
+  // Hard process-exit threshold. If RSS climbs past this, the lane recycle
+  // mechanism has lost the race against the native leak and the only safe
+  // move is to crash the whole process so NSSM restarts us cleanly. Any
+  // in-flight rows are left 'pending' for the next run to re-claim — the
+  // claim is in-memory, not persisted, so process death automatically
+  // releases them.
+  const RSS_HARD_EXIT_THRESHOLD_BYTES = parsePositiveIntEnv(
+    process.env.OCR_HARD_EXIT_RSS_MB,
+    3072, // default 3 GB — well above the 1.2 GB recycle so a single
+          // burst doesn't trip exit; only sustained climb does
+    1024, // floor 1 GB
   ) * 1024 * 1024;
   // Try to spawn a fresh OcrLane up to maxAttempts times with exponential
   // backoff. Returns true on success, false after exhausting retries.
@@ -2796,6 +2813,21 @@ async function processQueue(reconId) {
   // observability ticks.
   const startedAtMs = Date.now();
   let lastRssMb = 0;
+  // Latch for the hard-exit path so a stuck setInterval can't fire
+  // process.exit twice while the first scheduled exit is still pending.
+  let hardExitFiring = false;
+
+  // Per-run set of PDF URLs that wedged the worker thread. Once a URL has
+  // forced a lane to be hard-killed (lane.worker.dead becomes true after
+  // an extract that timed out at the parent's PDF_TIMEOUT), every later
+  // row in this run with the same URL is failed fast with a verbose
+  // explanation instead of being sent into pdfjs/node-canvas to wedge
+  // the lane all over again. The set is per-run (not persisted), so
+  // restarting OCR resets it — that's deliberate, since fixing the PDF
+  // upstream OR raising OCR_MAX_RENDER_PIXELS should give it a fair
+  // retry without manual intervention.
+  const wedgedUrls = new Set();
+
   const memoryMonitor = setInterval(() => {
     try {
       const m = process.memoryUsage();
@@ -2804,6 +2836,53 @@ async function processQueue(reconId) {
       const heapTotalMb = Math.round(m.heapTotal / 1024 / 1024);
       const externalMb = Math.round(m.external / 1024 / 1024);
       const elapsedSec = Math.floor((Date.now() - startedAtMs) / 1000);
+
+      // Hard exit gate. If we've climbed past the kill threshold, the
+      // lane recycle mechanism has lost the race against the native leak.
+      // Continuing means swap-thrashing or an OS-level OOM kill — both
+      // are worse than a clean process exit + NSSM restart. Fire ONCE
+      // (track via a flag so a stuck setInterval doesn't loop into
+      // process.exit calls before the first one takes effect).
+      if (m.rss >= RSS_HARD_EXIT_THRESHOLD_BYTES && !hardExitFiring) {
+        hardExitFiring = true;
+        const hardExitMb = Math.round(RSS_HARD_EXIT_THRESHOLD_BYTES / 1024 / 1024);
+        const recycleMb  = Math.round(RSS_RECYCLE_THRESHOLD_BYTES / 1024 / 1024);
+        try {
+          logError(
+            'bat.ocr.rss_hard_exit',
+            new Error(
+              `OCR process RSS reached ${rssMb} MB, above the hard-exit threshold of ${hardExitMb} MB. ` +
+              `The lane-recycle mechanism (default ${recycleMb} MB) couldn't keep up with native ` +
+              `memory growth — the leak is in pdfjs/node-canvas/sharp/Tesseract native allocators ` +
+              `and isn't visible to V8's GC (heap is only ${heapMb} MB right now while RSS is ${rssMb} MB). ` +
+              `Exiting the Cardoso process so NSSM restarts it cleanly. In-flight OCR rows will be ` +
+              `left 'pending' and re-claimed on the next run; no data is lost. ` +
+              `Operator action: if this triggers repeatedly on the same recon, lower ` +
+              `OCR_MAX_RENDER_PIXELS or OCR_MAX_RENDER_WIDTH in .env to reduce per-page memory pressure, ` +
+              `or raise OCR_HARD_EXIT_RSS_MB if the box has more headroom than the default 3 GB.`
+            ),
+            {
+              reconciliation_id: reconId,
+              rss_mb: rssMb,
+              heap_mb: heapMb,
+              external_mb: externalMb,
+              hard_exit_threshold_mb: hardExitMb,
+              recycle_threshold_mb: recycleMb,
+              in_flight_count: currentlyProcessing.size,
+            },
+            'error',
+          );
+        } catch {}
+        // Give logError + downstream alert eval a moment to flush. The
+        // sync better-sqlite3 INSERT inside logError lands immediately,
+        // but we want any async observers (SSE listeners, alert engine)
+        // to drain too. 1s is generous — the harm of waiting longer is
+        // RSS climbing further; the harm of exiting too fast is a missed
+        // alert. 1s is a reasonable middle.
+        setTimeout(() => { try { process.exit(1); } catch { /* should never reach */ } }, 1000);
+        return; // skip the regular memory-tick log this cycle
+      }
+
       // Suppress when nothing has materially changed (within 5MB) to keep
       // the log signal-to-noise high. Always log the first tick.
       if (lastRssMb && Math.abs(rssMb - lastRssMb) < 5) return;
@@ -2924,6 +3003,40 @@ async function processQueue(reconId) {
       }
       const next = claimNext();
       if (!next) return;
+
+      // Per-URL skip: if a previous row in this run wedged the worker
+      // on this exact URL, fail the row fast instead of handing it back
+      // to pdfjs/node-canvas to wedge another lane. The error text
+      // explains exactly what happened so the operator can act on it
+      // (the original wedge already wrote a verbose log entry; this
+      // entry just makes the cause visible per row that gets skipped).
+      if (next.pdf_url && wedgedUrls.has(next.pdf_url)) {
+        const skipMsg =
+          `Skipped: this PDF URL wedged the OCR worker earlier in this run, so it has been added ` +
+          `to a per-run skip list to stop it grinding the rest of the queue. ` +
+          `URL: ${next.pdf_url}. ` +
+          `Operator action: download the PDF and inspect it (typical culprits are banner-format ` +
+          `documents, multi-page-merged PDFs, or pages with very large embedded images). The skip ` +
+          `list resets per OCR run, so restarting OCR will retry this URL automatically once the ` +
+          `underlying PDF is fixed or OCR_MAX_RENDER_PIXELS is raised in .env.`;
+        try {
+          updateExtraction.run(null, 'failed', null, skipMsg.slice(0, 1000), next.id);
+        } catch (writeErr) {
+          try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: 'wedged-url skip' }); } catch {}
+        }
+        try {
+          logError(
+            'bat.ocr.url_skipped',
+            new Error(skipMsg),
+            { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url },
+            'warn',
+          );
+        } catch {}
+        recordOutcome(next._claimSeq, 'noop');
+        inFlight.delete(next.id);
+        emitExtractionUpdate(reconId);
+        continue;
+      }
 
       // Mark this row as in-flight in the module-level registry so
       // getExtractionProgress can report it back to the UI.
@@ -3179,6 +3292,69 @@ async function processQueue(reconId) {
           // retry helper so a single transient hiccup during
           // `new OcrLane()` doesn't permanently retire the lane.
           if (lane.worker.dead) {
+            // Per-URL skip on hard kill — but ONLY when the wedge was in
+            // the render stage. A lane is also marked dead for many
+            // non-PDF causes:
+            //   - extract_total / engine:* timeouts (Google Vision slow,
+            //     ocr.space rate-limited, Tesseract crash)
+            //   - tesseract_init / canvas init failures
+            //   - generic worker crashes during the cascade
+            // In all those cases the URL is fine; blacklisting it would
+            // incorrectly drain other rows pointing at the same PDF
+            // during a transient API/network incident. The wedge we
+            // actually want to blacklist is pdfjs+node-canvas blocking
+            // the worker thread inside render — that's the case where
+            // the same URL will reliably wedge another lane if we hand
+            // it back. Gate on the row's last reported stage being
+            // 'render' (set by emitProgress just before page.render).
+            //
+            // Done BEFORE tryLaneRecovery so even a recovery failure
+            // still records the bad URL for the next run that picks
+            // up where we left off.
+            if (next.pdf_url && stuckStage === 'render') {
+              wedgedUrls.add(next.pdf_url);
+              try {
+                logError(
+                  'bat.ocr.url_blacklisted',
+                  new Error(
+                    `PDF URL added to per-run skip list because the OCR worker wedged in the render stage ` +
+                    `and required a hard kill (parent-side PDF_TIMEOUT fired after ${PDF_TIMEOUT}ms while the ` +
+                    `worker was still inside pdfjs/node-canvas). Future rows in this run with the same URL ` +
+                    `will be failed fast without another render attempt. URL: ${next.pdf_url}. ` +
+                    `Operator action: this PDF has malformed content, an unusual viewport ` +
+                    `(banner format, multi-page-merged), or hits a known pdfjs/node-canvas bug ` +
+                    `that blocks the worker thread synchronously inside native code. Download the ` +
+                    `URL and inspect it. The skip list resets per OCR run, so restarting OCR will ` +
+                    `retry once the underlying PDF is fixed or OCR_MAX_RENDER_PIXELS is raised.`
+                  ),
+                  { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
+                  'warn',
+                );
+              } catch {}
+            } else if (next.pdf_url) {
+              // Lane died in a non-render stage (or stage attribution
+              // was lost). Don't blacklist the URL — but log the lane
+              // death with stage attribution so the operator can see
+              // WHICH stage failed when triaging. Distinguishes "this
+              // PDF is poison" from "OCR provider X is having a moment"
+              // or "the worker crashed mid-engine-call".
+              try {
+                logError(
+                  'bat.ocr.lane_died_non_render',
+                  new Error(
+                    `OCR lane died after extract failure on row ${next.id}, but the failure was NOT in the render ` +
+                    `stage — last reported stage was '${stuckStage || 'unknown'}'. The PDF URL is NOT being blacklisted ` +
+                    `(non-render lane deaths are usually transient: OCR provider slowness, engine timeouts, network ` +
+                    `blips, Tesseract crashes). Other rows pointing at the same URL will retry normally. ` +
+                    `URL: ${next.pdf_url}. ` +
+                    `Operator action: if you see clusters of these on the same engine name, check that engine's ` +
+                    `health (Google Vision quota, ocr.space rate-limit window, etc.).`
+                  ),
+                  { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
+                  'info',
+                );
+              } catch {}
+            }
             try { await lane.worker.terminate(); } catch {}
             // tryLaneRecovery does its own retry-with-backoff and
             // already calls logError + recordReconciliationError on
