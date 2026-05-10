@@ -1224,7 +1224,24 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       } else {
         try {
           const ctrl = new AbortController();
-          const timeout = setTimeout(() => ctrl.abort(), 6 * 60 * 1000); // 6 min — pull can take 5
+          // 12 min total. The hub-side pullBackupForSite has TWO
+          // sequential long phases now: /api/backup/download (5 min
+          // cap) followed by /api/backup/bat-previews (5 min cap),
+          // so the worst-case round-trip is ~10 min plus normal RTT
+          // and integrity-check overhead. The original 6-min cap
+          // covered only the DB phase and now under-fits — Codex
+          // catch: large sites finish the DB pull then time out
+          // mid-previews, the site reports hub_notified:false, and
+          // the operator sees a false "hub didn't pull" signal even
+          // though the hub completed seconds after the abort. New
+          // 12-min cap covers both phases + buffer.
+          //
+          // If hub pulls grow past this in the future, the right
+          // architectural answer is: hub responds immediately after
+          // accepting the notify and runs pullBackupForSite async,
+          // with the site polling a follow-up status endpoint. For
+          // now the timeout bump keeps the simple call+wait shape.
+          const timeout = setTimeout(() => ctrl.abort(), 12 * 60 * 1000);
           const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/notify-backup-ready`, {
             method: 'POST',
             headers: {
