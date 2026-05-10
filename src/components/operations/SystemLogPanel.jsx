@@ -62,15 +62,27 @@ export default function SystemLogPanel() {
     refetchInterval: 30_000,
   });
 
-  const fmt = (dt) => {
-    if (!dt) return "—";
-    // logError writes ISO strings (with trailing Z), but SQLite's
-    // datetime('now') default uses space-separated UTC (no Z). Normalise:
-    // if no Z/offset, treat as UTC by appending Z so the toLocaleString
-    // call below converts to the user's display zone correctly.
-    const normalized = /[zZ]|[+-]\d{2}:?\d{2}$/.test(dt)
+  // logError writes ISO strings (with trailing Z), but SQLite's
+  // datetime('now') default uses space-separated UTC (no Z). Browsers
+  // parse the latter inconsistently — Chrome treats it as local time,
+  // Firefox treats it as invalid, Safari has its own opinion. Normalise
+  // to a Z-suffixed ISO string so every consumer (display formatter
+  // AND sort comparator) reads the same numeric timestamp.
+  const _normaliseLogTimestamp = (dt) => {
+    if (!dt) return null;
+    return /[zZ]|[+-]\d{2}:?\d{2}$/.test(dt)
       ? dt
       : dt.replace(' ', 'T') + 'Z';
+  };
+  const _logTimestampMs = (dt) => {
+    const normalized = _normaliseLogTimestamp(dt);
+    if (!normalized) return 0;
+    const t = new Date(normalized).getTime();
+    return Number.isFinite(t) ? t : 0;
+  };
+  const fmt = (dt) => {
+    if (!dt) return "—";
+    const normalized = _normaliseLogTimestamp(dt);
     const d = new Date(normalized);
     if (isNaN(d.getTime())) return dt; // last resort — show raw rather than "Invalid Date"
     return d.toLocaleString("en-ZA", {
@@ -120,10 +132,12 @@ export default function SystemLogPanel() {
     // Sort by newest member of each group so the freshest activity
     // stays at the top of the table. Rows within each group are
     // already newest-first because we iterated `rows` in order.
+    // Use _logTimestampMs (same normalisation path as fmt) — raw
+    // `new Date(occurred_at)` would treat SQLite's space-separated
+    // UTC stamps as local time in Chrome / Invalid Date in Firefox,
+    // so the comparator could place stale groups above newer ones.
     return Array.from(byKey.values()).sort((a, b) => {
-      const aT = new Date(a.rows[0].occurred_at).getTime();
-      const bT = new Date(b.rows[0].occurred_at).getTime();
-      return bT - aT;
+      return _logTimestampMs(b.rows[0].occurred_at) - _logTimestampMs(a.rows[0].occurred_at);
     });
   }, [rows, dedupeOn]);
 
