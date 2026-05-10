@@ -233,17 +233,6 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                     ? <><RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />Downloading…</>
                     : <><Download className="mr-1.5 h-3 w-3" />Pull .env</>}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!site.url}
-                  onClick={() => onRestore(site)}
-                  className="h-7 border-rose-500/40 px-3 text-xs text-rose-400 hover:text-rose-300 hover:border-rose-500/60"
-                  title="Push a snapshot from the hub back to this site"
-                >
-                  <Upload className="mr-1.5 h-3 w-3" />
-                  Restore…
-                </Button>
               </div>
             </div>
             )}
@@ -308,6 +297,27 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
               )}
             </div>
             )}
+            {/* Restore lives outside the view-conditional blocks because
+                a restore replaces the live DB on the site — it's a
+                site-level action, not an App-tab-only one. Originally
+                rendered inside the App block; Codex flagged that the
+                workflow vanished when an operator switched to the SQL
+                tab, which contradicts the always-visible behaviour
+                the action had pre-tabs. Pull DB / Pull .env stay in
+                the App block because those are App-backup-specific. */}
+            <div className="flex justify-end border-t border-border/40 pt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!site.url}
+                onClick={() => onRestore(site)}
+                className="h-7 border-rose-500/40 px-3 text-xs text-rose-400 hover:text-rose-300 hover:border-rose-500/60"
+                title="Push a snapshot from the hub back to this site"
+              >
+                <Upload className="mr-1.5 h-3 w-3" />
+                Restore…
+              </Button>
+            </div>
           </div>
         )}
       </div>
