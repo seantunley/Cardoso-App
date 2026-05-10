@@ -681,6 +681,23 @@ async function pullBackupForSite(site) {
       console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
     }
 
+    // ok=true means: download landed AND PRAGMA integrity_check passed.
+    // A 'corrupt' integrity result is a real failure even though the
+    // bytes streamed successfully — the file gets renamed to .corrupt
+    // by checkBackupIntegrity, the hub_backup_integrity table records
+    // the failure reason, but the .corrupt file is unusable for restore.
+    // Returning ok=true in that case caused downstream callers
+    // (notify-backup-ready handler, then the site's backup-now flow)
+    // to report "Hub pulled immediately" while the hub mirror was
+    // actually a renamed corrupt artifact. Codex catch on PR #248.
+    if (integrity.integrity !== 'ok') {
+      return {
+        ok: false,
+        file: integrity.finalPath,
+        integrity: integrity.integrity,
+        error: `Snapshot downloaded but PRAGMA integrity_check returned '${integrity.integrity}'. The file was renamed to .corrupt; the hub mirror does NOT contain a usable copy of this snapshot. Operator action: investigate the source DB (live site DB may also be corrupt) and re-pull, OR restore the site from an earlier known-good hub snapshot.`,
+      };
+    }
     return { ok: true, file: integrity.finalPath, integrity: integrity.integrity };
   } catch (err) {
     const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
