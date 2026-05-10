@@ -1576,19 +1576,49 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // databaseconnection.last_sync value via the kpis aggregation,
       // so any drift is bounded to one scheduler interval.
       //
+      // status/error are derived from body.results to mirror the
+      // site's own kpis aggregation contract: any connection in
+      // 'error' makes site_accpac_status='error'. Initial version of
+      // this fix unconditionally set status='ok' and cleared
+      // last_accpac_error whenever okCount > 0, which on a partial
+      // failure (e.g. 2 of 3 connections succeed, 1 fails) would
+      // paint the tile green and hide the real error until the next
+      // scheduled syncSite tick — exactly the timeout case where the
+      // chained syncSite below tends NOT to land. Codex catch on
+      // PR #238: derive the correct status here from the trigger
+      // response itself, since body.results is already the complete
+      // current state of every active + error connection.
+      //
       // Gated on okCount > 0 — a trigger that returned 200 with zero
       // successful connections shouldn't advance the timestamp; that
-      // would be a lie.
-      const okCount = (body.results || []).filter((r) => r?.ok).length;
+      // would be a lie. (Status/error are derived even in the
+      // okCount === 0 case below for the chained refresh logic.)
+      const results = Array.isArray(body.results) ? body.results : [];
+      const okCount = results.filter((r) => r?.ok).length;
+      const failedResults = results.filter((r) => !r?.ok);
       if (okCount > 0) {
+        // Build the error column from the failures, if any. Mirror
+        // the site kpis aggregation: error message of the most-recent
+        // failure, capped at 500 chars (same cap routes/reporting.js
+        // applies). Prefix with the connection name so the tile shows
+        // WHICH connection failed when there's mixed success.
+        let optimisticStatus = 'ok';
+        let optimisticError = null;
+        if (failedResults.length > 0) {
+          optimisticStatus = 'error';
+          const first = failedResults[0];
+          const namePrefix = first?.name ? `${first.name}: ` : '';
+          const msg = String(first?.message || 'Sync failed');
+          optimisticError = `${namePrefix}${msg}`.slice(0, 500);
+        }
         try {
           db.prepare(`
             UPDATE hub_sites
             SET last_accpac_synced_at = ?,
-                last_accpac_status    = 'ok',
-                last_accpac_error     = NULL
+                last_accpac_status    = ?,
+                last_accpac_error     = ?
             WHERE id = ?
-          `).run(new Date().toISOString(), site.id);
+          `).run(new Date().toISOString(), optimisticStatus, optimisticError, site.id);
         } catch (updateErr) {
           // Don't fail the trigger response on a stamp-write error;
           // the actual sync already succeeded and the next scheduled
