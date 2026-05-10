@@ -370,10 +370,50 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
     const source = typeof req.query.source === 'string' && req.query.source.trim() ? req.query.source.trim() : null;
     const sinceHours = Math.min(Math.max(parseInt(req.query.sinceHours, 10) || 24 * 7, 1), 24 * 90);
+    // ?prefixes=bat.ocr.,bat-ocr. — narrow rows AND the sources dropdown
+    // to topics matching ANY of the given prefixes. The OCR ops panel
+    // needs this so it doesn't fetch 300 unrelated rows and client-side
+    // filter to leftovers (Codex P2 on PR #226: when System Log is
+    // dominated by other sources, the 300-row server cap fills up
+    // before enough OCR entries reach the client and the operator sees
+    // a shorter window than they think).
+    //
+    // Capped at 5 prefixes to keep the SQL clause bounded; each prefix
+    // sanitised to ≤ 60 chars. SQLite LIKE-escape isn't needed here
+    // because our topic names are dot-/dash-separated identifiers — no
+    // % or _ in any topic — but we strip those defensively anyway so a
+    // future topic naming choice can't accidentally widen the filter.
+    let prefixes = null;
+    if (typeof req.query.prefixes === 'string' && req.query.prefixes.trim()) {
+      prefixes = req.query.prefixes
+        .split(',')
+        .map(p => p.trim().slice(0, 60))
+        .filter(Boolean)
+        .map(p => p.replace(/[%_]/g, ''))
+        .slice(0, 5);
+      if (prefixes.length === 0) prefixes = null;
+    }
     try {
       const where = ["occurred_at >= datetime('now', ?)"];
       const args = [`-${sinceHours} hours`];
-      if (source) { where.push('source = ?'); args.push(source); }
+      // Build the prefix clause once and reuse for both the rows query
+      // (whose limit Codex was worried about) and the sources aggregate
+      // (so the dropdown counts match what's actually visible).
+      let prefixClause = '';
+      const prefixArgs = [];
+      if (prefixes) {
+        prefixClause = `(${prefixes.map(() => 'source LIKE ?').join(' OR ')})`;
+        for (const p of prefixes) prefixArgs.push(`${p}%`);
+      }
+      if (source) {
+        // Explicit single-source filter wins over prefix — used when
+        // the operator picks a specific topic from the dropdown.
+        where.push('source = ?');
+        args.push(source);
+      } else if (prefixClause) {
+        where.push(prefixClause);
+        args.push(...prefixArgs);
+      }
       const rows = db.prepare(`
         SELECT id, source, level, message, stack, context, occurred_at
         FROM error_log
@@ -381,13 +421,19 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         ORDER BY occurred_at DESC
         LIMIT ?
       `).all(...args, limit);
+      const sourceWhere = ["occurred_at >= datetime('now', ?)"];
+      const sourceArgs = [`-${sinceHours} hours`];
+      if (prefixClause) {
+        sourceWhere.push(prefixClause);
+        sourceArgs.push(...prefixArgs);
+      }
       const sources = db.prepare(`
         SELECT source, COUNT(*) AS n
         FROM error_log
-        WHERE occurred_at >= datetime('now', ?)
+        WHERE ${sourceWhere.join(' AND ')}
         GROUP BY source
         ORDER BY n DESC
-      `).all(`-${sinceHours} hours`);
+      `).all(...sourceArgs);
       res.json({ rows, sources, limit, sinceHours });
     } catch (err) {
       res.status(500).json({ error: err.message });

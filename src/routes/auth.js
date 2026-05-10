@@ -89,9 +89,12 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         }
       }
 
+      const session_expires_at = req.session?.cookie?.expires
+        ? new Date(req.session.cookie.expires).toISOString()
+        : null;
       res.json({
         success: true,
-        user: sanitizeUser(user),
+        user: { ...sanitizeUser(user), session_expires_at },
       });
     } catch (error) {
       console.error(`Login error (phase=${phase}):`, error);
@@ -220,7 +223,45 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
   });
 
   router.get('/api/auth/me', requireAuth, (req, res) => {
-    res.json(req.currentUser);
+    // Include the absolute session expiry so the client-side SessionExpiry
+    // watcher can warn the operator before the cookie's maxAge hits zero.
+    // express-session sets cookie.expires when the cookie is created/saved;
+    // with rolling: false (our default), this is a fixed timestamp set at
+    // login and not extended by activity. Send it as ISO so the client can
+    // count down without trusting client clock drift relative to login.
+    const session_expires_at = req.session?.cookie?.expires
+      ? new Date(req.session.cookie.expires).toISOString()
+      : null;
+    res.json({ ...req.currentUser, session_expires_at });
+  });
+
+  // Session extension — bumps the cookie's maxAge so the absolute expiry
+  // moves forward by the original window. Called by the client when the
+  // operator clicks "Continue" on the about-to-expire warning. With
+  // resave: false, mutating cookie.maxAge marks the session dirty so it's
+  // persisted to SqliteStore and the Set-Cookie header is rewritten with
+  // the new expires.
+  router.post('/api/auth/extend-session', requireAuth, (req, res) => {
+    try {
+      // Mirror the original cookie maxAge (12h, defined in server.js).
+      // Reading process.env here keeps the source of truth in one place
+      // if we ever make this configurable; for now the literal matches.
+      const MAX_AGE_MS = 1000 * 60 * 60 * 12;
+      req.session.cookie.maxAge = MAX_AGE_MS;
+      req.session.save((err) => {
+        if (err) {
+          try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+          return res.status(500).json({ error: 'Failed to extend session' });
+        }
+        const expires = req.session?.cookie?.expires
+          ? new Date(req.session.cookie.expires).toISOString()
+          : null;
+        res.json({ success: true, session_expires_at: expires });
+      });
+    } catch (err) {
+      try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+      res.status(500).json({ error: 'Failed to extend session' });
+    }
   });
 
   router.put('/api/auth/me', requireAuth, async (req, res) => {

@@ -13,6 +13,7 @@ import { hasPermission } from "@/lib/permissions";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
+import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import ProtectedRoute from "@/components/auth/ProtectedAuth";
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -161,6 +162,7 @@ function App() {
       <QueryClientProvider client={queryClientInstance}>
         <Router>
           <NavigationTracker />
+          <SessionExpiryWatcher />
           <AuthenticatedApp />
         </Router>
         <Toaster />

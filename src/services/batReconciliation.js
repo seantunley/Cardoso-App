@@ -1433,6 +1433,178 @@ export function getExtractionProgress(reconId) {
   return { running, processed, total, pending, in_flight: inFlight };
 }
 
+// ── OCR Operations Tab support ──────────────────────────────────────────────
+// The Operations page's OCR tab needs a single fast snapshot of "what is OCR
+// doing right now" — pause state, in-flight rows across all recons, the
+// active recon's progress, and any active regex auto-halt. Distinct from
+// getExtractionProgress (which is per-recon and used by the BAT page) — this
+// is a global view for the operator. Polled every ~2s by the panel.
+
+export function getOcrSnapshot() {
+  const now = Date.now();
+  const inFlight = [];
+  for (const row of currentlyProcessing.values()) {
+    inFlight.push({
+      id: row.id,
+      reconciliation_id: row.reconciliation_id,
+      store_name: row.store_name,
+      stage: row.stage || null,
+      elapsed_seconds: Math.floor((now - row.started_at_ms) / 1000),
+      stage_age_seconds: row.stage_at_ms ? Math.floor((now - row.stage_at_ms) / 1000) : null,
+      kill_attempted: !!row.kill_attempted,
+    });
+  }
+
+  let pending = 0;
+  let failed = 0;
+  let notFound = 0;
+  try {
+    pending = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'pending'").get()?.c || 0;
+    failed = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'failed'").get()?.c || 0;
+    notFound = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'not_found'").get()?.c || 0;
+  } catch { /* table may not exist on first boot */ }
+
+  // Active recon = the one the worker is currently chewing through.
+  // We want week_number / year so the operator sees "currently working
+  // week 38 / 2025" instead of a bare id.
+  let activeRecon = null;
+  if (workerRunning && workerReconId != null) {
+    try {
+      const r = db.prepare(`
+        SELECT id, week_number, year, status, last_error, last_error_at,
+          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id) AS rows_total,
+          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'found') AS rows_found,
+          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'pending') AS rows_pending,
+          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'not_found') AS rows_not_found,
+          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'failed') AS rows_failed
+        FROM bat_reconciliations WHERE id = ?
+      `).get(workerReconId);
+      if (r) activeRecon = r;
+    } catch { /* table may not exist on first boot */ }
+  }
+
+  // Halt detection — most recent recon whose last_error matches the auto-halt
+  // signature. We surface this even when worker isn't running because the
+  // halt's whole point is "OCR is stopped and the operator needs to know
+  // why", not "what's running right now".
+  let halt = null;
+  try {
+    const haltRow = db.prepare(`
+      SELECT id, week_number, year, last_error, last_error_at
+      FROM bat_reconciliations
+      WHERE last_error LIKE 'OCR auto-halted:%'
+      ORDER BY last_error_at DESC LIMIT 1
+    `).get();
+    if (haltRow) {
+      halt = {
+        reconciliation_id: haltRow.id,
+        week_number: haltRow.week_number,
+        year: haltRow.year,
+        message: haltRow.last_error,
+        occurred_at: haltRow.last_error_at,
+        // Always clearable — even if ocrPaused is somehow false (stale
+        // marker, manual API call, race), the right action is still to
+        // clear the marker so the panel doesn't keep showing a halt that
+        // isn't in force. The clearOcrHalt path is idempotent: it wipes
+        // the marker, sets paused=false, and resumes — safe to invoke
+        // regardless of current state.
+        can_clear: true,
+      };
+    }
+  } catch { /* not fatal — surface no halt rather than crash */ }
+
+  return {
+    paused: ocrPaused,
+    worker_running: workerRunning,
+    worker_recon_id: workerReconId,
+    concurrency: OCR_CONCURRENCY,
+    pending_total: pending,
+    not_found_total: notFound,
+    failed_total: failed,
+    in_flight: inFlight,
+    active_recon: activeRecon,
+    halt,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+// Aggregated counters from error_log over a sliding window. Used by the
+// OCR tab's counter strip — "in the last hour: 142 matches, 3 cascade
+// exhausted, 12 cooldown skips, 1 halt fire". Topic prefixes covered:
+//   bat.ocr.*  — primary OCR observability stream (this batch + earlier)
+//   bat-ocr.*  — older worker lifecycle topic (paused/resumed/started)
+export function getOcrCounters({ windowHours = 1 } = {}) {
+  const window = Math.min(Math.max(parseInt(windowHours, 10) || 1, 1), 24 * 7);
+  const since = `-${window} hours`;
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      SELECT source, level, COUNT(*) AS n
+      FROM error_log
+      WHERE (source LIKE 'bat.ocr.%' OR source LIKE 'bat-ocr.%')
+        AND occurred_at >= datetime('now', ?)
+      GROUP BY source, level
+      ORDER BY n DESC
+    `).all(since);
+  } catch { /* error_log may not exist on a fresh install */ }
+  // Flatten to a topic→count map plus a level→count map for the
+  // headline strip. Keeping both per-source and per-level lets the UI
+  // build its own categorisation without re-querying.
+  const by_source = {};
+  const by_level = {};
+  for (const r of rows) {
+    by_source[r.source] = (by_source[r.source] || 0) + r.n;
+    by_level[r.level || 'error'] = (by_level[r.level || 'error'] || 0) + r.n;
+  }
+  return { window_hours: window, by_source, by_level };
+}
+
+// Recent reconciliations (any status) with row-count breakdown. Powers the
+// "recent runs" table in the OCR tab. NOT scoped by user — admin-only view.
+export function getRecentBatReconciliations(limit = 20) {
+  const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
+  try {
+    return db.prepare(`
+      SELECT
+        r.id, r.week_number, r.year, r.status,
+        r.last_error, r.last_error_at, r.created_at,
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id) AS rows_total,
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'found') AS rows_found,
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'pending') AS rows_pending,
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'not_found') AS rows_not_found,
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'failed') AS rows_failed
+      FROM bat_reconciliations r
+      ORDER BY r.id DESC
+      LIMIT ?
+    `).all(lim);
+  } catch {
+    return [];
+  }
+}
+
+// "Clear halt + resume" action — called from the OCR tab when the operator
+// has investigated the regex_streak_halt and wants to restart OCR. Wipes
+// the halt's last_error so the recon doesn't show a stale toast, then
+// unpauses and resumes the worker. If reconId is provided, only that
+// recon's auto-halt error is cleared (defence — a different recon's
+// last_error shouldn't be touched).
+export function clearOcrHalt({ reconId = null } = {}) {
+  if (reconId != null) {
+    try {
+      db.prepare(`
+        UPDATE bat_reconciliations
+        SET last_error = NULL, last_error_at = NULL, status = 'pending'
+        WHERE id = ? AND last_error LIKE 'OCR auto-halted:%'
+      `).run(reconId);
+    } catch { /* best-effort — pause + resume below is the load-bearing part */ }
+  }
+  setOcrPaused(false);
+  let resumed = false;
+  try { resumeExtractionWorker(); resumed = true; } catch {}
+  try { logError('bat.ocr.halt_cleared', new Error('Operator cleared regex auto-halt'), { reconciliation_id: reconId, resumed }, 'info'); } catch {}
+  return { cleared: true, resumed };
+}
+
 export async function runInvoiceExtraction(reconId) {
   if (ocrPaused) {
     // Don't silently swallow the request — the UI disables the button when
