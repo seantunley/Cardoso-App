@@ -107,7 +107,14 @@ function initSchema(db) {
       action_type TEXT NOT NULL,
       user_email TEXT NOT NULL,
       user_name TEXT,
-      resource_type TEXT CHECK(resource_type IN ('user', 'connection', 'record', 'rule', 'system')),
+      -- resource_type intentionally has NO CHECK constraint. The original
+      -- whitelist ('user'|'connection'|'record'|'rule'|'system') silently
+      -- dropped audit rows whenever a feature added a new resource type
+      -- without coordinating a schema migration (PR #198 added 'site' for
+      -- the Sync from Accpac trigger; rows lost until v65 ran). Migration
+      -- v65 drops the constraint on existing installs; this mirrors it
+      -- for fresh installs.
+      resource_type TEXT,
       resource_id TEXT,
       resource_name TEXT,
       action_details TEXT,
