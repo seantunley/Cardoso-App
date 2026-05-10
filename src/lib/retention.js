@@ -75,13 +75,34 @@ function parseDays(envVal, defaultVal) {
 // a summary array suitable for attaching to job_runs.context via the
 // scheduler's `track()` helper. Per-table failures are logged and the
 // loop continues — one bad table shouldn't block the others.
+//
+// Comparison uses SQLite datetime() on BOTH sides, NOT raw lexicographic
+// string compare. The targeted tables write timestamps in two
+// incompatible formats:
+//   - error_log.occurred_at + syncrun.started_at: ISO 8601 with `T`
+//     separator and `.sssZ` suffix (logError + recordJob both call
+//     `new Date().toISOString()`)
+//   - auditlog.created_date + login_log.logged_in_at: SQLite
+//     CURRENT_TIMESTAMP / datetime('now') format
+//     ('YYYY-MM-DD HH:MM:SS')
+//
+// In raw string compare, ' ' (0x20) sorts BEFORE 'T' (0x54), so a
+// CURRENT_TIMESTAMP-format row that lands EXACTLY on the cutoff
+// boundary gets deleted as "older than kept_days" when it's actually
+// at the cutoff. Wrapping both sides in datetime() normalises to a
+// single comparable form (julianday-based internally) and the
+// boundary works as intended.
+//
+// Codex catch on PR #245.
 export function pruneOldRows() {
   const summary = [];
   for (const { table, date_col, default_days, env } of RETENTION_TABLES) {
     const keepDays = parseDays(process.env[env], default_days);
     const cutoff = new Date(Date.now() - keepDays * 24 * 60 * 60 * 1000).toISOString();
     try {
-      const result = db.prepare(`DELETE FROM ${table} WHERE ${date_col} < ?`).run(cutoff);
+      const result = db
+        .prepare(`DELETE FROM ${table} WHERE datetime(${date_col}) < datetime(?)`)
+        .run(cutoff);
       summary.push({ table, deleted: result.changes, kept_days: keepDays });
     } catch (err) {
       try { logError(`retention.${table}`, err, { table, kept_days: keepDays }); } catch {}
