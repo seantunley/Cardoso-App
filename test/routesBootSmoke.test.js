@@ -33,15 +33,102 @@
 // If you add a new route module under src/routes/, no change is
 // needed here — the test discovers files via fs.readdirSync.
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
+import Database from 'better-sqlite3';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..');
 const ROUTES_DIR = path.join(REPO_ROOT, 'src', 'routes');
+
+// Real schema-loaded temp DB. Without this, several lib modules
+// (audit.js, statements.js via syncEngine.js) call db.prepare at
+// top level with table names that wouldn't exist in a blank file,
+// so the static ESM import phase rejects with a SqliteError BEFORE
+// the route module body ever runs. That would mask import-time
+// bugs further down the file (e.g. a broken createRequire on
+// line N appearing after a healthy import on line 1) — Codex
+// review caught the smoke runner falling through to the accepted-
+// side-effect arm in exactly this scenario.
+//
+// We hand-roll the minimum CREATE TABLE statements the lib import
+// chain touches (audit.js → auditlog; statements.js → user,
+// datarecord, syncrun, databaseconnection, autoflagrule;
+// hub-mode-only refs → hub_settings, hub_sites). Importing the
+// real schema.js → runMigrations chain is brittle here: migration
+// replay against a blank file hits ordering bugs unrelated to
+// what we're testing.
+// Column shapes mirror src/db/schema.js so better-sqlite3's prepare-time
+// column validation is satisfied. If a future PR widens audit.js or
+// statements.js to reference a new column, this block needs the same
+// addition. (Better than chasing the live schema.js: importing schema.js
+// drags in runMigrations, whose replay against a blank file hits
+// ordering bugs unrelated to this test.)
+const SMOKE_SCHEMA = `
+  CREATE TABLE "user" (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT,
+    full_name TEXT,
+    password_hash TEXT,
+    role TEXT,
+    theme_preference TEXT,
+    created_date TEXT
+  );
+  CREATE TABLE auditlog (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action_type TEXT,
+    user_email TEXT,
+    user_name TEXT,
+    resource_type TEXT,
+    resource_id TEXT,
+    resource_name TEXT,
+    action_details TEXT,
+    changes TEXT,
+    ip_address TEXT,
+    status TEXT,
+    created_date TEXT
+  );
+  CREATE TABLE datarecord (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    flag_color TEXT,
+    flag_reason TEXT,
+    auto_flagged INTEGER,
+    flag_source TEXT,
+    outstanding_balance TEXT
+  );
+  CREATE TABLE syncrun (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    connection_id INTEGER,
+    status TEXT,
+    started_at TEXT,
+    completed_at TEXT
+  );
+  CREATE TABLE databaseconnection (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    status TEXT
+  );
+  CREATE TABLE autoflagrule (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    is_active INTEGER,
+    priority INTEGER
+  );
+  CREATE TABLE hub_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+  CREATE TABLE hub_sites (
+    id TEXT PRIMARY KEY,
+    name TEXT,
+    url TEXT,
+    token TEXT
+  );
+`;
+
+let TEMP_DB_PATH = '';
 
 const routeFiles = fs
   .readdirSync(ROUTES_DIR)
@@ -67,9 +154,18 @@ import(url).then(
     const code = err && err.code;
     process.stderr.write(\`\${err && err.constructor && err.constructor.name || 'Error'}: \${msg}\\n\`);
     // Import-resolution failure class: exit 2 so the test fails.
+    // Both the ESM loader codes (ERR_MODULE_NOT_FOUND, ERR_REQUIRE_ESM,
+    // ERR_UNSUPPORTED_DIR_IMPORT) AND the CJS loader's MODULE_NOT_FOUND
+    // need to be in this set — route modules now use createRequire
+    // (see backup.js → archiver), and a missing CJS dep throws with
+    // code === 'MODULE_NOT_FOUND' (no ERR_ prefix). Without that arm
+    // a missing CJS dependency would fall through to the accepted-
+    // side-effect path and the test would pass while production boot
+    // crashed on startup. Codex review catch.
     if (
       err instanceof SyntaxError ||
       code === 'ERR_MODULE_NOT_FOUND' ||
+      code === 'MODULE_NOT_FOUND' ||
       code === 'ERR_REQUIRE_ESM' ||
       code === 'ERR_UNSUPPORTED_DIR_IMPORT' ||
       /does not provide an export/.test(msg)
@@ -86,12 +182,9 @@ import(url).then(
 
 function importInSubprocess(file) {
   const fileUrl = pathToFileURL(path.join(ROUTES_DIR, file)).href;
-  // Use ':memory:' so even if the module side-effects an open of the
-  // DB file, we don't touch the real cardoso.db. Migrations don't run
-  // — that's intentional; if an import-time DB call hits a missing
-  // table, the subprocess exits 0 (accepted side-effect-time error)
-  // and the smoke test passes for the import-resolution check.
-  const env = { ...process.env, DB_PATH: ':memory:' };
+  // Point at the schema-loaded temp DB created in beforeAll so the
+  // import graph completes — see the TEMP_DB_PATH comment above.
+  const env = { ...process.env, DB_PATH: TEMP_DB_PATH };
   const result = spawnSync(
     process.execPath,
     ['--input-type=module', '-e', RUNNER, fileUrl],
@@ -99,6 +192,26 @@ function importInSubprocess(file) {
   );
   return result;
 }
+
+beforeAll(() => {
+  TEMP_DB_PATH = path.join(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'cardoso-smoke-')),
+    'schema.db',
+  );
+  const db = new Database(TEMP_DB_PATH);
+  db.exec(SMOKE_SCHEMA);
+  db.close();
+});
+
+afterAll(() => {
+  if (TEMP_DB_PATH && fs.existsSync(TEMP_DB_PATH)) {
+    try {
+      fs.rmSync(path.dirname(TEMP_DB_PATH), { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup; tempdir gets reaped by the OS eventually
+    }
+  }
+});
 
 describe('src/routes/* — boot-time import smoke test', () => {
   it('discovers at least one route module (sanity check)', () => {
