@@ -2435,6 +2435,11 @@ async function processQueue(reconId) {
   // would manifest on every lane simultaneously, so per-lane streaks
   // would never trip the threshold individually.
   let cascadeExhaustedStreak = 0;
+  // Set when the streak breaker fires, so the post-lanes "stillPending"
+  // check can skip the generic "all lanes retired" error message — that
+  // message would mask the real auto-halt reason and mislead the operator
+  // toward investigating lane recreation rather than the regex.
+  let regexHaltTriggered = false;
 
   const runLane = async (lane) => {
     while (true) {
@@ -2606,6 +2611,7 @@ async function processQueue(reconId) {
                 // in sync, and pending rows survive a service restart in
                 // their pending state.
                 try { setOcrPaused(true); } catch {}
+                regexHaltTriggered = true;
                 const haltMsg =
                   `OCR auto-halted: ${cascadeExhaustedStreak} consecutive rows returned text but no invoice regex match. ` +
                   `Likely cause: the supplier's invoice number format isn't recognised by findInvoiceNumber. ` +
@@ -2683,10 +2689,16 @@ async function processQueue(reconId) {
             // existsSync is sync but cheap — single fs.stat. The
             // COALESCE in updateExtraction's UPDATE statement preserves
             // any prior preview if the file isn't there now.
+            //
+            // Stored as the `/api/bat/preview/<file>` URL form (NOT raw
+            // filename) to match the success path in ocrWorker.js — the
+            // UI uses preview_path verbatim as an <a href>, so a bare
+            // filename would render as a broken relative link and defeat
+            // the recovery affordance.
             let salvagedPreview = null;
             try {
               const candidate = path.join(previewDir, `${next.id}.jpg`);
-              if (fs.existsSync(candidate)) salvagedPreview = `${next.id}.jpg`;
+              if (fs.existsSync(candidate)) salvagedPreview = `/api/bat/preview/${next.id}.jpg`;
             } catch {}
             try {
               updateExtraction.run(null, 'failed', salvagedPreview, String(err.message || 'Unknown error').slice(0, 1000), next.id);
@@ -2760,14 +2772,31 @@ async function processQueue(reconId) {
   // UI as a recon-level error so the operator sees a toast/banner rather
   // than a queue that quietly stalls. This also prevents the next
   // workerRunning check from masking the failure.
+  //
+  // Exception: if the regex-streak breaker fired, lanes exited cleanly
+  // by design and pending rows are intentional (waiting for the operator
+  // to resume after fixing the regex). The breaker has already recorded
+  // its own descriptive error via recordReconciliationError, so we skip
+  // the generic "all lanes retired" message — emitting it here would
+  // overwrite the halt reason and point the operator at lane recreation
+  // logs that have nothing to do with the actual problem.
   const stillPending = db.prepare(
     "SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
   ).get(reconId)?.c || 0;
-  if (stillPending > 0) {
+  if (stillPending > 0 && !regexHaltTriggered) {
     const msg = `OCR run ended with ${stillPending} row${stillPending === 1 ? '' : 's'} still pending — all lanes retired. Check the System Log for bat.ocr.lane_recreate / bat.ocr.watchdog_kill entries.`;
     db.prepare("UPDATE bat_reconciliations SET status = 'error', last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(msg, reconId);
     try { logError('bat.ocr.run_incomplete', new Error(msg), { reconciliation_id: reconId, pending: stillPending }); } catch {}
+    emitExtractionUpdate(reconId);
+    return;
+  }
+  if (regexHaltTriggered) {
+    // Halt is its own terminal state — leave status as 'error' (already
+    // set by recordReconciliationError's path), don't try to flip to
+    // 'completed' below, and don't run normalizeInvoiceNumbers since the
+    // run was cut short. Operator resumes by clearing pause + restarting.
+    db.prepare("UPDATE bat_reconciliations SET status = 'error' WHERE id = ?").run(reconId);
     emitExtractionUpdate(reconId);
     return;
   }
