@@ -23,7 +23,7 @@ import {
   Zap, Plus,
   RefreshCw, AlertCircle, CheckCircle2, Clock, LogIn, ClipboardList,
   Download, Upload, GitBranch, Send, Info, Workflow, AlertTriangle,
-  Lock, ShieldCheck, ShieldAlert, ExternalLink, Database,
+  Lock, ShieldCheck, ShieldAlert, ExternalLink, Save,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -797,50 +797,52 @@ function MaintenanceTab() {
   const [clearPassword, setClearPassword] = useState('');
   const [clearPasswordError, setClearPasswordError] = useState('');
 
-  // Compact-database (VACUUM) state. Mirrors the clear-imported pattern
-  // — password-confirmed, modal-gated, result panel sticky after success
-  // so the operator can see the disk reclaimed without re-running.
-  const [compactOpen, setCompactOpen] = useState(false);
-  const [compacting, setCompacting] = useState(false);
-  const [compactPassword, setCompactPassword] = useState('');
-  const [compactPasswordError, setCompactPasswordError] = useState('');
-  const [compactResult, setCompactResult] = useState(null);
+  // Backup-now state. Mirrors the compact-database / clear-imported
+  // pattern: password-confirmed, modal-gated, sticky result panel
+  // shows the operator both the local outcome AND the hub-notify
+  // outcome separately (one can succeed while the other fails — local
+  // backup is the primary goal, hub notify is best-effort).
+  const [backupOpen, setBackupOpen] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupPasswordError, setBackupPasswordError] = useState('');
+  const [backupResult, setBackupResult] = useState(null);
 
-  const handleCompactDatabase = async () => {
-    if (!compactPassword) {
-      setCompactPasswordError('Password is required');
+  const handleBackupNow = async () => {
+    if (!backupPassword) {
+      setBackupPasswordError('Password is required');
       return;
     }
-    setCompactPasswordError('');
-    setCompacting(true);
+    setBackupPasswordError('');
+    setBackingUp(true);
     try {
-      const r = await fetch('/api/maintenance/compact-database', {
+      const r = await fetch('/api/maintenance/backup-now', {
         method: 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: compactPassword }),
+        body: JSON.stringify({ password: backupPassword }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
         if (r.status === 401) {
-          setCompactPasswordError(d.error || 'Incorrect password');
+          setBackupPasswordError(d.error || 'Incorrect password');
           return;
         }
-        throw new Error(d.error || 'Compact database failed');
+        throw new Error(d.error || 'Backup failed');
       }
-      setCompactResult(d);
-      setCompactOpen(false);
-      setCompactPassword('');
-      const reclaimed = d.reclaimed_mb;
-      const integrity = d.integrity_ok ? '' : ' (⚠ post-VACUUM integrity check FAILED — see audit log)';
+      setBackupResult(d);
+      setBackupOpen(false);
+      setBackupPassword('');
+      const hubNote = d.hub_notified
+        ? 'Hub pulled the new backup immediately.'
+        : `Hub not notified yet (${d.hub_error || 'no detail'}). Hub will pick it up on its next scheduled cron tick.`;
       toast.success(
-        `Database compacted: ${d.size_before_mb} MB → ${d.size_after_mb} MB ` +
-        `(reclaimed ${reclaimed} MB) in ${(d.elapsed_ms / 1000).toFixed(1)}s${integrity}`,
+        `Backup created: ${d.backup_filename} (${d.size_mb} MB) in ${(d.elapsed_ms / 1000).toFixed(1)}s. ${hubNote}`,
       );
     } catch (e) {
-      toast.error(e.message || 'Compact database failed');
+      toast.error(e.message || 'Backup failed');
     } finally {
-      setCompacting(false);
+      setBackingUp(false);
     }
   };
 
@@ -920,6 +922,46 @@ function MaintenanceTab() {
 
   return (
     <div className="space-y-6 max-w-3xl">
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div>
+          <h4 className="text-sm font-semibold text-foreground">Backup now</h4>
+          <p className="text-xs text-muted-foreground mt-1">
+            Creates a fresh database snapshot in <code className="bg-muted px-1 py-0.5 rounded text-[10px]">database/backups/</code>
+            {' '}immediately, instead of waiting for the daily 02:00 cron. Safe to run any time —
+            backups are purely additive (a new file is created; the live database is never modified).
+          </p>
+          <p className="text-xs text-muted-foreground mt-1">
+            If <code className="bg-muted px-1 py-0.5 rounded text-[10px]">HUB_URL</code> is configured,
+            the site also notifies the hub to pull the new file immediately so the hub mirror stays current.
+            The notify is best-effort; if the hub is offline the local backup still succeeds and the hub picks
+            it up on its next scheduled cron tick.
+          </p>
+        </div>
+        {backupResult && (
+          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs space-y-1">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-medium">
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Last run: <code className="bg-muted px-1.5 py-0.5 rounded">{backupResult.backup_filename}</code> ({backupResult.size_mb} MB)
+            </div>
+            <div className="text-muted-foreground">
+              Took {(backupResult.elapsed_ms / 1000).toFixed(1)}s · Hub notify: {backupResult.hub_notified ? '✓ pulled immediately' : '○ deferred to next cron'}
+            </div>
+            {!backupResult.hub_notified && backupResult.hub_error && (
+              <div className="text-amber-700 dark:text-amber-400 text-[11px]">{backupResult.hub_error}</div>
+            )}
+          </div>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => setBackupOpen(true)}
+          disabled={loadingPreview || applying || clearingImported || backingUp}
+        >
+          <Save className="h-3.5 w-3.5 mr-1.5" />
+          {backingUp ? 'Backing up...' : 'Backup now'}
+        </Button>
+      </div>
+
       <div>
         <h3 className="text-sm font-semibold mb-1">Maintenance</h3>
         <p className="text-xs text-muted-foreground mb-4">
@@ -937,48 +979,49 @@ function MaintenanceTab() {
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground">Compact database</h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            Reclaims disk space freed by previously-deleted records by rewriting the database
-            file. <strong className="text-foreground">Non-destructive</strong> — every current row
-            is preserved. The app may briefly slow down during the operation (typically a
-            few seconds; up to a few minutes on a recently-bloated database).
-          </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            A backup is taken first as a safety net, and integrity checks run before AND
-            after to catch any corruption. The backup file stays on disk so you can restore
-            it manually if anything else goes wrong.
-          </p>
-        </div>
-        {compactResult && (
-          <div className="rounded-md border border-emerald-500/30 bg-emerald-500/5 p-3 text-xs space-y-1">
-            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-300 font-medium">
-              <CheckCircle2 className="h-3.5 w-3.5" />
-              Last run: {compactResult.size_before_mb} MB → {compactResult.size_after_mb} MB
-              <span className="text-emerald-600 dark:text-emerald-400">
-                (reclaimed {compactResult.reclaimed_mb} MB)
-              </span>
+      <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Create a backup now?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 text-sm">
+            <p className="text-muted-foreground">
+              A timestamped database snapshot is written to <code className="bg-muted px-1 py-0.5 rounded text-[10px]">database/backups/</code>.
+              The live database is not modified.
+            </p>
+            <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs text-muted-foreground space-y-1">
+              <div className="font-medium text-foreground">After the local backup lands:</div>
+              <ul className="list-disc pl-5 space-y-0.5">
+                <li>The hub is notified (if <code className="bg-muted px-1 py-0.5 rounded text-[10px]">HUB_URL</code> is set) and pulls the new file within seconds</li>
+                <li>If the hub is unreachable, the local backup still succeeds; the hub catches up on its next scheduled cron tick</li>
+                <li>An audit-log entry records who triggered this and what was created</li>
+              </ul>
             </div>
-            <div className="text-muted-foreground">
-              Took {(compactResult.elapsed_ms / 1000).toFixed(1)}s · Integrity check: {compactResult.integrity_ok ? '✓ OK' : '✗ FAILED'}
+            <div className="space-y-1.5">
+              <label htmlFor="backup-password" className="text-xs font-medium text-foreground">Confirm your password</label>
+              <input
+                id="backup-password"
+                type="password"
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                placeholder="Enter your password"
+                value={backupPassword}
+                onChange={(e) => { setBackupPassword(e.target.value); setBackupPasswordError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && backupPassword) handleBackupNow(); }}
+                disabled={backingUp}
+                autoComplete="current-password"
+              />
+              {backupPasswordError && <p className="text-xs text-destructive">{backupPasswordError}</p>}
             </div>
-            <div className="text-muted-foreground">
-              Backup saved as <code className="bg-muted px-1.5 py-0.5 rounded">{compactResult.backup_filename}</code>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setBackupOpen(false)} disabled={backingUp}>Cancel</Button>
+              <Button onClick={handleBackupNow} disabled={backingUp || !backupPassword}>
+                <Save className="h-3.5 w-3.5 mr-1.5" />
+                {backingUp ? 'Backing up...' : 'Yes, back up now'}
+              </Button>
             </div>
           </div>
-        )}
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={() => setCompactOpen(true)}
-          disabled={loadingPreview || applying || clearingImported || compacting}
-        >
-          <Database className="h-3.5 w-3.5 mr-1.5" />
-          {compacting ? 'Compacting...' : 'Compact database'}
-        </Button>
-      </div>
+        </DialogContent>
+      </Dialog>
 
       <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 space-y-3">
         <div>

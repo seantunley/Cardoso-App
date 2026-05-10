@@ -1155,37 +1155,32 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
-  // POST /api/maintenance/compact-database — admin-only, password-confirmed.
-  // Runs `VACUUM` to reclaim disk pages freed by prior DELETEs.
+  // POST /api/maintenance/backup-now — admin-only, password-confirmed.
+  // Creates a fresh backup snapshot in database/backups/ and (best-
+  // effort) notifies the hub so it pulls the new file immediately
+  // instead of waiting for the next 03:00 cron.
   //
-  // VACUUM is non-destructive by SQLite's design — every row in every
-  // table survives. It rewrites the file at its actual content size,
-  // so a DB that has 3 GB of free pages from a bulk DELETE shrinks to
-  // its true content size. The original use case here was the operator
-  // who hit a 3.7 GB cardoso.db where 99% was the defunct
-  // record_snapshots table; one VACUUM took it to 14 MB.
+  // Backup itself is purely additive (new file, never overwrites or
+  // deletes the live DB), but we keep the password confirm to match
+  // the rest of the maintenance UX and so the audit row reflects an
+  // explicit operator action.
   //
-  // Three layers of safety even though VACUUM is non-destructive:
-  //   1. Backup the DB before VACUUM (timestamped, kept on disk so the
-  //      operator can restore if anything else goes wrong).
-  //   2. PRAGMA integrity_check BEFORE — refuses to VACUUM a corrupt
-  //      DB. VACUUM doesn't propagate corruption but a corrupt source
-  //      should be a loud failure, not a silent rewrite.
-  //   3. PRAGMA integrity_check AFTER — surfaces any post-VACUUM issue
-  //      so the operator sees it instead of trusting silently.
-  //
-  // The operation acquires an EXCLUSIVE lock for its duration; on a
-  // healthy DB this is sub-second to a few seconds, on a recently-
-  // bloated one it can take 30-180s. The frontend warns about this.
-  router.post('/api/maintenance/compact-database', requireAuth, requireAdmin, async (req, res) => {
+  // The hub-notify step is best-effort: a notify failure (HUB_URL
+  // unset, hub unreachable, hub returns 4xx/5xx) still reports the
+  // local backup as successful. The hub's daily cron will pick the
+  // file up at 03:00 regardless. Operator sees the notify-failure
+  // reason in the response so they know whether to chase it.
+  router.post('/api/maintenance/backup-now', requireAuth, requireAdmin, async (req, res) => {
     try {
-      // Require password confirmation (mirrors the clear-imported-data
-      // pattern). VACUUM isn't destructive but holding the lock for
-      // minutes during a slow vacuum CAN affect every operator using
-      // the app, so we want explicit confirmation that this is intentional.
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(400).json({
+          error: 'Backup-now is site-only. The hub does not maintain its own database backup via this endpoint.',
+        });
+      }
+
       const { password } = req.body || {};
       if (!password) {
-        return res.status(400).json({ error: 'Password is required to compact the database.' });
+        return res.status(400).json({ error: 'Password is required.' });
       }
       const user = db.prepare('SELECT * FROM "user" WHERE id = ?').get(req.currentUser.id);
       if (!user || !user.password_hash) {
@@ -1196,102 +1191,104 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         return res.status(401).json({ error: 'Incorrect password.' });
       }
 
-      // Resolve the live DB path. process.env.DB_PATH wins over the
-      // packaged default just like src/db/index.js does, so a site
-      // running the DB on a different volume gets the right file.
+      // Inline backup using the same shape as scheduler.runLocalBackup
+      // (which we don't import to avoid a circular routes↔scheduler
+      // dependency). Async backup() is safe with concurrent writes.
       const dbPath = process.env.DB_PATH || './database/cardoso.db';
       const resolvedDbPath = path.resolve(dbPath);
-
-      // Pre-VACUUM integrity check. Refuse if the DB is already
-      // corrupt — vacuuming a corrupt source can mask the original
-      // damage and make recovery harder. The operator should restore
-      // from backup instead.
-      const preIntegrity = db.prepare('PRAGMA integrity_check').all();
-      const preOk = preIntegrity.length === 1 && preIntegrity[0].integrity_check === 'ok';
-      if (!preOk) {
-        const issues = preIntegrity.map(r => r.integrity_check).slice(0, 5).join('; ');
-        return res.status(409).json({
-          error:
-            'Pre-VACUUM integrity check failed — refusing to compact a corrupt database. ' +
-            `Issues: ${issues}. Operator action: restore from the most recent good backup ` +
-            'in database/backups/ before retrying.',
-          integrity: preIntegrity,
-        });
-      }
-
-      // Backup BEFORE VACUUM. better-sqlite3.backup() is online — safe
-      // with live writes — and produces a consistent snapshot. Filename
-      // mirrors the daily-backup convention but with a "before-vacuum-"
-      // marker so it's easy to spot in the backups dir.
-      const sizeBefore = fs.statSync(resolvedDbPath).size;
+      const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch {}
+      const siteId = process.env.SITE_ID || 'site';
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const backupDir = path.dirname(resolvedDbPath);
-      const backupPath = path.join(backupDir, `cardoso.db.before-vacuum-${ts}`);
-      try {
-        await db.backup(backupPath);
-      } catch (backupErr) {
-        return res.status(500).json({
-          error: `Backup before VACUUM failed: ${backupErr.message}. Refusing to VACUUM without a backup safety net.`,
-        });
-      }
-
-      // Run VACUUM. Acquires an EXCLUSIVE lock for the duration.
+      const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
       const t0 = Date.now();
-      try {
-        db.exec('VACUUM');
-      } catch (vacuumErr) {
-        // The backup is already on disk — no data loss. Surface the
-        // failure verbosely so the operator can act. The backup name
-        // is included so they can restore manually if needed.
-        return res.status(500).json({
-          error: `VACUUM failed: ${vacuumErr.message}. The pre-VACUUM backup is preserved at ${path.basename(backupPath)} — restore from there if the live DB is damaged.`,
-          backup_filename: path.basename(backupPath),
-        });
-      }
+      await db.backup(destPath);
       const elapsedMs = Date.now() - t0;
+      const sizeBytes = fs.statSync(destPath).size;
 
-      // Post-VACUUM integrity check. If this fails the operator needs
-      // to know loudly — VACUUM should never produce corruption, but
-      // we'd rather surface a hardware/filesystem fault than have the
-      // operator discover it days later when something fails to read.
-      const postIntegrity = db.prepare('PRAGMA integrity_check').all();
-      const postOk = postIntegrity.length === 1 && postIntegrity[0].integrity_check === 'ok';
-      const sizeAfter = fs.statSync(resolvedDbPath).size;
+      // Best-effort hub notify. HUB_URL must be configured and the
+      // site must have its own REPORTING_TOKEN to authenticate (the
+      // hub matches inbound tokens against HUB_SITES[].token).
+      let hubNotified = false;
+      let hubError = null;
+      const hubUrl = process.env.HUB_URL;
+      const reportingToken = process.env.REPORTING_TOKEN;
+      if (!hubUrl) {
+        hubError = 'HUB_URL not configured on this site — hub will pick up the backup on its next scheduled cron tick (default 03:00 daily).';
+      } else if (!reportingToken) {
+        hubError = 'REPORTING_TOKEN not configured on this site — cannot authenticate to the hub. Backup is on disk locally; hub will pick it up on its next scheduled cron tick.';
+      } else {
+        try {
+          const ctrl = new AbortController();
+          const timeout = setTimeout(() => ctrl.abort(), 6 * 60 * 1000); // 6 min — pull can take 5
+          const r = await fetch(`${hubUrl.replace(/\/$/, '')}/api/hub/notify-backup-ready`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'x-reporting-token': reportingToken,
+            },
+            body: JSON.stringify({ filename: path.basename(destPath), size_bytes: sizeBytes }),
+            signal: ctrl.signal,
+          });
+          clearTimeout(timeout);
+          // Always parse the body — the hub returns HTTP 200 with
+          // `{ ok: false, error }` when the inbound notify validates
+          // (token matched, route matched) but the underlying
+          // pullBackupForSite call fails (site unreachable from hub,
+          // timeout, integrity check failed, etc.). Codex catch on
+          // PR #248: trusting r.ok alone reported "Hub pulled
+          // immediately" to the operator while no hub backup was
+          // actually ingested, leaving the hub mirror stale until the
+          // next cron run with no operator-visible signal.
+          const body = await r.json().catch(() => ({}));
+          if (r.ok && body && body.ok === true) {
+            hubNotified = true;
+          } else if (r.ok) {
+            // 200 with body.ok=false → hub accepted the notify but
+            // the pull failed. Operator needs to know specifically
+            // that the local backup landed but the hub copy didn't.
+            hubError =
+              `Hub accepted the notify but the pull itself failed: ${body.error || 'no detail returned'}. ` +
+              `The local backup succeeded; hub will retry on its next cron tick (or you can check the hub's System Log under hub.backupPull).`;
+          } else {
+            // Non-2xx → hub didn't even accept the notify (token
+            // mismatch, route missing on a non-hub install, network
+            // disconnect mid-response, etc.).
+            hubError = `Hub responded ${r.status}: ${body.error || 'unknown'}. The local backup succeeded; hub will retry on its next cron tick.`;
+          }
+        } catch (notifyErr) {
+          hubError = `Hub notification failed: ${notifyErr.message}. The local backup succeeded; hub will pick it up on its next cron tick.`;
+        }
+      }
 
       logAudit({
         req,
-        action: 'compact_database',
+        action: 'backup_now',
         resourceType: 'system',
-        resourceName: 'Database compaction (VACUUM)',
+        resourceName: 'Manual database backup',
         details:
-          `Compacted ${(sizeBefore / 1024 / 1024).toFixed(1)} MB → ${(sizeAfter / 1024 / 1024).toFixed(1)} MB ` +
-          `in ${(elapsedMs / 1000).toFixed(1)}s. ` +
-          `Integrity check ${postOk ? 'passed' : 'FAILED'}. ` +
-          `Pre-VACUUM backup: ${path.basename(backupPath)}.`,
+          `Backup created: ${path.basename(destPath)} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB) in ${(elapsedMs / 1000).toFixed(1)}s. ` +
+          `Hub notified: ${hubNotified}${hubError ? ` (${hubError})` : ''}.`,
         changes: {
-          size_before_bytes: sizeBefore,
-          size_after_bytes: sizeAfter,
+          backup_filename: path.basename(destPath),
+          size_bytes: sizeBytes,
           elapsed_ms: elapsedMs,
-          integrity_ok: postOk,
-          backup_filename: path.basename(backupPath),
+          hub_notified: hubNotified,
         },
-        status: postOk ? 'success' : 'failure',
       });
 
       res.json({
         ok: true,
-        size_before_mb: Math.round((sizeBefore / 1024 / 1024) * 10) / 10,
-        size_after_mb: Math.round((sizeAfter / 1024 / 1024) * 10) / 10,
-        reclaimed_mb: Math.round(((sizeBefore - sizeAfter) / 1024 / 1024) * 10) / 10,
+        backup_filename: path.basename(destPath),
+        size_mb: Math.round((sizeBytes / 1024 / 1024) * 10) / 10,
         elapsed_ms: elapsedMs,
-        integrity_ok: postOk,
-        integrity_issues: postOk ? null : postIntegrity.map(r => r.integrity_check).slice(0, 5),
-        backup_filename: path.basename(backupPath),
+        hub_notified: hubNotified,
+        hub_error: hubError,
       });
     } catch (error) {
-      console.error('[maintenance] compact database failed:', error.message);
-      try { logError('maintenance.compact_database', error); } catch {}
-      res.status(500).json({ error: error.message || 'Failed to compact database' });
+      console.error('[maintenance] backup-now failed:', error.message);
+      try { logError('maintenance.backup_now', error); } catch {}
+      res.status(500).json({ error: error.message || 'Failed to create backup' });
     }
   });
 

@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import { readdirSync, statSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
-import { syncAllSites, syncSite, runHubBackupPull, HUB_SITES } from '../services/hubEtl.js';
+import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
@@ -1683,6 +1683,75 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: friendly, status: 'failure',
       });
       res.status(502).json({ ok: false, error: friendly });
+    }
+  });
+
+  // POST /api/hub/notify-backup-ready — site-token-authenticated.
+  // Called by sites right after their Backup-Now button completes a
+  // local snapshot, asking the hub to immediately pull the new file
+  // instead of waiting for the next 03:00 cron tick. Without this,
+  // the operator who clicks "Backup now" on a site sees the snapshot
+  // appear locally but the hub mirror is up to ~24 hours stale until
+  // the next scheduled pull.
+  //
+  // Auth: matches the inbound x-reporting-token against HUB_SITES[].token
+  // (same auth model the hub itself uses outbound when pulling from
+  // sites — every site→hub trust relationship is already encoded in
+  // the HUB_SITES env). Token match identifies which site this came
+  // from; we then run pullBackupForSite for that site only. Tokenless
+  // or unknown-token requests return 401.
+  //
+  // Per-site: only pulls the calling site, not all sites. Avoids a
+  // thundering-herd if multiple sites click Backup-Now simultaneously
+  // (the bulk runHubBackupPull is still scheduled at 03:00 and is the
+  // right place for "pull everyone").
+  router.post('/api/hub/notify-backup-ready', async (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    if (!token) return res.status(401).json({ error: 'Missing x-reporting-token header' });
+
+    // Match against the in-env HUB_SITES list rather than hub_sites
+    // table — the env list is the source of truth for "which sites
+    // do we trust"; a tombstoned/orphaned hub_sites row should NOT
+    // be able to authenticate a notify call.
+    const matched = HUB_SITES.find((s) => s.token && s.token === token);
+    if (!matched) {
+      return res.status(401).json({ error: 'Unrecognised reporting token' });
+    }
+
+    try {
+      // Look up the full site row from hub_sites — pullBackupForSite
+      // wants id/url/token/name. Should always exist (HUB_SITES is
+      // upserted into hub_sites at boot) but we tolerate an absent
+      // row by reusing the env-supplied fields directly.
+      const dbRow = db.prepare(`
+        SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?
+      `).get(matched.id);
+      const site = dbRow || {
+        id: matched.id, slug: matched.slug, name: matched.name,
+        url: matched.url, token: matched.token,
+      };
+      const result = await pullBackupForSite(site);
+      // Propagate the upstream ok status to the HTTP status so a
+      // pull failure (network error, integrity check failed, etc.)
+      // surfaces as a non-2xx response. Without this, the site's
+      // backup-now flow trusted r.ok && body.ok=true, but the body
+      // shape is the only failure signal — the response status was
+      // always 200 even on a failed pull. Codex catch (PR #248):
+      // operators saw "Hub pulled immediately" while the hub mirror
+      // was actually stale or corrupt because pullBackupForSite
+      // returned ok:false.
+      const status = result?.ok ? 200 : 502;
+      res.status(status).json({
+        ok: !!result?.ok,
+        site_id: site.id,
+        site_slug: site.slug,
+        ...(result?.error ? { error: result.error } : {}),
+        ...(result?.file ? { file: result.file } : {}),
+        ...(result?.integrity ? { integrity: result.integrity } : {}),
+      });
+    } catch (err) {
+      logError('hub.notify_backup_ready', err, { site_id: matched.id });
+      res.status(500).json({ ok: false, error: err.message || 'pull failed' });
     }
   });
 
