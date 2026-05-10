@@ -701,43 +701,67 @@ async function pullBackupForSite(site) {
     // Default 30 (HUB_BACKUP_KEEP_COUNT) — higher than site default
     // because the hub IS the long-tail archive.
     //
-    // BAT preview zips are pruned separately at a SHALLOWER depth
-    // (HUB_BAT_PREVIEWS_KEEP, default 3) because previews are
-    // append-only on the site (each preview is written once when its
-    // row is OCR'd) so the LATEST zip already covers all historical
-    // extractions — keeping 30 zips would burn ~5 GB of hub disk
-    // (typical zip is 100-200 MB) for no recovery benefit. Operator
-    // can dial up via the env var if they want belt-and-braces.
+    // Three independent prune queues per site:
+    //
+    //   1. Healthy .db snapshots: HUB_BACKUP_KEEP_COUNT (default 30)
+    //   2. .db.corrupt forensic artifacts: HUB_CORRUPT_KEEP_COUNT
+    //      (default 5). Codex catch on PR #249: the original .db-only
+    //      glob would let .corrupt files (renamed by checkBackupIntegrity
+    //      on integrity-check failure) accumulate unbounded — exactly
+    //      the failure mode this retention is supposed to bound. Pruned
+    //      at a shallower depth than healthy snapshots because corrupt
+    //      files are forensic, not recovery candidates: once you've
+    //      seen one or two, more of the same don't add information.
+    //   3. BAT preview zips: HUB_BAT_PREVIEWS_KEEP (default 3) —
+    //      append-only on the site, so the LATEST zip covers every
+    //      historical extraction; keeping 30 would burn ~5 GB of hub
+    //      disk for no recovery benefit.
     try {
       const { readdirSync, statSync, unlinkSync } = await import('fs');
+      const allEntries = readdirSync(dir);
 
-      const dbFiles = readdirSync(dir)
-        .filter((f) => f.endsWith('.db'))
-        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-      const parsedDbKeep = parseInt(process.env.HUB_BACKUP_KEEP_COUNT, 10);
-      const dbKeep = Number.isFinite(parsedDbKeep) && parsedDbKeep >= 1 ? parsedDbKeep : 30;
-      const dbToDelete = dbFiles.slice(dbKeep);
-      for (const f of dbToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
-      }
-      if (dbToDelete.length > 0) {
-        console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
-      }
+      const pruneByPattern = ({ filter, keepEnv, keepDefault, label }) => {
+        const matched = allEntries
+          .filter(filter)
+          .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        const parsed = parseInt(process.env[keepEnv], 10);
+        const keep = Number.isFinite(parsed) && parsed >= 1 ? parsed : keepDefault;
+        const toDelete = matched.slice(keep);
+        for (const f of toDelete) {
+          try { unlinkSync(path.join(dir, f.name)); } catch {}
+        }
+        if (toDelete.length > 0) {
+          console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old ${label} (keeping ${keep})`);
+        }
+      };
 
-      const previewZips = readdirSync(dir)
-        .filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'))
-        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-      const parsedPrevKeep = parseInt(process.env.HUB_BAT_PREVIEWS_KEEP, 10);
-      const prevKeep = Number.isFinite(parsedPrevKeep) && parsedPrevKeep >= 1 ? parsedPrevKeep : 3;
-      const prevToDelete = previewZips.slice(prevKeep);
-      for (const f of prevToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
-      }
-      if (prevToDelete.length > 0) {
-        console.log(`[HUB BACKUP] ${site.name}: pruned ${prevToDelete.length} old preview zip(s), keeping ${prevKeep}`);
-      }
+      // Healthy DB snapshots — file ends in .db AND not also .db.corrupt.
+      pruneByPattern({
+        filter: (f) => f.endsWith('.db') && !f.endsWith('.db.corrupt'),
+        keepEnv: 'HUB_BACKUP_KEEP_COUNT',
+        keepDefault: 30,
+        label: 'DB snapshot(s)',
+      });
+
+      // Corrupt artifacts — checkBackupIntegrity renames failed pulls
+      // to <original>.corrupt. Glob anything ending in .corrupt so we
+      // also catch any older naming conventions (.zip.corrupt etc.) if
+      // the integrity helper grows them in the future.
+      pruneByPattern({
+        filter: (f) => f.endsWith('.corrupt'),
+        keepEnv: 'HUB_CORRUPT_KEEP_COUNT',
+        keepDefault: 5,
+        label: 'corrupt artifact(s)',
+      });
+
+      // BAT preview zips
+      pruneByPattern({
+        filter: (f) => f.startsWith('bat-previews-') && f.endsWith('.zip'),
+        keepEnv: 'HUB_BAT_PREVIEWS_KEEP',
+        keepDefault: 3,
+        label: 'preview zip(s)',
+      });
     } catch (pruneErr) {
       console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
     }
