@@ -9,7 +9,7 @@ import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
 import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
-import { isoYear } from '../lib/isoWeek.js';
+import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 
 // Status emitter for the SSE-based extraction-status stream. Worker emits
 // 'update:<reconId>' after every invoice processed; subscribers (route
@@ -885,20 +885,26 @@ export async function querySageCreditNotes(weekNumber, year) {
     attributed AS (
       SELECT *,
         CASE
-          -- Late-posted W52 line (e.g. desc says "WEEK 52" but doc_date
-          -- is Jan 5 of the next calendar year, ISO week 1) → previous
-          -- year. The +4 buffer is wider than any legitimate same-year
-          -- gap between desc_week and ISO_WEEK(doc_date).
+          -- desc_week far AHEAD of ISO_WEEK(doc_date) → previous year.
+          -- See querySageWeekTotals for the full reasoning. Same shape
+          -- here so totals (querySageWeekTotals) and per-line details
+          -- (this query) agree on which year a line belongs to.
+          --
+          -- Initial fix to the W10/2027 phantom tightened both branches
+          -- symmetrically (required doc_date AND desc_week to both be
+          -- near the year boundary). That regressed the legitimate
+          -- cross-year-lag case: a W52 credit note posted in February
+          -- (W6) was no longer attributed to the previous year, so
+          -- prior-year cache totals were silently understated. Restored
+          -- this branch to the pre-fix threshold; only the year+1 branch
+          -- below stays tightened.
           WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
-          -- Early-posted W1 line (e.g. desc says "WEEK 1" but doc_date
-          -- is Dec 28 of previous calendar year, ISO week 52/53) →
-          -- next year. Symmetric to the rule above; without it, an
-          -- early W1 credit note posted before year-end was attributed
-          -- to the WRONG year and never matched the corresponding
-          -- recon. Discovered via Codex audit on the year-boundary
-          -- hardening pass.
-          WHEN desc_week + 4 < DATEPART(ISO_WEEK, doc_date)
+          -- desc_week far BEHIND ISO_WEEK(doc_date) → next year.
+          -- ONLY at the end of the year. See querySageWeekTotals for
+          -- why the symmetric "behind" gate is too eager and how it
+          -- created the phantom W10/2027 row mid-year.
+          WHEN DATEPART(ISO_WEEK, doc_date) >= 49 AND desc_week <= 4
             THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
         END AS attributed_year
@@ -964,16 +970,45 @@ export async function querySageWeekTotals() {
     attributed AS (
       SELECT
         CASE
-          -- Late-posted W52 line → previous year. Same heuristic as
-          -- querySageCreditNotes (kept symmetric so totals and details
-          -- agree on which year a year-straddling line belongs to).
+          -- desc_week far AHEAD of ISO_WEEK(doc_date) → previous year.
+          --
+          -- A credit note can't legitimately reference future activity.
+          -- So when desc_week sits well past the current ISO week of
+          -- doc_date, the only sane interpretation is that desc_week
+          -- belongs to the previous calendar year. Examples that this
+          -- correctly handles:
+          --   - Jan 5 (W1) with desc_week=52 → W52 of previous year
+          --   - Feb 10 (W6) with desc_week=49 → W49 of previous year
+          --     (cross-year accounting lag: late posting of Dec activity)
+          --   - May 4 (W18) with desc_week=24 → W24 of previous year
+          --     (data-entry error: operator typo or stale Sage line —
+          --     attributing to last year is closer to truth than calling
+          --     it future-dated activity in the current year)
+          -- The +4 buffer absorbs same-year mid-week posting lag without
+          -- triggering the rule (e.g. W10 posted in W12).
+          --
+          -- This branch is unchanged from the pre-fix shape — the
+          -- regression was on the year+1 branch below. Initial fix to
+          -- the W10/2027 bug tightened both sides symmetrically, but
+          -- that broke legitimate cross-year lag (Codex catch).
           WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
-          -- Early-posted W1 line → next year. Without this, a "WEEK 1"
-          -- credit note posted on Dec 28 of the previous year was
-          -- summed into the wrong year's totals and never reconciled
-          -- against the corresponding W1 recon.
-          WHEN desc_week + 4 < DATEPART(ISO_WEEK, doc_date)
+          -- desc_week far BEHIND ISO_WEEK(doc_date) → next year.
+          --
+          -- Pre-fix this fired for any "behind" desc_week, e.g. May (W19)
+          -- with desc_week=10 → year+1 = next year, creating the phantom
+          -- W10/2027 row that broke the site dashboard. The interpretation
+          -- was wrong: a desc_week in the past of the current ISO week is
+          -- usually just a normal in-year late posting (W10 posted in W19
+          -- means "10 weeks late posting of W10 activity", year unchanged).
+          --
+          -- The only legitimate next-year case is the narrow
+          -- end-of-year-anticipating-next-year scenario: a "WEEK 1" credit
+          -- note pre-posted on Dec 28 (W52/53) so the W1 recon next year
+          -- has a Sage line waiting for it. Restrict the rule to that
+          -- case alone (doc_date in W49+ AND desc_week in 1-4); everything
+          -- else falls through to YEAR(doc_date).
+          WHEN DATEPART(ISO_WEEK, doc_date) >= 49 AND desc_week <= 4
             THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
         END AS year,
@@ -1034,6 +1069,96 @@ export function getCachedSageWeekTotals() {
     `).all();
     return _sageTotalsMemo;
   } catch { return []; }
+}
+
+// SHARED SOURCE OF TRUTH for "last week paid (Sage)".
+//
+// IMPORTANT — DO NOT INLINE A PARALLEL VERSION.
+//
+// The hub displays each site's "last paid week" by mirroring whatever the
+// site itself reports. Both the site's own UI (via /api/bat/week-status)
+// AND the hub-export endpoint (/api/reporting/bat-summary) MUST return
+// the same value for any given (site, moment) pair, or the hub stops
+// being a faithful mirror of the site and the operator can no longer
+// trust either view.
+//
+// Pre-fix history: /api/bat/week-status sorted the cache by max(year, week)
+// without scoping, while /api/reporting/bat-summary scoped to the current
+// ISO year. A late-posted "WEEK 10" credit note dated mid-2026 was being
+// misattributed to year 2027 by querySageWeekTotals' year-attribution
+// heuristic, so the unscoped path showed W10/2027 (the phantom row beat
+// real data) while the year-scoped path showed W44/2026 (the next-most-
+// wrong row). Site UI said one thing, hub tile said another, both wrong.
+//
+// This helper IS that single source. Both endpoints call it. If you find
+// yourself writing a SELECT against bat_sage_week_cache to get "the
+// latest paid week", call this instead.
+//
+// Returns null when the cache has no rows for the current ISO year, OR
+// when the only candidate rows are clearly impossible (week strictly in
+// the future). The future-week guard is defensive — querySageWeekTotals
+// also rejects future-dated raw Sage data on the way in, but a Sage
+// data-entry typo on a credit note's posting date can still produce a
+// real future-week cache row, and the operator-facing tile shouldn't
+// lie about it.
+export function getLastPaidSageWeek() {
+  let currentIsoYear, currentWeek;
+  try {
+    const cur = currentIsoWeek();
+    currentIsoYear = cur.year;
+    currentWeek = cur.week;
+  } catch {
+    // If we can't determine the current ISO year for any reason, refuse
+    // to guess — return null so the UI shows '—' rather than surfacing
+    // a phantom-future-year row.
+    return null;
+  }
+  try {
+    const row = db.prepare(`
+      SELECT year, week_number
+      FROM bat_sage_week_cache
+      WHERE year = ?
+        -- Defensive guard: never report a "future" week. The 1-week
+        -- buffer (currentWeek + 1) tolerates late-Sunday postings where
+        -- Sage stamps a credit note that crosses into the next ISO week.
+        AND week_number <= ?
+      ORDER BY week_number DESC
+      LIMIT 1
+    `).get(currentIsoYear, currentWeek + 1);
+    if (!row) return null;
+    return { year: row.year, week_number: row.week_number };
+  } catch {
+    return null;
+  }
+}
+
+// SHARED SOURCE OF TRUTH for "last week the operator uploaded a BAT
+// reconciliation". Same architectural rule as getLastPaidSageWeek:
+// hub mirrors site, both endpoints route through this helper, never
+// inline a parallel SELECT.
+export function getLastBatReconciliationWeek() {
+  let currentIsoYear, currentWeek;
+  try {
+    const cur = currentIsoWeek();
+    currentIsoYear = cur.year;
+    currentWeek = cur.week;
+  } catch {
+    return null;
+  }
+  try {
+    const row = db.prepare(`
+      SELECT year, week_number
+      FROM bat_reconciliations
+      WHERE year = ?
+        AND week_number <= ?
+      ORDER BY week_number DESC
+      LIMIT 1
+    `).get(currentIsoYear, currentWeek + 1);
+    if (!row) return null;
+    return { year: row.year, week_number: row.week_number };
+  } catch {
+    return null;
+  }
 }
 
 export function getSageCacheMeta() {
