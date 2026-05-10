@@ -1857,6 +1857,46 @@ function startExtractionWorker(reconId) {
     } catch {}
     workerRunning = false;
     workerReconId = null;
+
+    // Auto-handoff to the next pending reconciliation. Without this,
+    // only the recon the operator explicitly triggered would get
+    // drained — pending rows on OTHER recons sat idle indefinitely.
+    // The OCR tab's "queued — picked up automatically when the current
+    // run finishes" affordance promises this chain; backend has to
+    // honour it. Codex catch on PR #231.
+    //
+    // Excludes the just-finished recon: if it still has pending rows
+    // (lanes-retired / paused-mid-run / hard failure path), retrying
+    // the same recon immediately would just hit the same wall. The
+    // operator can manually click Extract on it after diagnosing.
+    // Different recons are always worth chaining to.
+    //
+    // ocrPaused short-circuits the chain so the operator's pause toggle
+    // still wins. setImmediate defers to the next tick to avoid any
+    // tangle with awaiters that might still be holding on to this
+    // promise's resolution.
+    if (!ocrPaused) {
+      try {
+        const nextPending = db.prepare(`
+          SELECT DISTINCT reconciliation_id FROM bat_invoice_extractions
+          WHERE extraction_status = 'pending' AND reconciliation_id != ?
+          ORDER BY reconciliation_id LIMIT 1
+        `).get(reconId);
+        if (nextPending) {
+          try {
+            logError(
+              'bat-ocr.worker',
+              new Error(`Auto-handoff from recon ${reconId} to recon ${nextPending.reconciliation_id} (still pending)`),
+              { from: reconId, to: nextPending.reconciliation_id, phase: 'auto_handoff' },
+              'info',
+            );
+          } catch {}
+          setImmediate(() => startExtractionWorker(nextPending.reconciliation_id));
+        }
+      } catch (err) {
+        try { logError('bat-ocr.worker', err, { phase: 'auto_handoff', from: reconId }); } catch {}
+      }
+    }
   });
 }
 

@@ -536,7 +536,7 @@ export default function OcrPanel() {
                             size="sm"
                             variant="outline"
                             disabled
-                            title={`OCR worker is busy on recon #${snap.worker_recon_id} — this row will be picked up automatically when the current run finishes (if still pending).`}
+                            title={`OCR worker is busy on recon #${snap.worker_recon_id}. When that run completes, the worker auto-hands off to the next reconciliation with pending rows — including this one — so no further action is needed unless the chain stops (e.g. an auto-halt or pause).`}
                             className="h-7 px-2 border-border text-xs text-muted-foreground"
                           >
                             <Clock className="w-3 h-3 mr-1" /> queued
