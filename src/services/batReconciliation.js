@@ -1963,6 +1963,13 @@ class OcrLane {
               stage: msg.stage,
               message: msg.message,
               tierError: !!msg.tierError,
+              // Cooldown skips are emitted via the same engine_error
+              // channel for transport simplicity, but they're not real
+              // failures — no OCR call was even attempted. Forward the
+              // flag so the parent can log them at info level under a
+              // distinct topic instead of poisoning the engine_failed
+              // stream with intentional skips.
+              cooldown: !!msg.cooldown,
             });
           } catch {}
         }
@@ -2505,18 +2512,41 @@ async function processQueue(reconId) {
             // operator wasted hours wondering why GV "wasn't being used".
             (info) => {
               try {
-                logError(
-                  'bat.ocr.engine_failed',
-                  new Error(`${info.stage}: ${info.message}`),
-                  {
-                    reconciliation_id: reconId,
-                    extraction_id: next.id,
-                    store_name: next.store_name,
-                    engine: info.engine,
-                    angle: info.angle,
-                    tier_error: info.tierError,
-                  },
-                );
+                // Cooldown skips: no OCR call was attempted, no engine
+                // actually failed. Logging these as bat.ocr.engine_failed
+                // at error level pollutes the failure signal during
+                // rate-limit windows (each cooldown row would emit one
+                // engine_failed per cooled engine) and triggers operator
+                // alerts pointed at the wrong cause. Route to a distinct
+                // topic at info level so the cooldown is still visible
+                // in the System Log without masquerading as a failure.
+                if (info.cooldown) {
+                  logError(
+                    'bat.ocr.engine_cooldown_skip',
+                    new Error(`${info.stage}: ${info.message}`),
+                    {
+                      reconciliation_id: reconId,
+                      extraction_id: next.id,
+                      store_name: next.store_name,
+                      engine: info.engine,
+                      angle: info.angle,
+                    },
+                    'info',
+                  );
+                } else {
+                  logError(
+                    'bat.ocr.engine_failed',
+                    new Error(`${info.stage}: ${info.message}`),
+                    {
+                      reconciliation_id: reconId,
+                      extraction_id: next.id,
+                      store_name: next.store_name,
+                      engine: info.engine,
+                      angle: info.angle,
+                      tier_error: info.tierError,
+                    },
+                  );
+                }
               } catch {}
             },
             // Engine returned text but produced no usable invoice. The
