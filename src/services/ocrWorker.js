@@ -213,7 +213,18 @@ async function getCanvas() {
 // 2400px is comfortably inside Google Vision's recommended input range
 // (1024–2400) and gives Tesseract enough resolution for invoice-number
 // text, while bounding raw RGBA at ~2400 × 3400 × 4 = 32 MB per page.
-const MAX_RENDER_WIDTH = Math.max(800, parseInt(process.env.OCR_MAX_RENDER_WIDTH || '2400', 10));
+//
+// Defensive parse: parseInt('', 10) and parseInt('not-a-number', 10) both
+// return NaN, and Math.max(800, NaN) is NaN — that NaN propagates into
+// page.getViewport({ scale: NaN }) and createCanvas(NaN, NaN), failing
+// the render stage on every PDF. So we validate the parse before
+// clamping and fall back to the default for missing/malformed values.
+const DEFAULT_MAX_RENDER_WIDTH = 2400;
+const MIN_RENDER_WIDTH = 800;
+const _envMaxRenderWidth = parseInt(process.env.OCR_MAX_RENDER_WIDTH ?? '', 10);
+const MAX_RENDER_WIDTH = Number.isFinite(_envMaxRenderWidth) && _envMaxRenderWidth > 0
+  ? Math.max(MIN_RENDER_WIDTH, _envMaxRenderWidth)
+  : DEFAULT_MAX_RENDER_WIDTH;
 
 async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
   const pdfjsLib = await getPdfjs();
