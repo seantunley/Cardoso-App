@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SummaryTile, fmtR, fmtRSigned, fmtCount, REPORT_COLORS } from '@/components/reports/lib';
 import { CheckCircle, AlertTriangle, CloudOff, ExternalLink, RefreshCw } from 'lucide-react';
+import { currentIsoWeek } from '@/lib/isoWeek';
 
 function fetchBatSummary() {
   return fetch('/api/hub/bat-summary', { credentials: 'include' })
@@ -92,17 +93,11 @@ export default function HubReconciliation() {
                 big
               />
               {(() => {
-                // Current ISO 8601 week — same algorithm as /api/bat/week-status
-                // on the site. Naive dayOfYear/7 would be wrong on weeks
-                // straddling Jan 1, so shift to the week's Thursday and
-                // count from the ISO year start.
-                const now = new Date();
-                const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-                const dayNum = d.getUTCDay() || 7;
-                d.setUTCDate(d.getUTCDate() + 4 - dayNum);
-                const isoYear = d.getUTCFullYear();
-                const yearStart = new Date(Date.UTC(isoYear, 0, 1));
-                const currentWeek = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+                // Routed through the canonical helper in src/lib/isoWeek.js
+                // (which has dedicated boundary tests) so this tile and the
+                // server's /api/bat/week-status agree on every ISO-year
+                // straddling week. Replaces the previous inline algorithm.
+                const { year: isoYear, week: currentWeek } = currentIsoWeek();
                 return (
                   <SummaryTile
                     label="Current Week"

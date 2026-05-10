@@ -12,6 +12,7 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
+import { isoYear as toIsoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import {
   parseSupplierSpreadsheet,
   SpreadsheetValidationError,
@@ -98,8 +99,11 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       // with zero PODs that polluted the dashboard.
       const parsed = parseSupplierSpreadsheet(req.file.path, req.file.originalname);
 
-      const year = parsed.year || parseInt(req.body.year, 10) || new Date().getFullYear();
-      if (parsed.year) console.log(`[bat] Year detected from order numbers: ${parsed.year}`);
+      // Year fallback chain: parser-detected → request body → ISO year of
+      // current date. ISO year (not calendar year) so a late-Dec upload
+      // for a W1 file doesn't get filed under the previous year.
+      const year = parsed.year || parseInt(req.body.year, 10) || toIsoYear(new Date());
+      if (parsed.year) console.log(`[bat] Year detected from spreadsheet: ${parsed.year}`);
       const reconId = createReconciliation({
         weekNumber: parsed.weekNumber,
         year,
@@ -161,7 +165,9 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
 
   router.get('/api/bat/sage-credit-notes', ...gate, async (req, res) => {
     const week = parseInt(req.query.week, 10);
-    const year = parseInt(req.query.year, 10) || new Date().getFullYear();
+    // Fallback to ISO year so Dec 29-31 queries default to the correct
+    // year for the W1 they're inside, not the calendar year they're in.
+    const year = parseInt(req.query.year, 10) || toIsoYear(new Date());
     if (!week || week < 1 || week > 53) {
       return res.status(400).json({ error: 'Valid week number required (1-53)' });
     }
@@ -451,16 +457,11 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
   router.get('/api/bat/week-status', ...gate, async (req, res) => {
     const __t0 = Date.now();
     res.on('finish', () => console.log(`[bat-perf] /api/bat/week-status: ${Date.now() - __t0}ms`));
-    // Current ISO 8601 calendar week. Naive dayOfYear/7 is wrong: it rolls over
-    // on dayOfYear multiples of 7, regardless of which weekday Jan 1 fell on.
-    // ISO weeks run Mon–Sun, and W1 is the week containing the first Thursday.
-    const now = new Date();
-    const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-    const dayNum = d.getUTCDay() || 7; // Sun = 0 → 7
-    d.setUTCDate(d.getUTCDate() + 4 - dayNum); // shift to that week's Thursday
-    const isoYear = d.getUTCFullYear(); // ISO year of the current week (≠ calendar year on Jan 1–3 / Dec 29–31 in some years)
-    const yearStart = new Date(Date.UTC(isoYear, 0, 1));
-    const currentWeek = Math.ceil(((d - yearStart) / 86400000 + 1) / 7);
+    // Current ISO 8601 week — routed through src/lib/isoWeek.js so this
+    // endpoint and the Hub/site UI's "current week" tile always agree.
+    // Calendar year and ISO year disagree on Dec 29-31 of years where
+    // Jan 1 is Mon-Wed (e.g. Dec 31 2025 is W1 of ISO year 2026).
+    const { year: isoYear, week: currentWeek } = currentIsoWeek();
 
     // Read Sage week totals from the LOCAL CACHE (refreshed by the scheduler /
     // manual button). Dashboard never blocks on a live Sage query.

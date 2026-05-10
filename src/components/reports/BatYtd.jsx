@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { isoYear } from '@/lib/isoWeek';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtRSigned, fmtPct, downloadCsv, BarChart, Bar,
@@ -23,7 +24,10 @@ function fetchBatYtd(year) {
 }
 
 export default function BatYtd() {
-  const [year, setYear] = useState(new Date().getFullYear());
+  // ISO year (not calendar year) — bat_reconciliations is keyed on ISO
+  // (week, year) so the YTD filter must match. Calendar year and ISO
+  // year disagree on Dec 29-31 of years where Jan 1 is Mon/Tue/Wed.
+  const [year, setYear] = useState(() => isoYear(new Date()));
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['bat-ytd', year],

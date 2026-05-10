@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { FileSpreadsheet, Loader2, AlertTriangle, X } from 'lucide-react';
+import { isoYear } from '@/lib/isoWeek';
 
 export default function FileUpload({ onComplete }) {
   const [dragging, setDragging] = useState(false);
@@ -25,7 +26,11 @@ export default function FileUpload({ onComplete }) {
     try {
       const form = new FormData();
       form.append('file', file);
-      form.append('year', new Date().getFullYear().toString());
+      // ISO year (not calendar year) — on Dec 29-31 of years where Jan 1
+      // is Mon/Tue/Wed, the calendar year is the OLD year but the recon
+      // is logically for the NEW ISO year's W1. Without this, a late-Dec
+      // upload could be filed under the wrong year.
+      form.append('year', String(isoYear(new Date())));
       const r = await fetch('/api/bat/upload', {
         method: 'POST',
         credentials: 'include',

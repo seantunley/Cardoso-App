@@ -8,6 +8,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import FileUpload from '@/components/reconciliation/FileUpload';
+import { isoYear } from '@/lib/isoWeek';
 import WeekSelector from '@/components/reconciliation/WeekSelector';
 import FeeComparison from '@/components/reconciliation/FeeComparison';
 import InvoiceMatching from '@/components/reconciliation/InvoiceMatching';
@@ -163,7 +164,10 @@ export default function Reconciliation() {
       const saved = window.localStorage.getItem('bat.viewingYear');
       if (saved) return saved;
     } catch {}
-    return String(new Date().getFullYear());
+    // ISO year — disagrees with calendar year on Dec 29-31 of years
+    // where Jan 1 is Mon/Tue/Wed. Without this the page would default
+    // to viewing the previous year's recons in early Jan / late Dec.
+    return String(isoYear(new Date()));
   });
   useEffect(() => {
     try { window.localStorage.setItem('bat.viewingYear', viewingYear); } catch {}
@@ -695,7 +699,7 @@ export default function Reconciliation() {
           {view === 'dashboard' && (
             <div className="flex items-center gap-2 flex-wrap">
               {(() => {
-                const currentYear = new Date().getFullYear();
+                const currentYear = isoYear(new Date());
                 const knownYears = Array.from(new Set(reconciliations.map(r => r.year).filter(Boolean)));
                 // Always offer current year + an "all" option so a fresh install
                 // can still flip the selector even before the first upload.
