@@ -9,6 +9,7 @@ import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
 import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
+import { isoYear } from '../lib/isoWeek.js';
 
 // Status emitter for the SSE-based extraction-status stream. Worker emits
 // 'update:<reconId>' after every invoice processed; subscribers (route
@@ -356,6 +357,38 @@ export function parseSupplierSpreadsheet(filePath, originalFilename) {
     const matched = podUrls.filter(p => p.orderAmount != null);
     const exceptions = podUrls.filter(p => p.isException);
     console.log(`[bat] Matched ${matched.length}/${podUrls.length} order amounts (${exceptions.length} exceptions)`);
+  }
+
+  // Year-boundary sanity check. The order-number year-detection
+  // (ORD-YYYY) is right ~99% of the time, but if a supplier hasn't
+  // rolled their numbering at the year change, a Week 1 / 2026 file
+  // can come in with ORD-2025-* numbers and get misfiled to 2025.
+  // We don't auto-correct (a retroactive upload of last year's data
+  // is legitimate), but if the recon's week_number is in the
+  // year-straddle danger zone (W1-2 or W51-53) AND the detected year
+  // disagrees with the ISO year of the upload date, log a warning so
+  // the operator sees the discrepancy in System Log and can override
+  // via the form's year selector before processing.
+  if (detectedYear && weekNumber) {
+    const inDangerZone = weekNumber <= 2 || weekNumber >= 51;
+    const uploadIsoYear = isoYear(new Date());
+    if (inDangerZone && detectedYear !== uploadIsoYear) {
+      try {
+        logError(
+          'bat.parser.year_disagreement',
+          new Error(
+            `Year detected from order numbers (${detectedYear}) disagrees with ISO year of upload date (${uploadIsoYear}) for boundary week W${weekNumber}. Verify the year is correct before processing — supplier may not have rolled their order numbering at the year change.`,
+          ),
+          {
+            file: originalFilename,
+            week_number: weekNumber,
+            detected_year: detectedYear,
+            upload_iso_year: uploadIsoYear,
+          },
+          'warn',
+        );
+      } catch { /* logError best-effort — don't block the upload */ }
+    }
   }
 
   return {
@@ -852,8 +885,21 @@ export async function querySageCreditNotes(weekNumber, year) {
     attributed AS (
       SELECT *,
         CASE
+          -- Late-posted W52 line (e.g. desc says "WEEK 52" but doc_date
+          -- is Jan 5 of the next calendar year, ISO week 1) → previous
+          -- year. The +4 buffer is wider than any legitimate same-year
+          -- gap between desc_week and ISO_WEEK(doc_date).
           WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
+          -- Early-posted W1 line (e.g. desc says "WEEK 1" but doc_date
+          -- is Dec 28 of previous calendar year, ISO week 52/53) →
+          -- next year. Symmetric to the rule above; without it, an
+          -- early W1 credit note posted before year-end was attributed
+          -- to the WRONG year and never matched the corresponding
+          -- recon. Discovered via Codex audit on the year-boundary
+          -- hardening pass.
+          WHEN desc_week + 4 < DATEPART(ISO_WEEK, doc_date)
+            THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
         END AS attributed_year
       FROM src
@@ -918,8 +964,17 @@ export async function querySageWeekTotals() {
     attributed AS (
       SELECT
         CASE
+          -- Late-posted W52 line → previous year. Same heuristic as
+          -- querySageCreditNotes (kept symmetric so totals and details
+          -- agree on which year a year-straddling line belongs to).
           WHEN desc_week > DATEPART(ISO_WEEK, doc_date) + 4
             THEN YEAR(doc_date) - 1
+          -- Early-posted W1 line → next year. Without this, a "WEEK 1"
+          -- credit note posted on Dec 28 of the previous year was
+          -- summed into the wrong year's totals and never reconciled
+          -- against the corresponding W1 recon.
+          WHEN desc_week + 4 < DATEPART(ISO_WEEK, doc_date)
+            THEN YEAR(doc_date) + 1
           ELSE YEAR(doc_date)
         END AS year,
         desc_week AS week_number,

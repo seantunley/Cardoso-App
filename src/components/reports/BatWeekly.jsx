@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { isoYear } from '@/lib/isoWeek';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtRSigned, fmtCount, downloadCsv, BarChart, Bar, LineChart, Line,
@@ -18,7 +19,9 @@ function fetchBatWeekly(year) {
 }
 
 export default function BatWeekly() {
-  const [year, setYear] = useState(new Date().getFullYear());
+  // ISO year (not calendar year) — bat_reconciliations is keyed on ISO
+  // (week, year) so the per-year filter must match.
+  const [year, setYear] = useState(() => isoYear(new Date()));
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['bat-weekly', year],

@@ -8,6 +8,7 @@ const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
+import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 
@@ -844,7 +845,9 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/reports/bat-ytd?year=YYYY — YTD fee-type breakdown comparing
   // BAT's claimed totals to Sage's posted credit-note totals.
   router.get('/api/reports/bat-ytd', requireAuth, (req, res) => {
-    const year = req.query.year ? parseInt(req.query.year, 10) : new Date().getFullYear();
+    // ISO year fallback so a late-Dec call without ?year= matches the
+    // ISO year that bat_reconciliations is keyed on.
+    const year = req.query.year ? parseInt(req.query.year, 10) : isoYear(new Date());
     try {
       const supplierAgg = prep(
         `SELECT
@@ -1261,14 +1264,11 @@ export function createReportingRouter({ requireAuth }) {
       // would mix 2025 and 2026 once we cross the year boundary, which
       // isn't useful for the operator.
       //
-      // ISO year — not calendar year — so weeks straddling Jan 1 are
-      // attributed to the right year. e.g. Jan 1 2027 (a Friday) belongs
-      // to W53/2026.
-      const _now = new Date();
-      const _isoTmp = new Date(Date.UTC(_now.getFullYear(), _now.getMonth(), _now.getDate()));
-      const _dayNum = _isoTmp.getUTCDay() || 7;
-      _isoTmp.setUTCDate(_isoTmp.getUTCDate() + 4 - _dayNum);
-      const summary_year = _isoTmp.getUTCFullYear();
+      // ISO year (not calendar year) so weeks straddling Jan 1 are
+      // attributed to the right year. Routed through the canonical helper
+      // — same algorithm as the previous inline implementation, just
+      // sharing the unit-tested code.
+      const summary_year = currentIsoWeek().year;
 
       const rows = prep(
         `SELECT r.year, r.week_number,
