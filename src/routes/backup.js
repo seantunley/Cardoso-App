@@ -3,7 +3,17 @@ import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
-import archiver from 'archiver';
+import { createRequire } from 'module';
+// archiver v8 is published as CommonJS without an ESM-compatible default
+// export, so `import archiver from 'archiver'` throws at boot under Node
+// 22 ESM with `SyntaxError: The requested module 'archiver' does not
+// provide an export named 'default'`. The whole service then refuses to
+// start (this route module is loaded eagerly at boot from server.js).
+// createRequire gives us the CJS module's actual export — same factory
+// function `archiver(format, opts)` that the rest of the file expects.
+// Dropping back to require here is intentional and load-bearing; do not
+// "modernise" without first checking that `archiver` ships an ESM build.
+const archiver = createRequire(import.meta.url)('archiver');
 import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
