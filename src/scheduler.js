@@ -11,6 +11,7 @@ import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batRecon
 import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
+import { pruneOldRows, vacuumDb } from './lib/retention.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -357,6 +358,33 @@ export function startSchedulers() {
   cronTasks.push(cron.schedule('0 4 * * *', () => {
     try { pruneOldJobRuns(30); } catch (err) { console.error('[jobRunner] prune failed:', err.message); }
   }));
+
+  // Daily prune at 04:15 of the other unbounded tables — error_log,
+  // auditlog, syncrun, login_log. Each one's keep-days horizon is
+  // env-tunable (see src/lib/retention.js). Slotted between the
+  // job_runs prune (04:00) and the alerts prune (04:30) so the three
+  // writes don't contend for the writer slot. Wrapped in track() so
+  // the per-table summary lands in job_runs.context — operator can
+  // see at a glance how many rows each prune touched.
+  cronTasks.push(cron.schedule('15 4 * * *', track(
+    'retention-prune',
+    pruneOldRows,
+    (result) => ({ tables: result }),
+  )));
+
+  // Monthly VACUUM at 04:45 on the 1st — reclaims pages freed by the
+  // daily prunes above (and the v66 record_snapshots drop). Without
+  // VACUUM, DELETEs leave free pages internally and cardoso.db never
+  // shrinks; the production site that hit 3.7 GB had 99% free pages
+  // by the time we caught it. Holds an EXCLUSIVE lock for the duration
+  // (typically <5s on a healthy DB, longer on the first run after a
+  // bulk drop) so we run it at the quietest hour — well after the
+  // 02:00 backup and the daily prunes have settled.
+  cronTasks.push(cron.schedule('45 4 1 * *', track(
+    'vacuum-db',
+    vacuumDb,
+    (result) => result,
+  )));
 }
 
 export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites) {
