@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
@@ -606,20 +607,56 @@ export default function HubBackups() {
             ) : (
               <>
                 <SummaryBar sites={sites} />
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                  {sites.map((site) => (
-                    <SiteCard
-                      key={site.site_id}
-                      site={site}
-                      hubData={hubBackupMap[site.site_id]}
-                      onDownload={handleDownload}
-                      downloading={downloading}
-                      onDownloadConfig={handleDownloadConfig}
-                      downloadingConfig={downloadingConfig}
-                      onRestore={openRestoreModal}
-                    />
-                  ))}
-                </div>
+                {/* App / SQL tabs split per-site detail blocks. The five
+                    summary tiles above already cover both backup types so
+                    they render once, outside the tabs. SiteCard branches
+                    on the `view` prop and only renders the matching detail
+                    block — pre-tabs the layout stacked both blocks side by
+                    side per site, which scaled badly past ~3 sites.
+                    Originally landed in PR #250; the parent-side <Tabs>
+                    UI was lost in the subsequent merge of PR #251 (the
+                    inner SiteCard branching survived but had no toggle).
+                    Same merge-loss class as #221, #223, #228, #235, #253. */}
+                <Tabs defaultValue="app" className="w-full">
+                  <TabsList className="grid w-full max-w-md grid-cols-2 mb-4">
+                    <TabsTrigger value="app">App Backup</TabsTrigger>
+                    <TabsTrigger value="sql">SQL Backup</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="app" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          onRestore={openRestoreModal}
+                          view="app"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="sql" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          onRestore={openRestoreModal}
+                          view="sql"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                </Tabs>
                 <p className="text-xs text-slate-600 mt-6 text-center">
                   Auto-refreshes every 60s · File backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h · SQL attention = failed, unavailable, or no successful full DAT backup within 24h
                 </p>
