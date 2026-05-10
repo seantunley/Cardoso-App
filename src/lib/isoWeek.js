@@ -19,44 +19,75 @@
 // {year, week} pair always satisfies 1 <= week <= 53 and is the ISO
 // year/week the date actually belongs to (NOT the calendar year).
 
-// Coerce the various accepted shapes into a Date. Any unparseable
-// input throws — better than silently returning NaN downstream.
-function _coerce(input) {
-  if (input instanceof Date) {
-    if (Number.isNaN(input.getTime())) throw new Error('isoWeek: invalid Date input');
-    return input;
-  }
-  if (typeof input === 'string' || typeof input === 'number') {
+// Coerce the various accepted shapes into a {year, month, day} calendar
+// triple. Different input shapes get different treatment so the calendar
+// date never shifts across host timezones (Codex catch on PR #232:
+// previously we always took UTC components, which moved a JHB-local
+// 00:30 Dec 29 to UTC Dec 28 and returned the wrong ISO week).
+//
+//   - Bare YYYY-MM-DD strings: parse the digits directly. Skips the
+//     Date round-trip entirely so '2025-12-29' always means Dec 29
+//     regardless of what Date.parse would do with it on different hosts.
+//   - Date objects / numeric timestamps: take LOCAL components
+//     (getFullYear / getMonth / getDate). Assumes the host's local
+//     timezone is the operator's intended timezone — true for our
+//     JHB-deployed Cardoso installs. If a future deployment runs the
+//     server in UTC while operators are in JHB, that's the only case
+//     this still misattributes around midnight; documented above.
+//   - Other ISO strings (with time/offset): parsed via Date and then
+//     LOCAL components — for our UI, "what calendar day did this
+//     happen on" is the operator-local day, which is what local
+//     components give us.
+function _coerceToYmd(input) {
+  if (typeof input === 'string') {
+    // Bare YYYY-MM-DD (with optional T/time after) — parse directly so
+    // the host timezone can't shift the calendar date.
+    const m = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d|$)|$)/.exec(input);
+    if (m) {
+      const year = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10) - 1; // 0-indexed
+      const day = parseInt(m[3], 10);
+      // If a time component followed, fall through to Date-based parsing
+      // (we want the LOCAL day at the given instant). The match group
+      // m[4] is non-empty when a time digit is present.
+      if (!m[4]) return { year, month, day };
+    }
     const d = new Date(input);
     if (Number.isNaN(d.getTime())) throw new Error(`isoWeek: unparseable input ${JSON.stringify(input)}`);
-    return d;
+    return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
+  }
+  if (input instanceof Date) {
+    if (Number.isNaN(input.getTime())) throw new Error('isoWeek: invalid Date input');
+    return { year: input.getFullYear(), month: input.getMonth(), day: input.getDate() };
+  }
+  if (typeof input === 'number') {
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) throw new Error(`isoWeek: unparseable input ${input}`);
+    return { year: d.getFullYear(), month: d.getMonth(), day: d.getDate() };
   }
   throw new Error(`isoWeek: unsupported input type ${typeof input}`);
 }
 
 // Compute ISO 8601 week number AND ISO year for a given date.
 //
-// Algorithm: shift the date to the Thursday of its ISO week, then
+// Algorithm: anchor on UTC midnight of the input's local calendar date,
+// shift to the Thursday of that ISO week, then:
 //   - ISO year = calendar year of that Thursday (because every ISO
 //     week's Thursday is unambiguously in one calendar year, even
 //     when Mon/Sun are in adjacent calendar years).
 //   - ISO week = number of weeks from week 1 of that ISO year, where
 //     week 1 contains Jan 4 (equivalently, the year's first Thursday).
 //
-// Working entirely in UTC to avoid DST shifts moving a midnight date
-// into the previous calendar day. Africa/Johannesburg is UTC+2 with no
-// DST so this is paranoia for our deployment, but it's cheap and stops
-// a future tz change biting silently.
+// Why local-then-UTC: if we took UTC components from a non-UTC input
+// (the previous bug), JHB-local Dec 29 00:30 became UTC Dec 28 22:30
+// and yielded W52/2025 instead of W1/2026. Local components capture
+// the operator's intended calendar day; once we have that triple, the
+// week-shift math runs in UTC so DST and tz arithmetic don't bite.
 export function isoWeek(input) {
-  const src = _coerce(input);
-  // Anchor on midnight UTC of the input's calendar date — ignoring the
-  // time-of-day component of the input. Two dates at 23:59 and 00:01
-  // tomorrow could land in different ISO weeks if we kept the time;
-  // the ISO definition is calendar-day based.
-  const d = new Date(Date.UTC(src.getUTCFullYear(), src.getUTCMonth(), src.getUTCDate()));
+  const { year, month, day } = _coerceToYmd(input);
+  const d = new Date(Date.UTC(year, month, day));
   // Shift to Thursday of this ISO week. ISO weekday: Mon=1..Sun=7.
-  // JS getUTCDay() returns Sun=0..Sat=6; convert to ISO weekday with
-  // (getUTCDay() || 7).
+  // JS getUTCDay() returns Sun=0..Sat=6; convert via (getUTCDay() || 7).
   const isoDay = d.getUTCDay() || 7;
   d.setUTCDate(d.getUTCDate() + 4 - isoDay);
   const isoYear = d.getUTCFullYear();
@@ -95,7 +126,9 @@ export function currentIsoWeek() {
 export function weeksInIsoYear(year) {
   // ISO trick: Dec 28 is always in the last week of its ISO year.
   // (Equivalently: Dec 28's ISO week count IS the year's max week.)
-  return isoWeek(new Date(Date.UTC(year, 11, 28))).week;
+  // Pass a bare YYYY-MM-DD so the calendar day can't shift across
+  // host timezones via Date construction.
+  return isoWeek(`${year}-12-28`).week;
 }
 
 // Reverse helper: given ISO (year, week, weekday=1..7 Mon-first), return

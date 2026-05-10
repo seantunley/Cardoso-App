@@ -85,16 +85,24 @@ describe('isoWeek — middle-of-year sanity checks', () => {
 });
 
 describe('isoWeek — input flexibility', () => {
-  it('accepts a Date object', () => {
-    expect(isoWeek(new Date('2025-12-29'))).toEqual({ year: 2026, week: 1 });
-  });
-
-  it('accepts an ISO string', () => {
+  it('accepts a bare YYYY-MM-DD string (parsed directly, host-tz-independent)', () => {
+    // Bare date strings are the recommended input shape for tests and
+    // any caller that wants to express a calendar date without a tz
+    // commitment. Same answer on every host regardless of TZ.
     expect(isoWeek('2025-12-29')).toEqual({ year: 2026, week: 1 });
   });
 
-  it('accepts a numeric timestamp', () => {
-    expect(isoWeek(new Date('2025-12-29').getTime())).toEqual({ year: 2026, week: 1 });
+  it('accepts a Date object using its LOCAL calendar components', () => {
+    // Construct at midday UTC mid-July to dodge the TZ window where
+    // local and UTC days differ — the test outcome should hold on any
+    // reasonable host timezone (-12..+14).
+    const d = new Date(Date.UTC(2025, 6, 16, 12, 0, 0));
+    expect(isoWeek(d)).toEqual({ year: 2025, week: 29 });
+  });
+
+  it('accepts a numeric timestamp using its LOCAL calendar components', () => {
+    const ts = Date.UTC(2025, 6, 16, 12, 0, 0);
+    expect(isoWeek(ts)).toEqual({ year: 2025, week: 29 });
   });
 
   it('throws on an invalid Date', () => {
@@ -110,11 +118,26 @@ describe('isoWeek — input flexibility', () => {
     expect(() => isoWeek(null)).toThrow(/unsupported input type/);
     expect(() => isoWeek(undefined)).toThrow(/unsupported input type/);
   });
+});
 
-  it('strips time component — different times on the same day are the same ISO week', () => {
-    const morning = isoWeek('2025-12-29T01:00:00.000Z');
-    const evening = isoWeek('2025-12-29T23:59:00.000Z');
-    expect(morning).toEqual(evening);
+describe('isoWeek — timezone-portability regression (Codex P-level on PR #232)', () => {
+  // Earlier version took UTC components from the input, which shifted
+  // local-midnight dates by the host's UTC offset. For a JHB user
+  // (UTC+2) at 00:30 local on Dec 29, UTC components returned Dec 28
+  // and yielded the wrong ISO week. These tests pin the fix:
+  // bare date strings parse directly without tz round-trip, and Date
+  // inputs use local components.
+
+  it('bare date string is host-tz-independent for boundary dates', () => {
+    expect(isoWeek('2025-12-29')).toEqual({ year: 2026, week: 1 });
+    expect(isoWeek('2025-12-28')).toEqual({ year: 2025, week: 52 });
+    expect(isoWeek('2026-12-28')).toEqual({ year: 2026, week: 53 });
+    expect(isoWeek('2027-01-01')).toEqual({ year: 2026, week: 53 });
+  });
+
+  it('weeksInIsoYear is host-tz-independent (uses bare date string internally)', () => {
+    expect(weeksInIsoYear(2026)).toBe(53);
+    expect(weeksInIsoYear(2025)).toBe(52);
   });
 });
 
