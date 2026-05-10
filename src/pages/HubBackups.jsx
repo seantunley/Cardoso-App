@@ -90,7 +90,17 @@ function Stat({ label, value, sub }) {
   );
 }
 
-function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, onRestore }) {
+// view: 'app' | 'sql' — controls which backup-type block renders
+// inside the per-site card. Default 'app' for back-compat with any
+// caller that doesn't pass it. Codex catch (post-merge): the prop
+// was previously dropped from this destructure during a merge while
+// the conditional `view === 'app'` / `view === 'sql'` JSX further
+// down was preserved, so reading `view` at render time threw
+// ReferenceError and crashed the entire Hub Backups page before any
+// site cards rendered. Same merge-loss class as the SettingsPanel
+// compact-state issue fixed in the same commit, and the v62 /
+// auditlog / backup.js / SiteCard chain from earlier this week.
+function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, onRestore, view = 'app' }) {
   const meta = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon = meta.icon;
   const lb = site.last_backup;
