@@ -140,10 +140,32 @@ jobs:
           }
         shell: powershell
 
-      - name: Compute lock hash
+      - name: Compute lock hash (dep-only, version-bump invariant)
         id: lockhash
+        # Hashing the whole package-lock.json invalidates the delta-update path
+        # on every release: `npm` rewrites the version field in package-lock.json
+        # whenever package.json's version changes, so a pure code-only release
+        # (zero dep changes) still flips the lock_hash. The in-app updater then
+        # rejects delta and falls back to the heavy NSIS installer every time.
+        # Hash a normalized view of `packages` instead, with the root entry's
+        # version stripped — that way the hash only changes when dependencies
+        # actually change.
         run: |
-          $hash = (Get-FileHash package-lock.json -Algorithm SHA256).Hash.ToLower()
+          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json
+          $normalized = [ordered]@{}
+          foreach ($prop in ($lock.packages.PSObject.Properties | Sort-Object Name)) {
+            $value = $prop.Value
+            if ($prop.Name -eq '') {
+              # Root entry mirrors package.json — drop fields that change with a
+              # version bump but have no effect on installed node_modules.
+              $value = $value | Select-Object * -ExcludeProperty version
+            }
+            $normalized[$prop.Name] = $value
+          }
+          $json  = $normalized | ConvertTo-Json -Depth 100 -Compress
+          $bytes = [System.Text.Encoding]::UTF8.GetBytes($json)
+          $sha   = [System.Security.Cryptography.SHA256]::Create()
+          $hash  = ([System.BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLower()
           echo "lock_hash=$hash" >> $env:GITHUB_OUTPUT
           Write-Host "lock_hash=$hash"
         shell: powershell

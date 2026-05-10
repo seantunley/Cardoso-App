@@ -87,12 +87,14 @@ Section "Install" SecInstall
     StrCpy $SiteNameValue "Cardoso Site"
   ${EndIf}
 
-  ; Stop and remove existing service before copying files (prevents file-lock failures on upgrade)
-  ; nssm install fails silently if service already exists, leaving it broken
+  ; Stop the service so files can be replaced. We deliberately do NOT
+  ; `nssm remove` here — the previous flow removed the service before
+  ; extracting files, so any failure between (file lock, AV, NSIS timeout,
+  ; nssm install exiting non-zero) left the service permanently gone with
+  ; no recovery. Keep the service registered; reconfigure it after the
+  ; new files land so a mid-extract failure leaves the old service intact.
   ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
   Sleep 3000
-  ExecWait '"$INSTDIR\nssm\nssm.exe" remove ${SERVICE_NAME} confirm' $0
-  Sleep 2000
 
   SetOutPath "$INSTDIR"
 
@@ -136,8 +138,16 @@ Section "Install" SecInstall
     FileClose $0
   env_exists:
 
-  ; Install Windows service via NSSM
+  ; Install OR reconfigure the Windows service via NSSM.
+  ; `nssm install` exits non-zero if the service already exists; that's fine —
+  ; we suppress the failure and let the subsequent `set` calls bring an
+  ; existing service back into a known-good configuration. On a fresh box
+  ; the install line creates the service; the `set` lines are then redundant
+  ; but harmless. This double-coverage is what keeps an upgrade safe even if
+  ; the service had drift from a prior partial install.
   ExecWait '"$INSTDIR\nssm\nssm.exe" install ${SERVICE_NAME} "$INSTDIR\node\node.exe" "-r dotenv/config server.js"' $0
+  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} Application "$INSTDIR\node\node.exe"' $0
+  ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppParameters "-r dotenv/config server.js"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppDirectory "$INSTDIR"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} AppEnvironmentExtra "NODE_ENV=production"' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" set ${SERVICE_NAME} DisplayName "${APP_NAME}"' $0
