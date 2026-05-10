@@ -1659,7 +1659,7 @@ export default function Reconciliation() {
                       loadDashboard();
                     }
                   } catch (err) {
-                    toast.error(humanizeApiError(err, `generate Cardoso invoices for week ${recon?.week_number ?? '?'}`));
+                    toast.error(humanizeApiError(err, `generate Cardoso invoices for ${genFromDate} → ${genToDate}`));
                   } finally {
                     setGenerating(false);
                   }
