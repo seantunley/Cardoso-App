@@ -1,3 +1,11 @@
+/**
+ * @typedef {Record<string, unknown> & { role?: string }} PermissionUser
+ */
+
+/**
+ * @param {PermissionUser | null | undefined} user
+ * @param {string | null | undefined} permissionKey
+ */
 export function hasPermission(user, permissionKey) {
   if (!user) return false;
   // Fail-closed on missing/empty key BEFORE the admin branch. The
@@ -37,6 +45,11 @@ export function hasPermission(user, permissionKey) {
  *   - reason:  short human-readable explanation
  *   - source:  one of 'no_user' | 'no_key' | 'admin_default' |
  *              'admin_explicit_off' | 'user_grant' | 'user_deny'
+ */
+/**
+ * @param {PermissionUser | null | undefined} user
+ * @param {string | null | undefined} permissionKey
+ * @returns {{ allowed: boolean, reason: string, source: string }}
  */
 export function explainPermission(user, permissionKey) {
   if (!user) {
@@ -82,6 +95,7 @@ export function explainPermission(user, permissionKey) {
   };
 }
 
+/** @param {unknown} v */
 function describeValue(v) {
   if (v === undefined) return 'undefined (column not set)';
   if (v === null) return 'null';

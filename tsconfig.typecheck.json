@@ -1,0 +1,14 @@
+{
+  "extends": "./jsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/lib/dates.js",
+    "src/lib/isoWeek.js",
+    "src/lib/manualFlagMessages.js",
+    "src/lib/permissions.js",
+    "src/utils/index.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

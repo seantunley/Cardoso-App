@@ -1,3 +1,4 @@
+/** @param {unknown} value */
 export function parseAppDate(value) {
   if (!value) return null;
 
@@ -21,6 +22,7 @@ export function parseAppDate(value) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/** @param {unknown} value */
 export function formatAppDate(value) {
   const parsed = parseAppDate(value);
   if (!parsed) return "-";
@@ -36,6 +38,7 @@ export function formatAppDate(value) {
   }).format(parsed);
 }
 
+/** @param {unknown} value */
 export function formatAppDateLong(value) {
   const parsed = parseAppDate(value);
   if (!parsed) return "-";

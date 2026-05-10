@@ -55,28 +55,26 @@ end-of-lifed or a more serious CVE lands.
 
 ## Code quality
 
-### Pre-existing TypeScript errors (~700)
+### Legacy broad TypeScript errors (~1800)
 
-`npm run typecheck` reports 700+ errors against `jsconfig.json`. This is
-mostly `forwardRef` ref-attribute typing noise plus unrelated JS-checked
-type drift. Typecheck is **not** a CI gate (intentional — the JS-checking
-config produces too much noise to be useful as-is).
+`npm run typecheck` is now a scoped CI gate backed by
+`tsconfig.typecheck.json`. The broad legacy JS-checking baseline is still
+measurable with `npm run typecheck:legacy`; after the React 19 ref-as-prop
+codemod it sits at roughly 1800 errors.
 
-Cleanup options:
-1. Make `jsconfig.json` less strict (`checkJs: false` until type debt is
-   reduced) — fast, hides the problem.
-2. One-by-one cleanup pass — slow, real value if we ever want typecheck
-   to be a CI gate.
+The initial checked surface is intentionally small and clean:
 
-Not urgent. Pick this up when adding new code that benefits from real type
-safety.
+- `src/lib/dates.js`
+- `src/lib/isoWeek.js`
+- `src/lib/manualFlagMessages.js`
+- `src/lib/permissions.js`
+- `src/utils/index.ts`
 
-### `forwardRef` dev-mode warnings (React 19)
-
-~163 components in `src/components/ui/*` use `React.forwardRef(...)`. These
-keep working in React 19 but emit deprecation warnings in the dev console.
-The mechanical refactor to ref-as-prop is one quiet day's work; the noise
-isn't blocking.
+Cleanup path:
+1. Keep `npm run typecheck` green in CI.
+2. When a source file is cleaned, add it to `tsconfig.typecheck.json`.
+3. Periodically run `npm run typecheck:legacy -- --pretty false` to choose
+   the next highest-value bucket.
 
 ---
 

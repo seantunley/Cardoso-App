@@ -2,10 +2,8 @@ name: CI
 
 # Minimum-viable PR gate. Anything beyond lint + build + audit-critical +
 # secret-scan gets added separately as the baseline reaches green:
-# - typecheck is NOT a gate yet (~700 pre-existing errors, see
-#   docs/plans/tech-debt.md)
-# - tests are NOT a gate yet (none scaffolded — first ones land alongside
-#   this workflow for parseSupplierSpreadsheet)
+# - typecheck is scoped via tsconfig.typecheck.json; the broad legacy
+#   baseline is still measured with npm run typecheck:legacy.
 # - npm audit is set to --audit-level=critical, not high, because xlsx
 #   has known unfixed high-severity CVEs that are mitigated by trust
 #   boundary; flagged in tech-debt.md.
@@ -56,6 +54,10 @@ jobs:
 
       - name: Lint
         run: npm run lint
+        shell: powershell
+
+      - name: Typecheck
+        run: npm run typecheck
         shell: powershell
 
       - name: Build frontend
