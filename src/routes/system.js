@@ -170,7 +170,11 @@ async function sha256File(filePath) {
 //
 // Returns the absolute path of the .ps1 file written, for use by callers
 // that need to log it.
-async function launchViaTaskScheduler(taskName, scriptContent) {
+// Exported so other routers (e.g. routes/hub.js receive-restore
+// handler) can hand off long-running, service-restarting work to
+// the OS scheduler with the same survives-NSSM-kill-tree semantics
+// the in-app updater needs.
+export async function launchViaTaskScheduler(taskName, scriptContent) {
   const tempDir = process.env.TEMP || 'C:\\Windows\\Temp';
   const scriptPath = path.join(tempDir, `${taskName}.ps1`);
 

@@ -7,7 +7,8 @@
 
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { readdirSync, statSync } from 'fs';
+import crypto from 'crypto';
+import { readdirSync, statSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
@@ -1745,6 +1746,305 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // ========================================================================
+  // RESTORE — hub-driven push of a previously-pulled snapshot back to a site
+  // ========================================================================
+  //
+  // Three endpoints work together. Auth model mirrors the existing
+  // backup-pull flow but reversed:
+  //
+  //   1. GET /api/hub/sites/:siteId/snapshots                  (admin)
+  //      Lists snapshots the hub has on disk for one site. The
+  //      operator picks one in the UI.
+  //
+  //   2. POST /api/hub/sites/:siteId/restore                   (admin + password)
+  //      Operator-initiated. Body: { snapshot_filename, password,
+  //      include_previews }. Hub:
+  //        - validates password against the operator's user record
+  //        - mints a one-shot restore token (random 32 bytes,
+  //          5-min TTL) bound to siteId + snapshot_filename
+  //        - POSTs to <site>/api/hub/restore with { snapshot_filename,
+  //          hub_url, restore_token, include_previews }
+  //        - returns the site's response to the operator
+  //
+  //   3. GET /api/hub/restore-fetch/:siteId/:filename          (one-shot token)
+  //      Site downloads the snapshot file from this. Auth via
+  //      x-restore-token header matched against the in-memory map
+  //      minted in step 2. Token is consumed (deleted) on first use
+  //      so a leaked token can't be replayed.
+  //
+  // Why a one-shot token instead of letting the site re-use its
+  // x-reporting-token: keeping the snapshot-fetch URL operator-
+  // gated means the site can't pull arbitrary snapshots whenever it
+  // wants — only during an explicit restore window the operator
+  // initiated. Also forces single-use semantics so the same token
+  // can't accidentally fire two restores.
+  const restoreTokens = new Map(); // token -> { siteId, fileBaseName, expiresAt }
+  const RESTORE_TOKEN_TTL_MS = 5 * 60 * 1000;
+
+  function mintRestoreToken(siteId, fileBaseName) {
+    const token = crypto.randomBytes(32).toString('hex');
+    restoreTokens.set(token, {
+      siteId,
+      fileBaseName,
+      expiresAt: Date.now() + RESTORE_TOKEN_TTL_MS,
+    });
+    return token;
+  }
+
+  // Sweep expired tokens lazily on every check — keeps the map from
+  // growing unbounded if a site never picks up its restore.
+  function consumeRestoreToken(token, siteId, fileBaseName) {
+    const entry = restoreTokens.get(token);
+    if (!entry) return false;
+    restoreTokens.delete(token); // one-shot: always consumed
+    if (entry.expiresAt < Date.now()) return false;
+    if (entry.siteId !== siteId) return false;
+    if (entry.fileBaseName !== fileBaseName) return false;
+    return true;
+  }
+
+  // Sweep stale tokens every minute. Bounded; map stays small.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [tok, entry] of restoreTokens.entries()) {
+      if (entry.expiresAt < now) restoreTokens.delete(tok);
+    }
+  }, 60_000).unref();
+
+  // Reject filenames that try to escape the per-site backup dir.
+  // hub-backups/<siteId>/<file> is the only legal shape; '..' or
+  // path separators in the filename are rejected.
+  function isSafeBackupFilename(name) {
+    if (typeof name !== 'string' || !name) return false;
+    if (name.includes('/') || name.includes('\\') || name.includes('..')) return false;
+    if (!/^[\w.\-+ ]+$/.test(name)) return false; // conservative whitelist
+    return true;
+  }
+
+  // GET /api/hub/sites/:siteId/snapshots
+  // Lists every .db snapshot the hub has on disk for this site,
+  // with size + mtime + integrity (joined from hub_backup_integrity).
+  // The matching bat-previews-*.zip for each snapshot timestamp is
+  // included so the operator can see at a glance whether previews
+  // are available for each snapshot.
+  router.get('/api/hub/sites/:siteId/snapshots', requireAuth, requireAdmin, (req, res) => {
+    const { siteId } = req.params;
+    const site = db.prepare(`SELECT id, slug, name FROM hub_sites WHERE id = ?`).get(siteId);
+    if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
+
+    const dir = path.join(process.cwd(), 'database', 'hub-backups', siteId);
+    if (!existsSync(dir)) {
+      return res.json({ site_id: site.id, site_name: site.name, snapshots: [] });
+    }
+
+    let allFiles = [];
+    try {
+      allFiles = readdirSync(dir);
+    } catch (err) {
+      return res.status(500).json({ error: `Cannot read backups dir: ${err.message}` });
+    }
+
+    // Pull every db file's metadata + previews-zip companion (if any).
+    // Match on the timestamp suffix `-YYYY-MM-DD-HH-MM-SS` since the
+    // .db and .zip share that part — see hubEtl.pullBackupForSite.
+    const dbFiles = allFiles.filter((f) => f.endsWith('.db'));
+    const previewZips = allFiles.filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'));
+
+    // Pre-load integrity statuses in one query keyed by filename, so
+    // the snapshots list shows whether the hub already verified each.
+    let integrityMap = new Map();
+    try {
+      const rows = db.prepare(`
+        SELECT filename, result, MAX(created_at) AS last_check
+        FROM hub_backup_integrity WHERE site_id = ? GROUP BY filename
+      `).all(siteId);
+      integrityMap = new Map(rows.map(r => [r.filename, r]));
+    } catch {}
+
+    const snapshots = dbFiles.map((dbFile) => {
+      const fullDb = path.join(dir, dbFile);
+      let dbStat = null;
+      try { dbStat = statSync(fullDb); } catch {}
+      // Match the timestamp suffix to find the companion previews zip.
+      // .db filename: cardoso-<siteId>-YYYY-MM-DD-HH-MM-SS.db
+      // zip filename: bat-previews-<siteId>-YYYY-MM-DD-HH-MM-SS.zip
+      const tsMatch = dbFile.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
+      const ts = tsMatch ? tsMatch[1] : null;
+      const previewsFile = ts ? previewZips.find((z) => z.includes(ts)) : null;
+      let previewsStat = null;
+      if (previewsFile) {
+        try { previewsStat = statSync(path.join(dir, previewsFile)); } catch {}
+      }
+      const integrity = integrityMap.get(dbFile);
+      return {
+        filename: dbFile,
+        size_bytes: dbStat?.size ?? null,
+        mtime: dbStat ? new Date(dbStat.mtimeMs).toISOString() : null,
+        integrity: integrity?.result || null,
+        integrity_checked_at: integrity?.last_check || null,
+        previews_filename: previewsFile || null,
+        previews_size_bytes: previewsStat?.size ?? null,
+      };
+    }).sort((a, b) => (b.mtime || '').localeCompare(a.mtime || ''));
+
+    res.json({
+      site_id: site.id,
+      site_slug: site.slug,
+      site_name: site.name,
+      snapshots,
+    });
+  });
+
+  // POST /api/hub/sites/:siteId/restore
+  // Operator-initiated restore. Pushes a snapshot back to the named site.
+  router.post('/api/hub/sites/:siteId/restore', requireAuth, requireAdmin, async (req, res) => {
+    const { siteId } = req.params;
+    const { snapshot_filename, password, include_previews } = req.body || {};
+
+    if (!password) {
+      return res.status(400).json({ error: 'Password is required to initiate a restore.' });
+    }
+    if (!isSafeBackupFilename(snapshot_filename)) {
+      return res.status(400).json({ error: 'Invalid snapshot_filename.' });
+    }
+
+    const site = db.prepare(`SELECT id, slug, name, url, token FROM hub_sites WHERE id = ?`).get(siteId);
+    if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
+    if (!site.url || !site.token) {
+      return res.status(400).json({ error: `Site '${site.slug}' has no URL or token configured — cannot push a restore.` });
+    }
+
+    // Password check against the operator's user record.
+    const user = db.prepare('SELECT * FROM "user" WHERE id = ?').get(req.currentUser.id);
+    if (!user || !user.password_hash) {
+      return res.status(401).json({ error: 'Unable to verify your password.' });
+    }
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Incorrect password.' });
+
+    // Validate the snapshot exists on hub disk.
+    const snapDir = path.join(process.cwd(), 'database', 'hub-backups', siteId);
+    const snapPath = path.join(snapDir, snapshot_filename);
+    if (!existsSync(snapPath)) {
+      return res.status(404).json({ error: `Snapshot '${snapshot_filename}' not found on hub.` });
+    }
+
+    // Find the matching previews zip (if include_previews is set).
+    let previewsFilename = null;
+    if (include_previews) {
+      const tsMatch = snapshot_filename.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
+      if (tsMatch) {
+        const ts = tsMatch[1];
+        const candidate = readdirSync(snapDir).find((f) => f.startsWith('bat-previews-') && f.includes(ts) && f.endsWith('.zip'));
+        if (candidate && existsSync(path.join(snapDir, candidate))) {
+          previewsFilename = candidate;
+        }
+      }
+    }
+
+    // Mint one-shot tokens — one per file the site needs to pull.
+    const dbToken = mintRestoreToken(siteId, snapshot_filename);
+    const previewsToken = previewsFilename ? mintRestoreToken(siteId, previewsFilename) : null;
+    const restoreId = crypto.randomBytes(8).toString('hex');
+
+    // Determine the hub's URL the site will fetch from. Same env
+    // the trigger-accpac flow uses: HUB_URL must match what the
+    // site's REPORTING_TOKEN authenticates to. If unset, fall back
+    // to req protocol+host (works when the operator browses to the
+    // hub directly, but not behind a reverse proxy that strips
+    // host info).
+    const hubUrl = process.env.HUB_URL || `${req.protocol}://${req.get('host')}`;
+
+    try {
+      const restoreUrl = `${site.url}/api/hub/restore`;
+      const r = await fetch(restoreUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Reporting-Token': site.token,
+        },
+        signal: AbortSignal.timeout(10 * 60 * 1000), // 10 min — restore can be slow on big sites
+        body: JSON.stringify({
+          restore_id: restoreId,
+          hub_url: hubUrl.replace(/\/$/, ''),
+          snapshot: {
+            filename: snapshot_filename,
+            token: dbToken,
+          },
+          previews: previewsToken
+            ? { filename: previewsFilename, token: previewsToken }
+            : null,
+        }),
+      });
+      const body = await r.json().catch(() => ({}));
+
+      logAudit({
+        req,
+        action: 'hub_push_restore',
+        resourceType: 'site',
+        resourceId: site.id,
+        resourceName: site.name || site.slug,
+        details:
+          `Pushed snapshot ${snapshot_filename}` +
+          (previewsFilename ? ` + previews ${previewsFilename}` : ' (no previews)') +
+          ` to ${site.url}. Site response: ${r.status} ${body.message || body.error || ''}`,
+        changes: {
+          restore_id: restoreId,
+          snapshot_filename,
+          previews_filename: previewsFilename,
+          site_response_status: r.status,
+        },
+        status: r.ok ? 'success' : 'failure',
+      });
+
+      if (!r.ok) {
+        return res.status(r.status).json({ ok: false, error: body.error || `HTTP ${r.status}`, ...body });
+      }
+      res.json({ ok: true, restore_id: restoreId, ...body });
+    } catch (err) {
+      const friendly = describeFetchError(err, `${site.url}/api/hub/restore`);
+      logError('hub.push_restore', err, { site_id: site.id, site_url: site.url, friendly });
+      logAudit({
+        req,
+        action: 'hub_push_restore',
+        resourceType: 'site',
+        resourceId: site.id,
+        resourceName: site.name || site.slug,
+        details: `Failed to forward restore: ${friendly}`,
+        status: 'failure',
+      });
+      res.status(502).json({ ok: false, error: friendly });
+    }
+  });
+
+  // GET /api/hub/restore-fetch/:siteId/:filename
+  // Site downloads a snapshot file from this. Auth via x-restore-token
+  // header validated against the in-memory token map. One-shot.
+  router.get('/api/hub/restore-fetch/:siteId/:filename', (req, res) => {
+    const { siteId, filename } = req.params;
+    const token = req.headers['x-restore-token'];
+
+    if (!token) return res.status(401).json({ error: 'Missing x-restore-token header' });
+    if (!isSafeBackupFilename(filename)) return res.status(400).json({ error: 'Invalid filename' });
+    if (!consumeRestoreToken(token, siteId, filename)) {
+      return res.status(401).json({ error: 'Invalid, expired, or already-consumed restore token' });
+    }
+
+    const filePath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    if (!existsSync(filePath)) return res.status(404).json({ error: 'Snapshot file not found on hub' });
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+    const stream = createReadStream(filePath);
+    stream.on('error', (err) => {
+      console.error('[hub.restore-fetch] stream error:', err.message);
+      try { res.destroy(err); } catch {}
+    });
+    stream.pipe(res);
+  });
+
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
   // See createReceiveUsersRouter() below — mounted separately in server.js.
 
@@ -2035,6 +2335,159 @@ export function createReceiveUsersRouter() {
       succeeded: okCount,
       failed: results.length - okCount,
       results,
+    });
+  });
+
+  // POST /api/hub/restore — site-side. Hub posts here to push a
+  // restore. The site:
+  //   1. Validates inbound x-reporting-token
+  //   2. Downloads the snapshot DB (and optional previews zip) from
+  //      the hub using the one-shot tokens the hub provided
+  //   3. Schedules apply-restore.ps1 via Task Scheduler so the swap
+  //      survives the service stop (same pattern as the auto-update
+  //      flow — see launchViaTaskScheduler in routes/system.js for
+  //      the full reasoning on why detached child-process spawning
+  //      isn't enough on Windows under NSSM)
+  //   4. Returns immediately — the operator on the hub watches the
+  //      site's tile go offline briefly then come back at the
+  //      restored state. Detailed result lands in the site's
+  //      .last-restore-status.json which the in-app status endpoint
+  //      surfaces.
+  router.post('/api/hub/restore', async (req, res) => {
+    const token = req.headers['x-reporting-token'];
+    const expectedToken = process.env.REPORTING_TOKEN;
+    if (!expectedToken || token !== expectedToken) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { restore_id, hub_url, snapshot, previews } = req.body || {};
+    if (!restore_id || !hub_url || !snapshot?.filename || !snapshot?.token) {
+      return res.status(400).json({ error: 'Missing restore_id, hub_url, or snapshot {filename, token}' });
+    }
+
+    const fsModule = await import('fs');
+    const pathModule = await import('path');
+    const streamModule = await import('stream');
+    const { pipeline } = streamModule.promises || (await import('stream/promises'));
+
+    const appDir = process.env.APP_DIR || 'C:\\Cardoso Customer App';
+    const stagingDir = pathModule.join(appDir, '.restore-staging', restore_id);
+    fsModule.mkdirSync(stagingDir, { recursive: true });
+
+    const downloadFile = async (urlPath, oneShotToken, destPath) => {
+      const ctrl = new AbortController();
+      const timeout = setTimeout(() => ctrl.abort(), 10 * 60 * 1000); // 10 min — multi-GB DB possible
+      try {
+        const r = await fetch(`${hub_url}${urlPath}`, {
+          headers: { 'x-restore-token': oneShotToken },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timeout);
+        if (!r.ok) {
+          const body = await r.text().catch(() => '');
+          throw new Error(`HTTP ${r.status} from hub on ${urlPath}: ${body.slice(0, 300)}`);
+        }
+        const ws = fsModule.createWriteStream(destPath);
+        const { Readable } = streamModule;
+        await pipeline(Readable.fromWeb(r.body), ws);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+
+    let dbStaging = null;
+    let previewsStaging = null;
+    try {
+      // Download DB snapshot
+      dbStaging = pathModule.join(stagingDir, snapshot.filename);
+      const siteId = process.env.SITE_ID || 'site';
+      await downloadFile(
+        `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(snapshot.filename)}`,
+        snapshot.token,
+        dbStaging,
+      );
+
+      // Optional previews zip
+      if (previews?.filename && previews?.token) {
+        previewsStaging = pathModule.join(stagingDir, previews.filename);
+        await downloadFile(
+          `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(previews.filename)}`,
+          previews.token,
+          previewsStaging,
+        );
+      }
+    } catch (err) {
+      // Clean up staging on download failure — don't leave orphaned
+      // partial files on disk.
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      return res.status(502).json({
+        ok: false,
+        error: `Failed to download restore artifacts from hub: ${err.message}`,
+      });
+    }
+
+    // Hand off to apply-restore.ps1 via Task Scheduler. The script
+    // stops the service, swaps files, runs integrity check, restarts
+    // the service, and writes a status marker for the next boot to
+    // pick up. We DON'T await it — the script runs detached and we'd
+    // be killed mid-flight when the service stops.
+    if (process.platform !== 'win32') {
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      return res.status(400).json({
+        ok: false,
+        error: 'Restore is only supported on Windows site installs (apply-restore.ps1 is PowerShell).',
+      });
+    }
+
+    const applyScript = pathModule.join(appDir, 'scripts', 'apply-restore.ps1');
+    if (!fsModule.existsSync(applyScript)) {
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      return res.status(500).json({
+        ok: false,
+        error: `Restore script missing at ${applyScript} — site needs to upgrade to a release that ships the restore mechanism.`,
+      });
+    }
+
+    // Build the PowerShell argument string. Quote each value for
+    // PowerShell so paths with spaces survive re-parsing (same
+    // pattern apply-app-update.ps1 invocation uses).
+    const psArgsList = [
+      ['-StagingDir', stagingDir],
+      ['-SnapshotDbPath', dbStaging],
+      ['-AppDir', appDir],
+      ['-RestoreId', restore_id],
+    ];
+    if (previewsStaging) {
+      psArgsList.push(['-SnapshotPreviewsZipPath', previewsStaging]);
+    }
+    const psArgs = psArgsList
+      .map(([k, v]) => `${k} '${String(v).replace(/'/g, "''")}'`)
+      .join(' ');
+    const wrapper = `& '${applyScript.replace(/'/g, "''")}' ${psArgs}`;
+
+    // Schedule it. Reuses launchViaTaskScheduler from routes/system.js
+    // — same one the auto-updater uses. Lazy-import to avoid a circular
+    // routes↔routes dependency at module load.
+    try {
+      const { launchViaTaskScheduler } = await import('./system.js');
+      const taskName = `CardosoRestore-${restore_id}`;
+      await launchViaTaskScheduler(taskName, wrapper);
+    } catch (err) {
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { logError('site.restore.task_scheduler', err, { restore_id }); } catch {}
+      return res.status(500).json({
+        ok: false,
+        error: `Failed to schedule apply-restore task: ${err.message}`,
+      });
+    }
+
+    res.json({
+      ok: true,
+      restore_id,
+      message: 'Restore scheduled. Site service will stop, swap files, and restart. Watch the site tile go offline briefly then come back.',
+      staging_dir: stagingDir,
+      snapshot_filename: snapshot.filename,
+      previews_filename: previews?.filename || null,
     });
   });
 
