@@ -1,3 +1,21 @@
+// React 19 ref-as-prop with JSDoc-typed props.
+//
+// Was previously `React.forwardRef` with no type parameters, which made
+// TypeScript infer the component's prop type as
+// `IntrinsicAttributes & RefAttributes<any>` — every callsite passing
+// `children` / `className` / `variant` / `onClick` / etc. surfaced as a
+// TS2322 ("Type '{ children: ... }' is not assignable...") error. 507
+// of those errors disappear when this one component is typed correctly.
+//
+// The JSDoc shape `ButtonOwnProps & React.ComponentPropsWithRef<'button'>`
+// is what shadcn-style components want: own variants/asChild plus every
+// standard <button> HTML attribute (className, onClick, disabled, etc.)
+// AND the ref slot. ComponentPropsWithRef (not -Without-) is required
+// because we destructure `ref` from props.
+//
+// Slot still accepts `ref` as a prop in @radix-ui/react-slot@1.2.x, so
+// the asChild path lands the ref on the inner element exactly as before.
+
 import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva } from "class-variance-authority";
@@ -38,15 +56,23 @@ const buttonVariants = cva(
   }
 )
 
-const Button = React.forwardRef(({ className, variant, size, asChild = false, ...props }, ref) => {
+/**
+ * @typedef {object} ButtonOwnProps
+ * @property {'default'|'destructive'|'outline'|'secondary'|'ghost'|'link'} [variant]
+ * @property {'default'|'sm'|'lg'|'icon'} [size]
+ * @property {boolean} [asChild]
+ */
+
+/** @param {ButtonOwnProps & React.ComponentPropsWithRef<'button'>} props */
+function Button({ className, variant, size, asChild = false, ref, ...props }) {
   const Comp = asChild ? Slot : "button"
   return (
-    (<Comp
-      className={cn(buttonVariants({ variant, size, className }))}
+    <Comp
       ref={ref}
-      {...props} />)
+      className={cn(buttonVariants({ variant, size, className }))}
+      {...props} />
   );
-})
+}
 Button.displayName = "Button"
 
 export { Button, buttonVariants }
