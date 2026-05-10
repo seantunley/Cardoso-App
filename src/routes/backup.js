@@ -6,6 +6,8 @@ import { pipeline } from 'stream/promises';
 import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
+import { reportingRateLimiter, backupHeavyRateLimiter } from '../middleware/rateLimit.js';
 
 const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBackupAndFTP\\Db\\routines.db';
 const DEFAULT_SQLBACKUP_OBJECT_EXCLUDE_LIST = 'PPDdata';
