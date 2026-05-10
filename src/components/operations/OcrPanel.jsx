@@ -491,15 +491,24 @@ export default function OcrPanel() {
                 <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
               ) : (
                 recentRuns.data.rows.map(row => {
-                  // Show the Extract button only when there's something to do
-                  // (rows_pending > 0). While the worker is running THIS recon,
-                  // swap to a non-actionable "running" indicator so the
-                  // operator can see the click landed and the queue moved on.
-                  // The pause flag disables the button — runInvoiceExtraction
-                  // would 409 anyway, but failing-fast in the UI is clearer
-                  // than letting them click and read an error.
+                  // Action-button states:
+                  //   no pending rows   → "—" (nothing to do)
+                  //   this is the active recon → "running" indicator (worker is
+                  //     already chewing through it; clicking would no-op)
+                  //   worker busy on a DIFFERENT recon → disabled "queued" button.
+                  //     Critical: startExtractionWorker() returns early when
+                  //     workerRunning is true, so without this guard the click
+                  //     lands as a 200 response that does nothing — the
+                  //     operator gets a false "started" signal. The queue is
+                  //     conceptual: as soon as the active run finishes,
+                  //     resumeExtractionWorker() picks up any pending rows
+                  //     including this row's, so calling out "queued" rather
+                  //     than just disabling matches what actually happens.
+                  //   OCR paused → disabled (with a "resume first" tooltip)
+                  //   otherwise → enabled "Extract"
                   const hasPending = row.rows_pending > 0;
-                  const isActiveRecon = snap?.worker_running && snap?.worker_recon_id === row.id;
+                  const workerOnThis = snap?.worker_running && snap?.worker_recon_id === row.id;
+                  const workerOnOther = snap?.worker_running && snap?.worker_recon_id !== row.id;
                   const isExtracting = extractMutation.isPending && extractMutation.variables === row.id;
                   return (
                     <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/20">
@@ -517,11 +526,21 @@ export default function OcrPanel() {
                       <td className="px-4 py-2 text-right">
                         {!hasPending ? (
                           <span className="text-xs text-muted-foreground/50">—</span>
-                        ) : isActiveRecon ? (
+                        ) : workerOnThis ? (
                           <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-mono">
                             <Loader2 className="w-3 h-3 animate-spin" />
                             running
                           </span>
+                        ) : workerOnOther ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled
+                            title={`OCR worker is busy on recon #${snap.worker_recon_id} — this row will be picked up automatically when the current run finishes (if still pending).`}
+                            className="h-7 px-2 border-border text-xs text-muted-foreground"
+                          >
+                            <Clock className="w-3 h-3 mr-1" /> queued
+                          </Button>
                         ) : (
                           <Button
                             size="sm"
