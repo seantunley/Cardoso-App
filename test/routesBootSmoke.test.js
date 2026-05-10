@@ -137,14 +137,37 @@ const routeFiles = fs
 
 // Inline runner — given a file URL, attempt to import it. Map the
 // outcome to one of three exit codes:
-//   0  — import resolved, OR threw a side-effect-time error we accept
-//   2  — import resolved, but the failure was an import-time class
-//        we want this smoke test to catch (SyntaxError, MODULE_NOT_FOUND,
-//        ERR_REQUIRE_ESM, etc.)
+//   0  — import resolved cleanly, OR threw a recognised side-effect-
+//        time error that is out of scope for this smoke test
+//   2  — import-time failure we WANT the test to catch (any
+//        error that isn't on the side-effect allowlist)
 //   1  — unexpected runner error (vitest will surface this as a fail)
 //
-// Stderr carries the error message either way so vitest can show it
-// in the failure output.
+// Default-fail polarity is load-bearing: Codex review caught an
+// earlier version that used a small allowlist of failure codes
+// and treated everything else as side-effect — that let new Node
+// loader codes silently slip through (e.g. ERR_PACKAGE_PATH_NOT_EXPORTED
+// from a non-exported subpath import). Inverting the polarity
+// means any future loader/parse error class is caught by default,
+// and only explicitly-recognised evaluation-time errors pass.
+//
+// What we accept (the allowlist):
+//   - better-sqlite3 errors raised when a route's lib chain calls
+//     db.prepare/run/etc. at top level against the slim test schema.
+//     These are NOT import-resolution issues — they live in the
+//     module body, AFTER import resolution succeeded. Identified
+//     by constructor name (SqliteError) and/or code prefix
+//     (SQLITE_*). Per-feature tests cover query behaviour; this
+//     test only cares about reaching the body in the first place.
+//
+// Everything else — SyntaxError, every ERR_* loader code (known
+// and yet-to-be-added), MODULE_NOT_FOUND from CJS createRequire,
+// "does not provide an export" messages, any unrecognised import
+// failure — exits 2 and fails the test with the original error
+// message visible in stderr.
+//
+// Stderr carries the error message either way so vitest can show
+// it in the failure output.
 const RUNNER = `
 const url = process.argv[1];
 import(url).then(
@@ -152,30 +175,23 @@ import(url).then(
   (err) => {
     const msg = (err && err.message) || String(err);
     const code = err && err.code;
-    process.stderr.write(\`\${err && err.constructor && err.constructor.name || 'Error'}: \${msg}\\n\`);
-    // Import-resolution failure class: exit 2 so the test fails.
-    // Both the ESM loader codes (ERR_MODULE_NOT_FOUND, ERR_REQUIRE_ESM,
-    // ERR_UNSUPPORTED_DIR_IMPORT) AND the CJS loader's MODULE_NOT_FOUND
-    // need to be in this set — route modules now use createRequire
-    // (see backup.js → archiver), and a missing CJS dep throws with
-    // code === 'MODULE_NOT_FOUND' (no ERR_ prefix). Without that arm
-    // a missing CJS dependency would fall through to the accepted-
-    // side-effect path and the test would pass while production boot
-    // crashed on startup. Codex review catch.
-    if (
-      err instanceof SyntaxError ||
-      code === 'ERR_MODULE_NOT_FOUND' ||
-      code === 'MODULE_NOT_FOUND' ||
-      code === 'ERR_REQUIRE_ESM' ||
-      code === 'ERR_UNSUPPORTED_DIR_IMPORT' ||
-      /does not provide an export/.test(msg)
-    ) {
-      process.exit(2);
+    const name = err && err.constructor && err.constructor.name;
+    process.stderr.write(\`\${name || 'Error'}: \${msg}\\n\`);
+    if (code) process.stderr.write(\`code=\${code}\\n\`);
+
+    // Side-effect allowlist — better-sqlite3 errors raised inside a
+    // transitively-imported module's body. Anything else is treated
+    // as an import-time failure.
+    const isSqliteSideEffect =
+      name === 'SqliteError' ||
+      (typeof code === 'string' && code.startsWith('SQLITE_'));
+
+    if (isSqliteSideEffect) {
+      process.stderr.write('SIDE-EFFECT (accepted by smoke test)\\n');
+      process.exit(0);
     }
-    // Side-effect-time errors (SqliteError, missing env, etc.) — accept,
-    // those have their own tests. Print so it's visible in CI logs.
-    process.stderr.write('SIDE-EFFECT (accepted by smoke test)\\n');
-    process.exit(0);
+
+    process.exit(2);
   },
 );
 `;
