@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useToast } from "@/components/ui/use-toast";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
@@ -232,17 +233,6 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                     ? <><RefreshCw className="mr-1.5 h-3 w-3 animate-spin" />Downloading…</>
                     : <><Download className="mr-1.5 h-3 w-3" />Pull .env</>}
                 </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!site.url}
-                  onClick={() => onRestore(site)}
-                  className="h-7 border-rose-500/40 px-3 text-xs text-rose-400 hover:text-rose-300 hover:border-rose-500/60"
-                  title="Push a snapshot from the hub back to this site"
-                >
-                  <Upload className="mr-1.5 h-3 w-3" />
-                  Restore…
-                </Button>
               </div>
             </div>
             )}
@@ -307,6 +297,27 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
               )}
             </div>
             )}
+            {/* Restore lives outside the view-conditional blocks because
+                a restore replaces the live DB on the site — it's a
+                site-level action, not an App-tab-only one. Originally
+                rendered inside the App block; Codex flagged that the
+                workflow vanished when an operator switched to the SQL
+                tab, which contradicts the always-visible behaviour
+                the action had pre-tabs. Pull DB / Pull .env stay in
+                the App block because those are App-backup-specific. */}
+            <div className="flex justify-end border-t border-border/40 pt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!site.url}
+                onClick={() => onRestore(site)}
+                className="h-7 border-rose-500/40 px-3 text-xs text-rose-400 hover:text-rose-300 hover:border-rose-500/60"
+                title="Push a snapshot from the hub back to this site"
+              >
+                <Upload className="mr-1.5 h-3 w-3" />
+                Restore…
+              </Button>
+            </div>
           </div>
         )}
       </div>
@@ -606,20 +617,56 @@ export default function HubBackups() {
             ) : (
               <>
                 <SummaryBar sites={sites} />
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-                  {sites.map((site) => (
-                    <SiteCard
-                      key={site.site_id}
-                      site={site}
-                      hubData={hubBackupMap[site.site_id]}
-                      onDownload={handleDownload}
-                      downloading={downloading}
-                      onDownloadConfig={handleDownloadConfig}
-                      downloadingConfig={downloadingConfig}
-                      onRestore={openRestoreModal}
-                    />
-                  ))}
-                </div>
+                {/* App / SQL tabs split per-site detail blocks. The five
+                    summary tiles above already cover both backup types so
+                    they render once, outside the tabs. SiteCard branches
+                    on the `view` prop and only renders the matching detail
+                    block — pre-tabs the layout stacked both blocks side by
+                    side per site, which scaled badly past ~3 sites.
+                    Originally landed in PR #250; the parent-side <Tabs>
+                    UI was lost in the subsequent merge of PR #251 (the
+                    inner SiteCard branching survived but had no toggle).
+                    Same merge-loss class as #221, #223, #228, #235, #253. */}
+                <Tabs defaultValue="app" className="w-full">
+                  <TabsList className="grid w-full max-w-md grid-cols-2 mb-4">
+                    <TabsTrigger value="app">App Backup</TabsTrigger>
+                    <TabsTrigger value="sql">SQL Backup</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="app" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          onRestore={openRestoreModal}
+                          view="app"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                  <TabsContent value="sql" className="mt-0">
+                    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                      {sites.map((site) => (
+                        <SiteCard
+                          key={site.site_id}
+                          site={site}
+                          hubData={hubBackupMap[site.site_id]}
+                          onDownload={handleDownload}
+                          downloading={downloading}
+                          onDownloadConfig={handleDownloadConfig}
+                          downloadingConfig={downloadingConfig}
+                          onRestore={openRestoreModal}
+                          view="sql"
+                        />
+                      ))}
+                    </div>
+                  </TabsContent>
+                </Tabs>
                 <p className="text-xs text-slate-600 mt-6 text-center">
                   Auto-refreshes every 60s · File backup health: OK = within 25h, Overdue = 25–48h, Stale = &gt;48h · SQL attention = failed, unavailable, or no successful full DAT backup within 24h
                 </p>
