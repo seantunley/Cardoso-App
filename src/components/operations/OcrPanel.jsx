@@ -20,7 +20,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Activity, AlertTriangle, AlertCircle, CheckCircle2, Pause, Play,
-  RefreshCw, Zap, ZapOff, Clock, Skull, FileSearch,
+  RefreshCw, Zap, ZapOff, Clock, Skull, FileSearch, ScanLine, Loader2,
 } from "lucide-react";
 
 const fmtZA = (dt) => {
@@ -177,6 +177,43 @@ export default function OcrPanel() {
       return d;
     },
     onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ocr-snapshot'] });
+      qc.invalidateQueries({ queryKey: ['ocr-recent-runs'] });
+    },
+  });
+
+  // Extract-invoices trigger — fires the OCR worker for a specific recon
+  // straight from the recent-runs table. Saves the operator a screen jump
+  // to the BAT page just to click "Extract" on a recon they already see
+  // pending rows on.
+  //
+  // Tracks in-flight by reconId rather than a single boolean — if the
+  // operator queues several recons while OCR's chewing through one, each
+  // row's button shows its own spinner. (Backend is single-worker today
+  // but that may change; UX is more honest if it doesn't lie about it.)
+  const [extractError, setExtractError] = useState(null);
+  const extractMutation = useMutation({
+    mutationFn: async (reconId) => {
+      const r = await fetch('/api/bat/extract-invoices', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reconciliationId: reconId }),
+      });
+      const d = await r.json();
+      if (!r.ok) {
+        // 409 OCR_PAUSED is a known-shape error — surface verbatim
+        // (operator typically clicks Resume and tries again).
+        throw new Error(d.error || 'Failed to start extraction');
+      }
+      return { ...d, reconId };
+    },
+    onMutate: () => setExtractError(null),
+    onError: (err) => setExtractError(err.message),
+    onSuccess: () => {
+      // The snapshot poll will pick up the new active recon in 2s, but
+      // an immediate invalidation makes the in-flight panel light up
+      // without that delay.
       qc.invalidateQueries({ queryKey: ['ocr-snapshot'] });
       qc.invalidateQueries({ queryKey: ['ocr-recent-runs'] });
     },
@@ -426,6 +463,11 @@ export default function OcrPanel() {
           </div>
           <div className="text-xs text-muted-foreground">last 20</div>
         </div>
+        {extractError && (
+          <div className="px-4 py-2 border-b border-rose-700/40 bg-rose-900/15 text-xs text-rose-300">
+            {extractError}
+          </div>
+        )}
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -439,29 +481,86 @@ export default function OcrPanel() {
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Not found</th>
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Failed</th>
                 <th className="px-4 py-2 text-left text-[10px] font-medium text-muted-foreground uppercase">Last error</th>
+                <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase w-28">Action</th>
               </tr>
             </thead>
             <tbody>
               {recentRuns.isLoading ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
               ) : (recentRuns.data?.rows?.length ?? 0) === 0 ? (
-                <tr><td colSpan={9} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
+                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
               ) : (
-                recentRuns.data.rows.map(row => (
-                  <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/20">
-                    <td className="px-4 py-2 font-mono text-muted-foreground">#{row.id}</td>
-                    <td className="px-4 py-2 font-mono text-foreground">W{row.week_number}/{row.year}</td>
-                    <td className="px-4 py-2"><RecentRunStatus row={row} /></td>
-                    <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">{fmtZA(row.created_at)}</td>
-                    <td className="px-4 py-2 text-right font-mono text-emerald-400">{row.rows_found}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${row.rows_pending > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>{row.rows_pending}</td>
-                    <td className="px-4 py-2 text-right font-mono text-muted-foreground">{row.rows_not_found}</td>
-                    <td className={`px-4 py-2 text-right font-mono ${row.rows_failed > 0 ? 'text-rose-400' : 'text-muted-foreground'}`}>{row.rows_failed}</td>
-                    <td className="px-4 py-2 text-xs text-muted-foreground max-w-[40ch] truncate" title={row.last_error || ''}>
-                      {row.last_error || '—'}
-                    </td>
-                  </tr>
-                ))
+                recentRuns.data.rows.map(row => {
+                  // Action-button states:
+                  //   no pending rows   → "—" (nothing to do)
+                  //   this is the active recon → "running" indicator (worker is
+                  //     already chewing through it; clicking would no-op)
+                  //   worker busy on a DIFFERENT recon → disabled "queued" button.
+                  //     Critical: startExtractionWorker() returns early when
+                  //     workerRunning is true, so without this guard the click
+                  //     lands as a 200 response that does nothing — the
+                  //     operator gets a false "started" signal. The queue is
+                  //     conceptual: as soon as the active run finishes,
+                  //     resumeExtractionWorker() picks up any pending rows
+                  //     including this row's, so calling out "queued" rather
+                  //     than just disabling matches what actually happens.
+                  //   OCR paused → disabled (with a "resume first" tooltip)
+                  //   otherwise → enabled "Extract"
+                  const hasPending = row.rows_pending > 0;
+                  const workerOnThis = snap?.worker_running && snap?.worker_recon_id === row.id;
+                  const workerOnOther = snap?.worker_running && snap?.worker_recon_id !== row.id;
+                  const isExtracting = extractMutation.isPending && extractMutation.variables === row.id;
+                  return (
+                    <tr key={row.id} className="border-b border-border last:border-0 hover:bg-muted/20">
+                      <td className="px-4 py-2 font-mono text-muted-foreground">#{row.id}</td>
+                      <td className="px-4 py-2 font-mono text-foreground">W{row.week_number}/{row.year}</td>
+                      <td className="px-4 py-2"><RecentRunStatus row={row} /></td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground whitespace-nowrap">{fmtZA(row.created_at)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-emerald-400">{row.rows_found}</td>
+                      <td className={`px-4 py-2 text-right font-mono ${row.rows_pending > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>{row.rows_pending}</td>
+                      <td className="px-4 py-2 text-right font-mono text-muted-foreground">{row.rows_not_found}</td>
+                      <td className={`px-4 py-2 text-right font-mono ${row.rows_failed > 0 ? 'text-rose-400' : 'text-muted-foreground'}`}>{row.rows_failed}</td>
+                      <td className="px-4 py-2 text-xs text-muted-foreground max-w-[40ch] truncate" title={row.last_error || ''}>
+                        {row.last_error || '—'}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {!hasPending ? (
+                          <span className="text-xs text-muted-foreground/50">—</span>
+                        ) : workerOnThis ? (
+                          <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-mono">
+                            <Loader2 className="w-3 h-3 animate-spin" />
+                            running
+                          </span>
+                        ) : workerOnOther ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled
+                            title={`OCR worker is busy on recon #${snap.worker_recon_id}. When that run completes, the worker auto-hands off to the next reconciliation with pending rows — including this one — so no further action is needed unless the chain stops (e.g. an auto-halt or pause).`}
+                            className="h-7 px-2 border-border text-xs text-muted-foreground"
+                          >
+                            <Clock className="w-3 h-3 mr-1" /> queued
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => extractMutation.mutate(row.id)}
+                            disabled={isExtracting || snap?.paused || extractMutation.isPending}
+                            title={snap?.paused ? 'OCR is paused — resume it first' : `Extract ${row.rows_pending} pending row${row.rows_pending === 1 ? '' : 's'}`}
+                            className="h-7 px-2 border-border text-xs"
+                          >
+                            {isExtracting ? (
+                              <><Loader2 className="w-3 h-3 mr-1 animate-spin" /> Starting…</>
+                            ) : (
+                              <><ScanLine className="w-3 h-3 mr-1" /> Extract</>
+                            )}
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
