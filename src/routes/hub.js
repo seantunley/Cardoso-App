@@ -1556,11 +1556,56 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // operator clicks Sync, response says success, tile keeps the
       // old timestamp until the scheduler caught up minutes later.
       //
+      // OPTIMISTIC UPDATE: if at least one connection on the site
+      // synced successfully, we KNOW the site just set
+      // databaseconnection.last_sync to NOW(). Stamp hub_sites here
+      // directly instead of waiting for the chained syncSite to pull
+      // the new value back. This is what fixes the long-standing
+      // "sync from accpac works, but the time it synced does not"
+      // operator complaint: previously the only way the hub tile got
+      // the new timestamp was if the chained syncSite (below)
+      // succeeded — and on a slow/flaky link the syncSite health
+      // check times out at 10s even when the trigger forward (with
+      // its 5-minute timeout) had succeeded. Result: the trigger
+      // worked, the data flowed, but the tile stayed stale.
+      //
+      // We use the hub's own clock as the optimistic timestamp. It's
+      // off from the site's actual UPDATE-time by network round-trip
+      // + sync duration (typically 1-60s). The next scheduled
+      // syncSite tick will overwrite this with the site's actual
+      // databaseconnection.last_sync value via the kpis aggregation,
+      // so any drift is bounded to one scheduler interval.
+      //
+      // Gated on okCount > 0 — a trigger that returned 200 with zero
+      // successful connections shouldn't advance the timestamp; that
+      // would be a lie.
+      const okCount = (body.results || []).filter((r) => r?.ok).length;
+      if (okCount > 0) {
+        try {
+          db.prepare(`
+            UPDATE hub_sites
+            SET last_accpac_synced_at = ?,
+                last_accpac_status    = 'ok',
+                last_accpac_error     = NULL
+            WHERE id = ?
+          `).run(new Date().toISOString(), site.id);
+        } catch (updateErr) {
+          // Don't fail the trigger response on a stamp-write error;
+          // the actual sync already succeeded and the next scheduled
+          // syncSite will eventually correct the displayed time. But
+          // surface the failure so it's not silent if v62-style
+          // schema drift bites again.
+          try { logError('hub.trigger_accpac_sync.stamp', updateErr, { site_id: site.id }); } catch {}
+        }
+      }
+
       // Chain a syncSite call here so by the time we respond, the
-      // hub has already pulled the freshly-updated kpis. Wrapped in a
-      // try/catch — if the hub-pull fails for some reason, the trigger
-      // itself still succeeded, so we report partial success rather
-      // than 502. The client's fetchAll then sees the up-to-date row.
+      // hub has also pulled the freshly-updated records / inventory /
+      // BAT summary. Wrapped in a try/catch — if the hub-pull fails
+      // for some reason, the trigger itself still succeeded, the
+      // optimistic timestamp above already landed, so we report
+      // partial success rather than 502. The client's fetchAll then
+      // sees the up-to-date row.
       //
       // Use the DB row directly — earlier this looked up the site in
       // HUB_SITES (the env-derived in-memory list), but the two can
