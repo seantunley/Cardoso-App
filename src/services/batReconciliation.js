@@ -1601,8 +1601,13 @@ function buildExtractionStats(extractions, reconId, globalDupIndex = new Map()) 
     const dup = k ? globalDupIndex.get(k) : null;
     if (dup) {
       e.duplicate_count = dup.count;
+      // Filter to OTHER reconciliations only, not just other extractions.
+      // Same-recon dupes belong to the within-week-fallback wording in the
+      // tooltip — including them here would surface "also in W19/2026"
+      // when the operator is already viewing W19/2026, which contradicts
+      // the message itself. Codex review catch.
       e.duplicate_other_recons = dup.occurrences
-        .filter(o => o.extraction_id !== e.id)
+        .filter(o => o.reconciliation_id !== reconId)
         .map(o => ({ reconciliation_id: o.reconciliation_id, week: o.week, year: o.year }));
       duplicateExtractions++;
       duplicateKeysSeen.add(k);
