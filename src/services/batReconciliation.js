@@ -331,6 +331,35 @@ export function parseSupplierSpreadsheet(filePath, originalFilename) {
     errors.push(`No POD URLs (PDF links) found in the "Delivery POD" sheet. Without PDFs the OCR pipeline has nothing to process.`);
   }
 
+  // Per-fee-category column-not-found checks. Each FEE_MATCHERS entry
+  // accepts a generous range of header variants (typos, abbreviations,
+  // singular/plural). If a category STILL didn't match anywhere, the
+  // supplier's header is likely in a form we've never seen before — we
+  // refuse the upload with an explicit reason rather than silently
+  // writing R 0.00 into the recon. Operator can then either fix the
+  // source spreadsheet (most common — a typo by the supplier) or send
+  // the new header text so we can extend the matcher.
+  //
+  // We do NOT fail when a category matched but the SUM is zero — that's
+  // a legitimate case (genuinely no Pricing Adjustments for the week).
+  // We only fail when the COLUMN itself was never located.
+  const feeChecks = [
+    { key: 'discount', label: 'Discount',           expectedHeaders: 'Discount, Sum of Discount' },
+    { key: 'delivery', label: 'Delivery Fee',       expectedHeaders: 'Delivery Fee, Delivery Fee Excl NC, Sum of Delivery Fee' },
+    { key: 'pricing',  label: 'Price Adjustment',   expectedHeaders: 'Price Adjustment, Pricing Adjustment, Sum of Price Adjustment' },
+  ];
+  for (const check of feeChecks) {
+    if (!fees._matched[check.key]) {
+      errors.push(
+        `Couldn't find the "${check.label}" column anywhere in the Overview sheet — header text didn't match any known variant. ` +
+        `Expected one of: ${check.expectedHeaders}. ` +
+        `Common cause: the supplier renamed or typo'd the header (e.g. "Adjustement" instead of "Adjustment"). ` +
+        `Fix the column header in the spreadsheet and re-upload, OR send the operator team the actual header text so we can extend the parser. ` +
+        `Refusing the upload because importing with R 0.00 here would silently corrupt the BAT TOTAL on this recon.`
+      );
+    }
+  }
+
   if (errors.length > 0) {
     throw new SpreadsheetValidationError(errors, originalFilename);
   }
@@ -402,12 +431,58 @@ export function parseSupplierSpreadsheet(filePath, originalFilename) {
   };
 }
 
+// Matcher predicates lifted out so they're testable, reusable, and
+// deliberately tolerant of common header drift. The previous strict
+// equality (`cell === 'PRICE ADJUSTMENT'`) silently dropped real-world
+// variants like "Sum of Price Adjustement" (typo, extra "e") — the
+// column wasn't matched, the fee value silently became R 0.00, and the
+// recon's BAT TOTAL was wrong with no operator-visible signal.
+//
+// Each matcher accepts the exact text plus reasonable variants
+// (singular/plural, common typos, abbreviation forms). New variants can
+// be added by extending the regex without touching the surrounding
+// extraction logic.
+const FEE_MATCHERS = {
+  // PRICE ADJUSTMENT, PRICING ADJUSTMENT, PRICE ADJUSTEMENT (typo),
+  // SUM OF PRICE ADJUSTMENT, PRICE ADJ, PRICING ADJ.
+  pricing:  (s) => /(^|\s)(PRICE|PRICING)\s*ADJ/.test(s),
+  // DISCOUNT, SUM OF DISCOUNT — guard against TOTAL/HEADER rows that
+  // contain DISCOUNT as part of a larger label (e.g. "TOTAL DISCOUNT").
+  discount: (s) => /(^|\s)DISCOUNT(\s|$)/.test(s) && !/TOTAL/.test(s),
+
+  // Delivery is preference-ordered to handle the common case of a sheet
+  // with BOTH "Delivery Fee Incl NC" and "Delivery Fee Excl NC" columns:
+  // the recon needs the Excl total (VAT-exclusive), and a permissive
+  // single matcher would happily bind to whichever column appears first
+  // — silently summing VAT-inclusive values into supplier_delivery while
+  // _matched.delivery still reads true. Codex review catch on PR #274.
+  //
+  // The extraction loop tries each matcher in order:
+  //   1. deliveryExcl    — explicit EXCL variant, always preferred
+  //   2. deliveryPlain   — bare "Delivery Fee" with no EXCL/INCL marker
+  //                        (templates that only have a single column)
+  //
+  // deliveryIncl exists only as a NEGATIVE guard — extraction code
+  // SKIPS columns that match it so we never accidentally bind to the
+  // VAT-inclusive variant.
+  deliveryExcl:  (s) => /DELIVERY/.test(s) && /EXCL/.test(s) && !/TOTAL|VOLUME/.test(s),
+  deliveryIncl:  (s) => /DELIVERY/.test(s) && /INCL/.test(s),
+  deliveryPlain: (s) => /DELIVERY/.test(s) && !/EXCL|INCL|TOTAL|VOLUME/.test(s),
+};
+
 function extractFees(rows) {
   const fees = {
     discount: { subTotal: 0, vat: 0, total: 0 },
     delivery: { subTotal: 0, vat: 0, total: 0 },
     pricing: { subTotal: 0, vat: 0, total: 0 },
     total: { subTotal: 0, vat: 0, total: 0 },
+    // Per-category match flags — caller (parseSupplierSpreadsheet)
+    // checks these after extraction and raises a structured upload
+    // error when any category was never matched. Without this, a
+    // missing column silently writes R 0.00 into the recon, which
+    // pollutes BAT TOTAL and the BAT-vs-Sage variance calculation
+    // without any operator-visible signal.
+    _matched: { discount: false, delivery: false, pricing: false },
   };
 
   // Sum from the Overview pivot table. Strategy:
@@ -444,11 +519,24 @@ function extractFees(rows) {
       const row = rows[i];
       if (!Array.isArray(row)) continue;
       // Only look at columns near the ODR column (within the same pivot)
+      // Track delivery candidates separately so we can prefer EXCL over
+      // a bare "Delivery Fee" header when both kinds appear in the sheet.
+      // See FEE_MATCHERS.deliveryExcl/Plain comment block.
+      let deliveryColExcl = -1;
+      let deliveryColPlain = -1;
       for (let j = firstOdrCol; j < Math.min(row.length, firstOdrCol + 15); j++) {
         const cell = String(row[j] || '').trim().toUpperCase();
-        if ((cell === 'DISCOUNT' || cell === ' DISCOUNT') && discountCol < 0) discountCol = j;
-        if (cell.includes('DELIVERY FEE') && cell.includes('EXCL') && deliveryCol < 0) deliveryCol = j;
-        if ((cell === 'PRICE ADJUSTMENT' || cell === ' PRICE ADJUSTMENT') && pricingCol < 0) pricingCol = j;
+        if (FEE_MATCHERS.discount(cell) && discountCol < 0) discountCol = j;
+        if (FEE_MATCHERS.pricing(cell)  && pricingCol  < 0) pricingCol  = j;
+        // Delivery: classify each candidate. Skip Incl outright (we
+        // never want to bind to the VAT-inclusive column).
+        if (FEE_MATCHERS.deliveryIncl(cell)) continue;
+        if (FEE_MATCHERS.deliveryExcl(cell)  && deliveryColExcl  < 0) deliveryColExcl  = j;
+        else if (FEE_MATCHERS.deliveryPlain(cell) && deliveryColPlain < 0) deliveryColPlain = j;
+      }
+      if (deliveryCol < 0) {
+        // Excl wins; bare Delivery is the fallback when no Excl exists.
+        deliveryCol = deliveryColExcl >= 0 ? deliveryColExcl : deliveryColPlain;
       }
       if (discountCol >= 0 || deliveryCol >= 0 || pricingCol >= 0) {
         headerRow = i;
@@ -487,12 +575,25 @@ function extractFees(rows) {
         if (val !== null) numericCells.push(val);
       }
       const last3 = numericCells.slice(-3);
-      if (label.includes('DISCOUNT') && !label.includes('TOTAL') && !label.includes('DELIVERY') && last3.length >= 3)
+      // Same loosened matchers as the pivot path so a typo in the
+      // summary section (where these labels also appear) doesn't fall
+      // through to a silent zero.
+      if (last3.length < 3) continue;
+      if (FEE_MATCHERS.discount(label)) {
         fees.discount = { subTotal: last3[0], vat: last3[1], total: last3[2] };
-      else if (label.includes('DELIVERY') && !label.includes('TOTAL') && !label.includes('VOLUME') && last3.length >= 3)
+        fees._matched.discount = true;
+      } else if (FEE_MATCHERS.deliveryIncl(label)) {
+        // Explicit Incl variant — skip. See FEE_MATCHERS comment.
+        continue;
+      } else if (FEE_MATCHERS.deliveryExcl(label) || (FEE_MATCHERS.deliveryPlain(label) && !fees._matched.delivery)) {
+        // Excl always wins; bare "Delivery" only accepted if no Excl
+        // has matched yet (preference-ordered to match the pivot path).
         fees.delivery = { subTotal: last3[0], vat: last3[1], total: last3[2] };
-      else if (label.includes('PRICING') && !label.includes('TOTAL') && last3.length >= 3)
+        fees._matched.delivery = true;
+      } else if (FEE_MATCHERS.pricing(label)) {
         fees.pricing = { subTotal: last3[0], vat: last3[1], total: last3[2] };
+        fees._matched.pricing = true;
+      }
     }
   } else {
     // Find the ODR column in data rows
@@ -518,6 +619,13 @@ function extractFees(rows) {
     fees.discount = { subTotal: discountSum, vat: 0, total: discountSum };
     fees.delivery = { subTotal: deliverySum, vat: 0, total: deliverySum };
     fees.pricing  = { subTotal: pricingSum,  vat: 0, total: pricingSum };
+    // Track which categories actually had a column matched. A column
+    // index of -1 means the header text never matched any of FEE_MATCHERS
+    // — caller will surface this to the operator instead of silently
+    // shipping a R 0.00 value.
+    fees._matched.discount = discountCol >= 0;
+    fees._matched.delivery = deliveryCol >= 0;
+    fees._matched.pricing  = pricingCol  >= 0;
 
     console.log(`[bat] Fees from pivot: Discount=R${discountSum.toFixed(2)}, Delivery=R${deliverySum.toFixed(2)}, Pricing=R${pricingSum.toFixed(2)}`);
   }
