@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Loader2, Database, X, RefreshCcw, Play, Table, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
 import FieldMappingBuilder from "./FieldMappingBuilder";
 
 async function fetchLocalCustomFields() {
@@ -337,8 +338,9 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     setIsImporting(true);
     try {
       const result = await runLocalImport(connection.id);
-      toast.success(result.message || `Sync completed — ${result.imported || 0} records`);
+      toast.success(result.message || cleanImportToastMessage({ imported: result.imported || 0 }));
     } catch (e) {
+      resetCleanSyncStreak();
       toast.error("Sync failed: " + (e.message || "Unknown error"));
     } finally {
       setIsImporting(false);

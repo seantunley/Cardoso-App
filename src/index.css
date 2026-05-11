@@ -37,6 +37,40 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes ledger-sparkline-draw {
+  from { stroke-dashoffset: 96; }
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes ledger-secret-glow {
+  0%, 100% { filter: saturate(1); }
+  50% { filter: saturate(1.25); }
+}
+
+.ledger-sparkline-path {
+  stroke-dasharray: 96;
+  stroke-dashoffset: 96;
+  animation: ledger-sparkline-draw 1.2s ease-out forwards;
+}
+
+.cardoso-secret-glow {
+  animation: ledger-secret-glow 2.4s ease-in-out infinite;
+}
+
+.cardoso-secret-glow [class*="bg-accent"],
+.cardoso-secret-glow .text-phosphor {
+  filter: drop-shadow(0 0 12px hsla(33, 95%, 55%, 0.55));
+}
+
+.cardoso-coffee-mode {
+  --phosphor: hsl(38 92% 58%);
+}
+
+.cardoso-coffee-mode .text-phosphor,
+.cardoso-coffee-mode .text-accent {
+  filter: drop-shadow(0 0 10px hsla(38, 92%, 58%, 0.35));
+}
+
 /* ══════════════════════════════════════════════════════════════════════════════
    CARDOSO DESIGN SYSTEM — "Ledger"
    Obsidian + bone + phosphor amber. Sharp edges, tabular figures, dramatic serif

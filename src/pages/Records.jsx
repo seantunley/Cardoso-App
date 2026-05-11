@@ -16,6 +16,7 @@ import RecordCard from "../components/records/RecordCard";
 import RecordEditModal from "../components/records/RecordEditModal";
 import { hasPermission } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { getLedgerFortune } from "@/lib/fun";
 
 // Skeleton card matching RecordCard shape
 function SkeletonCard() {
@@ -235,8 +236,8 @@ export default function Records() {
             <h3 className="text-sm font-semibold text-foreground">No records found</h3>
             <p className="text-xs text-muted-foreground mt-1">
               {totalRecords === 0
-                ? "Sync data from your connections to see records here"
-                : "Try adjusting your search or filter"}
+                ? getLedgerFortune()
+                : "No matching rows. The filter did its job a little too well."}
             </p>
           </div>
         ) : (
