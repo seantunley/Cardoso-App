@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
+import { getLedgerFortune, getReportSignature } from "@/lib/fun";
 
 // ── Resizable column widths (mirrors the CustomerBalances pattern) ──────────
 const INV_COLUMN_DEFAULTS = {
@@ -494,14 +495,14 @@ export default function Inventory() {
           <div className="flex flex-col items-center justify-center py-20 rounded-xl border border-border bg-card">
             <Package className="w-12 h-12 text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium text-foreground">No inventory data yet</h3>
-            <p className="text-sm text-muted-foreground mt-1">Sync your connections to see inventory.</p>
+            <p className="text-sm text-muted-foreground mt-1">{getLedgerFortune()}</p>
           </div>
         )}
 
         {/* State: empty (filtered) */}
         {!isLoading && !isError && allRows.length > 0 && rows.length === 0 && (
           <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-            {debouncedSearch ? `No inventory items matching "${debouncedSearch}".` : "No inventory records found."}
+            {debouncedSearch ? `No inventory items matching "${debouncedSearch}".` : getLedgerFortune()}
           </div>
         )}
 
@@ -517,6 +518,8 @@ export default function Inventory() {
             }).length : rows.length)} item{rows.length !== 1 ? "s" : ""}
             {highlightBelowCost && ' · Below-cost only'}
             {activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''} applied`}
+            <br />
+            {getReportSignature()}
           </p>
         </div>
 

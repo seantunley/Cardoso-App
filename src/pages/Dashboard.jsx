@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Database } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { getDailyOperatorCodename, getJohannesburgGreeting } from "@/lib/fun";
 
 function relativeTime(dateStr) {
   if (!dateStr) return "never";
@@ -47,13 +48,15 @@ export default function Dashboard() {
   const lastSync = kpis?.last_sync_at ?? null;
   const activeCount = connections.filter((c) => c.status === "active").length;
   const flaggedTotal = (flags.red || 0) + (flags.orange || 0);
+  const johannesburgGreeting = getJohannesburgGreeting();
+  const operatorCodename = getDailyOperatorCodename();
   const flaggedRatio = kpis?.total_records ? ((flaggedTotal / kpis.total_records) * 100).toFixed(1) : "—";
 
   if (connections.length === 0 && !kpis) {
     return (
       <div className="min-h-screen bg-background">
         <div className="max-w-[1600px] mx-auto px-8 py-16">
-          <Header />
+          <Header greeting={johannesburgGreeting} operatorCodename={operatorCodename} />
           <div className="mt-16 border border-border py-24 text-center">
             <Database className="w-10 h-10 mx-auto mb-6 text-muted-foreground/60" strokeWidth={1} />
             <h3 className="font-display text-3xl text-foreground mb-2">No connections configured</h3>
@@ -69,7 +72,11 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-[1600px] mx-auto px-8 py-10 lg:py-16">
-        <Header subtitle={lastSync ? `Last sync ${relativeTime(lastSync)}` : "Awaiting first sync"} />
+        <Header
+          subtitle={lastSync ? `Last sync ${relativeTime(lastSync)}` : "Awaiting first sync"}
+          greeting={johannesburgGreeting}
+          operatorCodename={operatorCodename}
+        />
 
         {/* ── Hero KPI row — oversized numbers, minimal chrome ── */}
         <div className="mt-12 grid grid-cols-1 lg:grid-cols-12 gap-4 stagger-in">
@@ -224,7 +231,7 @@ export default function Dashboard() {
   );
 }
 
-function Header({ subtitle }) {
+function Header({ subtitle, greeting, operatorCodename }) {
   return (
     <div className="flex items-end justify-between gap-8 border-b border-border pb-6">
       <div>
@@ -235,6 +242,16 @@ function Header({ subtitle }) {
           The <em className="text-phosphor">ledger</em>,<br />
           at a glance.
         </h1>
+        {greeting && (
+          <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.22em] text-accent">
+            {greeting}
+          </p>
+        )}
+        {operatorCodename && (
+          <p className="mt-2 font-mono text-[10px] uppercase tracking-[0.22em] text-muted-foreground">
+            Operator codename: {operatorCodename}
+          </p>
+        )}
       </div>
       {subtitle && (
         <div className="hidden md:block font-mono text-xs text-muted-foreground pb-2 whitespace-nowrap">

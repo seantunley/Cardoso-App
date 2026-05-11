@@ -6,6 +6,7 @@ import { reportClientError } from "@/lib/clientLog";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
 import { humanizeApiError } from "@/lib/humanizeApiError";
+import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -211,10 +212,10 @@ function ConnectionsTab({ currentUser }) {
     try {
       let total = 0;
       for (const c of connections) { const r = await runLocalImport(c.id); total += r.imported || 0; }
-      toast.success(`Sync complete. ${total} records imported.`);
+      toast.success(cleanImportToastMessage({ imported: total }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
-    } catch (e) { toast.error(humanizeApiError(e, "sync all connections")); }
+    } catch (e) { resetCleanSyncStreak(); toast.error(humanizeApiError(e, "sync all connections")); }
     finally { setIsSyncingAll(false); }
   };
 
@@ -222,10 +223,10 @@ function ConnectionsTab({ currentUser }) {
     setSyncingId(conn.id);
     try {
       const r = await runLocalImport(conn.id);
-      toast.success(r.message || `Synced ${conn.name} (${r.imported || 0} records)`);
+      toast.success(r.message || cleanImportToastMessage({ imported: r.imported || 0, target: conn.name }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
-    } catch (e) { toast.error(humanizeApiError(e, `sync "${conn.name}"`)); }
+    } catch (e) { resetCleanSyncStreak(); toast.error(humanizeApiError(e, `sync "${conn.name}"`)); }
     finally { setSyncingId(null); }
   };
 
