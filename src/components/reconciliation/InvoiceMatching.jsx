@@ -565,7 +565,32 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                             ×{e.duplicate_count} dup
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>This invoice number appears on {e.duplicate_count} different POD rows in this week — at least one is wrong.</TooltipContent>
+                        <TooltipContent>
+                          {(() => {
+                            const others = Array.isArray(e.duplicate_other_recons) ? e.duplicate_other_recons : [];
+                            // Distinct (week, year) pairs from the other occurrences,
+                            // ordered most-recent-first so the operator's eye lands
+                            // on the relevant week.
+                            const seen = new Set();
+                            const uniqueWeeks = [];
+                            for (const o of others) {
+                              if (!o.week || !o.year) continue;
+                              const key = `${o.year}-${o.week}`;
+                              if (seen.has(key)) continue;
+                              seen.add(key);
+                              uniqueWeeks.push({ week: o.week, year: o.year });
+                            }
+                            uniqueWeeks.sort((a, b) => (b.year - a.year) || (b.week - a.week));
+                            const weekList = uniqueWeeks.map(w => `W${w.week}/${w.year}`).join(', ');
+                            if (uniqueWeeks.length === 0) {
+                              // Cross-recon dupes only within the same week — fall back to the
+                              // original wording so the operator isn't told "no other weeks" when
+                              // the duplicates are actually right here in front of them.
+                              return `This invoice number appears on ${e.duplicate_count} different POD rows in this week — at least one is wrong.`;
+                            }
+                            return `Invoice number appears on ${e.duplicate_count} POD rows across all reconciliations — also in ${weekList}. At least one is wrong (OCR misread or manual typo).`;
+                          })()}
+                        </TooltipContent>
                       </Tooltip>
                     )}
                   </span>

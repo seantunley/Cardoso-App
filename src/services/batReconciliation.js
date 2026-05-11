@@ -1459,9 +1459,62 @@ export function getReconciliation(id) {
 
   // Fee comparison
   recon.feeComparison = buildFeeComparison(recon);
-  recon.extractionStats = buildExtractionStats(recon.extractions, recon.id);
+  // Build a CROSS-RECON duplicate index before computing this recon's
+  // stats. OCR and manual entry can both produce the same invoice
+  // number in different weeks (short numeric IDs are particularly
+  // prone — "1234" misreads as "1334" in W19, then misreads correctly
+  // back to "1234" in W22, and now two different POD rows claim
+  // invoice 1234). The previous within-recon duplicate check missed
+  // every cross-week dupe — operator only noticed when Sage reconciled
+  // and one of the two rows came back unmatched.
+  recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndex());
 
   return recon;
+}
+
+// Single-query global duplicate index keyed by upper-cased trimmed
+// invoice number. Only includes numbers that actually have >1
+// occurrence anywhere — every other invoice is omitted to keep the
+// in-memory map small. Each entry carries the total count plus the
+// list of (extraction_id, reconciliation_id, week, year) tuples so
+// the UI can show the operator EXACTLY which other recons hold the
+// duplicates.
+//
+// Performance: idx_bat_extractions_invoice covers the GROUP BY; on a
+// hub with ~50k extractions this query is ~5ms.
+function buildGlobalDuplicateIndex() {
+  const rows = db.prepare(`
+    SELECT UPPER(TRIM(e.extracted_invoice)) AS k,
+           e.id  AS extraction_id,
+           e.reconciliation_id,
+           r.week_number,
+           r.year
+    FROM bat_invoice_extractions e
+    JOIN bat_reconciliations r ON r.id = e.reconciliation_id
+    WHERE e.extracted_invoice IS NOT NULL
+      AND TRIM(e.extracted_invoice) <> ''
+      AND UPPER(TRIM(e.extracted_invoice)) IN (
+        SELECT UPPER(TRIM(extracted_invoice))
+        FROM bat_invoice_extractions
+        WHERE extracted_invoice IS NOT NULL AND TRIM(extracted_invoice) <> ''
+        GROUP BY UPPER(TRIM(extracted_invoice))
+        HAVING COUNT(*) > 1
+      )
+  `).all();
+
+  const index = new Map();
+  for (const r of rows) {
+    if (!index.has(r.k)) index.set(r.k, { count: 0, occurrences: [] });
+    const entry = index.get(r.k);
+    entry.count++;
+    entry.occurrences.push({
+      extraction_id: r.extraction_id,
+      reconciliation_id: r.reconciliation_id,
+      week: r.week_number,
+      year: r.year,
+    });
+  }
+  return index;
 }
 
 export function listReconciliations() {
@@ -1513,12 +1566,18 @@ function buildFeeComparison(recon) {
   ];
 }
 
-function buildExtractionStats(extractions, reconId) {
+// globalDupIndex (optional): Map<upper-trimmed-invoice, { count, occurrences[] }>
+// produced by buildGlobalDuplicateIndex. When supplied, duplicate_count
+// reflects the GLOBAL count across all reconciliations, not just this one,
+// and each duplicate extraction is annotated with `duplicate_other_recons`
+// listing the other weeks the same number appears in. Pass an empty Map to
+// fall back to within-recon-only behaviour (used by call sites that don't
+// need the cross-recon view).
+function buildExtractionStats(extractions, reconId, globalDupIndex = new Map()) {
   const total = extractions.length;
 
-  // Single pass: accumulate status counts AND build the duplicate-detection map.
+  // Single pass: accumulate status counts.
   let found = 0, notFound = 0, failed = 0, pending = 0, exceptions = 0;
-  const counts = new Map();
   for (const e of extractions) {
     switch (e.extraction_status) {
       case 'found':     found++; break;
@@ -1527,32 +1586,43 @@ function buildExtractionStats(extractions, reconId) {
       case 'pending':   pending++; break;
     }
     if (e.is_exception === 1) exceptions++;
-    if (e.extracted_invoice) {
-      const k = String(e.extracted_invoice).toUpperCase();
-      counts.set(k, (counts.get(k) || 0) + 1);
-    }
   }
 
-  // Duplicate invoice numbers within this reconciliation — OCR can output the same
-  // number for two different PDFs (typically a common OCR misread). Mark every
-  // extraction in a duplicate group so the UI can flag them.
-  let duplicateGroups = 0;
+  // Duplicate invoice numbers across ALL reconciliations — OCR can output
+  // the same number for different PDFs in different weeks (short numeric
+  // IDs are particularly prone), and manual edits can produce the same
+  // number by typo. Mark every extraction whose invoice number appears
+  // more than once anywhere, and attach the OTHER recons it appears in
+  // so the UI can give the operator a navigation hint.
   let duplicateExtractions = 0;
-  for (const [, c] of counts) {
-    if (c > 1) {
-      duplicateGroups += 1;
-      duplicateExtractions += c;
+  const duplicateKeysSeen = new Set();
+  for (const e of extractions) {
+    const k = e.extracted_invoice ? String(e.extracted_invoice).trim().toUpperCase() : null;
+    const dup = k ? globalDupIndex.get(k) : null;
+    if (dup) {
+      e.duplicate_count = dup.count;
+      // Filter to OTHER reconciliations only, not just other extractions.
+      // Same-recon dupes belong to the within-week-fallback wording in the
+      // tooltip — including them here would surface "also in W19/2026"
+      // when the operator is already viewing W19/2026, which contradicts
+      // the message itself. Codex review catch.
+      e.duplicate_other_recons = dup.occurrences
+        .filter(o => o.reconciliation_id !== reconId)
+        .map(o => ({ reconciliation_id: o.reconciliation_id, week: o.week, year: o.year }));
+      duplicateExtractions++;
+      duplicateKeysSeen.add(k);
+    } else {
+      e.duplicate_count = 1;
+      e.duplicate_other_recons = [];
     }
   }
-  // Mutate each extraction so the UI can render a per-row badge
-  for (const e of extractions) {
-    const k = e.extracted_invoice ? String(e.extracted_invoice).toUpperCase() : null;
-    e.duplicate_count = k ? (counts.get(k) || 1) : 1;
-  }
+  // Groups = distinct duplicate invoice numbers that appear in THIS recon.
+  // (A dupe key may also have occurrences in other recons; those don't
+  // count toward this recon's groups.)
+  const duplicateGroups = duplicateKeysSeen.size;
 
   // Anything that needs the user to look at it: OCR failed/not_found,
-  // exceptions, OR duplicate invoice numbers within the recon.
-  // (exceptions counted in the single pass above)
+  // exceptions, OR duplicate invoice numbers (now globally scoped).
   const needsAttention = notFound + failed + exceptions + duplicateExtractions;
 
   return { total, found, notFound, failed, pending, exceptions, needsAttention, duplicateGroups, duplicateExtractions };
