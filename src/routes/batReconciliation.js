@@ -55,6 +55,7 @@ import {
   getRecentBatReconciliations,
   clearOcrHalt,
 } from '../services/batReconciliation.js';
+import { archiveSupplierUpload } from '../services/bat/uploadArchive.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -113,6 +114,24 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
         podUrls: parsed.podUrls,
         userId: req.currentUser.id,
       });
+
+      // Archive the original .xlsx so a later supplier dispute can be
+      // replayed against the source bytes. The temp file is unlinked
+      // in the finally block below either way; if the archive copy
+      // fails (disk full, permission, etc.) we log + continue — losing
+      // the archive is regrettable but doesn't invalidate the parsed
+      // recon data, so this isn't worth aborting the upload over.
+      try {
+        const archivePath = archiveSupplierUpload({
+          srcPath: req.file.path,
+          reconId,
+          originalName: req.file.originalname,
+        });
+        db.prepare('UPDATE bat_reconciliations SET archive_path = ? WHERE id = ?')
+          .run(archivePath, reconId);
+      } catch (archiveErr) {
+        console.error(`[bat] Failed to archive uploaded spreadsheet for recon ${reconId} (${req.file.originalname}): ${archiveErr.message}`);
+      }
 
       // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
       // so the UI shows it instead of silently displaying zero credit notes.
