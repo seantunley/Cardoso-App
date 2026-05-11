@@ -1,6 +1,7 @@
 import React from 'react';
 import { CheckCircle, AlertCircle, AlertTriangle, Clock, CloudOff } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+import { getLedgerFortune } from '@/lib/fun';
 
 function statusMeta(status) {
   if (status === 'completed') return { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.3)', Icon: CheckCircle, label: 'Complete', tip: 'OCR extraction finished. Has not been compared against Sage credit notes yet.' };
@@ -19,7 +20,7 @@ export default function WeekSelector({ reconciliations, onSelect }) {
       >
         <p className="font-display text-2xl text-foreground mb-2">No reconciliations yet.</p>
         <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-          Upload a supplier spreadsheet to begin.
+          {getLedgerFortune()}
         </p>
       </div>
     );

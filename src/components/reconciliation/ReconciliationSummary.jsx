@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
+import { getVariancePersonality, launchLedgerConfetti } from '@/lib/fun';
 
 function Tile({ label, value, sub, accent = 'var(--phosphor)', glow = 'hsla(33, 95%, 55%, 0.35)', large = false }) {
   return (
@@ -30,6 +31,7 @@ function Tile({ label, value, sub, accent = 'var(--phosphor)', glow = 'hsla(33, 
 }
 
 export default function ReconciliationSummary({ recon }) {
+  const celebratedRef = useRef(null);
   const fmt = (v) => {
     const abs = Math.abs(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return v < 0 && Math.abs(v) >= 0.005 ? `−${abs}` : abs;
@@ -37,6 +39,7 @@ export default function ReconciliationSummary({ recon }) {
   const variance = (recon.supplier_total || 0) - (recon.sage_total || 0);
   const absVariance = Math.abs(variance);
   const matched = absVariance < 0.01;
+  const variancePersonality = getVariancePersonality(variance);
   const stats = recon.extractionStats || {};
   const needsAttention = stats.needsAttention || 0;
   const attentionRate = stats.total > 0 ? ((needsAttention / stats.total) * 100).toFixed(1) : '0.0';
@@ -45,11 +48,24 @@ export default function ReconciliationSummary({ recon }) {
   // all-clear instead so the healthy state isn't misread as broken.
   const allClear = needsAttention === 0 && (stats.total || 0) > 0;
 
+  useEffect(() => {
+    const reconciliationId = recon?.id || `${recon?.week_number || 'week'}-${recon?.supplier_total}-${recon?.sage_total}`;
+    if (!matched || celebratedRef.current === reconciliationId) return;
+
+    celebratedRef.current = reconciliationId;
+    launchLedgerConfetti({ duration: 650, particleCount: 2 });
+  }, [matched, recon?.id, recon?.sage_total, recon?.supplier_total, recon?.week_number]);
+
   return (
-    <section>
+    <section className="relative">
       <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-5">
         § Summary
       </div>
+      {matched && (
+        <div className="absolute right-0 top-0 rotate-[-2deg] border border-accent/60 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-accent shadow-[0_0_18px_hsla(33,95%,55%,0.16)]">
+          Closed clean
+        </div>
+      )}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-in">
         <Tile
           label="BAT Total"
@@ -66,7 +82,7 @@ export default function ReconciliationSummary({ recon }) {
         <Tile
           label="Variance"
           value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(variance)}</>}
-          sub={matched ? 'Matched' : variance > 0 ? 'BAT higher' : 'Sage higher'}
+          sub={matched ? 'Perfect match' : variancePersonality || (variance > 0 ? 'BAT higher' : 'Sage higher')}
           accent={matched ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))'}
           glow={matched ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.3)'}
         />

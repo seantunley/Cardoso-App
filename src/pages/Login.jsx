@@ -5,6 +5,113 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 import { reportClientError } from "@/lib/clientLog";
+import { getDailyOperatorCodename, getJohannesburgGreeting } from "@/lib/fun";
+
+const DAILY_LOGIN_QUOTES = [
+  "Tiny checks now save heroic fixes later.",
+  "Reconcile first. Panic never.",
+  "Clean data has a very particular kind of swagger.",
+  "Today's best report starts with yesterday's tidy rows.",
+  "If the numbers agree, let the coffee take the credit.",
+  "A calm ledger is a beautiful thing.",
+  "Measure twice, sync once.",
+  "The quietest systems usually did their homework.",
+  "Good records make future-you suspiciously grateful.",
+  "Every tidy row is a tiny act of optimism.",
+  "A weird variance is just a clue wearing a hat.",
+  "Trust the audit trail. It remembers things.",
+  "One clean import can improve the whole afternoon.",
+  "Logs are breadcrumbs for tomorrow's detective work.",
+  "The best dashboards tell the truth politely.",
+  "A settled account sleeps well.",
+  "Small fixes compound like interest.",
+  "When in doubt, follow the invoice number.",
+  "Precision is just kindness with columns.",
+  "A good backup is boring. Boring is excellent.",
+  "The spreadsheet blinked first.",
+  "Keep the books neat and the surprises small.",
+  "Consistency is the secret sauce nobody screenshots.",
+  "No drama, just data.",
+  "The day improves when totals agree.",
+  "A clean reconciliation is its own little celebration.",
+  "Slow is smooth. Smooth is posted.",
+  "A careful operator beats a clever shortcut.",
+  "The database appreciates your attention.",
+  "Today's mission: make tomorrow easier.",
+  "Somewhere, a future report is thanking you.",
+];
+
+const FRIDAY_LOGIN_QUOTES = [
+  "Friday totals should leave quietly and on time.",
+  "If the books balance today, Monday gets a softer landing.",
+  "The ledger is dressed casual. Still precise.",
+  "A clean Friday close is basically office poetry.",
+];
+
+const MONDAY_LOGIN_QUOTES = [
+  "Start gentle. Then reconcile.",
+  "Monday likes a small win before the big one.",
+  "Fresh week, clean rows, steady hands.",
+];
+
+const USERNAME_EXAMPLES = [
+  "j.doe",
+  "m.mouse",
+  "b.balance",
+  "p.ledger",
+  "c.audit",
+  "t.totals",
+  "s.sync",
+  "r.receipt",
+  "v.variance",
+  "a.account",
+  "d.debit",
+  "c.credit",
+  "q.queue",
+  "n.numbers",
+];
+
+function getDailyLoginQuote(date = new Date()) {
+  const seed = date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
+  if (date.getDay() === 5) return FRIDAY_LOGIN_QUOTES[seed % FRIDAY_LOGIN_QUOTES.length];
+  if (date.getDay() === 1) return MONDAY_LOGIN_QUOTES[seed % MONDAY_LOGIN_QUOTES.length];
+  return DAILY_LOGIN_QUOTES[seed % DAILY_LOGIN_QUOTES.length];
+}
+
+function getRandomUsernameExample() {
+  return USERNAME_EXAMPLES[Math.floor(Math.random() * USERNAME_EXAMPLES.length)];
+}
+
+function formatJohannesburgDateTime(date) {
+  return new Intl.DateTimeFormat("en-ZA", {
+    timeZone: "Africa/Johannesburg",
+    weekday: "short",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function LedgerSparkline() {
+  return (
+    <svg viewBox="0 0 120 34" className="mt-4 h-8 w-full max-w-[220px]" aria-hidden="true">
+      <path
+        d="M2 26 L18 24 L31 18 L44 20 L58 11 L72 14 L86 7 L102 10 L118 4"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="ledger-sparkline-path text-accent"
+      />
+      <path d="M2 30 H118" fill="none" stroke="currentColor" strokeWidth="1" className="text-border" />
+    </svg>
+  );
+}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -16,6 +123,10 @@ export default function Login() {
   const [localError, setLocalError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [appVersion, setAppVersion] = useState("");
+  const [clockNow, setClockNow] = useState(() => new Date());
+  const [footerClicks, setFooterClicks] = useState(0);
+  const [nightShiftMode, setNightShiftMode] = useState(false);
+  const [usernameExample] = useState(() => getRandomUsernameExample());
 
   useEffect(() => {
     fetch("/api/app-info")
@@ -30,6 +141,11 @@ export default function Login() {
       navigate(redirectTo, { replace: true });
     }
   }, [isAuthenticated, isLoadingAuth, location.state, navigate]);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setClockNow(new Date()), 1000);
+    return () => window.clearInterval(tick);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -65,6 +181,28 @@ export default function Login() {
   }
 
   const displayError = localError || authError?.message;
+  const quoteOfTheDay = getDailyLoginQuote();
+  const quoteText = nightShiftMode
+    ? "Night shift mode enabled. The ledger likes a quiet room."
+    : quoteOfTheDay;
+  const johannesburgDateTime = formatJohannesburgDateTime(clockNow);
+  const johannesburgGreeting = getJohannesburgGreeting(clockNow);
+  const operatorCodename = getDailyOperatorCodename(clockNow);
+
+  const handleLocationClick = () => {
+    setFooterClicks((count) => {
+      const next = count + 1;
+      if (next >= 5) {
+        setNightShiftMode(true);
+        window.setTimeout(() => {
+          setNightShiftMode(false);
+          setFooterClicks(0);
+        }, 7000);
+        return 0;
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="min-h-screen flex flex-col lg:flex-row bg-background text-foreground overflow-hidden">
@@ -92,7 +230,7 @@ export default function Login() {
         <div className="relative z-10 flex items-center gap-3">
           <div className="w-6 h-6 bg-accent" style={{ boxShadow: "0 0 28px hsla(33,95%,55%,0.6)" }} />
           <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-            Cardoso / Ledger System
+            Cardoso Cigarettes / Ledger System
           </span>
         </div>
 
@@ -116,9 +254,33 @@ export default function Login() {
         </div>
 
         {/* Bottom meta */}
-        <div className="relative z-10 flex items-end justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-          <span>© 2026 Cardoso</span>
-          <span>Johannesburg / ZA</span>
+        <div className="relative z-10 space-y-8">
+          <div className="max-w-md border-l border-accent/60 pl-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent mb-3">
+              Quote of the day
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              "{quoteText}"
+            </p>
+            <LedgerSparkline />
+          </div>
+          <div className="flex items-end justify-between font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+            <span>© 2026 Cardoso Cigarettes</span>
+            <span className="flex flex-col items-end gap-1">
+              <button
+                type="button"
+                onClick={handleLocationClick}
+                className="border-0 bg-transparent p-0 font-mono uppercase tracking-[0.25em] text-inherit transition-colors hover:text-accent"
+                title="Johannesburg office time"
+              >
+                Johannesburg / ZA
+              </button>
+              <span className="flex items-center gap-2 text-accent tabular-nums">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent animate-pulse" />
+                {johannesburgDateTime}
+              </span>
+            </span>
+          </div>
         </div>
       </div>
 
@@ -128,7 +290,7 @@ export default function Login() {
         <div className="lg:hidden mb-12 flex items-center gap-3">
           <div className="w-5 h-5 bg-accent" />
           <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-            Cardoso / Ledger
+            Cardoso Cigarettes / Ledger
           </span>
         </div>
 
@@ -136,9 +298,22 @@ export default function Login() {
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
             Sign in
           </div>
+          <div className="mb-5 font-mono text-[10px] uppercase tracking-[0.22em] text-accent">
+            Operator codename: {operatorCodename}
+          </div>
           <h2 className="font-display text-4xl leading-tight mb-10">
             Identify yourself.
           </h2>
+
+          <div className="lg:hidden mb-8 border-l border-accent/60 pl-4">
+            <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent mb-2">
+              Quote of the day
+            </div>
+            <p className="text-sm leading-relaxed text-muted-foreground">
+              "{quoteText}"
+            </p>
+            <LedgerSparkline />
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-7">
             <div>
@@ -151,7 +326,7 @@ export default function Login() {
                 value={formData.email}
                 onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
                 className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-foreground/40"
-                placeholder="e.g. s.tunley"
+                placeholder={`e.g. ${usernameExample}`}
                 required
               />
             </div>
@@ -211,11 +386,17 @@ export default function Login() {
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 Build
               </span>
-              <span className="font-mono text-[10px] text-muted-foreground tabular-nums">
+              <span
+                className="font-mono text-[10px] text-muted-foreground tabular-nums"
+                title="Shipped with care. Probably coffee."
+              >
                 v{appVersion}
               </span>
             </div>
           )}
+          <div className="mt-5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            {johannesburgGreeting}
+          </div>
         </div>
       </div>
     </div>
