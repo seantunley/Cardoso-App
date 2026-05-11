@@ -797,6 +797,18 @@ function MaintenanceTab() {
   const [clearPassword, setClearPassword] = useState('');
   const [clearPasswordError, setClearPasswordError] = useState('');
 
+  // Recompute-recon-totals state. Same dry-run/apply UX as the
+  // dedupe-customers tool above. Why this exists: the BAT spreadsheet
+  // upload upsert overwrites supplier_total per spreadsheet, so when
+  // two branch spreadsheets land on the same week (Welkom + JHB, etc.)
+  // the second upload's smaller fees blow away the first's. The
+  // headline BAT TOTAL on the recon goes wrong with no operator-visible
+  // signal. This button lets an admin scan every recon, see which ones
+  // drifted, and heal them in one click without leaving the UI.
+  const [reconTotalsPreview, setReconTotalsPreview] = useState(null);
+  const [reconTotalsLoadingPreview, setReconTotalsLoadingPreview] = useState(false);
+  const [reconTotalsApplying, setReconTotalsApplying] = useState(false);
+
   // Backup-now state. Mirrors the compact-database / clear-imported
   // pattern: password-confirmed, modal-gated, sticky result panel
   // shows the operator both the local outcome AND the hub-notify
@@ -936,6 +948,51 @@ function MaintenanceTab() {
     }
   };
 
+  const handleReconTotalsPreview = async () => {
+    setReconTotalsLoadingPreview(true);
+    try {
+      const r = await fetch('/api/maintenance/recompute-recon-totals', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: true }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Dry-run failed');
+      setReconTotalsPreview(d);
+      const n = d.mismatches?.length || 0;
+      if (n === 0) {
+        toast.success(`Dry-run complete. All ${d.scanned || 0} recon(s) already correct — nothing to fix.`);
+      } else {
+        toast.success(`Dry-run complete. ${n} of ${d.scanned || 0} recon(s) need their BAT TOTAL recomputed.`);
+      }
+    } catch (e) {
+      toast.error(e.message || 'Dry-run failed');
+    } finally {
+      setReconTotalsLoadingPreview(false);
+    }
+  };
+
+  const handleReconTotalsApply = async () => {
+    setReconTotalsApplying(true);
+    try {
+      const r = await fetch('/api/maintenance/recompute-recon-totals', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun: false }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Recompute failed');
+      setReconTotalsPreview(d);
+      toast.success(`Recompute complete. Updated ${d.updated || 0} recon(s).`);
+    } catch (e) {
+      toast.error(e.message || 'Recompute failed');
+    } finally {
+      setReconTotalsApplying(false);
+    }
+  };
+
   const handleClearImportedData = async () => {
     if (!clearPassword) {
       setClearPasswordError('Password is required');
@@ -1070,6 +1127,83 @@ function MaintenanceTab() {
             {applying ? 'Applying...' : 'Apply dedupe'}
           </Button>
         </div>
+      </div>
+
+      {/* Recompute BAT recon supplier_total. Heals recons whose
+          headline BAT TOTAL drifted from the per-row data — usually
+          because two branch spreadsheets uploaded to the same week
+          and the second upload's smaller fees overwrote the first.
+          Dry-run/apply pattern mirrors the Customer Dedupe above. */}
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Recompute BAT recon totals</h3>
+        <p className="text-xs text-muted-foreground mb-4">
+          Resyncs each BAT reconciliation's BAT TOTAL with the sum of its non-exception POD amounts.
+          Useful when the supplier sent multiple spreadsheets for one week and the headline total drifted.
+          Dry-run shows which recons would change before anything is written.
+        </p>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleReconTotalsPreview}
+            disabled={reconTotalsLoadingPreview || reconTotalsApplying || loadingPreview || applying || clearingImported}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${reconTotalsLoadingPreview ? 'animate-spin' : ''}`} />
+            {reconTotalsLoadingPreview ? 'Running dry-run...' : 'Dry-run recon totals'}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={handleReconTotalsApply}
+            disabled={reconTotalsApplying || reconTotalsLoadingPreview || loadingPreview || applying || clearingImported || !reconTotalsPreview || (reconTotalsPreview?.mismatches?.length || 0) === 0}
+          >
+            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+            {reconTotalsApplying ? 'Applying...' : 'Apply recon totals'}
+          </Button>
+        </div>
+
+        {reconTotalsPreview && (
+          <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
+            <div className="text-xs">
+              <span className="font-medium text-foreground">
+                {reconTotalsPreview.dryRun ? 'Dry-run result' : 'Applied'}:
+              </span>{' '}
+              <span className="text-foreground tabular-nums">
+                {(reconTotalsPreview.mismatches?.length || 0)}
+              </span>{' '}
+              of {reconTotalsPreview.scanned || 0} recon(s) drifted
+              {!reconTotalsPreview.dryRun && (
+                <>; updated <span className="text-emerald-400 tabular-nums">{reconTotalsPreview.updated || 0}</span></>
+              )}.
+            </div>
+            {(reconTotalsPreview.mismatches?.length || 0) > 0 && (
+              <div className="max-h-48 overflow-y-auto pr-1">
+                <table className="w-full text-[11px] tabular-nums">
+                  <thead>
+                    <tr className="text-muted-foreground border-b border-border">
+                      <th className="text-left pr-2 pb-1 font-medium">Week</th>
+                      <th className="text-right px-2 pb-1 font-medium">Current</th>
+                      <th className="text-right px-2 pb-1 font-medium">Derived</th>
+                      <th className="text-right pl-2 pb-1 font-medium">Diff</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reconTotalsPreview.mismatches.map((m) => (
+                      <tr key={m.id} className="border-b border-border/40 last:border-0">
+                        <td className="pr-2 py-1 font-mono">W{String(m.week_number).padStart(2, '0')}/{m.year}</td>
+                        <td className="text-right px-2 py-1">R {Number(m.current_total || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="text-right px-2 py-1">R {Number(m.derived_total || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className={`text-right pl-2 py-1 ${m.diff > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {m.diff > 0 ? '+' : ''}R {Number(m.diff || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>

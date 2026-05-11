@@ -1159,6 +1159,93 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // POST /api/maintenance/recompute-recon-totals
+  // Body: { dryRun: boolean }  — defaults to true.
+  //
+  // For every BAT reconciliation, derive supplier_total from the sum of
+  // non-exception POD order_amounts and compare against the stored
+  // value. Returns the list of mismatches; on dryRun=false also UPDATEs
+  // each one in a single transaction.
+  //
+  // Why this exists: the upload upsert overwrites supplier_total with
+  // each new spreadsheet's fees section. When two branch spreadsheets
+  // (Welkom + JHB, etc.) get uploaded to the same week, the SECOND
+  // upload's smaller fees blow away the first's, and the recon's
+  // BAT TOTAL becomes wrong with no operator-visible signal until they
+  // open the recon page. Manual SQL ran at the console fixes one recon
+  // at a time; this gives operators a Maintenance-tab button to check
+  // and heal every recon at once. Mirrors the dedupe-customers
+  // dry-run/apply UX.
+  router.post('/api/maintenance/recompute-recon-totals', requireAuth, requireAdmin, (req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.status(400).json({ error: 'BAT recon-total recompute is site-only.' });
+      }
+      const dryRun = req.body?.dryRun !== false;
+
+      const rows = db.prepare(`
+        SELECT
+          r.id, r.year, r.week_number,
+          COALESCE(r.supplier_total, 0) AS current_total,
+          COALESCE(SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 THEN COALESCE(e.order_amount, 0) ELSE 0 END), 0) AS derived_total,
+          COUNT(e.id) AS pod_count,
+          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 1 THEN 1 ELSE 0 END) AS exception_count
+        FROM bat_reconciliations r
+        LEFT JOIN bat_invoice_extractions e ON e.reconciliation_id = r.id
+        GROUP BY r.id
+        ORDER BY r.year DESC, r.week_number DESC
+      `).all();
+
+      // Mismatch threshold = R 0.01. A diff smaller than that is just
+      // floating-point noise and not worth flagging.
+      const mismatches = rows
+        .filter((r) => Math.abs(r.derived_total - r.current_total) >= 0.01)
+        .map((r) => ({
+          id: r.id,
+          year: r.year,
+          week_number: r.week_number,
+          current_total: r.current_total,
+          derived_total: r.derived_total,
+          diff: r.derived_total - r.current_total,
+          pod_count: r.pod_count,
+          exception_count: r.exception_count,
+        }));
+
+      let updated = 0;
+      if (!dryRun && mismatches.length > 0) {
+        const upd = db.prepare(`UPDATE bat_reconciliations SET supplier_total = ? WHERE id = ?`);
+        const tx = db.transaction(() => {
+          for (const m of mismatches) {
+            upd.run(m.derived_total, m.id);
+            updated++;
+          }
+        });
+        tx();
+      }
+
+      logAudit({
+        req,
+        action: dryRun ? 'bat_recompute_recon_totals_dryrun' : 'bat_recompute_recon_totals',
+        resourceType: 'system',
+        resourceName: 'BAT recon supplier_total recompute',
+        details: dryRun
+          ? `Dry-run found ${mismatches.length} recon(s) with supplier_total drift`
+          : `Updated ${updated} recon(s); derived from non-exception order_amount sums`,
+        changes: { mismatches: mismatches.map((m) => ({ id: m.id, week: m.week_number, year: m.year, before: m.current_total, after: m.derived_total })) },
+      });
+
+      res.json({
+        dryRun,
+        scanned: rows.length,
+        mismatches,
+        updated,
+      });
+    } catch (error) {
+      console.error('[maintenance] recompute-recon-totals failed:', error.message);
+      res.status(500).json({ error: error.message || 'Failed to recompute recon totals' });
+    }
+  });
+
   // POST /api/maintenance/backup-now — admin-only, password-confirmed.
   // Creates a fresh backup snapshot in database/backups/ and (best-
   // effort) notifies the hub so it pulls the new file immediately

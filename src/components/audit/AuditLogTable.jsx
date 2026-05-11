@@ -123,6 +123,8 @@ const actionLabels = {
   hub_delete_site: "Site Deleted",
   hub_backup_pull_trigger: "Backup Pull Triggered",
   hub_backup_pull: "Backup Pulled (per-site)",
+  bat_recompute_recon_totals: "BAT Recon Totals Recomputed",
+  bat_recompute_recon_totals_dryrun: "BAT Recon Totals Dry-run",
   enable_hub_backups: "Hub Backups Enabled",
   disable_hub_backups: "Hub Backups Disabled",
   app_update_trigger: "App Update Started",
