@@ -19,7 +19,7 @@ import XLSX from 'xlsx';
 import {
   parseSupplierSpreadsheet,
   SpreadsheetValidationError,
-} from '../src/services/batReconciliation.js';
+} from '../src/services/bat/parser.js';
 
 let tmpDir;
 
