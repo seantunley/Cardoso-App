@@ -1,5 +1,26 @@
+/** @typedef {Record<string, unknown>} FlagRecord */
+/**
+ * @typedef {object} RuleCondition
+ * @property {string} field
+ * @property {string} condition_type
+ * @property {unknown} [condition_value]
+ * @property {unknown} [condition_value_secondary]
+ * @property {string} [operator]
+ */
+/**
+ * @typedef {object} AutoFlagRule
+ * @property {string | RuleCondition[]} conditions
+ * @property {string} flag_color
+ * @property {string} rule_name
+ */
+/** @typedef {{ flag_color: string, flag_reason: string, auto_flagged: true }} AutoFlagResult */
+
 /**
  * Evaluate a single condition against a full record object.
+ *
+ * @param {RuleCondition} condition
+ * @param {FlagRecord} record
+ * @returns {boolean}
  */
 export function evaluateCondition(condition, record) {
   const { field, condition_type, condition_value, condition_value_secondary } = condition;
@@ -28,15 +49,15 @@ export function evaluateCondition(condition, record) {
   if (["greater_than","less_than","greater_or_equal","less_or_equal","range_between"].includes(condition_type)) {
     const num = parseFloat(String(raw ?? "").replace(/,/g, "").replace(/\s/g, ""));
     if (isNaN(num)) return false;
-    const threshold = parseFloat(condition_value);
+    const threshold = parseFloat(String(condition_value ?? ""));
     switch (condition_type) {
       case "greater_than":     return num > threshold;
       case "less_than":        return num < threshold;
       case "greater_or_equal": return num >= threshold;
       case "less_or_equal":    return num <= threshold;
       case "range_between": {
-        const lo = parseFloat(condition_value);
-        const hi = parseFloat(condition_value_secondary);
+        const lo = parseFloat(String(condition_value ?? ""));
+        const hi = parseFloat(String(condition_value_secondary ?? ""));
         return num >= lo && num <= hi;
       }
     }
@@ -51,10 +72,10 @@ export function evaluateCondition(condition, record) {
     if (isNaN(recordDate.getTime())) return false;
     const now = new Date();
     switch (condition_type) {
-      case "date_older_than": return (now - recordDate) / 86400000 > parseFloat(condition_value);
-      case "date_newer_than": return (now - recordDate) / 86400000 < parseFloat(condition_value);
-      case "before_date":     return recordDate < new Date(condition_value);
-      case "after_date":      return recordDate > new Date(condition_value);
+      case "date_older_than": return (now.getTime() - recordDate.getTime()) / 86400000 > parseFloat(String(condition_value ?? ""));
+      case "date_newer_than": return (now.getTime() - recordDate.getTime()) / 86400000 < parseFloat(String(condition_value ?? ""));
+      case "before_date":     return recordDate < new Date(String(condition_value ?? ""));
+      case "after_date":      return recordDate > new Date(String(condition_value ?? ""));
     }
   }
 
@@ -75,15 +96,25 @@ export function evaluateCondition(condition, record) {
  *   [A, AND B, AND C, OR D]      → (A && B && C) || D
  *
  * Backward compatible: conditions without `operator` default to AND.
+ *
+ * @param {RuleCondition[]} conditions
+ * @param {FlagRecord} record
+ * @returns {boolean}
  */
 function evaluateRuleConditions(conditions, record) {
   if (!Array.isArray(conditions) || conditions.length === 0) return false;
 
-  let result = evaluateCondition(conditions[0], record);
+  const firstCondition = conditions[0];
+  if (!firstCondition) return false;
+
+  let result = evaluateCondition(firstCondition, record);
 
   for (let i = 1; i < conditions.length; i++) {
-    const op = (conditions[i].operator ?? "AND").toUpperCase();
-    const val = evaluateCondition(conditions[i], record);
+    const condition = conditions[i];
+    if (!condition) continue;
+
+    const op = (condition.operator ?? "AND").toUpperCase();
+    const val = evaluateCondition(condition, record);
     if (op === "OR") {
       result = result || val;
     } else {
@@ -97,12 +128,21 @@ function evaluateRuleConditions(conditions, record) {
 /**
  * Check all active auto-flag rules against a full record.
  * Returns { flag_color, flag_reason, auto_flagged } for the first matching rule, or null.
+ *
+ * @param {FlagRecord} record
+ * @param {AutoFlagRule[]} rules
+ * @returns {AutoFlagResult | null}
  */
 export function checkAutoFlagRules(record, rules) {
   for (const rule of rules) {
     let conditions = rule.conditions;
     if (typeof conditions === "string") {
-      try { conditions = JSON.parse(conditions); } catch { conditions = []; }
+      try {
+        const parsed = JSON.parse(conditions);
+        conditions = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        conditions = [];
+      }
     }
     if (!Array.isArray(conditions) || conditions.length === 0) continue;
 

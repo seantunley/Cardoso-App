@@ -85,6 +85,12 @@ export const creditLogicConfigSchema = z.object({
   wording: wordingSchema,
 });
 
+/** @typedef {import("zod").infer<typeof creditLogicConfigSchema>} CreditLogicConfig */
+/** @typedef {{ path: string, message: string }} CreditLogicValidationError */
+/** @typedef {{ ok: true, config: CreditLogicConfig } | { ok: false, errors: CreditLogicValidationError[] }} CreditLogicValidationResult */
+/** @typedef {Record<string, unknown>} PlainObject */
+
+/** @type {CreditLogicConfig} */
 export const DEFAULT_CREDIT_LOGIC_CONFIG = {
   schemaVersion: CREDIT_LOGIC_SCHEMA_VERSION,
   thresholds: {
@@ -178,24 +184,44 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
   },
 };
 
+/**
+ * @param {unknown} value
+ * @returns {unknown}
+ */
 function deepClone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+/**
+ * @param {unknown} value
+ * @returns {value is PlainObject}
+ */
 function isPlainObject(value) {
-  return value && typeof value === "object" && !Array.isArray(value);
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * @param {unknown} base
+ * @param {unknown} override
+ * @returns {unknown}
+ */
 function deepMerge(base, override) {
   if (!isPlainObject(override)) return deepClone(base);
-  const output = Array.isArray(base) ? [...base] : { ...base };
+  const output = Array.isArray(base) ? [...base] : isPlainObject(base) ? { ...base } : {};
+  const outputObject = /** @type {Record<string, unknown>} */ (output);
+  const baseObject = isPlainObject(base) ? base : {};
   for (const [key, value] of Object.entries(override)) {
-    if (isPlainObject(value) && isPlainObject(base?.[key])) output[key] = deepMerge(base[key], value);
-    else output[key] = value;
+    const baseValue = baseObject[key];
+    if (isPlainObject(value) && isPlainObject(baseValue)) outputObject[key] = deepMerge(baseValue, value);
+    else outputObject[key] = value;
   }
   return output;
 }
 
+/**
+ * @param {unknown} config
+ * @returns {CreditLogicConfig}
+ */
 export function normaliseCreditLogicConfig(config) {
   const merged = deepMerge(DEFAULT_CREDIT_LOGIC_CONFIG, config || {});
   const parsed = creditLogicConfigSchema.parse(merged);
@@ -208,6 +234,10 @@ export function normaliseCreditLogicConfig(config) {
   };
 }
 
+/**
+ * @param {unknown} config
+ * @returns {CreditLogicValidationResult}
+ */
 export function validateCreditLogicConfig(config) {
   const result = creditLogicConfigSchema.safeParse(deepMerge(DEFAULT_CREDIT_LOGIC_CONFIG, config || {}));
   if (!result.success) {
