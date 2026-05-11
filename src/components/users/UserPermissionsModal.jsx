@@ -24,7 +24,6 @@ const permissionGroups = [
       { key: "can_access_hub_metrics", label: "Site Metrics", description: "View hub machine health metrics" },
       { key: "can_access_hub_backups", label: "Site Backups", description: "View and manage site backups from the hub" },
       { key: "can_access_hub_trends", label: "Trends", description: "View multi-site reporting trends in the hub" },
-      { key: "can_access_hub_audit_log", label: "Hub Audit Log", description: "View hub admin audit history" },
       { key: "can_access_records", label: "Records", description: "View and browse all raw data records" },
       { key: "can_access_reports", label: "Reports", description: "View the printable reports module (Aged Debtors, BAT Weekly, Sales Rep Exposure, etc.)" },
       { key: "can_access_reconciliation", label: "BAT Reconciliation", description: "Access the per-site BAT supplier reconciliation module" },

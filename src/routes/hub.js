@@ -23,19 +23,6 @@ const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 export function createHubRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
 
-  const writeHubAudit = db.prepare(`
-    INSERT INTO hub_audit_log (action, performed_by, target, detail)
-    VALUES (?, ?, ?, ?)
-  `);
-
-  function logHubAudit({ action, performedBy = null, target = null, detail = null }) {
-    try {
-      writeHubAudit.run(action, performedBy || null, target || null, detail == null ? null : String(detail));
-    } catch (err) {
-      console.warn('[hub-audit-log] failed:', err.message);
-    }
-  }
-
   function getSqlBackupHealth(sqlBackup) {
     if (!sqlBackup?.ok) {
       return { status: 'unavailable', needs_attention: true, last_success_at: null };
@@ -204,10 +191,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       const buf = Buffer.from(await upstream.arrayBuffer());
-      logHubAudit({
-        action: 'backup_pull',
-        performedBy: req.currentUser?.email,
-        target: site.slug || site.id,
+      logAudit({
+        req, action: 'hub_backup_pull', resourceType: 'system',
+        resourceId: site.id, resourceName: site.name || site.slug || site.id,
+        details: `Pulled backup from site "${site.name || site.slug || site.id}" (${buf.length} bytes)`,
       });
       res.send(buf);
     } catch (err) {
@@ -849,32 +836,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     res.json(rows);
   });
 
-  router.get('/api/hub/audit-log', requireAuth, requirePermission('can_access_hub_audit_log'), (req, res) => {
-    try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
-      const rows = db.prepare(`
-        SELECT *
-        FROM hub_audit_log
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?
-      `).all(limit);
-      res.json(rows);
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // POST /api/hub/force-resync — clears sync history and hub_records, triggers full re-pull
   router.post('/api/hub/force-resync', requireAuth, requireAdmin, (req, res) => {
     try {
       db.prepare('DELETE FROM hub_sync_log').run();
       db.prepare('DELETE FROM hub_records').run();
       db.prepare('DELETE FROM hub_inventory').run();
-      logHubAudit({
-        action: 'force_resync',
-        performedBy: req.currentUser?.email,
-        target: 'all_sites',
-      });
       logAudit({
         req, action: 'hub_force_resync_all', resourceType: 'system',
         resourceName: 'All hub sites',
@@ -907,11 +874,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare("DELETE FROM hub_records WHERE site_id = ?").run(siteId);
       db.prepare("DELETE FROM hub_inventory WHERE site_id = ?").run(siteId);
       const site = db.prepare('SELECT slug, name FROM hub_sites WHERE id = ?').get(siteId);
-      logHubAudit({
-        action: 'force_resync',
-        performedBy: req.currentUser?.email,
-        target: site?.slug || siteId,
-      });
       logAudit({
         req, action: 'hub_force_resync_site', resourceType: 'system',
         resourceId: siteId, resourceName: site?.name || site?.slug || siteId,
@@ -987,12 +949,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       });
       tx();
 
-      logHubAudit({
-        action: 'forget_orphan_site',
-        performedBy: req.currentUser?.email,
-        target: row.slug || siteId,
-        detail: JSON.stringify(counts),
-      });
       logAudit({
         req, action: 'hub_forget_orphan_site', resourceType: 'system',
         resourceId: siteId, resourceName: row.name || row.slug || siteId,
@@ -1019,12 +975,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_sync_log WHERE site_id = ?').run(siteId);
       db.prepare('DELETE FROM hub_sites WHERE id = ?').run(siteId);
 
-      logHubAudit({
-        action: 'delete_site',
-        performedBy: req.currentUser?.email,
-        target: site.slug || siteId,
-        detail: `Removed site "${site.name}" (${siteId}) and all associated data`,
-      });
       logAudit({
         req, action: 'hub_delete_site', resourceType: 'system',
         resourceId: siteId, resourceName: site.name,
@@ -1089,11 +1039,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
       tx();
 
-      logHubAudit({
-        action: 'dedupe_hub_records',
-        performedBy: req.currentUser?.email,
-        target: `${dupGroups.length} groups, ${totalRemoved} duplicates ${dryRun ? '(dry run)' : 'removed'}`,
-      });
       logAudit({
         req, action: dryRun ? 'hub_dedupe_dryrun' : 'hub_dedupe', resourceType: 'system',
         resourceName: 'Hub customer deduplication',
@@ -1224,7 +1169,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
                can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
-               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
+               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
                can_access_records, can_access_reports, can_access_connections, can_access_settings,
                can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
         FROM "user" ORDER BY role DESC, full_name ASC
@@ -1258,7 +1203,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         can_access_hub_metrics: boolFromRow(u.can_access_hub_metrics, false),
         can_access_hub_backups: boolFromRow(u.can_access_hub_backups, false),
         can_access_hub_trends: boolFromRow(u.can_access_hub_trends, false),
-        can_access_hub_audit_log: boolFromRow(u.can_access_hub_audit_log, false),
         can_access_records: boolFromRow(u.can_access_records, false),
         can_access_reports: boolFromRow(u.can_access_reports, false),
         can_access_connections: boolFromRow(u.can_access_connections, false),
@@ -1297,12 +1241,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       });
       txn();
 
-      logHubAudit({
-        action: 'update_user_allowed_sites',
-        performedBy: req.currentUser?.email,
-        target: user.email,
-        detail: JSON.stringify({ allowed_sites: site_slugs }),
-      });
       logAudit({
         req, action: 'update_user_allowed_sites', resourceType: 'user',
         resourceId: user.id, resourceName: user.email,
@@ -1328,7 +1266,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
-             can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
+             can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
              password_hash, must_change_password
@@ -1384,12 +1322,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       for (const u of usersToSync) {
         upsertSite.run(u.email, res_row.slug);
       }
-      logHubAudit({
-        action: 'push_users',
-        performedBy: req.currentUser?.email,
-        target: res_row.slug,
-        detail: JSON.stringify(usersToSync.map((user) => user.email)),
-      });
     }
 
     const allOk = summary.every(s => s.ok);
@@ -1414,12 +1346,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             auto_flagged = 0
         WHERE auto_flagged = 1
       `).run();
-      logHubAudit({
-        action: 'clear_auto_flags',
-        performedBy: req.currentUser?.email,
-        target: 'all_sites',
-        detail: String(result.changes),
-      });
       logAudit({
         req, action: 'hub_clear_auto_flags', resourceType: 'system',
         resourceName: 'Hub auto-flags',
@@ -1465,13 +1391,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             const body = await response.text();
             throw new Error(`HTTP ${response.status} — ${body || 'no body'}`);
           }
-
-          logHubAudit({
-            action: 'push_rules',
-            performedBy: req.currentUser?.email,
-            target: site.slug || site.id,
-            detail: String(rules.length),
-          });
 
           return { site: site.name || site.slug || site.id, status: 'ok' };
         } catch (err) {
@@ -2061,7 +1980,6 @@ export function createNonHubFallbackRouter() {
   router.get('/api/hub/kpis', (req, res) => res.json({ sites: [] }));
   router.get('/api/hub/inventory', (req, res) => res.json([]));
   router.get('/api/hub/sync-log', (req, res) => res.json([]));
-  router.get('/api/hub/audit-log', (req, res) => res.json([]));
   router.get('/api/hub/trends', (req, res) => res.json({ period: 'weekly', since: null, data: [] }));
   router.get('/api/hub/network-devices', (req, res) => res.json({ devices: [], samples: [], sites: [] }));
   router.get('/api/hub/customer-lookup', (req, res) => res.json({ record: null, subAccounts: [] }));
@@ -2104,7 +2022,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
-                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
+                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
                 password_hash = ?, must_change_password = 0
@@ -2122,7 +2040,6 @@ export function createReceiveUsersRouter() {
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
-              u.can_access_hub_audit_log ? 1 : 0,
               u.can_access_records ? 1 : 0,
               u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
@@ -2139,7 +2056,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
-                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?, can_access_hub_audit_log = ?,
+                can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
               WHERE email = ?
@@ -2156,7 +2073,6 @@ export function createReceiveUsersRouter() {
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
-              u.can_access_hub_audit_log ? 1 : 0,
               u.can_access_records ? 1 : 0,
               u.can_access_reports ? 1 : 0,
               u.can_access_connections ? 1 : 0,
@@ -2185,10 +2101,10 @@ export function createReceiveUsersRouter() {
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
-              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends, can_access_hub_audit_log,
+              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -2204,7 +2120,6 @@ export function createReceiveUsersRouter() {
             u.can_access_hub_metrics ? 1 : 0,
             u.can_access_hub_backups ? 1 : 0,
             u.can_access_hub_trends ? 1 : 0,
-            u.can_access_hub_audit_log ? 1 : 0,
             u.can_access_records ? 1 : 0,
             u.can_access_reports ? 1 : 0,
             u.can_access_connections ? 1 : 0,
