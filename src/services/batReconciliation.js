@@ -449,11 +449,25 @@ const FEE_MATCHERS = {
   // DISCOUNT, SUM OF DISCOUNT — guard against TOTAL/HEADER rows that
   // contain DISCOUNT as part of a larger label (e.g. "TOTAL DISCOUNT").
   discount: (s) => /(^|\s)DISCOUNT(\s|$)/.test(s) && !/TOTAL/.test(s),
-  // DELIVERY FEE, DELIVERY FEE EXCL NC. The previous version required
-  // "EXCL" present — but some templates only have a single Delivery Fee
-  // column without the EXCL/INCL split, and the strict requirement made
-  // those uploads land with a R 0.00 delivery fee.
-  delivery: (s) => /DELIVERY/.test(s) && !/TOTAL|VOLUME/.test(s),
+
+  // Delivery is preference-ordered to handle the common case of a sheet
+  // with BOTH "Delivery Fee Incl NC" and "Delivery Fee Excl NC" columns:
+  // the recon needs the Excl total (VAT-exclusive), and a permissive
+  // single matcher would happily bind to whichever column appears first
+  // — silently summing VAT-inclusive values into supplier_delivery while
+  // _matched.delivery still reads true. Codex review catch on PR #274.
+  //
+  // The extraction loop tries each matcher in order:
+  //   1. deliveryExcl    — explicit EXCL variant, always preferred
+  //   2. deliveryPlain   — bare "Delivery Fee" with no EXCL/INCL marker
+  //                        (templates that only have a single column)
+  //
+  // deliveryIncl exists only as a NEGATIVE guard — extraction code
+  // SKIPS columns that match it so we never accidentally bind to the
+  // VAT-inclusive variant.
+  deliveryExcl:  (s) => /DELIVERY/.test(s) && /EXCL/.test(s) && !/TOTAL|VOLUME/.test(s),
+  deliveryIncl:  (s) => /DELIVERY/.test(s) && /INCL/.test(s),
+  deliveryPlain: (s) => /DELIVERY/.test(s) && !/EXCL|INCL|TOTAL|VOLUME/.test(s),
 };
 
 function extractFees(rows) {
@@ -505,11 +519,24 @@ function extractFees(rows) {
       const row = rows[i];
       if (!Array.isArray(row)) continue;
       // Only look at columns near the ODR column (within the same pivot)
+      // Track delivery candidates separately so we can prefer EXCL over
+      // a bare "Delivery Fee" header when both kinds appear in the sheet.
+      // See FEE_MATCHERS.deliveryExcl/Plain comment block.
+      let deliveryColExcl = -1;
+      let deliveryColPlain = -1;
       for (let j = firstOdrCol; j < Math.min(row.length, firstOdrCol + 15); j++) {
         const cell = String(row[j] || '').trim().toUpperCase();
         if (FEE_MATCHERS.discount(cell) && discountCol < 0) discountCol = j;
-        if (FEE_MATCHERS.delivery(cell) && deliveryCol < 0) deliveryCol = j;
         if (FEE_MATCHERS.pricing(cell)  && pricingCol  < 0) pricingCol  = j;
+        // Delivery: classify each candidate. Skip Incl outright (we
+        // never want to bind to the VAT-inclusive column).
+        if (FEE_MATCHERS.deliveryIncl(cell)) continue;
+        if (FEE_MATCHERS.deliveryExcl(cell)  && deliveryColExcl  < 0) deliveryColExcl  = j;
+        else if (FEE_MATCHERS.deliveryPlain(cell) && deliveryColPlain < 0) deliveryColPlain = j;
+      }
+      if (deliveryCol < 0) {
+        // Excl wins; bare Delivery is the fallback when no Excl exists.
+        deliveryCol = deliveryColExcl >= 0 ? deliveryColExcl : deliveryColPlain;
       }
       if (discountCol >= 0 || deliveryCol >= 0 || pricingCol >= 0) {
         headerRow = i;
@@ -555,7 +582,12 @@ function extractFees(rows) {
       if (FEE_MATCHERS.discount(label)) {
         fees.discount = { subTotal: last3[0], vat: last3[1], total: last3[2] };
         fees._matched.discount = true;
-      } else if (FEE_MATCHERS.delivery(label)) {
+      } else if (FEE_MATCHERS.deliveryIncl(label)) {
+        // Explicit Incl variant — skip. See FEE_MATCHERS comment.
+        continue;
+      } else if (FEE_MATCHERS.deliveryExcl(label) || (FEE_MATCHERS.deliveryPlain(label) && !fees._matched.delivery)) {
+        // Excl always wins; bare "Delivery" only accepted if no Excl
+        // has matched yet (preference-ordered to match the pivot path).
         fees.delivery = { subTotal: last3[0], vat: last3[1], total: last3[2] };
         fees._matched.delivery = true;
       } else if (FEE_MATCHERS.pricing(label)) {
