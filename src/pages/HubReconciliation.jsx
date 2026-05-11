@@ -23,7 +23,7 @@ const TIPS = {
   missingCreditNotesHeader: 'Weeks where the BAT spreadsheet was uploaded but Sage hasn\'t posted any credit notes against it yet. Chase accounts to confirm the credit notes are processed; until they are, the site can\'t close the week.',
   weeksCount: 'Total number of weeks with any BAT spreadsheet uploaded this year. The denominator for "X of Y weeks matched".',
   mismatchCount: 'Count of weeks listed in the Mismatch section above — weeks where both BAT and Sage are present but the totals don\'t balance.',
-  missingBat: 'Weeks where Sage HAS posted credit notes but no matching BAT spreadsheet has been uploaded for that week — the site is behind on uploads. Different from "Missing credit notes" above, which is the opposite case (BAT uploaded, Sage not yet processed).',
+  missingBat: 'Number of ISO weeks between the last BAT spreadsheet uploaded and the current week. Example: if the last upload was W13 and we are now in W20, this shows 7 — meaning the site is 7 weeks behind on uploads. Crosses year boundaries correctly via ISO-week arithmetic.',
   synced: 'When the hub last successfully pulled this site\'s BAT summary. Hub pulls run every 5 minutes; click the refresh button at the top of the page to force one now.',
 };
 

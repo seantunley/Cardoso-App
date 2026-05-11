@@ -1136,7 +1136,22 @@ export function getLastPaidSageWeek() {
 // reconciliation". Same architectural rule as getLastPaidSageWeek:
 // hub mirrors site, both endpoints route through this helper, never
 // inline a parallel SELECT.
-export function getLastBatReconciliationWeek() {
+//
+// opts.allYears (default false):
+//   false → current ISO year only. Used by callsites that mean
+//           "last upload this year" (year-scoped tile labels).
+//   true  → look across every year. Required by the Missing-BAT
+//           gap calculation: a site whose last upload was W47/2025
+//           and has nothing in 2026 needs the all-time answer so
+//           the gap shows the real backlog. Codex review catch on
+//           PR #273 — the cross-year branch in the gap calculation
+//           never fired against the year-scoped default.
+//
+// The future-week guard (week_number <= currentWeek + 1) only applies
+// when allYears is false. With allYears=true, a recon stamped in a
+// PAST year is by definition not "future", so we don't constrain.
+export function getLastBatReconciliationWeek(opts = {}) {
+  const allYears = !!opts.allYears;
   let currentIsoYear, currentWeek;
   try {
     const cur = currentIsoWeek();
@@ -1146,14 +1161,29 @@ export function getLastBatReconciliationWeek() {
     return null;
   }
   try {
-    const row = db.prepare(`
-      SELECT year, week_number
-      FROM bat_reconciliations
-      WHERE year = ?
-        AND week_number <= ?
-      ORDER BY week_number DESC
-      LIMIT 1
-    `).get(currentIsoYear, currentWeek + 1);
+    let row;
+    if (allYears) {
+      // No year filter; guard future weeks within the CURRENT year only
+      // (a 2025 recon stamped as W47/2025 is fine; a 2026 recon stamped
+      // as W99/2026 isn't — keep the same defensive scoping the
+      // current-year branch applies).
+      row = db.prepare(`
+        SELECT year, week_number
+        FROM bat_reconciliations
+        WHERE NOT (year = ? AND week_number > ?)
+        ORDER BY year DESC, week_number DESC
+        LIMIT 1
+      `).get(currentIsoYear, currentWeek + 1);
+    } else {
+      row = db.prepare(`
+        SELECT year, week_number
+        FROM bat_reconciliations
+        WHERE year = ?
+          AND week_number <= ?
+        ORDER BY week_number DESC
+        LIMIT 1
+      `).get(currentIsoYear, currentWeek + 1);
+    }
     if (!row) return null;
     return { year: row.year, week_number: row.week_number };
   } catch {
