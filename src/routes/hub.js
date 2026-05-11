@@ -17,88 +17,12 @@ import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
 import { logAudit } from '../lib/audit.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
-import { pagination, clampInt } from '../lib/httpParams.js';
+import { getSqlBackupHealth, getMachineHealthSummary } from '../services/hub/hubHealth.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
 export function createHubRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
-
-  function getSqlBackupHealth(sqlBackup) {
-    if (!sqlBackup?.ok) {
-      return { status: 'unavailable', needs_attention: true, last_success_at: null };
-    }
-
-    const databases = Array.isArray(sqlBackup.databases) ? sqlBackup.databases : [];
-    if (databases.length === 0) {
-      return { status: 'unavailable', needs_attention: true, last_success_at: null };
-    }
-
-    const successTimes = databases
-      .filter((db) => db.isSuccess && db.backupAt)
-      .map((db) => new Date(db.backupAt).getTime())
-      .filter((value) => Number.isFinite(value));
-
-    const latestSuccessMs = successTimes.length > 0 ? Math.max(...successTimes) : null;
-    const latestSuccessAt = latestSuccessMs ? new Date(latestSuccessMs).toISOString() : null;
-    const anyFailed = databases.some((db) => db.isSuccess === false);
-    const stale = !latestSuccessMs || ((Date.now() - latestSuccessMs) > 24 * 3600000);
-
-    return {
-      status: anyFailed ? 'failed' : stale ? 'stale' : 'ok',
-      needs_attention: anyFailed || stale,
-      last_success_at: latestSuccessAt,
-    };
-  }
-
-  function getMachineHealthSummary(machineHealth) {
-    if (!machineHealth?.ok) {
-      return {
-        status: 'unavailable',
-        needs_attention: true,
-        reasons: [machineHealth?.message || 'Machine health unavailable'],
-      };
-    }
-
-    const reasons = [];
-    let status = 'ok';
-
-    const promote = (nextStatus, reason) => {
-      if (reason) reasons.push(reason);
-      if (status === 'critical' || nextStatus === status) return;
-      if (nextStatus === 'critical' || (nextStatus === 'warning' && status === 'ok')) {
-        status = nextStatus;
-      }
-    };
-
-    const cpuUsage = Number(machineHealth.cpu?.usage_percent);
-    if (Number.isFinite(cpuUsage) && cpuUsage >= 90) promote('critical', `CPU ${cpuUsage.toFixed(1)}%`);
-    else if (Number.isFinite(cpuUsage) && cpuUsage >= 75) promote('warning', `CPU ${cpuUsage.toFixed(1)}%`);
-
-    const memoryUsed = Number(machineHealth.memory?.used_percent);
-    if (Number.isFinite(memoryUsed) && memoryUsed >= 90) promote('critical', `RAM ${memoryUsed.toFixed(1)}% used`);
-    else if (Number.isFinite(memoryUsed) && memoryUsed >= 80) promote('warning', `RAM ${memoryUsed.toFixed(1)}% used`);
-
-    const disks = Array.isArray(machineHealth.disks) ? machineHealth.disks : [];
-    disks.forEach((disk) => {
-      const freePercent = Number(disk.free_percent);
-      if (!Number.isFinite(freePercent)) return;
-      const label = disk.drive || 'disk';
-      if (freePercent <= 10) promote('critical', `${label} low space (${freePercent.toFixed(1)}% free)`);
-      else if (freePercent <= 20) promote('warning', `${label} low space (${freePercent.toFixed(1)}% free)`);
-    });
-
-    const service = machineHealth.cardoso_service;
-    if (service?.present && service.status && service.status !== 'Running') {
-      promote('warning', `Cardoso service ${String(service.status).toLowerCase()}`);
-    }
-
-    return {
-      status,
-      needs_attention: status !== 'ok',
-      reasons,
-    };
-  }
 
   // GET /api/hub/backup-settings
   router.get('/api/hub/backup-settings', requireAuth, requirePermission('can_access_hub_backups'), (req, res) => {
