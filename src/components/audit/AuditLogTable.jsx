@@ -122,6 +122,7 @@ const actionLabels = {
   hub_force_resync_site: "Force Resync (Site)",
   hub_delete_site: "Site Deleted",
   hub_backup_pull_trigger: "Backup Pull Triggered",
+  hub_backup_pull: "Backup Pulled (per-site)",
   enable_hub_backups: "Hub Backups Enabled",
   disable_hub_backups: "Hub Backups Disabled",
   app_update_trigger: "App Update Started",

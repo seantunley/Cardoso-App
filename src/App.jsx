@@ -28,7 +28,6 @@ const pagePermissions = {
   HubMetrics: "can_access_hub_metrics",
   HubBackups: "can_access_hub_backups",
   HubTrends: "can_access_hub_trends",
-  HubAuditLog: "can_access_hub_audit_log",
   Records: "can_access_records",
   Reconciliation: "can_access_reconciliation",
   Reports: "can_access_reports",

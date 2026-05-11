@@ -178,23 +178,6 @@ const IconTrends = ({ className, style }) => (
   </svg>
 );
 
-// Hub Audit Log — clipboard with checkmark + signature line.
-const IconHubAuditLog = ({ className, style }) => (
-  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
-    {/* Clipboard back */}
-    <rect x="3" y="4" width="14" height="14" rx="1.5" fill="#f43f5e" opacity="0.85"/>
-    {/* Clip */}
-    <rect x="7" y="2.5" width="6" height="3" rx="0.6" fill="#fda4af"/>
-    {/* Page */}
-    <rect x="4.5" y="6.5" width="11" height="10" rx="0.6" fill="#fff1f2"/>
-    {/* Lines */}
-    <line x1="6" y1="9"  x2="13" y2="9"  stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
-    <line x1="6" y1="11" x2="13" y2="11" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
-    <line x1="6" y1="13" x2="11" y2="13" stroke="#fb7185" strokeWidth="0.7" strokeLinecap="round"/>
-    {/* Big checkmark */}
-    <path d="M6.5 14.5 L8 16 L13 11" stroke="#22c55e" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
-  </svg>
-);
 
 // Reconciliation — phosphor pulse cutting through stacked ledger rows.
 // Teal rows = static records; amber waveform = live matching across them.
@@ -285,7 +268,6 @@ const navItems = [
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
-  { name: "Hub Audit Log",       icon: IconHubAuditLog,           page: "HubAuditLog",      permission: "can_access_hub_audit_log", hubOnly: true },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
