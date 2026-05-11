@@ -961,10 +961,12 @@ function MaintenanceTab() {
       if (!r.ok) throw new Error(d.error || 'Dry-run failed');
       setReconTotalsPreview(d);
       const n = d.mismatches?.length || 0;
+      const skipped = d.skippedIncomplete?.length || 0;
+      const skippedTail = skipped > 0 ? `, ${skipped} skipped (incomplete amounts)` : '';
       if (n === 0) {
-        toast.success(`Dry-run complete. All ${d.scanned || 0} recon(s) already correct — nothing to fix.`);
+        toast.success(`Dry-run complete. All ${d.scanned || 0} recon(s) already correct${skippedTail} — nothing to fix.`);
       } else {
-        toast.success(`Dry-run complete. ${n} of ${d.scanned || 0} recon(s) need their BAT TOTAL recomputed.`);
+        toast.success(`Dry-run complete. ${n} of ${d.scanned || 0} recon(s) need their BAT TOTAL recomputed${skippedTail}.`);
       }
     } catch (e) {
       toast.error(e.message || 'Dry-run failed');
@@ -985,7 +987,9 @@ function MaintenanceTab() {
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || 'Recompute failed');
       setReconTotalsPreview(d);
-      toast.success(`Recompute complete. Updated ${d.updated || 0} recon(s).`);
+      const skipped = d.skippedIncomplete?.length || 0;
+      const skippedTail = skipped > 0 ? `; ${skipped} skipped (incomplete amounts — re-run after their next upload)` : '';
+      toast.success(`Recompute complete. Updated ${d.updated || 0} recon(s)${skippedTail}.`);
     } catch (e) {
       toast.error(e.message || 'Recompute failed');
     } finally {
@@ -1174,6 +1178,9 @@ function MaintenanceTab() {
               of {reconTotalsPreview.scanned || 0} recon(s) drifted
               {!reconTotalsPreview.dryRun && (
                 <>; updated <span className="text-emerald-400 tabular-nums">{reconTotalsPreview.updated || 0}</span></>
+              )}
+              {(reconTotalsPreview.skippedIncomplete?.length || 0) > 0 && (
+                <>; <span className="text-amber-400 tabular-nums">{reconTotalsPreview.skippedIncomplete.length}</span> skipped (incomplete amounts)</>
               )}.
             </div>
             {(reconTotalsPreview.mismatches?.length || 0) > 0 && (
@@ -1200,6 +1207,38 @@ function MaintenanceTab() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {(reconTotalsPreview.skippedIncomplete?.length || 0) > 0 && (
+              <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/5 p-2 space-y-1.5">
+                <div className="text-[11px] font-medium text-amber-300">
+                  Skipped — incomplete order_amount data (would corrupt the total if recomputed):
+                </div>
+                <div className="max-h-32 overflow-y-auto pr-1">
+                  <table className="w-full text-[11px] tabular-nums">
+                    <thead>
+                      <tr className="text-muted-foreground/80 border-b border-amber-500/20">
+                        <th className="text-left pr-2 pb-1 font-medium">Week</th>
+                        <th className="text-right px-2 pb-1 font-medium">PODs</th>
+                        <th className="text-right px-2 pb-1 font-medium">Missing amount</th>
+                        <th className="text-right pl-2 pb-1 font-medium">Current total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reconTotalsPreview.skippedIncomplete.map((s) => (
+                        <tr key={s.id} className="border-b border-amber-500/10 last:border-0">
+                          <td className="pr-2 py-1 font-mono">W{String(s.week_number).padStart(2, '0')}/{s.year}</td>
+                          <td className="text-right px-2 py-1">{s.pod_count || 0}</td>
+                          <td className="text-right px-2 py-1 text-amber-300">{s.missing_amount_count || 0}</td>
+                          <td className="text-right pl-2 py-1">R {Number(s.current_total || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="text-[10px] text-muted-foreground">
+                  Order amounts for these recons get filled in by a later week's upload (the cross-week backfill pass). Re-run after the next upload completes — incomplete weeks will move out of this list once their amounts land.
+                </div>
               </div>
             )}
           </div>

@@ -1183,33 +1183,74 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       }
       const dryRun = req.body?.dryRun !== false;
 
+      // Per-recon aggregates. We track a missing_amount_count column so
+      // we can REFUSE to recompute any recon that has non-exception POD
+      // rows with NULL order_amount — Codex review catch on PR #275.
+      // Without that guard the SUM treats nulls as zero (via COALESCE)
+      // and the derived total is artificially low, which would
+      // OVERWRITE a possibly-correct supplier_total with a corrupt
+      // value. The current ingest path leaves order_amount nullable
+      // (it's filled in by the spreadsheet upload AND/OR by a separate
+      // backfillOrderAmounts pass that runs on a later week's upload),
+      // so a recon with partial-amount data is a real ongoing state,
+      // not a defect to fix here.
       const rows = db.prepare(`
         SELECT
           r.id, r.year, r.week_number,
           COALESCE(r.supplier_total, 0) AS current_total,
           COALESCE(SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 THEN COALESCE(e.order_amount, 0) ELSE 0 END), 0) AS derived_total,
           COUNT(e.id) AS pod_count,
-          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 1 THEN 1 ELSE 0 END) AS exception_count
+          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 1 THEN 1 ELSE 0 END) AS exception_count,
+          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 AND e.order_amount IS NULL THEN 1 ELSE 0 END) AS missing_amount_count
         FROM bat_reconciliations r
         LEFT JOIN bat_invoice_extractions e ON e.reconciliation_id = r.id
         GROUP BY r.id
         ORDER BY r.year DESC, r.week_number DESC
       `).all();
 
-      // Mismatch threshold = R 0.01. A diff smaller than that is just
-      // floating-point noise and not worth flagging.
-      const mismatches = rows
-        .filter((r) => Math.abs(r.derived_total - r.current_total) >= 0.01)
-        .map((r) => ({
-          id: r.id,
-          year: r.year,
-          week_number: r.week_number,
-          current_total: r.current_total,
-          derived_total: r.derived_total,
-          diff: r.derived_total - r.current_total,
-          pod_count: r.pod_count,
-          exception_count: r.exception_count,
-        }));
+      // Bucket each recon into one of three lanes:
+      //   1. ok          — totals already agree, no work needed
+      //   2. mismatch    — totals drift AND the recon has full amount
+      //                    coverage; safe to recompute
+      //   3. skipped_*   — totals drift OR not, but the recon has at
+      //                    least one non-exception row missing
+      //                    order_amount; we DO NOT touch it because the
+      //                    derived value would be artificially low
+      //                    (treats nulls as zero) and overwriting could
+      //                    corrupt a previously-correct value
+      const mismatches = [];
+      const skippedIncomplete = [];
+      for (const r of rows) {
+        const drift = Math.abs(r.derived_total - r.current_total) >= 0.01;
+        if (r.missing_amount_count > 0) {
+          // Surface skipped recons in the response even when totals
+          // already agree, so the operator gets a complete picture of
+          // which weeks are still incomplete.
+          skippedIncomplete.push({
+            id: r.id,
+            year: r.year,
+            week_number: r.week_number,
+            current_total: r.current_total,
+            pod_count: r.pod_count,
+            exception_count: r.exception_count,
+            missing_amount_count: r.missing_amount_count,
+            reason: `${r.missing_amount_count} non-exception row(s) have no order_amount yet — backfill from a later upload would change the derived total. Refusing to recompute.`,
+          });
+          continue;
+        }
+        if (drift) {
+          mismatches.push({
+            id: r.id,
+            year: r.year,
+            week_number: r.week_number,
+            current_total: r.current_total,
+            derived_total: r.derived_total,
+            diff: r.derived_total - r.current_total,
+            pod_count: r.pod_count,
+            exception_count: r.exception_count,
+          });
+        }
+      }
 
       let updated = 0;
       if (!dryRun && mismatches.length > 0) {
@@ -1229,15 +1270,19 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         resourceType: 'system',
         resourceName: 'BAT recon supplier_total recompute',
         details: dryRun
-          ? `Dry-run found ${mismatches.length} recon(s) with supplier_total drift`
-          : `Updated ${updated} recon(s); derived from non-exception order_amount sums`,
-        changes: { mismatches: mismatches.map((m) => ({ id: m.id, week: m.week_number, year: m.year, before: m.current_total, after: m.derived_total })) },
+          ? `Dry-run: ${mismatches.length} recon(s) need recompute, ${skippedIncomplete.length} skipped (incomplete order_amount)`
+          : `Updated ${updated} recon(s); skipped ${skippedIncomplete.length} (incomplete order_amount); derived from non-exception order_amount sums`,
+        changes: {
+          mismatches: mismatches.map((m) => ({ id: m.id, week: m.week_number, year: m.year, before: m.current_total, after: m.derived_total })),
+          skipped: skippedIncomplete.map((s) => ({ id: s.id, week: s.week_number, year: s.year, missing_amount_count: s.missing_amount_count })),
+        },
       });
 
       res.json({
         dryRun,
         scanned: rows.length,
         mismatches,
+        skippedIncomplete,
         updated,
       });
     } catch (error) {
