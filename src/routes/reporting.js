@@ -9,6 +9,7 @@ import db from '../db/index.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek, weeksInIsoYear } from '../lib/isoWeek.js';
+import { pagination } from '../lib/httpParams.js';
 // Shared "last paid week" / "last BAT week" helpers — same source the
 // site's own /api/bat/week-status endpoint uses, so the per-site tile
 // the hub renders ALWAYS matches what the site shows on its own UI.
@@ -1196,8 +1197,7 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/reporting/records?since=ISO_DATE&offset=0&limit=1000
   router.get('/api/reporting/records', reportingRateLimiter, requireReportingToken, (req, res) => {
     const since = req.query.since;
-    const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
-    const offset = parseInt(req.query.offset) || 0;
+    const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 1000 });
     let rows;
     if (since) {
       rows = prep(
@@ -1424,8 +1424,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   router.get('/api/reporting/inventory', reportingRateLimiter, requireReportingToken, (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit) || 1000, 1000);
-    const offset = parseInt(req.query.offset) || 0;
+    const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 1000 });
     const rows = prep(
       `SELECT id, source_table, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, terms, updated_date
        FROM inventoryrecord ORDER BY item_number ASC LIMIT ? OFFSET ?`
