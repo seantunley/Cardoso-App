@@ -417,23 +417,48 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     res.json(recon);
   });
 
-  // Clear the per-recon last_error. Used by the toast "Dismiss" button so
-  // an operator can acknowledge a stale error after manual investigation
-  // (e.g. they ran a fresh extraction outside the standard workflow). The
-  // historical entry stays in error_log / System Log indefinitely.
+  // Clear the per-recon last_error AND reset status away from 'error'.
+  // Used by the toast "Dismiss" button so an operator can acknowledge a
+  // stale error after manual investigation (e.g. they ran a fresh
+  // extraction outside the standard workflow).
+  //
+  // Two columns drive the operator-visible "error" badge:
+  //   - last_error / last_error_at — written by recordReconciliationError
+  //   - status                     — set to 'error' when an OCR run ends
+  //                                  with rows still pending or auto-halts
+  //
+  // The original endpoint only cleared last_error/last_error_at, leaving
+  // status='error' in place — operator clicked Dismiss in the toast, the
+  // toast went away, but the badge in the recon picker / OCR Operations
+  // recents stayed red because the badge reads from status. Operator
+  // (correctly) reported "dismiss didn't work". Now we also flip status
+  // back into a meaningful state:
+  //   - 'completed' if every extraction is no longer 'pending'
+  //   - 'pending'   if any extractions are still pending (operator will
+  //                 normally re-trigger Extract after dismissing)
+  //
+  // Historical error entries in error_log / System Log are untouched —
+  // the audit trail is preserved indefinitely; this just clears the
+  // current-state signal.
   router.post('/api/bat/reconciliation/:id/dismiss-error', ...gate, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'invalid id' });
     try {
+      const pendingRow = db.prepare(
+        "SELECT COUNT(*) AS n FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status = 'pending'"
+      ).get(id);
+      const newStatus = (pendingRow?.n || 0) > 0 ? 'pending' : 'completed';
       const info = db.prepare(
-        "UPDATE bat_reconciliations SET last_error = NULL, last_error_at = NULL WHERE id = ?"
-      ).run(id);
+        "UPDATE bat_reconciliations SET last_error = NULL, last_error_at = NULL, status = ? WHERE id = ?"
+      ).run(newStatus, id);
       logAudit({
         req, action: 'bat_dismiss_recon_error', resourceType: 'system',
         resourceId: id, resourceName: `Reconciliation ${id}`,
-        details: info.changes ? 'Cleared last_error on reconciliation' : 'Reconciliation not found or already clear',
+        details: info.changes
+          ? `Cleared last_error and set status='${newStatus}' (${pendingRow?.n || 0} extractions still pending)`
+          : 'Reconciliation not found or already clear',
       });
-      res.json({ ok: true, cleared: info.changes });
+      res.json({ ok: true, cleared: info.changes, status: newStatus, pending: pendingRow?.n || 0 });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
