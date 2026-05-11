@@ -1194,6 +1194,17 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       // backfillOrderAmounts pass that runs on a later week's upload),
       // so a recon with partial-amount data is a real ongoing state,
       // not a defect to fix here.
+      // The `AND e.id IS NOT NULL` guard on missing_amount_count is
+      // load-bearing — without it, the LEFT JOIN's synthetic NULL row
+      // for any recon with ZERO PODs (e.id NULL, is_exception NULL →
+      // COALESCE=0, order_amount NULL) would match the predicate and
+      // return missing_amount_count = 1. That recon would then be
+      // classified as skippedIncomplete and could never be recomputed,
+      // even when its stored supplier_total should be corrected to 0.
+      // Codex review catch on PR #275. The other CASE expressions
+      // (derived_total, exception_count) already return 0 for the
+      // synthetic row via their respective predicates, so only this
+      // one needed the guard.
       const rows = db.prepare(`
         SELECT
           r.id, r.year, r.week_number,
@@ -1201,7 +1212,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
           COALESCE(SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 THEN COALESCE(e.order_amount, 0) ELSE 0 END), 0) AS derived_total,
           COUNT(e.id) AS pod_count,
           SUM(CASE WHEN COALESCE(e.is_exception, 0) = 1 THEN 1 ELSE 0 END) AS exception_count,
-          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 AND e.order_amount IS NULL THEN 1 ELSE 0 END) AS missing_amount_count
+          SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(e.is_exception, 0) = 0 AND e.order_amount IS NULL THEN 1 ELSE 0 END) AS missing_amount_count
         FROM bat_reconciliations r
         LEFT JOIN bat_invoice_extractions e ON e.reconciliation_id = r.id
         GROUP BY r.id
