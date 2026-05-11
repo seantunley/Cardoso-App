@@ -8,6 +8,15 @@ const dbDir = path.dirname(dbPath);
 if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
 const db = new Database(dbPath);
 
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function errorMessage(value) {
+  if (value && typeof value === 'object' && 'message' in value) return String(value.message);
+  return String(value);
+}
+
 // ── Performance pragmas ───────────────────────────────────────────────────
 // Applied before any other query so every subsequent statement runs against
 // the tuned engine. Each pragma is wrapped individually so a single
@@ -37,7 +46,7 @@ const db = new Database(dbPath);
 // busy_timeout = 5000
 //   When a writer is mid-checkpoint, readers can momentarily collide.
 //   Wait up to 5s instead of immediately throwing SQLITE_BUSY.
-const mmapBytes = parseInt(process.env.SQLITE_MMAP_BYTES, 10);
+const mmapBytes = parseInt(process.env.SQLITE_MMAP_BYTES ?? '', 10);
 const PRAGMAS = [
   ['journal_mode', 'WAL'],
   ['synchronous', 'NORMAL'],
@@ -50,7 +59,7 @@ for (const [key, val] of PRAGMAS) {
     const result = db.pragma(`${key} = ${val}`, { simple: true });
     console.log(`[db] PRAGMA ${key}=${val} → ${result}`);
   } catch (err) {
-    console.error(`[db] PRAGMA ${key}=${val} failed (continuing): ${err.message}`);
+    console.error(`[db] PRAGMA ${key}=${val} failed (continuing): ${errorMessage(err)}`);
   }
 }
 
