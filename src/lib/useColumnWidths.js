@@ -31,18 +31,31 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 
 const MIN_COL = 40;
 
+/** @typedef {Record<string, number>} ColumnWidths */
+/** @typedef {(id: string) => (event: import("react").MouseEvent) => void} StartResize */
+/** @typedef {{ widths: ColumnWidths, setWidths: import("react").Dispatch<import("react").SetStateAction<ColumnWidths>>, startResize: StartResize, resetColumn: (id: string) => void, resetAll: () => void }} UseColumnWidthsResult */
+
+/**
+ * @param {ColumnWidths} defaults
+ * @param {string} storageKey
+ * @param {import("react").RefObject<HTMLElement | null>} containerRef
+ * @returns {UseColumnWidthsResult}
+ */
 export function useColumnWidths(defaults, storageKey, containerRef) {
-  const [widths, setWidths] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '{}');
-      // Merge defaults under saved so a NEW column added in code shows up
-      // with its default width even when the user has cached widths from
-      // an older version of the table.
-      return { ...defaults, ...saved };
-    } catch {
-      return { ...defaults };
+  const [widths, setWidths] = useState(
+    /** @returns {ColumnWidths} */
+    () => {
+      try {
+        const saved = /** @type {Partial<ColumnWidths>} */ (JSON.parse(localStorage.getItem(storageKey) || '{}'));
+        // Merge defaults under saved so a NEW column added in code shows up
+        // with its default width even when the user has cached widths from
+        // an older version of the table.
+        return /** @type {ColumnWidths} */ ({ ...defaults, ...saved });
+      } catch {
+        return { ...defaults };
+      }
     }
-  });
+  );
 
   // useRef so resize handlers always read the current widths without
   // reattaching listeners every render.
@@ -52,6 +65,7 @@ export function useColumnWidths(defaults, storageKey, containerRef) {
     try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
   }, [widths, storageKey]);
 
+  /** @type {StartResize} */
   const startResize = useCallback((id) => (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -62,6 +76,7 @@ export function useColumnWidths(defaults, storageKey, containerRef) {
       .filter(([k]) => k !== id)
       .reduce((s, [, v]) => s + v, 0);
 
+    /** @param {MouseEvent} ev */
     const onMove = (ev) => {
       // Hard cap so the table never exceeds the container's inner width
       // (1px hairline reserved for the right border).
@@ -83,6 +98,7 @@ export function useColumnWidths(defaults, storageKey, containerRef) {
     window.addEventListener('mouseup', onUp);
   }, [containerRef, defaults]);
 
+  /** @type {(id: string) => void} */
   const resetColumn = useCallback((id) => {
     setWidths((w) => ({ ...w, [id]: defaults[id] ?? 100 }));
   }, [defaults]);

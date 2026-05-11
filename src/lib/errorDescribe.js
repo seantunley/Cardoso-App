@@ -11,12 +11,21 @@
 // readable English while preserving the raw text for the System Log
 // context payload.
 
+/** @typedef {{ code?: string, message?: string }} ErrorCauseLike */
+/** @typedef {{ code?: string, message?: string, cause?: ErrorCauseLike, originalError?: ErrorCauseLike }} ErrorLike */
+/** @typedef {{ host?: string, database?: string, op?: string }} SqlErrorContext */
+
 // ── Fetch ────────────────────────────────────────────────────────────────────
 
 // Format an undici / Node fetch failure into a string that says what went
 // wrong AND where we were trying to reach. The real cause lives on
 // error.cause for any network-level failure (TLS, DNS, ECONNREFUSED,
 // ECONNRESET, etc.); error.message itself is just "fetch failed".
+/**
+ * @param {ErrorLike | null | undefined} error
+ * @param {string | URL | null | undefined} [url]
+ * @returns {string}
+ */
 export function describeFetchError(error, url) {
   const parts = [];
   if (error?.message) parts.push(error.message);
@@ -42,6 +51,7 @@ export function describeFetchError(error, url) {
 //   https://github.com/tediousjs/tedious/blob/master/src/errors.ts
 // and the mssql README. Anything not in the map falls through to the raw
 // message.
+/** @type {Record<string, string>} */
 const MSSQL_CODE_MESSAGES = {
   ELOGIN:       "Login failed (wrong username or password)",
   ESOCKET:      "Network error reaching the SQL Server (socket dropped)",
@@ -59,6 +69,11 @@ const MSSQL_CODE_MESSAGES = {
   EINSTLOOKUP:  "Could not look up the SQL Server instance via SQL Browser",
 };
 
+/**
+ * @param {ErrorLike | null | undefined} error
+ * @param {SqlErrorContext} [context]
+ * @returns {string}
+ */
 export function describeSqlError(error, { host, database, op } = {}) {
   if (!error) return "Unknown SQL error";
   const code = error.code || error.originalError?.code;
@@ -82,6 +97,7 @@ export function describeSqlError(error, { host, database, op } = {}) {
 
 // Translate the most common SQLite codes. better-sqlite3 raises
 // `SqliteError` with a `code` like `SQLITE_CONSTRAINT_FOREIGNKEY`.
+/** @type {Record<string, string>} */
 const SQLITE_CODE_MESSAGES = {
   SQLITE_CONSTRAINT_PRIMARYKEY: "Database constraint violation: primary key conflict",
   SQLITE_CONSTRAINT_UNIQUE:     "Database constraint violation: unique value already exists",
@@ -98,6 +114,10 @@ const SQLITE_CODE_MESSAGES = {
   SQLITE_IOERR:                 "Disk I/O error reading or writing the database",
 };
 
+/**
+ * @param {ErrorLike | null | undefined} error
+ * @returns {string}
+ */
 export function describeSqliteError(error) {
   if (!error) return "Unknown database error";
   const code = error.code;

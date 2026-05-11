@@ -69,12 +69,14 @@ The checked surface (grows with each ratchet PR):
 - `src/lib/creditLogic.js`
 - `src/lib/dates.js`
 - `src/lib/evalFlagRules.js`
+- `src/lib/errorDescribe.js`
 - `src/lib/humanizeApiError.js`
 - `src/lib/isoWeek.js`
 - `src/lib/manualFlagMessages.js`
 - `src/lib/permissions.js`
 - `src/lib/query-client.js`
 - `src/lib/useColorScheme.js`
+- `src/lib/useColumnWidths.js`
 - `src/lib/utils.js`
 - `src/utils/index.ts`
 
@@ -83,10 +85,6 @@ Cleanup path:
 2. When a source file is cleaned, add it to `tsconfig.typecheck.json`.
 3. Periodically run `npm run typecheck:legacy -- --pretty false` to choose
    the next highest-value bucket.
-
-Next-bucket candidates (cheap, ~3-9 errors each):
-- `src/lib/errorDescribe.js` (9, mostly TS7006 implicit-any)
-- `src/lib/useColumnWidths.js` (9, TS7006)
 
 Pricier but still bounded:
 - `src/lib/errorLog.js` (43)
