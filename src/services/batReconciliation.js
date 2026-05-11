@@ -1,4 +1,4 @@
-import sql from 'mssql';
+﻿import sql from 'mssql';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
@@ -10,6 +10,15 @@ import { decryptPassword } from './encryption.js';
 import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
+import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/matching.js';
+
+// Back-compat shim — see src/services/bat/matching.js. Existing callers
+// pass a positional reconId; the new module takes `{ db, reconId }` so
+// it can be unit-tested with an in-memory DB. New code should import
+// directly from `./bat/matching.js` and pass `db` explicitly.
+export function matchCardosoToSupplier(reconId = null) {
+  return matchCardosoToSupplierService({ db, reconId });
+}
 
 // Status emitter for the SSE-based extraction-status stream. Worker emits
 // 'update:<reconId>' after every invoice processed; subscribers (route
@@ -4194,7 +4203,7 @@ export async function generateCardosoInvoicesFromSage({ fromDate, toDate, mode =
   const storeResult = storeCardosoInvoices(null, storeShape, sourceLabel, mode);
   // Auto-rerun the supplier match so the dashboard reflects the new invoices
   let matching = null;
-  try { matching = matchCardosoToSupplier(null); } catch {}
+  try { matching = matchCardosoToSupplierService({ db, reconId: null }); } catch {}
 
   _activeGenerate = null;
   return {
@@ -4375,144 +4384,3 @@ export function getCardosoInvoices(reconId) {
   return db.prepare('SELECT * FROM bat_cardoso_invoices ORDER BY id').all();
 }
 
-export function matchCardosoToSupplier(reconId) {
-  // If reconId is null, match across ALL reconciliations
-  const extractions = reconId
-    ? db.prepare('SELECT e.id, e.extracted_invoice, e.order_amount, e.supplier_discount, e.supplier_del_fee, e.supplier_pricing, e.delivery_date, e.is_exception, e.manual_override, e.reconciliation_id, r.week_number, r.year FROM bat_invoice_extractions e LEFT JOIN bat_reconciliations r ON r.id = e.reconciliation_id WHERE e.reconciliation_id = ? AND e.extracted_invoice IS NOT NULL').all(reconId)
-    : db.prepare('SELECT e.id, e.extracted_invoice, e.order_amount, e.supplier_discount, e.supplier_del_fee, e.supplier_pricing, e.delivery_date, e.is_exception, e.manual_override, e.reconciliation_id, r.week_number, r.year FROM bat_invoice_extractions e LEFT JOIN bat_reconciliations r ON r.id = e.reconciliation_id WHERE e.extracted_invoice IS NOT NULL').all();
-  const cardosoInvoices = reconId
-    ? db.prepare('SELECT id, invoice_number, amount, price_diff, discount, del_fee FROM bat_cardoso_invoices WHERE reconciliation_id = ?').all(reconId)
-    : db.prepare('SELECT id, invoice_number, amount, price_diff, discount, del_fee FROM bat_cardoso_invoices').all();
-
-  // Build lookup: normalized invoice number → cardoso row
-  const cardosoMap = new Map();
-  for (const ci of cardosoInvoices) {
-    const key = ci.invoice_number.replace(/\s/g, '').toUpperCase();
-    cardosoMap.set(key, ci);
-  }
-
-  // Fuzzy match helper: find Cardoso invoice within 1 digit difference
-  function fuzzyFind(ocrInvoice) {
-    const ocrKey = ocrInvoice.replace(/\s/g, '').toUpperCase();
-    if (ocrKey.length < 4) return null;
-    for (const [cardosoKey, ci] of cardosoMap) {
-      if (cardosoKey.length !== ocrKey.length) continue;
-      let diffs = 0;
-      for (let i = 0; i < ocrKey.length; i++) {
-        if (ocrKey[i] !== cardosoKey[i]) diffs++;
-        if (diffs > 1) break;
-      }
-      if (diffs === 1) return { ci, correctedInvoice: ci.invoice_number };
-    }
-    return null;
-  }
-
-  const results = [];
-  const matchedCardosoIds = new Set();
-  let autoCorrections = 0;
-
-  // Auto-correct update statement
-  const correctInvoice = db.prepare('UPDATE bat_invoice_extractions SET extracted_invoice = ? WHERE id = ?');
-
-  for (const ext of extractions) {
-    const key = (ext.extracted_invoice || '').replace(/\s/g, '').toUpperCase();
-    let cardoso = cardosoMap.get(key);
-
-    // Fuzzy match: if exact match fails, try 1-digit-off — but ONLY for rows
-    // the user hasn't manually corrected. Manual edits are sacred.
-    let wasCorrected = false;
-    if (!cardoso && !ext.manual_override) {
-      const fuzzy = fuzzyFind(ext.extracted_invoice);
-      if (fuzzy) {
-        cardoso = fuzzy.ci;
-        console.log(`[bat-match] Auto-corrected ${ext.extracted_invoice} → ${fuzzy.correctedInvoice} (1-digit OCR fix)`);
-        correctInvoice.run(fuzzy.correctedInvoice, ext.id);
-        ext.extracted_invoice = fuzzy.correctedInvoice;
-        wasCorrected = true;
-        autoCorrections++;
-      }
-    }
-
-    if (cardoso) {
-      matchedCardosoIds.add(cardoso.id);
-      const diff = (ext.order_amount || 0) - (cardoso.amount || 0);
-      results.push({
-        extraction_id: ext.id,
-        cardoso_id: cardoso.id,
-        invoice_number: ext.extracted_invoice,
-        supplier_amount: ext.order_amount,
-        cardoso_amount: cardoso.amount,
-        supplier_discount: ext.supplier_discount,
-        supplier_del_fee: ext.supplier_del_fee,
-        supplier_pricing: ext.supplier_pricing,
-        cardoso_price_diff: cardoso.price_diff,
-        cardoso_discount: cardoso.discount,
-        cardoso_del_fee: cardoso.del_fee,
-        difference: diff,
-        matched: true,
-        amount_mismatch: Math.abs(diff) > 0.01,
-        auto_corrected: wasCorrected,
-        is_exception: ext.is_exception,
-        week_number: ext.week_number,
-        year: ext.year,
-        delivery_date: ext.delivery_date,
-      });
-    } else {
-      results.push({
-        extraction_id: ext.id,
-        cardoso_id: null,
-        invoice_number: ext.extracted_invoice,
-        supplier_amount: ext.order_amount,
-        supplier_discount: ext.supplier_discount,
-        supplier_del_fee: ext.supplier_del_fee,
-        supplier_pricing: ext.supplier_pricing,
-        cardoso_amount: null,
-        cardoso_price_diff: null,
-        cardoso_discount: null,
-        cardoso_del_fee: null,
-        difference: null,
-        matched: false,
-        amount_mismatch: false,
-        is_exception: ext.is_exception,
-        week_number: ext.week_number,
-        year: ext.year,
-        delivery_date: ext.delivery_date,
-      });
-    }
-  }
-
-  // Unmatched Cardoso invoices (not found in supplier)
-  for (const ci of cardosoInvoices) {
-    if (!matchedCardosoIds.has(ci.id)) {
-      results.push({
-        extraction_id: null,
-        cardoso_id: ci.id,
-        invoice_number: ci.invoice_number,
-        supplier_amount: null,
-        cardoso_amount: ci.amount,
-        cardoso_price_diff: ci.price_diff,
-        cardoso_discount: ci.discount,
-        cardoso_del_fee: ci.del_fee,
-        difference: null,
-        matched: false,
-        amount_mismatch: false,
-      });
-    }
-  }
-
-  const matched = results.filter(r => r.matched).length;
-  const mismatches = results.filter(r => r.amount_mismatch).length;
-  console.log(`[bat] Matching: ${matched} matched (${autoCorrections} auto-corrected), ${mismatches} amount mismatches, ${results.length - matched} unmatched`);
-
-  return {
-    results,
-    stats: {
-      total: results.length,
-      matched,
-      mismatches,
-      autoCorrections,
-      unmatchedSupplier: results.filter(r => !r.matched && r.extraction_id).length,
-      unmatchedCardoso: results.filter(r => !r.matched && r.cardoso_id).length,
-    },
-  };
-}
