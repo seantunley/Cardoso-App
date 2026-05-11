@@ -531,9 +531,17 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let allSites = [];
     // Narrow column list — KPI aggregator only needs these fields,
-    // plus the orphan flags so the dashboard tile can render the pill.
+    // plus the orphan flags so the dashboard tile can render the pill,
+    // plus the three last_accpac_* columns so the tile's footer line
+    // ("Accpac sync: <timestamp>") and error pill can render. Without
+    // these the syncSite UPDATE in hubEtl.js stamps them in the DB
+    // every cycle, but the kpis response strips them and the tile
+    // shows "(not yet reported)" forever — see the "no silent
+    // failures" memory rule for why this kind of plumbing miss is
+    // load-bearing.
     try { allSites = db.prepare(`
-      SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at
+      SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at,
+             last_accpac_synced_at, last_accpac_status, last_accpac_error
       FROM hub_sites
     `).all(); } catch {}
     const sites = allowedSlugs === null
@@ -579,6 +587,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         // refuse on it. Operator forgets via the admin section.
         is_orphan: s.in_env === 0,
         removed_from_env_at: s.removed_from_env_at || null,
+        // Accpac freshness shown in the tile footer. The DB has the
+        // values (syncSite stamps them on every kpis tick); we just
+        // need to surface them so the frontend's
+        // `site.last_accpac_synced_at` lookup is no longer undefined.
+        last_accpac_synced_at: s.last_accpac_synced_at || null,
+        last_accpac_status:    s.last_accpac_status    || null,
+        last_accpac_error:     s.last_accpac_error     || null,
         kpis: {
           total_records: agg?.total || 0,
           records_by_flag: agg?.flags || { none: 0, red: 0, orange: 0, green: 0 },
