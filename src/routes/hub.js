@@ -394,8 +394,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // GET /api/hub/records
   router.get('/api/hub/records', requireAuth, (req, res) => {
     const { site_id, flag_color, search } = req.query;
-    const limit = Math.min(parseInt(req.query.limit, 10) || 100, 500);
-    const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+    const { limit, offset } = pagination(req, { defaultLimit: 100, maxLimit: 500 });
     let whereClause = 'WHERE 1=1';
     const params = [];
     if (site_id) { whereClause += ' AND site_id=?'; params.push(site_id); }
@@ -774,7 +773,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // were captured in DB but invisible to the operator, which is exactly
   // why "the hub isn't syncing" went undiagnosed.
   router.get('/api/hub/sync-log', requireAuth, (req, res) => {
-    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const limit = clampInt(req.query.limit, { default: 50, min: 1, max: 200 });
     const rows = db.prepare(`
       SELECT
         l.id,

@@ -12,6 +12,7 @@ import { getVersionStatus } from '../services/versionCheck.js';
 import { logError } from '../lib/errorLog.js';
 import { logAudit } from '../lib/audit.js';
 import { getSecuritySignals } from '../lib/securitySignals.js';
+import { recomputeReconTotals } from '../services/bat/reconTotals.js';
 
 const require = createRequire(import.meta.url);
 
@@ -1162,137 +1163,22 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   // POST /api/maintenance/recompute-recon-totals
   // Body: { dryRun: boolean }  — defaults to true.
   //
-  // For every BAT reconciliation, derive supplier_total from the sum of
-  // non-exception POD order_amounts and compare against the stored
-  // value. Returns the list of mismatches; on dryRun=false also UPDATEs
-  // each one in a single transaction.
-  //
-  // Why this exists: the upload upsert overwrites supplier_total with
-  // each new spreadsheet's fees section. When two branch spreadsheets
-  // (Welkom + JHB, etc.) get uploaded to the same week, the SECOND
-  // upload's smaller fees blow away the first's, and the recon's
-  // BAT TOTAL becomes wrong with no operator-visible signal until they
-  // open the recon page. Manual SQL ran at the console fixes one recon
-  // at a time; this gives operators a Maintenance-tab button to check
-  // and heal every recon at once. Mirrors the dedupe-customers
-  // dry-run/apply UX.
+  // Thin route layer over services/bat/reconTotals.js — that module
+  // owns the SQL, bucketing rules, and txn semantics. Why the heavy
+  // background lives there now: this is real business logic (drift
+  // detection, null-aware skip rules, BEGIN-IMMEDIATE write-locking)
+  // and it's already accumulating layers from PRs #275, #277, plus
+  // the supplier_total foot-gun chain we worked through during the
+  // W11 incident. Keeping the route slim makes it testable in
+  // isolation and lets future callers (auto-heal cron, programmatic
+  // fix-one-recon endpoint) reuse the same primitives.
   router.post('/api/maintenance/recompute-recon-totals', requireAuth, requireAdmin, (req, res) => {
     try {
       if (process.env.HUB_MODE === 'true') {
         return res.status(400).json({ error: 'BAT recon-total recompute is site-only.' });
       }
       const dryRun = req.body?.dryRun !== false;
-
-      // Per-recon aggregates. We track a missing_amount_count column so
-      // we can REFUSE to recompute any recon that has non-exception POD
-      // rows with NULL order_amount — Codex review catch on PR #275.
-      // Without that guard the SUM treats nulls as zero (via COALESCE)
-      // and the derived total is artificially low, which would
-      // OVERWRITE a possibly-correct supplier_total with a corrupt
-      // value. The current ingest path leaves order_amount nullable
-      // (it's filled in by the spreadsheet upload AND/OR by a separate
-      // backfillOrderAmounts pass that runs on a later week's upload),
-      // so a recon with partial-amount data is a real ongoing state,
-      // not a defect to fix here.
-      // The `AND e.id IS NOT NULL` guard on missing_amount_count is
-      // load-bearing — without it, the LEFT JOIN's synthetic NULL row
-      // for any recon with ZERO PODs (e.id NULL, is_exception NULL →
-      // COALESCE=0, order_amount NULL) would match the predicate and
-      // return missing_amount_count = 1. That recon would then be
-      // classified as skippedIncomplete and could never be recomputed,
-      // even when its stored supplier_total should be corrected to 0.
-      // Codex review catch on PR #275. The other CASE expressions
-      // (derived_total, exception_count) already return 0 for the
-      // synthetic row via their respective predicates, so only this
-      // one needed the guard.
-      // Single SELECT-then-UPDATE inside one transaction. For non-
-      // dryRun runs we use BEGIN IMMEDIATE (.immediate() variant) so
-      // the write lock is taken at the start of the body, which means
-      // no other writer can interleave between the SELECT (which
-      // computes derived_total + missing_amount_count) and the
-      // per-recon UPDATE that writes them. Without this, a concurrent
-      // bat_upload or backfillOrderAmounts call could change
-      // bat_invoice_extractions in the gap and we'd write a stale
-      // derived value over fresh row data — silent corruption while
-      // still returning {ok: true}. Codex review catch on PR #275.
-      //
-      // Dry-run uses a deferred (read-only) transaction since it
-      // doesn't write — no need to block other writers.
-      const aggregateSql = `
-        SELECT
-          r.id, r.year, r.week_number,
-          COALESCE(r.supplier_total, 0) AS current_total,
-          COALESCE(SUM(CASE WHEN COALESCE(e.is_exception, 0) = 0 THEN COALESCE(e.order_amount, 0) ELSE 0 END), 0) AS derived_total,
-          COUNT(e.id) AS pod_count,
-          SUM(CASE WHEN COALESCE(e.is_exception, 0) = 1 THEN 1 ELSE 0 END) AS exception_count,
-          SUM(CASE WHEN e.id IS NOT NULL AND COALESCE(e.is_exception, 0) = 0 AND e.order_amount IS NULL THEN 1 ELSE 0 END) AS missing_amount_count
-        FROM bat_reconciliations r
-        LEFT JOIN bat_invoice_extractions e ON e.reconciliation_id = r.id
-        GROUP BY r.id
-        ORDER BY r.year DESC, r.week_number DESC
-      `;
-      const updStmt = db.prepare(`UPDATE bat_reconciliations SET supplier_total = ? WHERE id = ?`);
-
-      // Body is the same for dry-run vs apply; the only difference is
-      // whether we run the UPDATE at the end. Returning the bucketed
-      // arrays out of the txn keeps the response shape clean.
-      const recompute = db.transaction(() => {
-        const rows = db.prepare(aggregateSql).all();
-
-        // Bucket each recon:
-        //   ok                  - totals already agree, no work needed
-        //   mismatch            - drift AND full amount coverage; safe
-        //                         to recompute
-        //   skippedIncomplete   - has at least one non-exception row
-        //                         with NULL order_amount; we DO NOT
-        //                         touch it because the derived value
-        //                         would be artificially low (treats
-        //                         nulls as zero) and overwriting could
-        //                         corrupt a possibly-correct value
-        const mismatches = [];
-        const skippedIncomplete = [];
-        for (const r of rows) {
-          const drift = Math.abs(r.derived_total - r.current_total) >= 0.01;
-          if (r.missing_amount_count > 0) {
-            skippedIncomplete.push({
-              id: r.id,
-              year: r.year,
-              week_number: r.week_number,
-              current_total: r.current_total,
-              pod_count: r.pod_count,
-              exception_count: r.exception_count,
-              missing_amount_count: r.missing_amount_count,
-              reason: `${r.missing_amount_count} non-exception row(s) have no order_amount yet — backfill from a later upload would change the derived total. Refusing to recompute.`,
-            });
-            continue;
-          }
-          if (drift) {
-            mismatches.push({
-              id: r.id,
-              year: r.year,
-              week_number: r.week_number,
-              current_total: r.current_total,
-              derived_total: r.derived_total,
-              diff: r.derived_total - r.current_total,
-              pod_count: r.pod_count,
-              exception_count: r.exception_count,
-            });
-          }
-        }
-
-        let updated = 0;
-        if (!dryRun) {
-          for (const m of mismatches) {
-            updStmt.run(m.derived_total, m.id);
-            updated++;
-          }
-        }
-        return { scanned: rows.length, mismatches, skippedIncomplete, updated };
-      });
-      // .immediate() on apply takes a write lock at BEGIN, so no other
-      // writer can interleave between the SELECT and the UPDATEs.
-      // Dry-run path uses the default deferred mode (read-only).
-      const { scanned, mismatches, skippedIncomplete, updated } = dryRun ? recompute() : recompute.immediate();
+      const result = recomputeReconTotals({ db, dryRun });
 
       logAudit({
         req,
@@ -1300,21 +1186,15 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         resourceType: 'system',
         resourceName: 'BAT recon supplier_total recompute',
         details: dryRun
-          ? `Dry-run: ${mismatches.length} recon(s) need recompute, ${skippedIncomplete.length} skipped (incomplete order_amount)`
-          : `Updated ${updated} recon(s); skipped ${skippedIncomplete.length} (incomplete order_amount); derived from non-exception order_amount sums`,
+          ? `Dry-run: ${result.mismatches.length} recon(s) need recompute, ${result.skippedIncomplete.length} skipped (incomplete order_amount)`
+          : `Updated ${result.updated} recon(s); skipped ${result.skippedIncomplete.length} (incomplete order_amount); derived from non-exception order_amount sums`,
         changes: {
-          mismatches: mismatches.map((m) => ({ id: m.id, week: m.week_number, year: m.year, before: m.current_total, after: m.derived_total })),
-          skipped: skippedIncomplete.map((s) => ({ id: s.id, week: s.week_number, year: s.year, missing_amount_count: s.missing_amount_count })),
+          mismatches: result.mismatches.map((m) => ({ id: m.id, week: m.week_number, year: m.year, before: m.current_total, after: m.derived_total })),
+          skipped: result.skippedIncomplete.map((s) => ({ id: s.id, week: s.week_number, year: s.year, missing_amount_count: s.missing_amount_count })),
         },
       });
 
-      res.json({
-        dryRun,
-        scanned,
-        mismatches,
-        skippedIncomplete,
-        updated,
-      });
+      res.json(result);
     } catch (error) {
       console.error('[maintenance] recompute-recon-totals failed:', error.message);
       res.status(500).json({ error: error.message || 'Failed to recompute recon totals' });

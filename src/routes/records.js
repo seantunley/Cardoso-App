@@ -6,6 +6,7 @@ import { runCustomerSqlQuery } from '../services/customerSqlPool.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 import { describeSqlError } from '../lib/errorDescribe.js';
+import { pagination } from '../lib/httpParams.js';
 
 // Tables whose CRUD via the generic /api/:table routes deserves an audit row.
 // datarecord is excluded — it has its own per-flag audit further down.
@@ -1025,8 +1026,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       try {
         const rawSearch = typeof req.query.search === 'string' ? req.query.search.trim() : '';
         const flagColor = typeof req.query.flag_color === 'string' ? req.query.flag_color.trim() : '';
-        const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 250);
-        const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
+        const { limit, offset } = pagination(req, { defaultLimit: 50, maxLimit: 250 });
 
         const whereParts = [];
         const params = [];
