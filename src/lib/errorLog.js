@@ -8,6 +8,26 @@ const MAX_BYTES = 10 * 1024 * 1024; // 10MB before rotation
 
 try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
 
+/** @typedef {Record<string, unknown>} LogMeta */
+
+/**
+ * @param {unknown} value
+ * @returns {string}
+ */
+function errorMessage(value) {
+  if (value && typeof value === 'object' && 'message' in value) return String(value.message);
+  return String(value || 'unknown event');
+}
+
+/**
+ * @param {unknown} value
+ * @returns {string | undefined}
+ */
+function errorStack(value) {
+  if (value && typeof value === 'object' && 'stack' in value && value.stack) return String(value.stack);
+  return undefined;
+}
+
 function rotateIfNeeded() {
   try {
     const stat = fs.statSync(LOG_FILE);
@@ -25,8 +45,14 @@ function rotateIfNeeded() {
 // guarantee the row is on disk before we return, so the post-mortem stack
 // always survives. logError is infrequent enough that sync-write overhead
 // is irrelevant.
+/** @typedef {{ run: (...params: unknown[]) => unknown }} InsertStatement */
+
+/** @type {InsertStatement | null} */
 let insertStmt = null;
 
+/**
+ * @returns {InsertStatement | null}
+ */
 function getInsertStmt() {
   // Lazy-prepare so a logError() call before migrations have finished
   // doesn't crash — first writes are dropped silently, file log still fires.
@@ -40,10 +66,17 @@ function getInsertStmt() {
   return insertStmt;
 }
 
+/**
+ * @param {string} scope
+ * @param {unknown} err
+ * @param {LogMeta} [meta]
+ * @param {string} [level]
+ * @returns {void}
+ */
 export function logError(scope, err, meta = {}, level = 'error') {
   const ts = new Date().toISOString();
-  const message = err?.message || String(err || 'unknown event');
-  const stack = err?.stack ? String(err.stack).split('\n').slice(0, 6).join('\n') : undefined;
+  const message = errorMessage(err);
+  const stack = errorStack(err)?.split('\n').slice(0, 6).join('\n');
   const entry = { ts, scope: scope || 'unknown', level, message, stack, ...meta };
 
   // 1) File log (existing — preserved so log-file tooling keeps working)
@@ -51,7 +84,7 @@ export function logError(scope, err, meta = {}, level = 'error') {
   try {
     fs.appendFileSync(LOG_FILE, JSON.stringify(entry) + '\n');
   } catch (e) {
-    process.stderr.write(`[errorLog] failed to write file: ${e.message}\n`);
+    process.stderr.write(`[errorLog] failed to write file: ${errorMessage(e)}\n`);
   }
 
   // 2) SQLite mirror — synchronous so it survives a process crash
@@ -74,7 +107,7 @@ export function logError(scope, err, meta = {}, level = 'error') {
   } catch (e) {
     // Last-resort stderr — don't recurse into logError or we could loop on
     // a persistently failing DB.
-    process.stderr.write(`[errorLog] sqlite insert failed: ${e.message}\n`);
+    process.stderr.write(`[errorLog] sqlite insert failed: ${errorMessage(e)}\n`);
   }
 
   // 3) Mirror to stderr so devs see it in the terminal too

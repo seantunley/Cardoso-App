@@ -18,6 +18,15 @@
 import db from './../db/index.js';
 import { logError } from './errorLog.js';
 
+/**
+ * @typedef {object} RetentionTable
+ * @property {string} table
+ * @property {string} date_col
+ * @property {number} default_days
+ * @property {string} env
+ */
+/** @typedef {{ table: string, deleted: number, kept_days: number } | { table: string, error: string, kept_days: number }} PruneSummary */
+
 // Tables to prune on the daily tick. Each entry names the SQLite column
 // that holds the row's wall-clock timestamp (ISO 8601 string compared
 // lexicographically — works because ISO 8601 is sort-friendly).
@@ -25,6 +34,7 @@ import { logError } from './errorLog.js';
 // `job_runs` is intentionally NOT here — it has its own dedicated prune
 // in lib/jobRunner.js with a different keep-days default (30) that the
 // scheduler already wires up. Adding it here would double-prune.
+/** @type {RetentionTable[]} */
 const RETENTION_TABLES = [
   {
     table: 'error_log',
@@ -65,8 +75,13 @@ const RETENTION_TABLES = [
 // NaN, and Math.max(1, NaN) is NaN — every `>= NaN` comparison
 // downstream is false, which would silently disable the prune if a
 // typo landed in the env. Validate before using.
+/**
+ * @param {string | undefined} envVal
+ * @param {number} defaultVal
+ * @returns {number}
+ */
 function parseDays(envVal, defaultVal) {
-  const n = parseInt(envVal, 10);
+  const n = parseInt(envVal ?? '', 10);
   if (!Number.isFinite(n) || n < 1) return defaultVal;
   return n;
 }
@@ -94,7 +109,11 @@ function parseDays(envVal, defaultVal) {
 // boundary works as intended.
 //
 // Codex catch on PR #245.
+/**
+ * @returns {PruneSummary[]}
+ */
 export function pruneOldRows() {
+  /** @type {PruneSummary[]} */
   const summary = [];
   for (const { table, date_col, default_days, env } of RETENTION_TABLES) {
     const keepDays = parseDays(process.env[env], default_days);
@@ -106,7 +125,7 @@ export function pruneOldRows() {
       summary.push({ table, deleted: result.changes, kept_days: keepDays });
     } catch (err) {
       try { logError(`retention.${table}`, err, { table, kept_days: keepDays }); } catch {}
-      summary.push({ table, error: err.message, kept_days: keepDays });
+      summary.push({ table, error: err instanceof Error ? err.message : String(err), kept_days: keepDays });
     }
   }
   return summary;
@@ -126,6 +145,9 @@ export function pruneOldRows() {
 // Returns the elapsed time so a slow VACUUM (suggesting filesystem
 // fragmentation or unusually heavy DELETE-and-grow churn) is visible
 // in job_runs.context.
+/**
+ * @returns {{ elapsed_ms: number }}
+ */
 export function vacuumDb() {
   const t0 = Date.now();
   db.exec('VACUUM');

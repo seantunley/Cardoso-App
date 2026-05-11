@@ -1,20 +1,26 @@
 {
   "extends": "./jsconfig.json",
   "compilerOptions": {
-    "noEmit": true
+    "noEmit": true,
+    "types": ["node"],
+    "maxNodeModuleJsDepth": 0
   },
   "include": [
+    "src/types/**/*.d.ts",
+    "src/db/index.js",
     "src/lib/app-params.js",
     "src/lib/clientLog.js",
     "src/lib/creditLogic.js",
     "src/lib/dates.js",
     "src/lib/evalFlagRules.js",
     "src/lib/errorDescribe.js",
+    "src/lib/errorLog.js",
     "src/lib/humanizeApiError.js",
     "src/lib/isoWeek.js",
     "src/lib/manualFlagMessages.js",
     "src/lib/permissions.js",
     "src/lib/query-client.js",
+    "src/lib/retention.js",
     "src/lib/useColorScheme.js",
     "src/lib/useColumnWidths.js",
     "src/lib/utils.js",
