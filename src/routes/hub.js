@@ -539,11 +539,30 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     // shows "(not yet reported)" forever — see the "no silent
     // failures" memory rule for why this kind of plumbing miss is
     // load-bearing.
-    try { allSites = db.prepare(`
-      SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at,
-             last_accpac_synced_at, last_accpac_status, last_accpac_error
-      FROM hub_sites
-    `).all(); } catch {}
+    //
+    // Two-step SELECT to handle the v62 migration-gap window: if the
+    // hub was bootstrapped between PR #198 (added the column refs in
+    // code) and PR #228 (restored the migration), the DB has hub_sites
+    // but is missing the three last_accpac_* columns. A single wide
+    // SELECT throws SqliteError("no such column"), the existing bare
+    // catch swallows it, and the kpis handler returns an EMPTY sites
+    // list — operator sees no tiles at all instead of tiles missing
+    // one footer line. v62's comment block (migrations.js:1817-1822)
+    // documents the exact gate that produces this state. Detect the
+    // schema first via pragma_table_info, then build the SELECT we
+    // can actually execute. The accpac fields default to null in
+    // the per-site object below when absent from the row.
+    try {
+      const cols = new Set(
+        db.prepare(`SELECT name FROM pragma_table_info('hub_sites')`).all().map(r => r.name)
+      );
+      const hasAccpac = cols.has('last_accpac_synced_at') && cols.has('last_accpac_status') && cols.has('last_accpac_error');
+      const accpacSelect = hasAccpac ? ', last_accpac_synced_at, last_accpac_status, last_accpac_error' : '';
+      allSites = db.prepare(`
+        SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at${accpacSelect}
+        FROM hub_sites
+      `).all();
+    } catch {}
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
