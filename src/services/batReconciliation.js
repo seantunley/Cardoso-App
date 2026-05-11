@@ -10,6 +10,12 @@ import { decryptPassword } from './encryption.js';
 import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
+import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
+
+// Back-compat re-export — see src/services/bat/duplicates.js. Existing
+// callers import from this module; new code should import directly
+// from `./bat/duplicates.js`.
+export { buildGlobalDuplicateIndex } from './bat/duplicates.js';
 
 // Status emitter for the SSE-based extraction-status stream. Worker emits
 // 'update:<reconId>' after every invoice processed; subscribers (route
@@ -1678,54 +1684,9 @@ export function getReconciliation(id) {
   // invoice 1234). The previous within-recon duplicate check missed
   // every cross-week dupe — operator only noticed when Sage reconciled
   // and one of the two rows came back unmatched.
-  recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndex());
+  recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndexService({ db }));
 
   return recon;
-}
-
-// Single-query global duplicate index keyed by upper-cased trimmed
-// invoice number. Only includes numbers that actually have >1
-// occurrence anywhere — every other invoice is omitted to keep the
-// in-memory map small. Each entry carries the total count plus the
-// list of (extraction_id, reconciliation_id, week, year) tuples so
-// the UI can show the operator EXACTLY which other recons hold the
-// duplicates.
-//
-// Performance: idx_bat_extractions_invoice covers the GROUP BY; on a
-// hub with ~50k extractions this query is ~5ms.
-function buildGlobalDuplicateIndex() {
-  const rows = db.prepare(`
-    SELECT UPPER(TRIM(e.extracted_invoice)) AS k,
-           e.id  AS extraction_id,
-           e.reconciliation_id,
-           r.week_number,
-           r.year
-    FROM bat_invoice_extractions e
-    JOIN bat_reconciliations r ON r.id = e.reconciliation_id
-    WHERE e.extracted_invoice IS NOT NULL
-      AND TRIM(e.extracted_invoice) <> ''
-      AND UPPER(TRIM(e.extracted_invoice)) IN (
-        SELECT UPPER(TRIM(extracted_invoice))
-        FROM bat_invoice_extractions
-        WHERE extracted_invoice IS NOT NULL AND TRIM(extracted_invoice) <> ''
-        GROUP BY UPPER(TRIM(extracted_invoice))
-        HAVING COUNT(*) > 1
-      )
-  `).all();
-
-  const index = new Map();
-  for (const r of rows) {
-    if (!index.has(r.k)) index.set(r.k, { count: 0, occurrences: [] });
-    const entry = index.get(r.k);
-    entry.count++;
-    entry.occurrences.push({
-      extraction_id: r.extraction_id,
-      reconciliation_id: r.reconciliation_id,
-      week: r.week_number,
-      year: r.year,
-    });
-  }
-  return index;
 }
 
 export function listReconciliations() {
