@@ -1319,15 +1319,24 @@ export function createReportingRouter({ requireAuth }) {
       const last_paid_week = lastPaid?.week_number ?? null;
       const last_paid_year = lastPaid?.year ?? null;
 
+      // Current-year-scoped lookup — drives last_bat_week / last_bat_year
+      // in the response (a year-scoped "Last upload this year: W##/YYYY"
+      // label on the tile).
       const lastBat = getLastBatReconciliationWeek();
       const last_bat_week = lastBat?.week_number ?? null;
       const last_bat_year = lastBat?.year ?? null;
 
       // Missing weeks = number of ISO weeks between the last BAT recon
-      // uploaded and the current ISO week (exclusive of the last
-      // upload, inclusive of the current week). Operator-facing meaning
-      // is "how many weeks behind on uploads is this site". Example: if
-      // last recon is W13/2026 and we're in W20/2026, that's 7 missing.
+      // uploaded ANYWHERE (across all years) and the current ISO week.
+      // Operator-facing meaning is "how many weeks behind on uploads is
+      // this site". Example: if last recon is W13/2026 and we're in
+      // W20/2026, that's 7 missing.
+      //
+      // Uses the allYears variant of the helper because a site whose
+      // most recent upload was in a PREVIOUS ISO year would otherwise
+      // get null from the current-year-scoped lookup, and the cross-
+      // year branch below would never fire. Codex review catch on
+      // PR #273.
       //
       // Cross-year case: if the last BAT was in a previous ISO year, sum
       // (weeks remaining in that year) + (full intermediate years) +
@@ -1340,22 +1349,23 @@ export function createReportingRouter({ requireAuth }) {
       // credit notes for those weeks yet. The new definition surfaces
       // the upload backlog directly, which is what the operator needs
       // to see at a glance from the hub tile.
+      const lastBatAllYears = getLastBatReconciliationWeek({ allYears: true });
       const cur = currentIsoWeek();
       let missing_weeks_count = 0;
-      if (lastBat) {
-        if (lastBat.year === cur.year) {
-          missing_weeks_count = Math.max(0, cur.week - lastBat.week_number);
-        } else if (lastBat.year < cur.year) {
-          let gap = weeksInIsoYear(lastBat.year) - lastBat.week_number;
-          for (let y = lastBat.year + 1; y < cur.year; y++) {
+      if (lastBatAllYears) {
+        if (lastBatAllYears.year === cur.year) {
+          missing_weeks_count = Math.max(0, cur.week - lastBatAllYears.week_number);
+        } else if (lastBatAllYears.year < cur.year) {
+          let gap = weeksInIsoYear(lastBatAllYears.year) - lastBatAllYears.week_number;
+          for (let y = lastBatAllYears.year + 1; y < cur.year; y++) {
             gap += weeksInIsoYear(y);
           }
           gap += cur.week;
           missing_weeks_count = gap;
         }
-        // lastBat.year > cur.year shouldn't happen (the helper guards
-        // against future weeks) but if it does we leave count at 0
-        // rather than reporting a negative gap.
+        // lastBatAllYears.year > cur.year shouldn't happen (the helper
+        // guards future weeks within the current year) but if it does we
+        // leave count at 0 rather than reporting a negative gap.
       }
 
       // Missing credit notes (current-year scope): weeks where BAT was
