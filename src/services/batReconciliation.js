@@ -1426,6 +1426,9 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
     db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(existing.id);
 
     insertPodEntries(existing.id, podUrls);
+    // Self-heal supplier_total from the per-row data we just upserted.
+    // No-ops gracefully if amounts are still incomplete; see helper docs.
+    recomputeSupplierTotalSafe(existing.id);
     return existing.id;
   }
 
@@ -1445,7 +1448,58 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
 
   const reconId = result.lastInsertRowid;
   insertPodEntries(reconId, podUrls);
+  recomputeSupplierTotalSafe(reconId);
   return reconId;
+}
+
+// Self-healing supplier_total. Sets the recon's supplier_total to the
+// sum of non-exception order_amounts from its rows — the operator-
+// visible BAT TOTAL and the headline number on the recon page. Returns
+// true if updated, false if skipped (incomplete amounts).
+//
+// Why this exists: createReconciliation/insertPodEntries originally
+// stamped supplier_total = parsed.fees.total.total (the sum of the
+// supplier's three fee-section lines from the spreadsheet's Overview
+// tab). That worked when every week had ONE supplier spreadsheet, but
+// broke the moment two branch spreadsheets (Welkom + JHB, etc.) landed
+// on the same week — the second upload's smaller fees overwrote the
+// first's, and the recon's BAT TOTAL silently went wrong with no
+// operator-visible signal. The W11 incident on 2026-05-11 burned
+// several rounds of debugging, a one-shot SQL fix, a Maintenance-tab
+// healer (PR #275), AND a column-not-found warning at upload (PR #274)
+// before we got here.
+//
+// This helper closes the entire class: every successful upload now
+// recomputes the headline total from the per-row data that just
+// landed. Re-uploads naturally produce the right number; merges of
+// branch spreadsheets are summed correctly because order_amount is
+// per-row (preserved by the upsert's COALESCE pattern).
+//
+// Null-safety guard (WHERE NOT EXISTS): we ONLY overwrite when every
+// non-exception row has a populated order_amount. Otherwise the SUM
+// would treat nulls as zero and the derived total would be artificially
+// low — e.g. mid-week uploads where some PODs haven't had their amount
+// set yet (filled in later by backfillOrderAmounts when a subsequent
+// week's spreadsheet arrives). In that case the UPDATE silently no-ops
+// (info.changes === 0) and the existing fees-derived supplier_total
+// stays in place. Same guard the Maintenance-tab tool uses (PR #275).
+function recomputeSupplierTotalSafe(reconId) {
+  const info = db.prepare(`
+    UPDATE bat_reconciliations
+    SET supplier_total = (
+      SELECT COALESCE(SUM(CASE WHEN COALESCE(is_exception, 0) = 0 THEN COALESCE(order_amount, 0) ELSE 0 END), 0)
+      FROM bat_invoice_extractions
+      WHERE reconciliation_id = bat_reconciliations.id
+    )
+    WHERE id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM bat_invoice_extractions
+        WHERE reconciliation_id = bat_reconciliations.id
+          AND COALESCE(is_exception, 0) = 0
+          AND order_amount IS NULL
+      )
+  `).run(reconId);
+  return info.changes > 0;
 }
 
 function insertPodEntries(reconId, podUrls) {
@@ -1493,8 +1547,15 @@ function insertPodEntries(reconId, podUrls) {
 export function backfillOrderAmounts(orderAmounts) {
   if (!orderAmounts || orderAmounts.size === 0) return 0;
 
+  // Pull reconciliation_id alongside so we can recompute supplier_total
+  // on every recon we touched. Without this, backfilling amounts onto
+  // a prior week's rows would leave that week's headline BAT TOTAL
+  // stale (it'd still reflect the old fees-section snapshot from when
+  // the spreadsheet was uploaded — pre-backfill). Self-healing here
+  // keeps the headline total consistent with the per-row data without
+  // needing the operator to run the Maintenance-tab recompute.
   const rows = db.prepare(
-    'SELECT id, order_number FROM bat_invoice_extractions WHERE order_amount IS NULL AND order_number IS NOT NULL'
+    'SELECT id, order_number, reconciliation_id FROM bat_invoice_extractions WHERE order_amount IS NULL AND order_number IS NOT NULL'
   ).all();
 
   const update = db.prepare(
@@ -1502,19 +1563,31 @@ export function backfillOrderAmounts(orderAmounts) {
   );
 
   let count = 0;
+  const touchedRecons = new Set();
   const tx = db.transaction(() => {
     for (const row of rows) {
       const entry = orderAmounts.get(row.order_number);
       if (entry) {
         update.run(entry.amount, entry.isException ? 1 : 0, row.id);
+        touchedRecons.add(row.reconciliation_id);
         count++;
       }
     }
   });
   tx();
 
+  // Recompute supplier_total for each touched recon. Safe-recompute
+  // helper no-ops if any non-exception row in that recon STILL has
+  // a null order_amount (the backfill may have filled some but not
+  // all rows). Per recon, not in one txn — better-sqlite3 is
+  // synchronous so the inner UPDATEs serialise naturally.
+  let recomputedRecons = 0;
+  for (const reconId of touchedRecons) {
+    if (recomputeSupplierTotalSafe(reconId)) recomputedRecons++;
+  }
+
   if (count > 0) {
-    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions`);
+    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions; recomputed supplier_total on ${recomputedRecons}/${touchedRecons.size} affected recon(s)`);
   }
   return count;
 }
