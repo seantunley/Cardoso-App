@@ -518,11 +518,38 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let allSites = [];
     // Narrow column list — KPI aggregator only needs these fields,
-    // plus the orphan flags so the dashboard tile can render the pill.
-    try { allSites = db.prepare(`
-      SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at
-      FROM hub_sites
-    `).all(); } catch {}
+    // plus the orphan flags so the dashboard tile can render the pill,
+    // plus the three last_accpac_* columns so the tile's footer line
+    // ("Accpac sync: <timestamp>") and error pill can render. Without
+    // these the syncSite UPDATE in hubEtl.js stamps them in the DB
+    // every cycle, but the kpis response strips them and the tile
+    // shows "(not yet reported)" forever — see the "no silent
+    // failures" memory rule for why this kind of plumbing miss is
+    // load-bearing.
+    //
+    // Two-step SELECT to handle the v62 migration-gap window: if the
+    // hub was bootstrapped between PR #198 (added the column refs in
+    // code) and PR #228 (restored the migration), the DB has hub_sites
+    // but is missing the three last_accpac_* columns. A single wide
+    // SELECT throws SqliteError("no such column"), the existing bare
+    // catch swallows it, and the kpis handler returns an EMPTY sites
+    // list — operator sees no tiles at all instead of tiles missing
+    // one footer line. v62's comment block (migrations.js:1817-1822)
+    // documents the exact gate that produces this state. Detect the
+    // schema first via pragma_table_info, then build the SELECT we
+    // can actually execute. The accpac fields default to null in
+    // the per-site object below when absent from the row.
+    try {
+      const cols = new Set(
+        db.prepare(`SELECT name FROM pragma_table_info('hub_sites')`).all().map(r => r.name)
+      );
+      const hasAccpac = cols.has('last_accpac_synced_at') && cols.has('last_accpac_status') && cols.has('last_accpac_error');
+      const accpacSelect = hasAccpac ? ', last_accpac_synced_at, last_accpac_status, last_accpac_error' : '';
+      allSites = db.prepare(`
+        SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at${accpacSelect}
+        FROM hub_sites
+      `).all();
+    } catch {}
     const sites = allowedSlugs === null
       ? allSites
       : allSites.filter(s => allowedSlugs.includes(s.slug));
@@ -566,6 +593,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         // refuse on it. Operator forgets via the admin section.
         is_orphan: s.in_env === 0,
         removed_from_env_at: s.removed_from_env_at || null,
+        // Accpac freshness shown in the tile footer. The DB has the
+        // values (syncSite stamps them on every kpis tick); we just
+        // need to surface them so the frontend's
+        // `site.last_accpac_synced_at` lookup is no longer undefined.
+        last_accpac_synced_at: s.last_accpac_synced_at || null,
+        last_accpac_status:    s.last_accpac_status    || null,
+        last_accpac_error:     s.last_accpac_error     || null,
         kpis: {
           total_records: agg?.total || 0,
           records_by_flag: agg?.flags || { none: 0, red: 0, orange: 0, green: 0 },
