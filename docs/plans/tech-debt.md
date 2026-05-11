@@ -66,7 +66,9 @@ The checked surface (grows with each ratchet PR):
 
 - `src/lib/app-params.js`
 - `src/lib/clientLog.js`
+- `src/lib/creditLogic.js`
 - `src/lib/dates.js`
+- `src/lib/evalFlagRules.js`
 - `src/lib/humanizeApiError.js`
 - `src/lib/isoWeek.js`
 - `src/lib/manualFlagMessages.js`
