@@ -21,7 +21,7 @@
 // be pinned in those tests. If you change anything in this file,
 // the tests will tell you whether the change is safe.
 
-import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 
 // Final output column structure. Order is load-bearing — the down-
 // stream pipeline indexes by position, not by header name. Comments
@@ -54,6 +54,11 @@ export const JTI_SHEET_NAME = 'Sheet1';
 // quantity format the macro applies.
 const FMT_DATE_INT = '0';
 const FMT_QUANTITY = '#,##0.00';
+
+// Default font for every cell. Matches the macro's output (Arial 10).
+// Applied via ExcelJS — the prior xlsx-CE library silently ignored
+// font settings on write, so we switched away from it for this module.
+const DEFAULT_FONT = { name: 'Arial', size: 10 };
 
 /**
  * Determine the DocumentType from the DocumentNumber prefix. The macro
@@ -94,7 +99,7 @@ export function deriveDocumentType(documentNumber) {
  * @param {{ rows: JtiRow[], manual: JtiManualFields }} args
  * @returns {Buffer}  the .xlsx file as a Node Buffer (route handler streams it back to the client)
  */
-export function buildJtiWorkbook({ rows, manual }) {
+export async function buildJtiWorkbook({ rows, manual }) {
   if (!Array.isArray(rows)) throw new TypeError('buildJtiWorkbook: rows must be an array');
   if (!manual || typeof manual !== 'object') {
     throw new TypeError('buildJtiWorkbook: manual fields object is required');
@@ -106,52 +111,60 @@ export function buildJtiWorkbook({ rows, manual }) {
   const region   = manual.region   == null ? '' : String(manual.region);
   const country  = manual.country  == null ? '' : String(manual.country);
 
-  // Build the AOA (Array of Arrays) representation. Header first,
-  // then one row per JtiRow. We use null (not '') for the always-empty
-  // L/M/N cells because aoa_to_sheet emits a cell entry for empty
-  // strings but skips nulls — the sample file shows those cells as
-  // entirely absent, not blank-string. Matches the macro output.
-  const aoa = [JTI_HEADERS];
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(JTI_SHEET_NAME);
+
+  // Header row. ExcelJS uses 1-indexed rows.
+  ws.addRow(JTI_HEADERS);
+
+  // Data rows. We write null for the always-empty L/M/N cells so the
+  // resulting cells aren't even emitted in the sheet — matches the
+  // macro's output (those columns exist as headers but data cells
+  // are absent, not blank). Quantity / Date stay as native numbers
+  // so number formats apply cleanly.
   for (const r of rows) {
-    aoa.push([
+    ws.addRow([
       deriveDocumentType(r.TRANNUM),                          // A DocumentType
       r.TRANNUM == null ? '' : String(r.TRANNUM),             // B DocumentNumber
-      r.TRANDATE,                                             // C Date (number)
+      r.TRANDATE,                                             // C Date (integer YYYYMMDD)
       r.ITEM == null ? '' : String(r.ITEM),                   // D ProductCode
-      r.DESC == null ? '' : String(r.DESC),                   // E ProductName (preserve whitespace)
+      r.DESC == null ? '' : String(r.DESC),                   // E ProductName (preserve leading whitespace)
       r.CUSTOMER == null ? '' : String(r.CUSTOMER),           // F CustomerCode
       r.NAMECUST == null ? '' : String(r.NAMECUST),           // G CustomerName
       townCity,                                               // H TownCity
       region,                                                 // I Region
       country,                                                // J Country
-      r.QTYSOLD,                                              // K Quantity (number)
-      null,                                                   // L CostExVAT
+      r.QTYSOLD,                                              // K Quantity (native number)
+      null,                                                   // L CostExVAT (no cell emitted)
       null,                                                   // M NetValueExVAT
       null,                                                   // N Currency
     ]);
   }
 
-  const ws = XLSX.utils.aoa_to_sheet(aoa);
-
-  // Apply number formats to the Date and Quantity columns. We walk
-  // the data range and stamp `.z` (the cell-level format string) on
-  // the relevant cells. We deliberately do NOT format the header row
-  // (row 0) — the macro leaves the header in General format.
-  for (let r = 1; r <= rows.length; r++) {
-    // C{r+1} = Date
-    const dateCell = ws[XLSX.utils.encode_cell({ r, c: 2 })];
-    if (dateCell && dateCell.t === 'n') dateCell.z = FMT_DATE_INT;
-    // K{r+1} = Quantity
-    const qtyCell = ws[XLSX.utils.encode_cell({ r, c: 10 })];
-    if (qtyCell && qtyCell.t === 'n') qtyCell.z = FMT_QUANTITY;
+  // Number formats on the data rows ONLY (header stays General).
+  // ExcelJS column.numFmt would apply to every cell in the column
+  // INCLUDING the header — applying per-cell on rows 2..N preserves
+  // the macro's "header in General format" behaviour.
+  const lastDataRow = rows.length + 1;   // +1 for the header
+  for (let r = 2; r <= lastDataRow; r++) {
+    ws.getCell(r, 3).numFmt  = FMT_DATE_INT;     // C: Date
+    ws.getCell(r, 11).numFmt = FMT_QUANTITY;     // K: Quantity
   }
 
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, JTI_SHEET_NAME);
-
-  return XLSX.write(wb, {
-    type: 'buffer',
-    bookType: 'xlsx',
-    cellStyles: true,   // ensure .z formats survive the write
+  // Default font (Arial 10) on every cell that exists. ExcelJS
+  // doesn't expose a workbook-default font setter that affects
+  // unspecified cells the way Excel's underlying styles.xml does,
+  // so we apply per-cell. Header and data both get it; matches the
+  // macro's whole-sheet font.
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    row.eachCell({ includeEmpty: false }, (cell) => {
+      cell.font = DEFAULT_FONT;
+    });
   });
+
+  // Buffer return — ExcelJS's writeBuffer returns an ArrayBuffer-ish
+  // value that Node treats fine, but Buffer.from is the canonical
+  // form for the route's res.end(buffer) downstream.
+  const arrayBuffer = await wb.xlsx.writeBuffer();
+  return Buffer.from(arrayBuffer);
 }

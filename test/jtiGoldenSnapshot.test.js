@@ -43,15 +43,15 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
     goldenRange = XLSX.utils.decode_range(goldenWs['!ref']);
   });
 
-  it('the golden file has exactly one sheet named "Sheet1"', () => {
+  it('the golden file has exactly one sheet named "Sheet1"', async () => {
     expect(goldenWb.SheetNames).toEqual(['Sheet1']);
   });
 
-  it('the golden file has 14 columns A..N', () => {
+  it('the golden file has 14 columns A..N', async () => {
     expect(goldenRange.e.c).toBe(13);
   });
 
-  it('the golden header row matches our JTI_HEADERS constant exactly', () => {
+  it('the golden header row matches our JTI_HEADERS constant exactly', async () => {
     const expectedHeaders = [
       'DocumentType', 'DocumentNumber', 'Date', 'ProductCode', 'ProductName',
       'CustomerCode', 'CustomerName', 'TownCity', 'Region', 'Country',
@@ -64,14 +64,14 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
     expect(actual).toEqual(expectedHeaders);
   });
 
-  it('the Date column (C) uses number format "0" in the golden', () => {
+  it('the Date column (C) uses number format "0" in the golden', async () => {
     // First data row at r=1 (r=0 is header)
     const cell = goldenWs[XLSX.utils.encode_cell({ r: 1, c: 2 })];
     expect(cell?.t).toBe('n');
     expect(cell?.z).toBe('0');
   });
 
-  it('the Quantity column (K) uses number format "#,##0.00" in the golden', () => {
+  it('the Quantity column (K) uses number format "#,##0.00" in the golden', async () => {
     const cell = goldenWs[XLSX.utils.encode_cell({ r: 1, c: 10 })];
     expect(cell?.t).toBe('n');
     expect(cell?.z).toBe('#,##0.00');
@@ -79,7 +79,7 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
 
   // ---- Now verify our builder produces a structurally-equivalent file ----
 
-  function buildOurs() {
+  async function buildOurs() {
     // A representative row matching the sample's first data row.
     const row = {
       TRANNUM: 'IN000428009',
@@ -90,7 +90,7 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
       NAMECUST: 'LIQUOR CITY WHITERIVER',
       QTYSOLD: 2,
     };
-    const buf = buildJtiWorkbook({
+    const buf = await buildJtiWorkbook({
       rows: [row],
       manual: { townCity: 'ERMELO', region: 'MPUMALANGA', country: 'SOUTH AFRICA' },
     });
@@ -103,13 +103,13 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
     return { wb, ws: wb.Sheets[wb.SheetNames[0]] };
   }
 
-  it('our builder produces a workbook with the same single sheet name "Sheet1"', () => {
-    const { wb } = buildOurs();
+  it('our builder produces a workbook with the same single sheet name "Sheet1"', async () => {
+    const { wb } = await buildOurs();
     expect(wb.SheetNames).toEqual(goldenWb.SheetNames);
   });
 
-  it('our builder produces the same 14 headers in the same order', () => {
-    const { ws } = buildOurs();
+  it('our builder produces the same 14 headers in the same order', async () => {
+    const { ws } = await buildOurs();
     const ourHeaders = Array.from({ length: 14 }, (_, c) => {
       const cell = ws[XLSX.utils.encode_cell({ r: 0, c })];
       return cell ? cell.v : null;
@@ -121,24 +121,24 @@ describeIfSample('JTI golden snapshot — structural equivalence with the suppli
     expect(ourHeaders).toEqual(goldenHeaders);
   });
 
-  it('our builder applies the same number format on the Date column', () => {
-    const { ws } = buildOurs();
+  it('our builder applies the same number format on the Date column', async () => {
+    const { ws } = await buildOurs();
     const ourDate = ws[XLSX.utils.encode_cell({ r: 1, c: 2 })];
     const goldenDate = goldenWs[XLSX.utils.encode_cell({ r: 1, c: 2 })];
     expect(ourDate.t).toBe(goldenDate.t);
     expect(ourDate.z).toBe(goldenDate.z);
   });
 
-  it('our builder applies the same number format on the Quantity column', () => {
-    const { ws } = buildOurs();
+  it('our builder applies the same number format on the Quantity column', async () => {
+    const { ws } = await buildOurs();
     const ourQty = ws[XLSX.utils.encode_cell({ r: 1, c: 10 })];
     const goldenQty = goldenWs[XLSX.utils.encode_cell({ r: 1, c: 10 })];
     expect(ourQty.t).toBe(goldenQty.t);
     expect(ourQty.z).toBe(goldenQty.z);
   });
 
-  it('our row 2 cell values match the golden row 2 cell values for all populated cols (A..K)', () => {
-    const { ws } = buildOurs();
+  it('our row 2 cell values match the golden row 2 cell values for all populated cols (A..K)', async () => {
+    const { ws } = await buildOurs();
     for (let c = 0; c <= 10; c++) {
       const ourCell = ws[XLSX.utils.encode_cell({ r: 1, c })];
       const goldenCell = goldenWs[XLSX.utils.encode_cell({ r: 1, c })];

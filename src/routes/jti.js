@@ -186,7 +186,7 @@ export async function handleExport({ db, getSagePool, audit, req, res }) {
 
   let buffer;
   try {
-    buffer = buildJtiWorkbook({ rows, manual });
+    buffer = await buildJtiWorkbook({ rows, manual });
   } catch (err) {
     console.error('[jti] workbook build failed:', err.message);
     audit({
