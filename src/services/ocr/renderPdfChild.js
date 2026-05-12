@@ -58,7 +58,14 @@ async function main() {
     maxHeight = 4000,
     maxPixels = 6_000_000,
     minScale = 0.3,
-    jpegQuality = 0.85,
+    // 0.95 (was 0.85). The Phase 1 default of 0.85 was inherited from
+    // canvas.toBuffer's "perceptually lossless on documents" guidance,
+    // but Phase 2 round-2 testing on real PODs showed digit edges
+    // (especially 9 vs 8, 9 vs 5) were bleeding under the heavier
+    // compression — engines misread digits that were visually correct
+    // on the underlying bitmap. 0.95 keeps payload growth tiny (~30%)
+    // and removes the OCR-visible artefacting.
+    jpegQuality = 0.95,
   } = params || {};
 
   for (const [k, v] of Object.entries({ pageNum, requestedScale, maxWidth, maxHeight, maxPixels, minScale, jpegQuality })) {

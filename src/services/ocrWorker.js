@@ -689,7 +689,16 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   emitProgress(msgId, 'render');
   let imageBuffer;
   try {
-    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
+    // Bumped from 1.5/2.0 → 2.0/3.0 alongside Phase 2's PDFium swap.
+    // Round-2 of OCR regression testing on real PODs showed digit-level
+    // misreads (the cascade engine was confidently picking the wrong
+    // digit on borderline-resolution renders). More pixels per page =
+    // more signal for digit recognition. The per-page caps in
+    // renderPdfChild (maxWidth / maxHeight / maxPixels) clamp this back
+    // down for banner-format / multi-page-merged PDFs, so the bump is
+    // additive only — pages that were already against the cap don't
+    // get any larger.
+    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 2.0 : 3.0);
   } catch (err) {
     // The child-process wrapper rejects with structured codes:
     //   - 'RENDER_TIMEOUT'      → wall-clock kill fired (SIGKILL after grace).
