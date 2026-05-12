@@ -75,6 +75,21 @@ describe('toYyyymmddInt', () => {
     expect(() => toYyyymmddInt(20260100)).toThrow(/invalid day component/);
   });
 
+  // Regression: the Date-string branch (anything that doesn't match
+  // /^\d{8}$/ but does Date.parse cleanly) used to skip the range
+  // check too. '1800-01-01' / '2200-01-01' / '0001-01-01' all
+  // parsed as real Dates and emerged as 18000101 / 22000101 /
+  // 00010101, widening the export window outside the documented
+  // 1900-2100 envelope. Same risk as the 8-digit-string bypass —
+  // POST /api/jti/export takes from/to as JSON strings so any of
+  // these shapes could land in the SQL filter.
+  it('rejects out-of-range Date-strings (1800, 2200, year-zero)', () => {
+    expect(() => toYyyymmddInt('1800-01-01')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('2200-01-01')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('1899-12-31T23:59:59.999Z')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('2101-01-01T00:00:00.000Z')).toThrow(/out of plausible YYYYMMDD range/);
+  });
+
   it('UTC anchored — server timezone never shifts the day', () => {
     // Same instant, formatted via UTC components no matter what
     // Date the server's local timezone produces.

@@ -9,6 +9,19 @@ import XLSX from 'xlsx';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+
+// Intercept the audit module BEFORE importing the route. Each test
+// already passes its own `audit` spy into the handler, so we never
+// exercise the real logAudit here — and audit.js does
+// `db.prepare(INSERT INTO auditlog…)` at module load, which fails
+// against a fresh CI database that hasn't run migrations yet. Without
+// this mock the whole test file fails to load on CI even though no
+// test depends on the real audit writer.
+vi.mock('../src/lib/audit.js', () => ({
+  logAudit: vi.fn(),
+  summarizeDiff: vi.fn(() => null),
+}));
+
 import {
   handleGetSettings,
   handlePutSettings,

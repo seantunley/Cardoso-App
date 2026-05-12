@@ -15,6 +15,12 @@ export default function HubJti() {
   const [error, setError] = useState('');
   const [downloadingId, setDownloadingId] = useState(null);
   const [siteFilter, setSiteFilter] = useState('');
+  // Master site list — derived ONCE from the unfiltered fetch and
+  // kept stable across filter changes. Without this, selecting a
+  // site would shrink the response to 1 site_id, the chips would
+  // hide, and there would be no in-page way back to "All sites".
+  // Filter chips render from this; the table renders from `archives`.
+  const [allSiteIds, setAllSiteIds] = useState([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +39,20 @@ export default function HubJti() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (cancelledRef()) return;
-      setArchives(Array.isArray(data.archives) ? data.archives : []);
+      const fetched = Array.isArray(data.archives) ? data.archives : [];
+      setArchives(fetched);
+      // Only refresh the master site list when we're fetching the
+      // UNFILTERED set — a filtered fetch would shrink it to one
+      // site_id and dead-end the UI. Union with the prior list (so a
+      // new site appearing in a later unfiltered fetch is captured)
+      // and only replace, never narrow.
+      if (!siteFilter) {
+        const seen = Array.from(new Set(fetched.map(a => a.site_id))).sort();
+        setAllSiteIds(prev => {
+          const merged = new Set([...prev, ...seen]);
+          return Array.from(merged).sort();
+        });
+      }
       setError('');
     } catch (err) {
       if (!cancelledRef()) {
@@ -64,8 +83,11 @@ export default function HubJti() {
     }
   };
 
-  // Distinct site_ids in the current result set (for the filter chips)
-  const siteIds = Array.from(new Set(archives.map(a => a.site_id))).sort();
+  // Filter chips use the stable master list (allSiteIds), NOT the
+  // currently-filtered archives — otherwise selecting a single site
+  // would shrink the chip list to just that site and leave no way
+  // back to "All sites" without a page reload.
+  const siteIds = allSiteIds;
 
   return (
     <div className="min-h-screen bg-background text-foreground">

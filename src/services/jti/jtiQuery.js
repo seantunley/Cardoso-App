@@ -78,7 +78,14 @@ export function toYyyymmddInt(value) {
   const yyyy = d.getUTCFullYear();
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
-  return Number(`${yyyy}${mm}${dd}`);
+  const n = Number(`${yyyy}${mm}${dd}`);
+  // Same range + structural check as the integer / 8-digit-string
+  // branches — otherwise '1800-01-01' or '2200-01-01' parse as valid
+  // Dates and emerge as 18000101 / 22000101 here without the bounds
+  // check, widening the SQL filter exactly the way '00000000' did on
+  // the 8-digit-string branch before the prior fix.
+  assertPlausibleYyyymmdd(n, 'date-string');
+  return n;
 }
 
 // Range + structural sanity. We don't validate per-month day counts
