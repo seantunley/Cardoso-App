@@ -43,12 +43,20 @@ jobs:
           BASE_REF: ${{ github.event.pull_request.base.ref }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          ALLOWED="main dev"
-          if echo " $ALLOWED " | grep -q " $BASE_REF "; then
-            echo "::notice::PR #$PR_NUMBER base is '$BASE_REF' — allowed."
-            exit 0
-          fi
-          echo "::error::PR #$PR_NUMBER base is '$BASE_REF', which is not in the allowed list ($ALLOWED)."
+          # Exact whole-token match via shell `case`. Don't use grep
+          # against the BASE_REF here — `grep " $BASE_REF "` would
+          # treat BASE_REF as a regex, so a branch named `d.v` would
+          # match the `dev` allowlist entry, and a name with regex
+          # metacharacters (`.`, `\b`, `[`, etc.) would have other
+          # surprising matches. `case` matches literal patterns on
+          # the whole word — no regex, no prefix collisions.
+          case "$BASE_REF" in
+            main|dev)
+              echo "::notice::PR #$PR_NUMBER base is '$BASE_REF' — allowed."
+              exit 0
+              ;;
+          esac
+          echo "::error::PR #$PR_NUMBER base is '$BASE_REF', which is not in the allowed list (main, dev)."
           echo ""
           echo "This usually means the PR was opened against another in-flight PR's"
           echo "branch (a \"stacked\" PR). Merging would land the change INTO that"
