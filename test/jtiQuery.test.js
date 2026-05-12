@@ -63,15 +63,33 @@ describe('buildJtiSql — SQL shape', () => {
 
   it('selects the seven columns the spreadsheet builder consumes', () => {
     const { sql } = build();
-    // Match against substrings we depend on. Loose matching to allow
-    // whitespace changes; tight enough to catch column drops.
-    expect(sql).toMatch(/OESHDT\.TRANNUM\s+AS\s+TRANNUM/);
-    expect(sql).toMatch(/OESHDT\.TRANDATE\s+AS\s+TRANDATE/);
-    expect(sql).toMatch(/OESHDT\.ITEM\s+AS\s+ITEM/);
-    expect(sql).toMatch(/ICITEM\.\[DESC\]\s+AS\s+\[DESC\]/);
-    expect(sql).toMatch(/OESHDT\.CUSTOMER\s+AS\s+CUSTOMER/);
-    expect(sql).toMatch(/ARCUS\.NAMECUST\s+AS\s+NAMECUST/);
-    expect(sql).toMatch(/OESHDT\.QTYSOLD\s+AS\s+QTYSOLD/);
+    // Match against the alias side only; the source side may be
+    // wrapped in RTRIM(...) for string columns to strip Sage CHAR
+    // padding. Tight enough to catch column drops; loose enough to
+    // allow the wrapper.
+    expect(sql).toMatch(/AS\s+TRANNUM\b/);
+    expect(sql).toMatch(/AS\s+TRANDATE\b/);
+    expect(sql).toMatch(/AS\s+ITEM\b/);
+    expect(sql).toMatch(/AS\s+\[DESC\]/);
+    expect(sql).toMatch(/AS\s+CUSTOMER\b/);
+    expect(sql).toMatch(/AS\s+NAMECUST\b/);
+    expect(sql).toMatch(/AS\s+QTYSOLD\b/);
+  });
+
+  it('wraps string columns in RTRIM to strip Sage CHAR padding', () => {
+    // Trailing space padding from Sage CHAR fields breaks downstream
+    // equality comparisons + diverges from the macro's RTRIM'd output.
+    // Pinning so a refactor that drops the RTRIM wrappers gets caught.
+    const { sql } = build();
+    expect(sql).toMatch(/RTRIM\(OESHDT\.TRANNUM\)/);
+    expect(sql).toMatch(/RTRIM\(OESHDT\.ITEM\)/);
+    expect(sql).toMatch(/RTRIM\(ICITEM\.\[DESC\]\)/);
+    expect(sql).toMatch(/RTRIM\(OESHDT\.CUSTOMER\)/);
+    expect(sql).toMatch(/RTRIM\(ARCUS\.NAMECUST\)/);
+    // Numeric columns stay un-wrapped — RTRIM on a number is a no-op
+    // and would just confuse the recordset shape.
+    expect(sql).not.toMatch(/RTRIM\(OESHDT\.TRANDATE\)/);
+    expect(sql).not.toMatch(/RTRIM\(OESHDT\.QTYSOLD\)/);
   });
 
   it('LEFT JOINs ARCUS so rows survive when the customer master is missing', () => {
@@ -94,11 +112,16 @@ describe('buildJtiSql — SQL shape', () => {
     expect(sql).toMatch(/ICITMV\.VENDNUM LIKE @vendor/);
   });
 
-  it('orders by TRANDATE ASC (with stable secondary keys to break ties)', () => {
+  it('orders by TRANDATE ASC ONLY — no tiebreakers (matches macro/Crystal output)', () => {
+    // Tiebreakers were initially added to make output deterministic,
+    // but they put alphabetical 'CN…' rows before 'IN…' rows within
+    // a single day, which diverges from the macro's ordering.
+    // Operator chose to drop the tiebreakers and rely on Sage's
+    // natural row order for same-day rows.
     const { sql } = build();
     expect(sql).toMatch(/ORDER BY OESHDT\.TRANDATE ASC/);
-    expect(sql).toMatch(/OESHDT\.TRANNUM ASC/);
-    expect(sql).toMatch(/OESHDT\.ITEM ASC/);
+    expect(sql).not.toMatch(/OESHDT\.TRANNUM ASC/);
+    expect(sql).not.toMatch(/OESHDT\.ITEM ASC/);
   });
 });
 

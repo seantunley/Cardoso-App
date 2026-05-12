@@ -81,15 +81,26 @@ export function toYyyymmddInt(value) {
 // codebase. Operators can override it via jti_settings.query_override
 // (admin-gated UI on the JTI page). The default + override go through
 // the same param-binding path; only the SQL string differs.
+//
+// String columns are wrapped in RTRIM() because Sage 300 stores
+// most identifier/name fields as CHAR(N) with right-side space
+// padding; without the RTRIM, "10" arrives as "10        " and
+// breaks downstream consumers comparing on equality. Compared
+// byte-for-byte against the macro's reference output and matched.
+//
+// LEADING whitespace on ICITEM.[DESC] (e.g. "  CAMEL CLASSIC ...")
+// is intentional — Sage stores it that way for some product names,
+// and the consumer pipeline depends on it. RTRIM only, not LTRIM,
+// preserves that.
 export const DEFAULT_JTI_SQL = `
     SELECT
-      OESHDT.TRANNUM       AS TRANNUM,
-      OESHDT.TRANDATE      AS TRANDATE,
-      OESHDT.ITEM          AS ITEM,
-      ICITEM.[DESC]        AS [DESC],
-      OESHDT.CUSTOMER      AS CUSTOMER,
-      ARCUS.NAMECUST       AS NAMECUST,
-      OESHDT.QTYSOLD       AS QTYSOLD
+      RTRIM(OESHDT.TRANNUM)   AS TRANNUM,
+      OESHDT.TRANDATE         AS TRANDATE,
+      RTRIM(OESHDT.ITEM)      AS ITEM,
+      RTRIM(ICITEM.[DESC])    AS [DESC],
+      RTRIM(OESHDT.CUSTOMER)  AS CUSTOMER,
+      RTRIM(ARCUS.NAMECUST)   AS NAMECUST,
+      OESHDT.QTYSOLD          AS QTYSOLD
     FROM OESHDT OESHDT
     INNER JOIN ICITEM ICITEM
       ON OESHDT.ITEM = ICITEM.ITEMNO
@@ -102,7 +113,12 @@ export const DEFAULT_JTI_SQL = `
         WHERE ICITMV.ITEMNO = OESHDT.ITEM
           AND ICITMV.VENDNUM LIKE @vendor
       )
-    ORDER BY OESHDT.TRANDATE ASC, OESHDT.TRANNUM ASC, OESHDT.ITEM ASC
+    -- ORDER BY Date only — same-day rows keep Sage's natural row
+    -- order, which is what the Crystal-report-plus-Excel-macro flow
+    -- produces. Adding TRANNUM/ITEM tiebreakers here would put
+    -- 'CN…' rows before 'IN…' rows within a day (alphabetical) and
+    -- diverge from the operator's expected ordering.
+    ORDER BY OESHDT.TRANDATE ASC
   `;
 
 /**
