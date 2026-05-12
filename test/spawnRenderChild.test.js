@@ -290,15 +290,25 @@ describe('renderPdfInChild — concurrency', () => {
 
 describe('renderPdfInChild — end-to-end with the real child script', () => {
   // Uses the production renderPdfChild.js + a minimal valid PDF.
-  // pdfjs-dist must be installed; on machines without the optional
-  // node-canvas binary this test cannot run — guard accordingly.
+  // PDFium (@hyzyla/pdfium) and sharp are hard deps after the Phase 2
+  // engine swap — both ship pre-built binaries (PDFium is WASM, sharp
+  // is libvips), no native build toolchain required, so this test is
+  // unconditional. If init fails in CI we want to SEE the failure, not
+  // silently skip past it.
+  //
+  // Earlier rev guarded with a `canRunRealChild` helper that called
+  // `require.resolve` from this ESM file — `require` is undefined in
+  // ESM, the helper threw a ReferenceError every time, was caught, and
+  // the test was masked. Removed entirely; if the renderer ever does
+  // need an environment guard, use `await import.meta.resolve(...)` /
+  // `createRequire(import.meta.url)` rather than bare `require`.
 
-  // Smallest legal PDF that pdfjs.getDocument() will accept. Built
-  // by hand from the PDF 1.4 spec: catalog + pages + one empty page.
-  // 0x0a separators are critical — pdfjs validates the xref offsets.
+  // Smallest legal PDF that PDFium will accept. Built by hand from the
+  // PDF 1.4 spec: catalog + pages + one empty page. 0x0a separators
+  // are critical — both PDFium and pdfjs validate the xref offsets.
   const MINIMAL_PDF = makeMinimalPdf();
 
-  it.skipIf(!canRunRealChild())(
+  it(
     'renders a minimal valid PDF to a JPEG buffer',
     async () => {
       const out = await renderPdfInChild(MINIMAL_PDF, { timeoutMs: 20_000 });
@@ -313,19 +323,6 @@ describe('renderPdfInChild — end-to-end with the real child script', () => {
 });
 
 // ── helpers ───────────────────────────────────────────────────────────
-
-function canRunRealChild() {
-  try {
-    // node-canvas ships a native .node binary; on CI without the build
-    // toolchain it might be absent. Resolve as a cheap presence check.
-    // Vitest's it.skipIf semantics: returning true SKIPS the test.
-    require.resolve('canvas');
-    require.resolve('pdfjs-dist/legacy/build/pdf.mjs');
-    return false; // i.e. don't skip — both deps resolvable
-  } catch {
-    return true;  // skip — one of the deps missing
-  }
-}
 
 function makeMinimalPdf() {
   // Hand-built PDF 1.4 with one empty 612×792 page. Verified parseable
