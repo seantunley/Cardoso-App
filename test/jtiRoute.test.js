@@ -13,8 +13,11 @@ import {
   handleGetSettings,
   handlePutSettings,
   handleExport,
+  handleListArchives,
+  handleDownloadArchive,
   pickFirst,
 } from '../src/routes/jti.js';
+import { archiveJtiExport } from '../src/services/jti/jtiArchive.js';
 
 // Minimal in-memory DB matching migrations v69 (jti_settings) +
 // v70 (jti_archive). The archive table is needed because
@@ -58,8 +61,8 @@ beforeEach(() => {
 // tests can assert on what the handler did. role defaults to 'admin'
 // because most JTI endpoints are admin-permissive; tests that check
 // the operator-vs-admin gate pass role: 'operator' explicitly.
-function makeReqRes({ body = {}, role = 'admin' } = {}) {
-  const req = { body, currentUser: { id: 1, email: 'op@example.com', role } };
+function makeReqRes({ body = {}, role = 'admin', query = {}, params = {} } = {}) {
+  const req = { body, query, params, currentUser: { id: 1, email: 'op@example.com', role } };
   const res = {
     statusCode: 200,
     headers: {},
@@ -561,3 +564,106 @@ describe('handleExport — auto-archive on full-month range', () => {
     expect(arg.changes.archivedId).toBeTypeOf('number');
   });
 });
+
+describe('handleListArchives', () => {
+  afterEach(() => {
+    if (tmpArchiveRoot && fs.existsSync(tmpArchiveRoot)) {
+      fs.rmSync(tmpArchiveRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns an empty list on a fresh install', async () => {
+    const { req, res } = makeReqRes();
+    handleListArchives({ db, req, res });
+    expect(res.body.ok).toBe(true);
+    expect(res.body.archives).toEqual([]);
+    expect(res.body.limit).toBe(60);
+  });
+
+  it('returns archives ordered latest-period first', async () => {
+    archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: 2 }) });
+    archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: 4 }) });
+    archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: 3 }) });
+    const { req, res } = makeReqRes();
+    handleListArchives({ db, req, res });
+    expect(res.body.archives.map(a => a.period_month)).toEqual([4, 3, 2]);
+  });
+
+  it('honours the `limit` query param within bounds', async () => {
+    for (let m = 1; m <= 6; m++) {
+      archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: m }) });
+    }
+    const { req, res } = makeReqRes({ query: { limit: '2' } });
+    handleListArchives({ db, req, res });
+    expect(res.body.archives).toHaveLength(2);
+    expect(res.body.limit).toBe(2);
+  });
+
+  it('falls back to default limit on garbage input', async () => {
+    const { req, res } = makeReqRes({ query: { limit: 'abc' } });
+    handleListArchives({ db, req, res });
+    expect(res.body.limit).toBe(60);
+  });
+});
+
+describe('handleDownloadArchive', () => {
+  afterEach(() => {
+    if (tmpArchiveRoot && fs.existsSync(tmpArchiveRoot)) {
+      fs.rmSync(tmpArchiveRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('returns 400 on a non-numeric id', async () => {
+    const { req, res } = makeReqRes({ params: { id: 'abc' } });
+    handleDownloadArchive({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('returns 404 when the id does not exist', async () => {
+    const { req, res } = makeReqRes({ params: { id: '999' } });
+    handleDownloadArchive({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(404);
+  });
+
+  it('returns 410 when the row exists but the file is missing on disk', async () => {
+    const row = archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: 4 }) });
+    fs.unlinkSync(row.file_path);
+    const audit = vi.fn();
+    const { req, res } = makeReqRes({ params: { id: String(row.id) } });
+    handleDownloadArchive({ db, audit, req, res });
+    expect(res.statusCode).toBe(410);
+    expect(audit.mock.calls[0][0].status).toBe('failure');
+  });
+
+  it('returns the .xlsx bytes + headers on a valid id', async () => {
+    const row = archiveJtiExport({ db, archiveRoot: tmpArchiveRoot, archive: makeArchiveInput({ year: 2026, month: 4 }) });
+    const audit = vi.fn();
+    const { req, res } = makeReqRes({ params: { id: String(row.id) } });
+    handleDownloadArchive({ db, audit, req, res });
+    expect(res.headers['content-type']).toBe('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    expect(res.headers['content-disposition']).toMatch(/attachment; filename=/);
+    expect(res.headers['x-jti-archive-id']).toBe(String(row.id));
+    expect(res.headers['x-jti-archive-sha256']).toBe(row.sha256);
+    expect(Buffer.isBuffer(res.raw)).toBe(true);
+    expect(res.raw.length).toBe(row.byte_size);
+    expect(audit.mock.calls[0][0].action).toBe('jti_archive_download');
+  });
+});
+
+// Helper for the archive-route tests: build a valid archive input
+// with a tiny in-memory buffer (we don't care about .xlsx validity,
+// only that bytes flow through end-to-end).
+function makeArchiveInput({ year, month, source = 'manual' }) {
+  return {
+    buffer: Buffer.from(`fake-xlsx-bytes-for-${year}-${month}`),
+    filename: `JTI_Cardoso_Sales_Test_${year}${String(month).padStart(2, '0')}30.xlsx`,
+    periodYear: year,
+    periodMonth: month,
+    source,
+    rowCount: 1,
+    townCity: 'TEST',
+    region: 'TEST',
+    country: 'TEST',
+    siteLabel: 'TEST',
+  };
+}

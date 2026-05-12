@@ -32,7 +32,14 @@ import {
 import { buildJtiWorkbook } from '../services/jti/jtiSpreadsheet.js';
 import { buildJtiFilename } from '../services/jti/jtiFilename.js';
 import { getJtiSettings, setJtiSettings } from '../services/jti/jtiSettings.js';
-import { archiveJtiExport, periodFromExactMonth } from '../services/jti/jtiArchive.js';
+import {
+  archiveJtiExport,
+  listJtiArchives,
+  getJtiArchive,
+  periodFromExactMonth,
+} from '../services/jti/jtiArchive.js';
+import fs from 'fs';
+import path from 'path';
 
 /**
  * Read the install's saved JTI defaults plus the effective SQL +
@@ -263,6 +270,83 @@ export async function handleExport({ db, getSagePool, audit, archiveRoot, req, r
 }
 
 /**
+ * GET /api/jti/archive — list archive rows, latest period first.
+ *
+ * UI shows the "Past months" panel from this. Includes a sane
+ * default cap (60 rows ≈ 5 years of monthly archives) which the
+ * UI can override.
+ */
+export function handleListArchives({ db, req, res }) {
+  try {
+    const limitRaw = Number(req.query?.limit);
+    const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500
+      ? limitRaw
+      : 60;
+    const archives = listJtiArchives({ db, limit });
+    res.json({ ok: true, archives, limit });
+  } catch (err) {
+    console.error('[jti] list archives failed:', err.message);
+    res.status(500).json({ error: `Failed to list JTI archives: ${err.message}` });
+  }
+}
+
+/**
+ * GET /api/jti/archive/:id/download — stream a previously-archived
+ * .xlsx back to the operator. Audits the download (these are
+ * confidential customer-sales artefacts; we want a paper trail of
+ * who pulled what and when).
+ */
+export function handleDownloadArchive({ db, audit, req, res }) {
+  const id = Number(req.params?.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'Invalid archive id' });
+  }
+
+  const row = getJtiArchive({ db, id });
+  if (!row) {
+    return res.status(404).json({ error: `JTI archive #${id} not found` });
+  }
+
+  // The archive row stores the absolute path written at insert time.
+  // If the file is missing on disk (manual deletion, restored backup
+  // missing the uploads tree, etc.), surface a clear 410 — the row
+  // is still there but the bytes are gone.
+  if (!fs.existsSync(row.file_path)) {
+    console.error(`[jti] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
+    audit({
+      req,
+      action: 'jti_archive_download',
+      resourceType: 'system',
+      resourceName: row.filename,
+      details: `Archive #${id} (${row.period_year}-${String(row.period_month).padStart(2, '0')}) requested but file missing at ${row.file_path}`,
+      status: 'failure',
+    });
+    return res.status(410).json({
+      error: `JTI archive #${id} record exists but the file is missing on disk: ${path.basename(row.file_path)}`,
+    });
+  }
+
+  audit({
+    req,
+    action: 'jti_archive_download',
+    resourceType: 'system',
+    resourceName: row.filename,
+    details: `Downloaded JTI archive #${id} (${row.period_year}-${String(row.period_month).padStart(2, '0')}, ${row.source}, ${row.row_count} row(s))`,
+  });
+
+  // Archives are ~200 KB — sync read into a buffer is fine and
+  // means handleDownloadArchive is trivially testable with a plain
+  // mock res (no stream/Writable plumbing needed in tests).
+  const buffer = fs.readFileSync(row.file_path);
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+  res.setHeader('Content-Length', String(buffer.length));
+  res.setHeader('X-JTI-Archive-Id', String(id));
+  res.setHeader('X-JTI-Archive-Sha256', row.sha256);
+  res.end(buffer);
+}
+
+/**
  * Return the first non-empty value from the args. "Empty" = null,
  * undefined, or "" (after trim). Used by handleExport to layer per-
  * request overrides over saved defaults.
@@ -288,6 +372,10 @@ export function createJtiRouter({ requireAuth, requirePermission }) {
     handlePutSettings({ db, audit: logAudit, resetPool: resetJtiSagePool, req, res }));
   router.post('/api/jti/export', ...gate, (req, res) =>
     handleExport({ db, getSagePool: getJtiSagePool, audit: logAudit, req, res }));
+  router.get('/api/jti/archive', ...gate, (req, res) =>
+    handleListArchives({ db, req, res }));
+  router.get('/api/jti/archive/:id/download', ...gate, (req, res) =>
+    handleDownloadArchive({ db, audit: logAudit, req, res }));
 
   return router;
 }
