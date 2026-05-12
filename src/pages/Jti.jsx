@@ -14,7 +14,7 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Download, Save, FileSpreadsheet, AlertTriangle, ChevronDown, ChevronRight, RotateCcw, Database } from "lucide-react";
+import { Loader2, Download, Save, FileSpreadsheet, AlertTriangle, ChevronDown, ChevronRight, RotateCcw, Database, Archive, Cloud, CloudOff, Check, X } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 
 // Preset date-range buttons. Computes the [from, to] pair from "now"
@@ -110,6 +110,13 @@ export default function Jti() {
     townCity: '', region: '', country: '',
   });
 
+  // Past archives — populated from GET /api/jti/archive on page load
+  // and refreshed after every successful Generate that triggers an
+  // archive write (i.e. when the range is a full calendar month).
+  const [archives, setArchives] = useState([]);
+  const [loadingArchives, setLoadingArchives] = useState(true);
+  const [downloadingArchiveId, setDownloadingArchiveId] = useState(null);
+
   // Load everything the page needs in one fetch. The settings
   // endpoint returns: saved defaults, the effective SQL, the default
   // SQL (so the editor can show "reset to default"), and the pool
@@ -140,6 +147,56 @@ export default function Jti() {
       .finally(() => { if (!cancelled) setLoadingSettings(false); });
     return () => { cancelled = true; };
   }, []);
+
+  // Fetch the archive list separately — the settings call is the
+  // gate (loads first), this populates the "Past months" panel.
+  useEffect(() => {
+    let cancelled = false;
+    refreshArchives({ cancelledRef: () => cancelled });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function refreshArchives({ cancelledRef = () => false } = {}) {
+    try {
+      const r = await fetch('/api/jti/archive', { credentials: 'include' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (cancelledRef()) return;
+      setArchives(Array.isArray(data.archives) ? data.archives : []);
+    } catch (err) {
+      if (!cancelledRef()) {
+        // Don't bury this — the user should know if the archive list
+        // failed to load (the panel will still render but be empty).
+        console.error('[jti] failed to load archives', err);
+        toast.error(`Couldn't load JTI archive list: ${err.message}`);
+      }
+    } finally {
+      if (!cancelledRef()) setLoadingArchives(false);
+    }
+  }
+
+  const handleDownloadArchive = async (id, filename) => {
+    setDownloadingArchiveId(id);
+    try {
+      const r = await fetch(`/api/jti/archive/${id}/download`, {
+        credentials: 'include',
+      });
+      if (!r.ok) {
+        let message = `HTTP ${r.status}`;
+        try { const data = await r.json(); message = data.error || message; }
+        catch { /* not JSON */ }
+        throw new Error(message);
+      }
+      const blob = await r.blob();
+      triggerDownload(blob, filename || `JTI_archive_${id}.xlsx`);
+      toast.success(`Downloaded ${filename}`);
+    } catch (err) {
+      toast.error(`Archive download failed: ${err.message}`);
+    } finally {
+      setDownloadingArchiveId(null);
+    }
+  };
 
   const defaultsDirty =
     defaultsForm.townCity  !== savedDefaults.townCity  ||
@@ -271,10 +328,18 @@ export default function Jti() {
         throw new Error(message);
       }
       // Download the binary response.
+      const archiveId = r.headers.get('x-jti-archive-id');
       const blob = await r.blob();
       const filename = parseFilename(r.headers.get('content-disposition')) || 'JTI_export.xlsx';
       triggerDownload(blob, filename);
-      toast.success(`Downloaded ${filename}`);
+      toast.success(
+        archiveId
+          ? `Downloaded ${filename} (archived as #${archiveId})`
+          : `Downloaded ${filename}`
+      );
+      // If this export hit the archive path, the new row needs to
+      // appear in the panel immediately.
+      if (archiveId) refreshArchives();
     } catch (err) {
       setError(`Export failed: ${err.message}`);
       toast.error(`Export failed: ${err.message}`);
@@ -635,6 +700,104 @@ export default function Jti() {
           </div>
         </section>
 
+        {/* Archive panel ──────────────────────────────────────────── */}
+        <section className="bg-card border border-border p-6" style={{ borderRadius: '12px' }}>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+                Past months
+              </div>
+              <h2 className="font-display text-xl text-foreground mb-1 flex items-center gap-2">
+                <Archive className="h-5 w-5 text-muted-foreground" strokeWidth={1.75} />
+                Archived exports
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Generated automatically on the 1st of every month for the previous month, plus any manual full-month exports.
+                Files are kept on disk and pushed to the hub.
+              </p>
+            </div>
+          </div>
+
+          {loadingArchives ? (
+            <div className="mt-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading archives…
+            </div>
+          ) : archives.length === 0 ? (
+            <div className="mt-4 border border-dashed border-border px-4 py-6 text-center" style={{ borderRadius: '8px' }}>
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                No archives yet
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Run a full-month export, or wait for the 1st-of-month scheduler to fire.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <th className="py-2 pr-4">Period</th>
+                    <th className="py-2 pr-4">Generated</th>
+                    <th className="py-2 pr-4">Source</th>
+                    <th className="py-2 pr-4 text-right">Rows</th>
+                    <th className="py-2 pr-4 text-right">Size</th>
+                    <th className="py-2 pr-4">Hub</th>
+                    <th className="py-2 pr-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archives.map(a => (
+                    <tr key={a.id} className="border-b border-border/40 last:border-b-0">
+                      <td className="py-2.5 pr-4 font-mono text-xs text-foreground">
+                        {a.period_year}-{String(a.period_month).padStart(2, '0')}
+                      </td>
+                      <td className="py-2.5 pr-4 text-muted-foreground text-xs">
+                        {formatGeneratedAt(a.generated_at)}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span
+                          className="inline-block px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]"
+                          style={{
+                            borderRadius: '4px',
+                            background: a.source === 'scheduled' ? 'hsla(33,95%,55%,0.12)' : 'hsla(0,0%,100%,0.06)',
+                            color: a.source === 'scheduled' ? 'var(--phosphor)' : 'hsl(var(--muted-foreground))',
+                          }}
+                        >
+                          {a.source}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
+                        {a.row_count.toLocaleString()}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
+                        {formatBytes(a.byte_size)}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <HubPushPill status={a.hub_push_status} attempts={a.hub_push_attempts} error={a.hub_push_error} />
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <button
+                          onClick={() => handleDownloadArchive(a.id, a.filename)}
+                          disabled={downloadingArchiveId === a.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-border font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-50"
+                          style={{ borderRadius: '6px' }}
+                          title={a.filename}
+                        >
+                          {downloadingArchiveId === a.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Download className="h-3 w-3" strokeWidth={1.75} />}
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         <div className="text-center pt-4 pb-8">
           <FileSpreadsheet className="h-4 w-4 inline-block text-muted-foreground/50 mr-2" strokeWidth={1.5} />
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/50">
@@ -675,6 +838,43 @@ function parseFilename(disposition) {
   if (!disposition) return null;
   const match = disposition.match(/filename\s*=\s*"?([^";]+)"?/i);
   return match ? match[1].trim() : null;
+}
+
+function formatGeneratedAt(s) {
+  if (!s) return '—';
+  // Server stores as 'YYYY-MM-DD HH:MM:SS' (UTC). Render as local
+  // short form so the operator sees "their" time.
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
+}
+
+function formatBytes(n) {
+  if (!Number.isFinite(n)) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function HubPushPill({ status, attempts, error }) {
+  const config = {
+    pushed:          { icon: Check,   label: 'Pushed',    color: 'var(--phosphor)',          bg: 'hsla(33,95%,55%,0.12)' },
+    pending:         { icon: Cloud,   label: 'Pending',   color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' },
+    failed:          { icon: X,       label: `Failed${attempts > 1 ? ` (${attempts}×)` : ''}`, color: 'hsl(var(--destructive))', bg: 'hsla(0,72%,50%,0.12)' },
+    skipped_no_hub:  { icon: CloudOff, label: 'No hub',   color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' },
+  }[status] || { icon: Cloud, label: status || 'unknown', color: 'hsl(var(--muted-foreground))', bg: 'hsla(0,0%,100%,0.05)' };
+
+  const Icon = config.icon;
+  return (
+    <span
+      title={status === 'failed' && error ? error : undefined}
+      className="inline-flex items-center gap-1 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]"
+      style={{ borderRadius: '4px', background: config.bg, color: config.color }}
+    >
+      <Icon className="h-2.5 w-2.5" strokeWidth={2} />
+      {config.label}
+    </span>
+  );
 }
 
 function triggerDownload(blob, filename) {
