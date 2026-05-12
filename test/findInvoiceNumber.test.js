@@ -213,6 +213,34 @@ describe('findInvoiceNumber — positional bias (textual proximity)', () => {
     const text = 'Customer INV1234\nInvoice Number: IN999888777';
     expect(findInvoiceNumber(text)).toBe('IN999888777');
   });
+
+  it('does NOT treat the word "invoices" / "invoiced" as a label anchor', () => {
+    // Reviewer-flagged regression #2: the word-form branch had no
+    // trailing \b, so "INVOICE" matched inside "invoices" /
+    // "invoiced" / "invoicing" / "invoicer" — any common suffix on
+    // the real English word. That phantom anchor hit an unrelated
+    // candidate later in ordinary prose and flipped the rank.
+    //
+    // Pre-fix behaviour on this input:
+    //   - "invoices" → phantom INVOICE label at end pos ~22
+    //   - IN444555666 sat right after at distance ~1
+    //   - IN111222333 was at distance ~14 from the same phantom
+    //   - Result: IN444555666 (phantom-driven), wrong.
+    //
+    // Post-fix: \b after the word-form blocks the match inside
+    // "invoices", no labels found anywhere → fallback to v1
+    // first-match priority → IN111222333.
+    const text = 'Header IN111222333 ... summary invoices IN444555666';
+    expect(findInvoiceNumber(text)).toBe('IN111222333');
+  });
+
+  it('still anchors on the real word "INVOICE" when it stands alone (boundary check passes)', () => {
+    // Sanity check that adding \b after the word-form didn't break
+    // the standalone-INVOICE anchor case. Boundary between E and ' '
+    // is a real word boundary; the regex still matches.
+    const text = 'INVOICE\nIN999888777\nbody body body IN111222333';
+    expect(findInvoiceNumber(text)).toBe('IN999888777');
+  });
 });
 
 describe('findInvoiceNumber — literal-prefix preference', () => {

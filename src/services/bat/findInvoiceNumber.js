@@ -69,7 +69,12 @@ export const HARDCODED_POISON_INVOICES = new Set([
 // Two branches in the alternation:
 //   1. Word-form labels — INVOICE / INVOIC / WNVOICE / WNVOIC / NVOICE
 //      / NVOIC. Each may stand alone (e.g. just "INVOICE" as a heading)
-//      or carry an optional NO/NUMBER/#/etc. suffix and a colon.
+//      or carry an optional NO/NUMBER/#/etc. suffix and a colon. A
+//      trailing \b is REQUIRED on the word-form group — otherwise
+//      "INVOICE" matches inside "INVOICES" / "INVOICED" / "INVOICING"
+//      etc. (any -s/-d/-r/-ing suffix on a real word), creating a
+//      phantom label anchor in ordinary prose like "summary invoices"
+//      that flips the rank to a nearby candidate.
 //   2. Abbreviated INV — REQUIRES an explicit suffix from the same
 //      list. Without this requirement the bare "INV" matches inside
 //      every "INV1234" candidate (the digit doesn't break the alt's
@@ -85,7 +90,7 @@ export const HARDCODED_POISON_INVOICES = new Set([
 //
 // `g` flag is required so matchAll works.
 const INVOICE_LABEL_RE =
-  /\b(?:TAX\s+)?(?:(?:INVOICE?|WNVOICE?|NVOICE?)(?:\s*(?:NO\.?|NUMBER|NUM|N°|#))?\s*[:.]?|INV\s*(?:NO\.?|NUMBER|NUM|N°|#|[:.]))/gi;
+  /\b(?:TAX\s+)?(?:(?:INVOICE?|WNVOICE?|NVOICE?)\b(?:\s*(?:NO\.?|NUMBER|NUM|N°|#))?\s*[:.]?|INV\s*(?:NO\.?|NUMBER|NUM|N°|#|[:.]))/gi;
 
 // A candidate within this many characters of a label is "near" enough
 // for the positional rank to apply. ~140 chars covers most "Invoice
