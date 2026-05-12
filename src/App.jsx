@@ -33,6 +33,7 @@ const pagePermissions = {
   Reconciliation: "can_access_reconciliation",
   Reports: "can_access_reports",
   Connections: "can_access_connections",
+  Jti: "can_access_jti",
 };
 
 const LayoutWrapper = ({ children, currentPageName }) =>
