@@ -338,7 +338,13 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
     setIsImporting(true);
     try {
       const result = await runLocalImport(connection.id);
-      toast.success(result.message || cleanImportToastMessage({ imported: result.imported || 0 }));
+      // Don't fall back to result.message here — runConnectionImport
+      // always returns a non-empty success message ("Import completed
+      // - N records added"), so the prior `result.message ||` short-
+      // circuited cleanImportToastMessage on every successful sync,
+      // meaning the streak counter inside it never ticked. Always run
+      // the streak fn; its output already conveys the imported count.
+      toast.success(cleanImportToastMessage({ imported: result.imported || 0 }));
     } catch (e) {
       resetCleanSyncStreak();
       toast.error("Sync failed: " + (e.message || "Unknown error"));

@@ -316,9 +316,11 @@ export default function Connections() {
 
     try {
       const result = await runLocalImport(connection.id);
-      toast.success(
-        result.message || cleanImportToastMessage({ imported: result.imported || 0, target: connection.name })
-      );
+      // Always run cleanImportToastMessage (so the streak ticks).
+      // Falling back via `result.message ||` would short-circuit on
+      // every successful sync since runConnectionImport always returns
+      // a non-empty success message. See ConnectionModal.handleImport.
+      toast.success(cleanImportToastMessage({ imported: result.imported || 0, target: connection.name }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });

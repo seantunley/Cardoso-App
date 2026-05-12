@@ -223,7 +223,11 @@ function ConnectionsTab({ currentUser }) {
     setSyncingId(conn.id);
     try {
       const r = await runLocalImport(conn.id);
-      toast.success(r.message || cleanImportToastMessage({ imported: r.imported || 0, target: conn.name }));
+      // Always run cleanImportToastMessage (so the streak ticks).
+      // Falling back via `r.message ||` would short-circuit on every
+      // successful sync since runConnectionImport always returns a
+      // non-empty success message. See ConnectionModal.handleImport.
+      toast.success(cleanImportToastMessage({ imported: r.imported || 0, target: conn.name }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
     } catch (e) { resetCleanSyncStreak(); toast.error(humanizeApiError(e, `sync "${conn.name}"`)); }
