@@ -106,11 +106,19 @@ async function main() {
 
     // Compute the actual scale by capping against ALL three limits
     // (width, height, total pixels). Same algorithm as the Phase 1
-    // pdfjs version — PDFium's getSize returns base page dimensions
-    // in CSS pixels at scale 1.0 just like pdfjs's getViewport.
-    const base = page.getSize();
-    const baseW = base.width;
-    const baseH = base.height;
+    // pdfjs version.
+    //
+    // PDFium API gotchas, both burned us in the first attempt:
+    //   - page.getSize(opts) REQUIRES opts.scale (throws "Cannot
+    //     destructure property 'scale'..." if missing).
+    //   - The unscaled dims come back as originalWidth / originalHeight,
+    //     not width / height (those are the scaled values).
+    // Use getOriginalSize() — the dedicated unscaled accessor that
+    // doesn't take renderOptions. It returns
+    // { originalWidth, originalHeight }.
+    const base = page.getOriginalSize();
+    const baseW = base.originalWidth;
+    const baseH = base.originalHeight;
     const baseArea = baseW * baseH;
     const widthCap  = maxWidth  / baseW;
     const heightCap = maxHeight / baseH;
