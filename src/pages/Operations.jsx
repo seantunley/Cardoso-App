@@ -50,6 +50,19 @@ export default function Operations() {
     const traceSequence = ["KeyT", "KeyR", "KeyA", "KeyC", "KeyE"];
 
     const handleKeyDown = (event) => {
+      // Bail out when the user is typing into a form control. This
+      // handler is global (window.addEventListener), so without this
+      // check, typing "LOGS" or "TRACE" into the OCR / system-log
+      // filter inputs (or any other input/textarea/select on the
+      // Operations page) would silently switch tabs and fire a toast
+      // mid-typing — confusing user-visible disruption during normal
+      // input.
+      const target = event.target;
+      const isEditable =
+        target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
+        target?.isContentEditable;
+      if (isEditable) return;
+
       logsIndex = event.code === logsSequence[logsIndex]
         ? logsIndex + 1
         : event.code === logsSequence[0]

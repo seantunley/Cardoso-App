@@ -25,18 +25,21 @@ export default function CardosoEasterEgg() {
 
   useEffect(() => {
     const onKeyDown = (event) => {
+      // Bail out when the user is typing into a form control. This
+      // handler is global (window-level), so without this gate every
+      // keystroke a user makes in any input/textarea/select would
+      // (a) hijack Cmd/Ctrl+K and (b) advance the Konami arrow-key
+      // sequence whenever they navigate with arrow keys inside text.
+      // Both are confusing user-visible disruptions during normal
+      // input. The easter egg remains triggerable when no editable
+      // element has focus.
+      const target = event.target;
+      const isEditable =
+        target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
+        target?.isContentEditable;
+      if (isEditable) return;
+
       if ((event.ctrlKey || event.metaKey) && event.code === "KeyK") {
-        // Don't hijack the browser's omnibox/search shortcut when the
-        // user is typing into an editable element — that's their
-        // expected use of Cmd/Ctrl+K and stealing it is a confusing
-        // regression. Login form, search boxes, comment fields, etc.
-        // The easter egg is also triggerable via the Konami sequence,
-        // so we lose nothing by being conservative here.
-        const target = event.target;
-        const isEditable =
-          target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
-          target?.isContentEditable;
-        if (isEditable) return;
         event.preventDefault();
         setCommandOpen(true);
         setCommandValue("");
