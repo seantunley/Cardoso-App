@@ -22,7 +22,7 @@ beforeEach(() => {
 describe('getJtiSettings', () => {
   it('returns empty strings for all four fields when nothing is stored', () => {
     expect(getJtiSettings({ db })).toEqual({
-      townCity: '', region: '', country: '', siteLabel: '',
+      townCity: '', region: '', country: '', siteLabel: '', queryOverride: '',
     });
   });
 
@@ -36,13 +36,14 @@ describe('getJtiSettings', () => {
       region: 'MPUMALANGA',
       country: 'SOUTH AFRICA',
       siteLabel: 'Ermelo',
+      queryOverride: '',
     });
   });
 
   it('returns empty string for missing individual keys (partial state)', () => {
     db.prepare(`INSERT INTO jti_settings (key, value) VALUES (?, ?)`).run('town_city', 'ERMELO');
     expect(getJtiSettings({ db })).toEqual({
-      townCity: 'ERMELO', region: '', country: '', siteLabel: '',
+      townCity: 'ERMELO', region: '', country: '', siteLabel: '', queryOverride: '',
     });
   });
 
@@ -57,7 +58,7 @@ describe('setJtiSettings', () => {
       db, townCity: 'ERMELO', region: 'MPUMALANGA', country: 'SOUTH AFRICA', siteLabel: 'Ermelo',
     });
     expect(result).toEqual({
-      townCity: 'ERMELO', region: 'MPUMALANGA', country: 'SOUTH AFRICA', siteLabel: 'Ermelo',
+      townCity: 'ERMELO', region: 'MPUMALANGA', country: 'SOUTH AFRICA', siteLabel: 'Ermelo', queryOverride: '',
     });
     // Persisted in DB
     const stored = db.prepare(`SELECT key, value FROM jti_settings ORDER BY key`).all();
@@ -83,6 +84,7 @@ describe('setJtiSettings', () => {
       region: 'MPUMALANGA',
       country: 'SOUTH AFRICA',
       siteLabel: '',
+      queryOverride: '',
     });
   });
 
@@ -97,10 +99,10 @@ describe('setJtiSettings', () => {
     expect(getJtiSettings({ db }).townCity).toBe('123');
   });
 
-  it('returns the post-upsert state of all four fields', () => {
+  it('returns the post-upsert state of all settings', () => {
     setJtiSettings({ db, townCity: 'A' });
     const result = setJtiSettings({ db, region: 'B' });
-    expect(result).toEqual({ townCity: 'A', region: 'B', country: '', siteLabel: '' });
+    expect(result).toEqual({ townCity: 'A', region: 'B', country: '', siteLabel: '', queryOverride: '' });
   });
 
   it('updates atomically — if the transaction fails mid-way, none of the changes apply', () => {
@@ -113,7 +115,7 @@ describe('setJtiSettings', () => {
     expect(() => setJtiSettings({ db, townCity: 'X', region: explosive }))
       .toThrow(/boom/);
     expect(getJtiSettings({ db })).toEqual({
-      townCity: 'ORIGINAL', region: 'ORIGINAL_REGION', country: '', siteLabel: '',
+      townCity: 'ORIGINAL', region: 'ORIGINAL_REGION', country: '', siteLabel: '', queryOverride: '',
     });
   });
 

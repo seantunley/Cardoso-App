@@ -27,9 +27,11 @@ beforeEach(() => {
 });
 
 // Stub req/res factory. Captures status / json / setHeader / end so
-// tests can assert on what the handler did.
-function makeReqRes({ body = {} } = {}) {
-  const req = { body, currentUser: { id: 1, email: 'op@example.com' } };
+// tests can assert on what the handler did. role defaults to 'admin'
+// because most JTI endpoints are admin-permissive; tests that check
+// the operator-vs-admin gate pass role: 'operator' explicitly.
+function makeReqRes({ body = {}, role = 'admin' } = {}) {
+  const req = { body, currentUser: { id: 1, email: 'op@example.com', role } };
   const res = {
     statusCode: 200,
     headers: {},
@@ -42,6 +44,11 @@ function makeReqRes({ body = {} } = {}) {
   };
   return { req, res };
 }
+
+// Default pool-status stub for handleGetSettings — assumes JTI is
+// configured (so a fresh-install GET doesn't trip the warning path).
+const stubPoolConfigured = () => ({ configured: true, source: 'mock://test-connection' });
+const stubPoolUnconfigured = () => ({ configured: false, source: null });
 
 // Simple Sage pool stub matching the shape jtiQuery expects (pool →
 // request() → input().query()).
@@ -73,27 +80,41 @@ describe('pickFirst', () => {
 });
 
 describe('handleGetSettings', () => {
-  it('returns empty defaults for a fresh install', async () => {
+  it('returns empty defaults + the default SQL + pool status for a fresh install', async () => {
     const { req, res } = makeReqRes();
-    handleGetSettings({ db, req, res });
-    expect(res.body).toEqual({
-      ok: true,
-      settings: { townCity: '', region: '', country: '', siteLabel: '' },
+    handleGetSettings({ db, getPoolStatus: stubPoolConfigured, req, res });
+    expect(res.body.ok).toBe(true);
+    expect(res.body.settings).toEqual({
+      townCity: '', region: '', country: '', siteLabel: '', queryOverride: '',
     });
+    // effective === default when no override is stored
+    expect(res.body.effectiveSql).toBe(res.body.defaultSql);
+    expect(res.body.effectiveSql).toMatch(/FROM OESHDT/);
+    expect(res.body.poolStatus).toEqual({ configured: true, source: 'mock://test-connection' });
   });
 
-  it('returns the stored defaults', async () => {
+  it('returns the stored defaults + override when present', async () => {
     db.prepare(`INSERT INTO jti_settings (key, value) VALUES ('town_city', 'ERMELO')`).run();
     db.prepare(`INSERT INTO jti_settings (key, value) VALUES ('site_label', 'Ermelo')`).run();
+    db.prepare(`INSERT INTO jti_settings (key, value) VALUES ('query_override', 'SELECT 1 AS TRANNUM, 2 AS TRANDATE, 3 AS ITEM, 4 AS [DESC], 5 AS CUSTOMER, 6 AS NAMECUST, 7 AS QTYSOLD WHERE @from <= @to AND @vendor = @vendor')`).run();
     const { req, res } = makeReqRes();
-    handleGetSettings({ db, req, res });
+    handleGetSettings({ db, getPoolStatus: stubPoolConfigured, req, res });
     expect(res.body.settings.townCity).toBe('ERMELO');
     expect(res.body.settings.siteLabel).toBe('Ermelo');
+    // effectiveSql now reflects the override, not the default
+    expect(res.body.effectiveSql).toMatch(/SELECT 1 AS TRANNUM/);
+    expect(res.body.effectiveSql).not.toBe(res.body.defaultSql);
+  });
+
+  it('surfaces poolStatus.configured=false when JTI has no role assigned', async () => {
+    const { req, res } = makeReqRes();
+    handleGetSettings({ db, getPoolStatus: stubPoolUnconfigured, req, res });
+    expect(res.body.poolStatus).toEqual({ configured: false, source: null });
   });
 });
 
 describe('handlePutSettings', () => {
-  it('persists the update + audits with before/after', async () => {
+  it('persists address-field updates + audits with before/after', async () => {
     const audit = vi.fn();
     const { req, res } = makeReqRes({
       body: { townCity: 'ERMELO', region: 'MPUMALANGA' },
@@ -105,7 +126,7 @@ describe('handlePutSettings', () => {
     expect(audit).toHaveBeenCalledTimes(1);
     const auditArg = audit.mock.calls[0][0];
     expect(auditArg.action).toBe('jti_settings_update');
-    expect(auditArg.changes.before).toEqual({ townCity: '', region: '', country: '', siteLabel: '' });
+    expect(auditArg.changes.before).toEqual({ townCity: '', region: '', country: '', siteLabel: '', queryOverride: '' });
     expect(auditArg.changes.after.townCity).toBe('ERMELO');
   });
 
@@ -114,8 +135,77 @@ describe('handlePutSettings', () => {
     const { req, res } = makeReqRes({ body: { townCity: 'ERMELO' } });
     handlePutSettings({ db, audit: vi.fn(), req, res });
     expect(res.body.settings).toEqual({
-      townCity: 'ERMELO', region: '', country: 'SOUTH AFRICA', siteLabel: '',
+      townCity: 'ERMELO', region: '', country: 'SOUTH AFRICA', siteLabel: '', queryOverride: '',
     });
+  });
+
+  it('REJECTS queryOverride from non-admin users (403)', async () => {
+    const { req, res } = makeReqRes({
+      body: { queryOverride: 'SELECT 1 AS TRANNUM ...' },
+      role: 'operator',
+    });
+    handlePutSettings({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(403);
+    expect(res.body.error).toMatch(/admin/i);
+  });
+
+  it('REJECTS invalid override SQL with structured issues array', async () => {
+    const { req, res } = makeReqRes({
+      body: { queryOverride: 'SELECT * FROM OESHDT' },  // missing every required column AND param
+    });
+    handlePutSettings({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(400);
+    expect(res.body.error).toMatch(/issues/);
+    expect(res.body.issues.length).toBeGreaterThan(0);
+    // Persisted nothing
+    const stored = db.prepare(`SELECT value FROM jti_settings WHERE key = 'query_override'`).get();
+    expect(stored).toBeUndefined();
+  });
+
+  it('REJECTS mutating SQL keywords', async () => {
+    const { req, res } = makeReqRes({
+      body: { queryOverride: 'SELECT @from, @to, @vendor, TRANNUM, TRANDATE, ITEM, [DESC], CUSTOMER, NAMECUST, QTYSOLD; DROP TABLE OESHDT' },
+    });
+    handlePutSettings({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(400);
+    expect(JSON.stringify(res.body.issues)).toMatch(/mutating keyword/i);
+  });
+
+  it('ACCEPTS a well-formed override and audits with the SQL-update action', async () => {
+    const audit = vi.fn();
+    const goodSql = `
+      SELECT TRANNUM, TRANDATE, ITEM, [DESC], CUSTOMER, NAMECUST, QTYSOLD
+      FROM OESHDT
+      WHERE TRANDATE BETWEEN @from AND @to
+        AND ITEM IN (SELECT ITEMNO FROM ICITMV WHERE VENDNUM LIKE @vendor)
+    `;
+    const { req, res } = makeReqRes({ body: { queryOverride: goodSql } });
+    handlePutSettings({ db, audit, req, res });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.settings.queryOverride.trim()).toBe(goodSql.trim());
+    expect(audit.mock.calls[0][0].action).toBe('jti_settings_query_update');
+  });
+
+  it('audits as "reset to default" when override is cleared with empty string', async () => {
+    db.prepare(`INSERT INTO jti_settings (key, value) VALUES ('query_override', 'SELECT 1')`).run();
+    const audit = vi.fn();
+    const { req, res } = makeReqRes({ body: { queryOverride: '' } });
+    handlePutSettings({ db, audit, req, res });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.settings.queryOverride).toBe('');
+    expect(audit.mock.calls[0][0].details).toMatch(/reset to default/);
+  });
+
+  it('warns (not errors) when override omits @vendor', async () => {
+    const noVendor = `
+      SELECT TRANNUM, TRANDATE, ITEM, [DESC], CUSTOMER, NAMECUST, QTYSOLD
+      FROM OESHDT WHERE TRANDATE BETWEEN @from AND @to
+    `;
+    const { req, res } = makeReqRes({ body: { queryOverride: noVendor } });
+    handlePutSettings({ db, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(200);
+    expect(res.body.warnings.length).toBeGreaterThan(0);
+    expect(JSON.stringify(res.body.warnings)).toMatch(/@vendor/);
   });
 });
 
@@ -147,13 +237,27 @@ describe('handleExport — input validation', () => {
   });
 });
 
-describe('handleExport — Sage pool unavailable', () => {
+describe('handleExport — JTI pool unavailable', () => {
   it('returns 503 with a clear message when the pool throws', async () => {
     const { req, res } = makeReqRes({ body: { from: '20260401', to: '20260430' } });
     const failingPool = async () => { throw new Error('Sage server timeout'); };
     await handleExport({ db, getSagePool: failingPool, audit: vi.fn(), req, res });
     expect(res.statusCode).toBe(503);
-    expect(res.body.error).toMatch(/Sage 300 unavailable.*timeout/);
+    expect(res.body.error).toMatch(/Sage server timeout/);
+  });
+
+  it('surfaces the "configure module routing" message verbatim when no role is assigned', async () => {
+    // This is the message getJtiSagePool throws when jti_export role
+    // is unset. The handler must NOT mask it — operator needs the
+    // exact "Settings → Connections → Module routing" hint to act.
+    const { req, res } = makeReqRes({ body: { from: '20260401', to: '20260430' } });
+    const unconfigured = async () => {
+      throw new Error('No connection assigned to JTI export — Settings → Connections → Module routing → assign a connection to "JTI export". This module does not fall back to the BAT Sage pool by design.');
+    };
+    await handleExport({ db, getSagePool: unconfigured, audit: vi.fn(), req, res });
+    expect(res.statusCode).toBe(503);
+    expect(res.body.error).toMatch(/Module routing/);
+    expect(res.body.error).toMatch(/JTI export/);
   });
 });
 

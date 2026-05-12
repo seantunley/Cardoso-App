@@ -16,23 +16,32 @@
 // explicit arg so tests can use an in-memory SQLite without a
 // module-level shim.
 
-export const JTI_SETTING_KEYS = ['town_city', 'region', 'country', 'site_label'];
+export const JTI_SETTING_KEYS = ['town_city', 'region', 'country', 'site_label', 'query_override'];
 
 /**
  * Read the current JTI settings as a plain object.
  *
+ * `queryOverride` carries the operator-supplied SQL that replaces the
+ * default jtiQuery.buildJtiSql when non-empty. Empty / missing means
+ * "use the default" — keeping the toggle implicit avoids needing a
+ * separate enable flag.
+ *
  * @param {{ db: import('better-sqlite3').Database }} args
- * @returns {{ townCity: string, region: string, country: string, siteLabel: string }}
+ * @returns {{
+ *   townCity: string, region: string, country: string,
+ *   siteLabel: string, queryOverride: string,
+ * }}
  */
 export function getJtiSettings({ db }) {
   if (!db) throw new TypeError('getJtiSettings: db is required');
   const rows = db.prepare(`SELECT key, value FROM jti_settings`).all();
   const map = new Map(rows.map((r) => [r.key, r.value]));
   return {
-    townCity:  map.get('town_city') || '',
-    region:    map.get('region')    || '',
-    country:   map.get('country')   || '',
-    siteLabel: map.get('site_label') || '',
+    townCity:      map.get('town_city')      || '',
+    region:        map.get('region')         || '',
+    country:       map.get('country')        || '',
+    siteLabel:     map.get('site_label')     || '',
+    queryOverride: map.get('query_override') || '',
   };
 }
 
@@ -43,12 +52,15 @@ export function getJtiSettings({ db }) {
  *
  * @param {{
  *   db: import('better-sqlite3').Database,
- *   townCity?: string, region?: string, country?: string, siteLabel?: string,
+ *   townCity?: string, region?: string, country?: string,
+ *   siteLabel?: string, queryOverride?: string,
  * }} args
- * @returns {{ townCity: string, region: string, country: string, siteLabel: string }}
- *          the post-upsert state of all four settings
+ * @returns {{
+ *   townCity: string, region: string, country: string,
+ *   siteLabel: string, queryOverride: string,
+ * }} the post-upsert state of all settings
  */
-export function setJtiSettings({ db, townCity, region, country, siteLabel }) {
+export function setJtiSettings({ db, townCity, region, country, siteLabel, queryOverride }) {
   if (!db) throw new TypeError('setJtiSettings: db is required');
   const upsert = db.prepare(`
     INSERT INTO jti_settings (key, value, updated_at)
@@ -58,10 +70,11 @@ export function setJtiSettings({ db, townCity, region, country, siteLabel }) {
       updated_at = excluded.updated_at
   `);
   const tx = db.transaction(() => {
-    if (townCity !== undefined)  upsert.run('town_city',  String(townCity));
-    if (region !== undefined)    upsert.run('region',     String(region));
-    if (country !== undefined)   upsert.run('country',    String(country));
-    if (siteLabel !== undefined) upsert.run('site_label', String(siteLabel));
+    if (townCity !== undefined)      upsert.run('town_city',      String(townCity));
+    if (region !== undefined)        upsert.run('region',         String(region));
+    if (country !== undefined)       upsert.run('country',        String(country));
+    if (siteLabel !== undefined)     upsert.run('site_label',     String(siteLabel));
+    if (queryOverride !== undefined) upsert.run('query_override', String(queryOverride));
   });
   tx();
   return getJtiSettings({ db });

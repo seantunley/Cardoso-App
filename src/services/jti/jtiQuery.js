@@ -35,6 +35,17 @@
 
 const JTI_VENDOR_PATTERN = '%JTI%';
 
+// The output spreadsheet builder consumes these seven aliases. Any
+// query (default OR override) that doesn't surface all of them will
+// produce a malformed .xlsx — so we enforce the contract twice:
+//   - validateOverrideSql  rejects bad SQL on save (PUT /settings)
+//   - assertRecordsetShape rejects bad recordsets on read (POST /export)
+// Belt-and-braces: a SELECT can pass the regex but still return
+// missing columns at runtime (e.g. dynamic SQL, conditional projection).
+export const JTI_REQUIRED_COLUMNS = [
+  'TRANNUM', 'TRANDATE', 'ITEM', 'DESC', 'CUSTOMER', 'NAMECUST', 'QTYSOLD',
+];
+
 /**
  * Coerce a Date / number / string to an integer YYYYMMDD. Sage 300
  * stores TRANDATE as INT in this format, and the WHERE clause
@@ -66,25 +77,11 @@ export function toYyyymmddInt(value) {
   return Number(`${yyyy}${mm}${dd}`);
 }
 
-/**
- * Build the parameterised SQL + param map for the JTI query.
- *
- * @param {{ fromDate: Date | number | string, toDate: Date | number | string }} args
- * @returns {{ sql: string, params: { from: number, to: number, vendor: string } }}
- * @throws {RangeError} when dates are invalid
- * @throws {Error}      when fromDate > toDate
- */
-export function buildJtiSql({ fromDate, toDate }) {
-  if (fromDate == null || toDate == null) {
-    throw new TypeError('buildJtiSql: fromDate and toDate are required');
-  }
-  const from = toYyyymmddInt(fromDate);
-  const to = toYyyymmddInt(toDate);
-  if (from > to) {
-    throw new Error(`buildJtiSql: fromDate (${from}) must not be after toDate (${to})`);
-  }
-
-  const sql = `
+// Default query — the version-controlled SQL that ships with the
+// codebase. Operators can override it via jti_settings.query_override
+// (admin-gated UI on the JTI page). The default + override go through
+// the same param-binding path; only the SQL string differs.
+export const DEFAULT_JTI_SQL = `
     SELECT
       OESHDT.TRANNUM       AS TRANNUM,
       OESHDT.TRANDATE      AS TRANDATE,
@@ -108,14 +105,119 @@ export function buildJtiSql({ fromDate, toDate }) {
     ORDER BY OESHDT.TRANDATE ASC, OESHDT.TRANNUM ASC, OESHDT.ITEM ASC
   `;
 
+/**
+ * Build the parameterised SQL + param map for the JTI query.
+ *
+ * @param {{
+ *   fromDate: Date | number | string,
+ *   toDate: Date | number | string,
+ *   sqlOverride?: string,    // operator-supplied SQL; defaults to DEFAULT_JTI_SQL
+ * }} args
+ * @returns {{ sql: string, params: { from: number, to: number, vendor: string } }}
+ * @throws {RangeError} when dates are invalid
+ * @throws {Error}      when fromDate > toDate
+ */
+export function buildJtiSql({ fromDate, toDate, sqlOverride }) {
+  if (fromDate == null || toDate == null) {
+    throw new TypeError('buildJtiSql: fromDate and toDate are required');
+  }
+  const from = toYyyymmddInt(fromDate);
+  const to = toYyyymmddInt(toDate);
+  if (from > to) {
+    throw new Error(`buildJtiSql: fromDate (${from}) must not be after toDate (${to})`);
+  }
+
+  const sql = (typeof sqlOverride === 'string' && sqlOverride.trim().length > 0)
+    ? sqlOverride
+    : DEFAULT_JTI_SQL;
+
   return {
     sql,
-    params: {
-      from,
-      to,
-      vendor: JTI_VENDOR_PATTERN,
-    },
+    params: { from, to, vendor: JTI_VENDOR_PATTERN },
   };
+}
+
+/**
+ * Validate an operator-supplied SQL override BEFORE storing it. Catches
+ * the obvious foot-guns:
+ *   - missing @from / @to (date filter would be silently lost)
+ *   - missing required columns in the SELECT (recordset would be
+ *     incomplete; the runtime contract assert below would also catch
+ *     this, but tripping at SAVE time is friendlier)
+ *   - non-SELECT statements (no INSERT / UPDATE / DELETE / DROP etc.)
+ *   - missing @vendor (warning not error — operator may legitimately
+ *     hardcode the vendor pattern in their override)
+ *
+ * Returns an array of issue strings. Empty array = OK to save.
+ *
+ * @param {string} sqlText
+ * @returns {{ errors: string[], warnings: string[] }}
+ */
+export function validateOverrideSql(sqlText) {
+  const errors = [];
+  const warnings = [];
+  const trimmed = String(sqlText || '').trim();
+  if (!trimmed) return { errors, warnings };  // empty = "no override", legit
+
+  // Must START with SELECT (or a WITH for CTEs). No mutating verbs.
+  if (!/^\s*(SELECT|WITH)\b/i.test(trimmed)) {
+    errors.push('Override SQL must begin with SELECT (or WITH for CTEs). Mutating statements are not allowed.');
+  }
+  // Reject mutating verbs anywhere in the script, in case someone
+  // chains `; UPDATE …` after a SELECT.
+  if (/\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|MERGE|EXEC|EXECUTE|CREATE|ALTER|GRANT|REVOKE)\b/i.test(trimmed)) {
+    errors.push('Override SQL contains a mutating keyword (INSERT/UPDATE/DELETE/DROP/TRUNCATE/MERGE/EXEC/CREATE/ALTER/GRANT/REVOKE).');
+  }
+
+  // Required date params.
+  if (!/@from\b/i.test(trimmed)) errors.push('Override SQL must reference @from in the WHERE clause.');
+  if (!/@to\b/i.test(trimmed))   errors.push('Override SQL must reference @to in the WHERE clause.');
+  if (!/@vendor\b/i.test(trimmed)) {
+    warnings.push('Override SQL does not reference @vendor — make sure your vendor filter is hardcoded if you intended that.');
+  }
+
+  // Must surface every required output column. We look for
+  //   "AS <COL>"  OR  "<COL> AS"  OR a bare reference (column name
+  // appearing as a token). This is intentionally permissive — a
+  // tighter regex would reject legitimate variants like square-
+  // bracketed identifiers. The runtime contract assert is the
+  // hard pin; this is a save-time smoke check.
+  for (const col of JTI_REQUIRED_COLUMNS) {
+    const re = new RegExp(`\\b(?:AS\\s+\\[?${col}\\]?|\\[?${col}\\]?\\b)`, 'i');
+    if (!re.test(trimmed)) {
+      errors.push(`Override SQL must surface a column called ${col} (the spreadsheet builder reads it by that exact alias).`);
+    }
+  }
+
+  return { errors, warnings };
+}
+
+/**
+ * Runtime contract enforcement: after the query returns, verify the
+ * recordset has every required column on its first row. Empty
+ * recordsets pass (no rows means no contract to break).
+ *
+ * Why duplicate the save-time check: validateOverrideSql is a regex
+ * smoke test on the SQL TEXT. assertRecordsetShape verifies what the
+ * SQL actually RETURNED. A clever override could pass the regex but
+ * conditionally drop a column at runtime — only the recordset check
+ * catches that.
+ *
+ * @param {Array<Record<string, unknown>>} rows
+ * @throws {Error} listing missing columns
+ */
+export function assertRecordsetShape(rows) {
+  if (!Array.isArray(rows)) throw new TypeError('assertRecordsetShape: rows must be an array');
+  if (rows.length === 0) return;
+  const sample = rows[0];
+  const present = new Set(Object.keys(sample));
+  const missing = JTI_REQUIRED_COLUMNS.filter((c) => !present.has(c));
+  if (missing.length > 0) {
+    throw new Error(
+      `JTI query returned rows missing required columns: ${missing.join(', ')}. ` +
+      `Edit the query in Settings → JTI to surface every required column (TRANNUM, TRANDATE, ITEM, DESC, CUSTOMER, NAMECUST, QTYSOLD).`
+    );
+  }
 }
 
 /**
@@ -125,21 +227,29 @@ export function buildJtiSql({ fromDate, toDate }) {
  *   pool: { request: () => any },          // mssql ConnectionPool
  *   fromDate: Date | number | string,
  *   toDate: Date | number | string,
+ *   sqlOverride?: string,                  // operator-supplied SQL (defaults to DEFAULT_JTI_SQL)
  * }} args
  * @returns {Promise<Array<{
  *   TRANNUM: string, TRANDATE: number, ITEM: string,
  *   DESC: string, CUSTOMER: string, NAMECUST: string | null, QTYSOLD: number
  * }>>}
+ * @throws {Error} when the recordset is missing any of the required
+ *                 JTI_REQUIRED_COLUMNS (column-contract enforcement)
  */
-export async function queryJtiSales({ pool, fromDate, toDate }) {
+export async function queryJtiSales({ pool, fromDate, toDate, sqlOverride }) {
   if (!pool || typeof pool.request !== 'function') {
     throw new TypeError('queryJtiSales: a Sage pool with .request() is required');
   }
-  const { sql, params } = buildJtiSql({ fromDate, toDate });
+  const { sql, params } = buildJtiSql({ fromDate, toDate, sqlOverride });
   const req = pool.request();
   req.input('from', params.from);
   req.input('to', params.to);
   req.input('vendor', params.vendor);
   const result = await req.query(sql);
-  return result.recordset || [];
+  const rows = result.recordset || [];
+  // Enforce the column contract before handing rows to the spreadsheet
+  // builder. Loud failure here is much better than producing a quietly
+  // malformed .xlsx for the downstream pipeline.
+  assertRecordsetShape(rows);
+  return rows;
 }

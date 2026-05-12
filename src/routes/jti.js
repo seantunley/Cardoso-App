@@ -3,39 +3,57 @@
 // Three endpoints, all gated by `can_access_jti` (admins always pass
 // per the requirePermission middleware contract):
 //
-//   GET  /api/jti/settings   — read the install's saved defaults
-//   PUT  /api/jti/settings   — update one or more defaults
+//   GET  /api/jti/settings   — read defaults + the effective SQL +
+//                              pool-status info for the UI
+//   PUT  /api/jti/settings   — update one or more settings (the
+//                              query_override field is admin-only)
 //   POST /api/jti/export     — run the live Accpac query + return .xlsx
 //
-// The export endpoint takes the date range + (optional per-export)
-// overrides for TownCity/Region/Country. If overrides aren't sent it
-// falls back to the saved defaults — that's the "pre-fill from a
-// setting" UX the operator asked for.
+// Sage pool: this module uses its OWN role-pinned pool
+// (services/jti/jtiPool.js — getJtiSagePool). It does NOT fall back
+// to the BAT pool. If the operator hasn't assigned a connection to
+// the 'jti_export' role, the export endpoint surfaces a 503 with the
+// "configure Settings → Connections → Module routing" hint.
 //
 // Architecture: heavy handler logic lives in standalone functions
-// that take their dependencies explicitly (db, getSagePool, audit).
+// that take their dependencies explicitly (db, pool getter, audit).
 // The router wires them up; tests target the handlers directly with
-// mock deps. Sage pool comes from services/batReconciliation.js so
-// the JTI module doesn't have to maintain its own pool config.
+// mock deps. Avoids needing supertest in the dep tree.
 
 import { Router } from 'express';
 import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
-import { getSagePool } from '../services/batReconciliation.js';
-import { queryJtiSales } from '../services/jti/jtiQuery.js';
+import { getJtiSagePool, getJtiPoolStatus, resetJtiSagePool } from '../services/jti/jtiPool.js';
+import {
+  queryJtiSales,
+  validateOverrideSql,
+  DEFAULT_JTI_SQL,
+} from '../services/jti/jtiQuery.js';
 import { buildJtiWorkbook } from '../services/jti/jtiSpreadsheet.js';
 import { buildJtiFilename } from '../services/jti/jtiFilename.js';
 import { getJtiSettings, setJtiSettings } from '../services/jti/jtiSettings.js';
 
 /**
- * Read the install's saved JTI defaults.
- *
- * @param {{ db, req, res }} ctx
+ * Read the install's saved JTI defaults plus the effective SQL +
+ * connection-pool configuration status. The UI uses everything but
+ * `queryOverride` directly for form pre-fill; `effectiveSql` drives
+ * the read-only "currently running" view; `poolStatus` warns the
+ * operator when JTI isn't yet routable.
  */
-export function handleGetSettings({ db, req, res }) {
+export function handleGetSettings({ db, getPoolStatus, req, res }) {
   try {
     const settings = getJtiSettings({ db });
-    res.json({ ok: true, settings });
+    const effectiveSql = (settings.queryOverride || '').trim().length > 0
+      ? settings.queryOverride
+      : DEFAULT_JTI_SQL;
+    const poolStatus = getPoolStatus();
+    res.json({
+      ok: true,
+      settings,
+      effectiveSql,
+      defaultSql: DEFAULT_JTI_SQL,
+      poolStatus,
+    });
   } catch (err) {
     console.error('[jti] read settings failed:', err.message);
     res.status(500).json({ error: 'Failed to read JTI settings' });
@@ -43,24 +61,69 @@ export function handleGetSettings({ db, req, res }) {
 }
 
 /**
- * Partial update of the saved JTI defaults. Audited.
- *
- * @param {{ db, audit, req, res }} ctx
+ * Partial update of saved settings. Address fields are open to anyone
+ * with can_access_jti; queryOverride is ADMIN-ONLY because changing
+ * the SQL has direct impact on what data flows into the consumer
+ * pipeline.
  */
-export function handlePutSettings({ db, audit, req, res }) {
-  const { townCity, region, country, siteLabel } = req.body || {};
+export function handlePutSettings({ db, audit, resetPool, req, res }) {
+  const body = req.body || {};
+  const { townCity, region, country, siteLabel, queryOverride } = body;
+  const isAdmin = req.currentUser?.role === 'admin';
+
+  // Admin gate for queryOverride. Operators with can_access_jti can
+  // still edit their address defaults from this same endpoint without
+  // being blocked.
+  if (queryOverride !== undefined && !isAdmin) {
+    return res.status(403).json({
+      error: 'Editing the JTI query is restricted to admin users.',
+    });
+  }
+
+  // Validate the SQL override before we try to persist it. validate
+  // returns { errors, warnings } — errors block the save; warnings
+  // are surfaced in the response so the UI can show them.
+  let validation = { errors: [], warnings: [] };
+  if (queryOverride !== undefined) {
+    validation = validateOverrideSql(queryOverride);
+    if (validation.errors.length > 0) {
+      return res.status(400).json({
+        error: 'Override SQL has issues',
+        issues: validation.errors,
+        warnings: validation.warnings,
+      });
+    }
+  }
+
   try {
     const before = getJtiSettings({ db });
-    const after = setJtiSettings({ db, townCity, region, country, siteLabel });
+    const after = setJtiSettings({ db, townCity, region, country, siteLabel, queryOverride });
+
+    // Compose audit details — log SQL changes loudly because they
+    // change what data leaves the building.
+    const sqlChanged = queryOverride !== undefined && before.queryOverride !== after.queryOverride;
     audit({
       req,
-      action: 'jti_settings_update',
+      action: sqlChanged ? 'jti_settings_query_update' : 'jti_settings_update',
       resourceType: 'system',
-      resourceName: 'JTI export defaults',
-      details: 'Updated JTI defaults',
+      resourceName: sqlChanged ? 'JTI export query' : 'JTI export defaults',
+      details: sqlChanged
+        ? `JTI SQL ${after.queryOverride ? 'overridden' : 'reset to default'}`
+        : 'Updated JTI defaults',
       changes: { before, after },
     });
-    res.json({ ok: true, settings: after });
+
+    // If the connection assignment didn't move but SQL changed, no
+    // pool reset is needed — pool is keyed by connection, not by SQL.
+    // Kept here as a hook for future code that might cache prepared
+    // statements per-config.
+    if (sqlChanged && resetPool) { /* no-op today */ }
+
+    res.json({
+      ok: true,
+      settings: after,
+      warnings: validation.warnings,
+    });
   } catch (err) {
     console.error('[jti] update settings failed:', err.message);
     res.status(500).json({ error: 'Failed to update JTI settings' });
@@ -70,7 +133,12 @@ export function handlePutSettings({ db, audit, req, res }) {
 /**
  * Run the live Accpac query + return the .xlsx download.
  *
- * @param {{ db, getSagePool, audit, req, res }} ctx
+ * Body shape:
+ *   {
+ *     from: 'YYYY-MM-DD' | 'YYYYMMDD' | <Date-string>,
+ *     to:   <same shapes>,
+ *     townCity?, region?, country?  // override saved defaults
+ *   }
  */
 export async function handleExport({ db, getSagePool, audit, req, res }) {
   const { from, to } = req.body || {};
@@ -87,18 +155,19 @@ export async function handleExport({ db, getSagePool, audit, req, res }) {
     country:  pickFirst(req.body?.country,  settings.country),
   };
   const siteLabel = pickFirst(req.body?.siteLabel, settings.siteLabel);
+  const sqlOverride = settings.queryOverride || undefined;
 
   let pool;
   try {
     pool = await getSagePool();
   } catch (err) {
     console.error('[jti] Sage pool unavailable:', err.message);
-    return res.status(503).json({ error: `Sage 300 unavailable: ${err.message}` });
+    return res.status(503).json({ error: err.message });
   }
 
   let rows;
   try {
-    rows = await queryJtiSales({ pool, fromDate: from, toDate: to });
+    rows = await queryJtiSales({ pool, fromDate: from, toDate: to, sqlOverride });
   } catch (err) {
     if (err instanceof RangeError || err.message?.includes('must not be after')) {
       return res.status(400).json({ error: err.message });
@@ -139,7 +208,7 @@ export async function handleExport({ db, getSagePool, audit, req, res }) {
     resourceType: 'system',
     resourceName: filename,
     details: `Generated JTI export (${from} → ${to}); ${rows.length} row(s)`,
-    changes: { from, to, rowCount: rows.length, manual },
+    changes: { from, to, rowCount: rows.length, manual, usedOverride: Boolean(sqlOverride) },
   });
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -168,9 +237,12 @@ export function createJtiRouter({ requireAuth, requirePermission }) {
   const router = Router();
   const gate = [requireAuth, requirePermission('can_access_jti')];
 
-  router.get('/api/jti/settings', ...gate, (req, res) => handleGetSettings({ db, req, res }));
-  router.put('/api/jti/settings', ...gate, (req, res) => handlePutSettings({ db, audit: logAudit, req, res }));
-  router.post('/api/jti/export', ...gate, (req, res) => handleExport({ db, getSagePool, audit: logAudit, req, res }));
+  router.get('/api/jti/settings', ...gate, (req, res) =>
+    handleGetSettings({ db, getPoolStatus: getJtiPoolStatus, req, res }));
+  router.put('/api/jti/settings', ...gate, (req, res) =>
+    handlePutSettings({ db, audit: logAudit, resetPool: resetJtiSagePool, req, res }));
+  router.post('/api/jti/export', ...gate, (req, res) =>
+    handleExport({ db, getSagePool: getJtiSagePool, audit: logAudit, req, res }));
 
   return router;
 }

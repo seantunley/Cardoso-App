@@ -14,7 +14,8 @@
 
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Download, Save, FileSpreadsheet, AlertTriangle } from "lucide-react";
+import { Loader2, Download, Save, FileSpreadsheet, AlertTriangle, ChevronDown, ChevronRight, RotateCcw, Database } from "lucide-react";
+import { useAuth } from "@/lib/AuthContext";
 
 // Preset date-range buttons. Computes the [from, to] pair from "now"
 // at click time. Order matches operator workflow: most-likely first.
@@ -65,8 +66,12 @@ function dateInputValue(d) {
 }
 
 export default function Jti() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [savingQuery, setSavingQuery] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState('');
 
@@ -74,12 +79,28 @@ export default function Jti() {
   // Used to detect "dirty" state on the defaults form so the Save
   // button can be disabled when nothing changed.
   const [savedDefaults, setSavedDefaults] = useState({
-    townCity: '', region: '', country: '', siteLabel: '',
+    townCity: '', region: '', country: '', siteLabel: '', queryOverride: '',
   });
   // The defaults panel's editable copy (what the user is about to save).
   const [defaultsForm, setDefaultsForm] = useState({
     townCity: '', region: '', country: '', siteLabel: '',
   });
+
+  // SQL editor state. defaultSql is the version-controlled SQL the
+  // server ships with; effectiveSql is what's currently being run
+  // (override OR default); queryDraft is the operator's editable
+  // copy. The editor panel is collapsed by default — most operators
+  // shouldn't ever look at it.
+  const [defaultSql, setDefaultSql] = useState('');
+  const [savedQueryOverride, setSavedQueryOverride] = useState('');
+  const [queryDraft, setQueryDraft] = useState('');
+  const [queryEditorOpen, setQueryEditorOpen] = useState(false);
+  const [queryWarnings, setQueryWarnings] = useState([]);
+  const [queryIssues, setQueryIssues] = useState([]);
+
+  // Pool status — when configured=false, JTI hasn't been routed in
+  // Settings → Connections and the export will fail. Show a banner.
+  const [poolStatus, setPoolStatus] = useState({ configured: true, source: null });
 
   // Export form: date range + per-export overrides for the address
   // fields (initialised from the saved defaults).
@@ -89,8 +110,10 @@ export default function Jti() {
     townCity: '', region: '', country: '',
   });
 
-  // Load saved defaults on mount + propagate them into both the
-  // defaults form and the export form's address fields.
+  // Load everything the page needs in one fetch. The settings
+  // endpoint returns: saved defaults, the effective SQL, the default
+  // SQL (so the editor can show "reset to default"), and the pool
+  // configuration status.
   useEffect(() => {
     let cancelled = false;
     fetch('/api/jti/settings', { credentials: 'include' })
@@ -99,10 +122,21 @@ export default function Jti() {
         if (cancelled) return;
         const s = data.settings || {};
         setSavedDefaults(s);
-        setDefaultsForm(s);
-        setExportForm({ townCity: s.townCity, region: s.region, country: s.country });
+        // Address-defaults form (excludes queryOverride which has its
+        // own editor below).
+        setDefaultsForm({
+          townCity: s.townCity || '',
+          region: s.region || '',
+          country: s.country || '',
+          siteLabel: s.siteLabel || '',
+        });
+        setExportForm({ townCity: s.townCity || '', region: s.region || '', country: s.country || '' });
+        setDefaultSql(data.defaultSql || '');
+        setSavedQueryOverride(s.queryOverride || '');
+        setQueryDraft(s.queryOverride || data.defaultSql || '');
+        setPoolStatus(data.poolStatus || { configured: false, source: null });
       })
-      .catch(err => { if (!cancelled) setError(`Couldn't load saved defaults: ${err.message}`); })
+      .catch(err => { if (!cancelled) setError(`Couldn't load JTI settings: ${err.message}`); })
       .finally(() => { if (!cancelled) setLoadingSettings(false); });
     return () => { cancelled = true; };
   }, []);
@@ -112,6 +146,15 @@ export default function Jti() {
     defaultsForm.region    !== savedDefaults.region    ||
     defaultsForm.country   !== savedDefaults.country   ||
     defaultsForm.siteLabel !== savedDefaults.siteLabel;
+
+  // Effective SQL: what's currently being run by the export. Override
+  // takes precedence; default falls through. The dirty flag drives
+  // the Save button.
+  const effectiveQuery = (savedQueryOverride && savedQueryOverride.length > 0)
+    ? savedQueryOverride
+    : defaultSql;
+  const queryDirty = queryDraft.trim() !== effectiveQuery.trim();
+  const queryUsingOverride = Boolean(savedQueryOverride && savedQueryOverride.length > 0);
 
   const applyPreset = (name) => {
     const range = presetRange(name);
@@ -146,6 +189,56 @@ export default function Jti() {
     } finally {
       setSavingSettings(false);
     }
+  };
+
+  const handleSaveQuery = async () => {
+    if (!isAdmin) {
+      setError('Only admin users can change the JTI query');
+      return;
+    }
+    setSavingQuery(true);
+    setError('');
+    setQueryIssues([]);
+    setQueryWarnings([]);
+    try {
+      // If the draft equals the default, send empty string — that's
+      // the "use default" signal the server understands.
+      const overrideToSend = queryDraft.trim() === defaultSql.trim() ? '' : queryDraft;
+      const r = await fetch('/api/jti/settings', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queryOverride: overrideToSend }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        // Validation failures come back as { error, issues, warnings }
+        if (Array.isArray(data.issues) && data.issues.length > 0) {
+          setQueryIssues(data.issues);
+          setQueryWarnings(data.warnings || []);
+          toast.error(`SQL validation failed (${data.issues.length} issue${data.issues.length === 1 ? '' : 's'})`);
+          return;
+        }
+        throw new Error(data.error || `HTTP ${r.status}`);
+      }
+      setSavedQueryOverride(data.settings.queryOverride || '');
+      setSavedDefaults(data.settings);
+      setQueryWarnings(data.warnings || []);
+      toast.success(
+        overrideToSend ? 'JTI query saved' : 'Reset to default JTI query'
+      );
+    } catch (err) {
+      setError(`Save query failed: ${err.message}`);
+      toast.error(`Save query failed: ${err.message}`);
+    } finally {
+      setSavingQuery(false);
+    }
+  };
+
+  const handleResetQuery = () => {
+    setQueryDraft(defaultSql);
+    setQueryIssues([]);
+    setQueryWarnings([]);
   };
 
   const handleExport = async () => {
@@ -221,6 +314,35 @@ export default function Jti() {
           </div>
         )}
 
+        {/* Pool-not-configured warning. Shows when the operator hasn't
+            assigned a connection to the jti_export role in Settings →
+            Connections → Module routing. JTI doesn't fall back to BAT,
+            so without this assignment the export endpoint will 503. */}
+        {!loadingSettings && !poolStatus.configured && (
+          <div
+            className="relative overflow-hidden border border-border bg-card px-4 py-3"
+            style={{ borderRadius: '12px' }}
+          >
+            <div
+              className="absolute left-0 top-0 bottom-0 w-[2px]"
+              style={{ background: 'var(--phosphor)', boxShadow: '0 0 10px hsla(33,95%,55%,0.3)' }}
+            />
+            <div className="pl-2">
+              <div className="flex items-center gap-2 mb-1">
+                <Database className="h-4 w-4" strokeWidth={1.75} style={{ color: 'var(--phosphor)' }} />
+                <p className="font-mono text-xs uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>
+                  JTI not yet routable
+                </p>
+              </div>
+              <p className="text-sm text-muted-foreground">
+                JTI export needs its own database connection (it does not fall back to BAT).
+                Open <span className="font-mono text-foreground">Connections → Module routing</span>,
+                find the <span className="font-mono text-foreground">JTI export</span> dropdown, pick the right Sage company.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Defaults panel ─────────────────────────────────────────── */}
         <section className="bg-card border border-border p-6" style={{ borderRadius: '12px' }}>
           <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
@@ -279,6 +401,137 @@ export default function Jti() {
               {savingSettings ? 'Saving…' : 'Save defaults'}
             </button>
           </div>
+        </section>
+
+        {/* Query (advanced) panel ─────────────────────────────────────
+            Collapsed by default. The default SQL is shipped in code;
+            an operator can override it per-install. Editing requires
+            admin role; viewing is open to anyone with can_access_jti.
+            Validation runs server-side: missing @from / @to / required
+            columns / mutating keywords are rejected before save. */}
+        <section className="bg-card border border-border" style={{ borderRadius: '12px' }}>
+          <button
+            onClick={() => setQueryEditorOpen(o => !o)}
+            className="w-full flex items-center justify-between gap-3 p-6 text-left"
+          >
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+                Query (advanced)
+              </div>
+              <h2 className="font-display text-xl text-foreground mb-1">SQL the export runs against Sage</h2>
+              <p className="text-sm text-muted-foreground">
+                {queryUsingOverride
+                  ? 'Currently using a custom override. Click to view or edit.'
+                  : 'Currently using the default. Click to view or override.'}
+                {' '}
+                {!isAdmin && (
+                  <span className="text-muted-foreground/60">(Admin-only to change.)</span>
+                )}
+              </p>
+            </div>
+            {queryEditorOpen
+              ? <ChevronDown className="h-5 w-5 text-muted-foreground flex-shrink-0" />
+              : <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />}
+          </button>
+
+          {queryEditorOpen && (
+            <div className="px-6 pb-6 border-t border-border pt-5">
+              {/* Param hint */}
+              <div className="mb-3 flex flex-wrap gap-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                <span>Required:</span>
+                <span className="text-foreground">@from</span>
+                <span className="text-foreground">@to</span>
+                <span className="text-muted-foreground/70">(optional)</span>
+                <span className="text-foreground">@vendor</span>
+              </div>
+              <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                <span>Required output cols:</span>
+                <span className="text-foreground">TRANNUM</span>
+                <span className="text-foreground">TRANDATE</span>
+                <span className="text-foreground">ITEM</span>
+                <span className="text-foreground">DESC</span>
+                <span className="text-foreground">CUSTOMER</span>
+                <span className="text-foreground">NAMECUST</span>
+                <span className="text-foreground">QTYSOLD</span>
+              </div>
+
+              <textarea
+                value={queryDraft}
+                onChange={(e) => setQueryDraft(e.target.value)}
+                disabled={!isAdmin || savingQuery}
+                rows={18}
+                className="w-full px-3 py-2 border border-border bg-background text-foreground font-mono text-xs disabled:opacity-60"
+                style={{ borderRadius: '8px', tabSize: 2 }}
+                spellCheck={false}
+              />
+
+              {/* Validation feedback from the most recent save attempt */}
+              {queryIssues.length > 0 && (
+                <div className="mt-3 border border-destructive bg-card px-3 py-2" style={{ borderRadius: '8px' }}>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-1.5">
+                    {queryIssues.length} issue{queryIssues.length === 1 ? '' : 's'} — fix before saving
+                  </p>
+                  <ul className="space-y-1 text-xs text-destructive">
+                    {queryIssues.map((msg, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="font-mono text-[10px] mt-0.5">▲</span>
+                        <span>{msg}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {queryWarnings.length > 0 && (
+                <div className="mt-3 border border-border bg-card px-3 py-2" style={{ borderRadius: '8px' }}>
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1.5" style={{ color: 'var(--phosphor)' }}>
+                    {queryWarnings.length} warning{queryWarnings.length === 1 ? '' : 's'}
+                  </p>
+                  <ul className="space-y-1 text-xs text-muted-foreground">
+                    {queryWarnings.map((msg, i) => (
+                      <li key={i} className="flex gap-2">
+                        <span className="font-mono text-[10px] mt-0.5" style={{ color: 'var(--phosphor)' }}>!</span>
+                        <span>{msg}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between gap-3">
+                <p className="text-xs text-muted-foreground">
+                  {queryUsingOverride
+                    ? <>Override is active. <span className="font-mono">Reset</span> reverts to the version-controlled default.</>
+                    : <>Default SQL is in use. Edit the textarea above to override per-install.</>}
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={handleResetQuery}
+                    disabled={savingQuery || queryDraft.trim() === defaultSql.trim()}
+                    className="inline-flex items-center gap-2 px-3 py-1.5 border border-border font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                    style={{ borderRadius: '8px' }}
+                    title="Replace the textarea with the version-controlled default"
+                  >
+                    <RotateCcw className="h-3 w-3" strokeWidth={1.75} />
+                    Reset to default
+                  </button>
+                  <button
+                    onClick={handleSaveQuery}
+                    disabled={!isAdmin || !queryDirty || savingQuery}
+                    className="inline-flex items-center gap-2 px-4 py-2 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-50"
+                    style={{
+                      borderRadius: '12px',
+                      borderColor: 'var(--phosphor)',
+                      color: 'var(--phosphor)',
+                      background: 'hsla(33, 95%, 55%, 0.08)',
+                    }}
+                  >
+                    {savingQuery ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" strokeWidth={1.75} />}
+                    {savingQuery ? 'Saving…' : (queryDraft.trim() === defaultSql.trim() ? 'Reset to default' : 'Save query')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Export panel ───────────────────────────────────────────── */}

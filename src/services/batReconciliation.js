@@ -139,7 +139,7 @@ function loadSageConfig() {
   return null;
 }
 
-export async function getSagePool() {
+async function getSagePool() {
   const loaded = loadSageConfig();
   if (!loaded) {
     throw new Error('No Sage connection configured — add a databaseconnection with "sage" in its name, set bat_settings.sage_connection_id, or set SAGE_* env vars');

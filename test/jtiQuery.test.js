@@ -15,6 +15,10 @@ import {
   buildJtiSql,
   queryJtiSales,
   toYyyymmddInt,
+  validateOverrideSql,
+  assertRecordsetShape,
+  DEFAULT_JTI_SQL,
+  JTI_REQUIRED_COLUMNS,
 } from '../src/services/jti/jtiQuery.js';
 
 describe('toYyyymmddInt', () => {
@@ -198,5 +202,157 @@ describe('queryJtiSales — execution against a fake pool', () => {
     const pool = { request: requestSpy };
     await expect(queryJtiSales({ pool, fromDate: 'garbage', toDate: 20260430 })).rejects.toThrow(RangeError);
     expect(requestSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('buildJtiSql — sqlOverride', () => {
+  it('uses the override when a non-empty string is supplied', () => {
+    const override = 'SELECT 1 AS X FROM Y WHERE Z = @from AND W = @to';
+    const { sql, params } = buildJtiSql({
+      fromDate: 20260401, toDate: 20260430, sqlOverride: override,
+    });
+    expect(sql).toBe(override);
+    // Params still bound the same way — operator's override uses the
+    // same @-named placeholders.
+    expect(params).toEqual({ from: 20260401, to: 20260430, vendor: '%JTI%' });
+  });
+
+  it('falls back to DEFAULT_JTI_SQL when override is undefined', () => {
+    const { sql } = buildJtiSql({ fromDate: 20260401, toDate: 20260430 });
+    expect(sql).toBe(DEFAULT_JTI_SQL);
+  });
+
+  it('falls back to DEFAULT_JTI_SQL when override is empty / whitespace', () => {
+    expect(buildJtiSql({ fromDate: 20260401, toDate: 20260430, sqlOverride: '' }).sql).toBe(DEFAULT_JTI_SQL);
+    expect(buildJtiSql({ fromDate: 20260401, toDate: 20260430, sqlOverride: '   ' }).sql).toBe(DEFAULT_JTI_SQL);
+  });
+});
+
+describe('validateOverrideSql', () => {
+  const goodOverride = `
+    SELECT TRANNUM, TRANDATE, ITEM, [DESC], CUSTOMER, NAMECUST, QTYSOLD
+    FROM OESHDT
+    WHERE TRANDATE BETWEEN @from AND @to
+      AND ITEM IN (SELECT ITEMNO FROM ICITMV WHERE VENDNUM LIKE @vendor)
+  `;
+
+  it('empty / whitespace override is valid (means "no override")', () => {
+    expect(validateOverrideSql('').errors).toEqual([]);
+    expect(validateOverrideSql('   ').errors).toEqual([]);
+    expect(validateOverrideSql(null).errors).toEqual([]);
+  });
+
+  it('happy path: well-formed override returns zero errors', () => {
+    const r = validateOverrideSql(goodOverride);
+    expect(r.errors).toEqual([]);
+    expect(r.warnings).toEqual([]);
+  });
+
+  it('rejects non-SELECT statements', () => {
+    const r = validateOverrideSql(`UPDATE OESHDT SET QTYSOLD = 0`);
+    expect(r.errors.length).toBeGreaterThan(0);
+    expect(JSON.stringify(r.errors)).toMatch(/SELECT/);
+  });
+
+  it('rejects mutating keywords even when SELECT comes first', () => {
+    const r = validateOverrideSql(`SELECT 1; DROP TABLE OESHDT`);
+    expect(JSON.stringify(r.errors)).toMatch(/mutating keyword/i);
+  });
+
+  it('rejects when @from is missing', () => {
+    const noFrom = goodOverride.replace('@from', 'GETDATE()');
+    const r = validateOverrideSql(noFrom);
+    expect(JSON.stringify(r.errors)).toMatch(/@from/);
+  });
+
+  it('rejects when @to is missing', () => {
+    const noTo = goodOverride.replace('@to', 'GETDATE()');
+    const r = validateOverrideSql(noTo);
+    expect(JSON.stringify(r.errors)).toMatch(/@to/);
+  });
+
+  it('warns (not errors) when @vendor is missing — operator may have hardcoded it', () => {
+    const noVendor = goodOverride.replace(/AND ITEM IN \([^)]*\)/, '');
+    const r = validateOverrideSql(noVendor);
+    expect(r.errors).toEqual([]);
+    expect(JSON.stringify(r.warnings)).toMatch(/@vendor/);
+  });
+
+  it('rejects when any required column is missing from the SELECT', () => {
+    const noQty = goodOverride.replace('QTYSOLD', '');
+    const r = validateOverrideSql(noQty);
+    expect(r.errors.some(e => e.includes('QTYSOLD'))).toBe(true);
+  });
+
+  it('accepts CTEs (WITH … AS … SELECT)', () => {
+    const cte = `
+      WITH src AS (SELECT * FROM OESHDT WHERE TRANDATE BETWEEN @from AND @to)
+      SELECT TRANNUM, TRANDATE, ITEM, [DESC], CUSTOMER, NAMECUST, QTYSOLD
+      FROM src WHERE ITEM IN (SELECT ITEMNO FROM ICITMV WHERE VENDNUM LIKE @vendor)
+    `;
+    const r = validateOverrideSql(cte);
+    expect(r.errors).toEqual([]);
+  });
+});
+
+describe('assertRecordsetShape', () => {
+  function row(overrides) {
+    return {
+      TRANNUM: 'IN1', TRANDATE: 20260401, ITEM: 'X', DESC: 'Y',
+      CUSTOMER: 'C', NAMECUST: 'N', QTYSOLD: 1,
+      ...overrides,
+    };
+  }
+
+  it('passes when rows have every required column', () => {
+    expect(() => assertRecordsetShape([row()])).not.toThrow();
+  });
+
+  it('passes for an empty recordset (no rows = no contract to break)', () => {
+    expect(() => assertRecordsetShape([])).not.toThrow();
+  });
+
+  it('throws naming the missing column(s)', () => {
+    const partial = { TRANNUM: 'IN1', TRANDATE: 20260401 };  // missing 5 cols
+    expect(() => assertRecordsetShape([partial])).toThrow(/ITEM/);
+    expect(() => assertRecordsetShape([partial])).toThrow(/DESC/);
+    expect(() => assertRecordsetShape([partial])).toThrow(/QTYSOLD/);
+  });
+
+  it('throws TypeError when input is not an array', () => {
+    expect(() => assertRecordsetShape(null)).toThrow(TypeError);
+    expect(() => assertRecordsetShape({})).toThrow(TypeError);
+  });
+
+  it('JTI_REQUIRED_COLUMNS lists the seven aliases the spreadsheet builder reads', () => {
+    expect(JTI_REQUIRED_COLUMNS).toEqual([
+      'TRANNUM', 'TRANDATE', 'ITEM', 'DESC', 'CUSTOMER', 'NAMECUST', 'QTYSOLD',
+    ]);
+  });
+});
+
+describe('queryJtiSales — column contract via assertRecordsetShape', () => {
+  function makePool(recordset) {
+    return {
+      request: () => ({
+        input() { return this; },
+        async query() { return { recordset }; },
+      }),
+    };
+  }
+
+  it('throws if the recordset is missing required columns (operator override that drops a column)', async () => {
+    const pool = makePool([{ TRANNUM: 'X', TRANDATE: 20260401 }]);
+    await expect(queryJtiSales({ pool, fromDate: 20260401, toDate: 20260430 }))
+      .rejects.toThrow(/missing required columns/);
+  });
+
+  it('passes for a well-shaped recordset', async () => {
+    const pool = makePool([{
+      TRANNUM: 'X', TRANDATE: 20260401, ITEM: 'A', DESC: 'B',
+      CUSTOMER: 'C', NAMECUST: 'D', QTYSOLD: 1,
+    }]);
+    const rows = await queryJtiSales({ pool, fromDate: 20260401, toDate: 20260430 });
+    expect(rows.length).toBe(1);
   });
 });
