@@ -39,18 +39,11 @@ jobs:
         run: npm ci
         shell: powershell
 
-      - name: Guard pdfjs-dist version (load-bearing pin)
-        # Mirror of the same check in build-windows.yml so PRs catch a
-        # bumped pdfjs before they hit the release workflow. See
-        # docs/plans/pdf-engine-migration.md.
-        run: |
-          $version = (Get-Content package.json | ConvertFrom-Json).dependencies.'pdfjs-dist'
-          if ($version -ne '4.8.69') {
-            Write-Error "pdfjs-dist must be pinned to exactly 4.8.69 (got: $version). See src/services/ocrWorker.js."
-            exit 1
-          }
-          Write-Host "pdfjs-dist pin verified: $version"
-        shell: powershell
+      # pdfjs-dist 4.8.69 pin guard removed in Phase 2 of the PDF-engine
+      # migration. The renderer moved to PDFium (@hyzyla/pdfium) and
+      # node-canvas was removed entirely. pdfjs is still used for the
+      # text-layer fast-path (no canvas dependency, no ImageBitmap
+      # interop) and can bump freely now.
 
       - name: Lint
         run: npm run lint
