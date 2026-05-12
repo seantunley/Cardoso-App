@@ -1,5 +1,6 @@
 import express from 'express';
 import os from 'os';
+import fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { createRequire } from 'module';
@@ -1458,6 +1459,48 @@ export function createReportingRouter({ requireAuth }) {
       has_more: rows.length === limit,
       records: rows,
     });
+  });
+
+  // ---- JTI archive intake (server-to-server, hub→site pull-fallback) ----
+  //
+  // The user-facing /api/jti/archive endpoints are gated by login +
+  // can_access_jti. The hub doesn't have a logged-in user — it auths
+  // via the same x-reporting-token middleware as the rest of this
+  // file. Mounted as /api/reporting/jti/archives so the auth model is
+  // unambiguous (anything under /api/reporting/* is server-to-server).
+  router.get('/api/reporting/jti/archives', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const limitRaw = Number(req.query?.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 60;
+      const archives = db.prepare(`
+        SELECT * FROM jti_archive
+        ORDER BY period_year DESC, period_month DESC, generated_at DESC
+        LIMIT ?
+      `).all(limit);
+      res.json({ ok: true, site_id: SITE_ID, archives, limit });
+    } catch (err) {
+      console.error('[reporting/jti] list failed:', err.message);
+      res.status(500).json({ error: 'Failed to list JTI archives' });
+    }
+  });
+
+  router.get('/api/reporting/jti/archives/:id/download', reportingRateLimiter, requireReportingToken, (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid archive id' });
+    }
+    const row = db.prepare(`SELECT * FROM jti_archive WHERE id = ?`).get(id);
+    if (!row) return res.status(404).json({ error: `JTI archive #${id} not found` });
+    if (!fs.existsSync(row.file_path)) {
+      console.error(`[reporting/jti] archive #${id} (${row.filename}) missing on disk`);
+      return res.status(410).json({ error: `JTI archive #${id} record exists but file missing on disk` });
+    }
+    const buffer = fs.readFileSync(row.file_path);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('X-JTI-Archive-Sha256', row.sha256);
+    res.end(buffer);
   });
 
   return router;

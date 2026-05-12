@@ -1993,6 +1993,175 @@ function buildMigrations(db) {
         db.exec(`ALTER TABLE bat_reconciliations ADD COLUMN archive_path TEXT`);
       },
     },
+    {
+      // JTI export module — a vendor-scoped Sales report against Accpac
+      // (Sage 300) that replaces an existing Crystal-report-plus-Excel-
+      // macro workflow. Adds:
+      //   - can_access_jti permission flag on the user table (defaults
+      //     OFF for existing users; UserPermissionsModal exposes a
+      //     toggle so admins can grant it)
+      //   - jti_settings key/value table for the operator-supplied
+      //     defaults (TownCity / Region / Country) that get pre-filled
+      //     into every export. These are static per install; changing
+      //     them is a once-per-deployment operation done via the JTI
+      //     page's Defaults panel.
+      //
+      // The defaults live in the DB rather than env vars because they're
+      // operator-editable from the UI; env vars would force a restart.
+      version: 69,
+      name: 'jti_export_permission_and_settings',
+      up() {
+        ensureColumn(db, 'user', 'can_access_jti', 'INTEGER DEFAULT 0');
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS jti_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+          )
+        `);
+      },
+    },
+    {
+      // JTI archive — versioned per (period_year, period_month) so the
+      // operator's manual exports and the scheduled monthly job both
+      // get persisted side-by-side without overwriting each other.
+      // Files live on disk under uploads/jti-archive/<YYYY>-<MM>/; this
+      // table stores the metadata + the hub-push state machine.
+      //
+      // Hub push lifecycle:
+      //   pending  → never attempted (fresh row)
+      //   pushed   → hub acknowledged receipt
+      //   failed   → push attempted, hub returned error or unreachable;
+      //              hub_push_attempts incremented; retry job picks it up
+      //   skipped_no_hub → site isn't configured for hub mode (no
+      //                    HUB_URL/REPORTING_TOKEN); won't be retried
+      // The hub-side mirror table (hub_jti_archive) lives in a later
+      // migration on the hub-mode side; keeping site-side and hub-side
+      // schemas separate keeps the per-install footprint minimal.
+      version: 70,
+      name: 'jti_archive_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS jti_archive (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            -- Calendar month this export covers
+            period_year   INTEGER NOT NULL,
+            period_month  INTEGER NOT NULL CHECK (period_month BETWEEN 1 AND 12),
+
+            -- Provenance
+            generated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+            generated_by  TEXT,
+            source        TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
+
+            -- File on disk
+            filename      TEXT NOT NULL,
+            file_path     TEXT NOT NULL,
+            byte_size     INTEGER NOT NULL,
+            sha256        TEXT NOT NULL,
+            row_count     INTEGER NOT NULL,
+
+            -- Snapshot of the address fields stamped into this archive,
+            -- so a future "what label values did we use for April?"
+            -- can be answered without re-reading the .xlsx.
+            town_city     TEXT,
+            region        TEXT,
+            country       TEXT,
+            site_label    TEXT,
+
+            -- Hub push state machine (see migration comment)
+            hub_push_status   TEXT NOT NULL DEFAULT 'pending'
+              CHECK (hub_push_status IN ('pending', 'pushed', 'failed', 'skipped_no_hub')),
+            hub_push_at       TEXT,
+            hub_push_error    TEXT,
+            hub_push_attempts INTEGER NOT NULL DEFAULT 0
+          )
+        `);
+        // Most common read: "list archives, latest first per period"
+        // — drives the JTI page's Archive panel. (DESC, DESC, DESC)
+        // matches the natural display order so SQLite can serve it
+        // from the index without sorting.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_jti_archive_period
+          ON jti_archive(period_year DESC, period_month DESC, generated_at DESC)
+        `);
+        // Retry job scans rows in pending/failed state hourly; this
+        // index keeps that scan cheap as the archive grows.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_jti_archive_hub_push
+          ON jti_archive(hub_push_status)
+        `);
+      },
+    },
+    {
+      // v71 — hub_jti_archive: hub-side mirror of the per-site
+      // jti_archive table (v70). Runs on hub installs only (the
+      // table is created everywhere, but is empty / unused on a
+      // pure site install). One row per (site_id, sha256) — sha256
+      // is the natural dedup key, so a push followed by a pull-
+      // fallback that targets the same archive can't double-insert.
+      //
+      // received_via captures whether the archive arrived via the
+      // site→hub PUSH or the hub→site PULL fallback. Useful for
+      // debugging "why did the hub not get last month's archive
+      // until 24h after the site generated it" investigations.
+      version: 71,
+      name: 'hub_jti_archive_table',
+      up() {
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS hub_jti_archive (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+            -- Which site this came from (matches HUB_SITES.id)
+            site_id        TEXT NOT NULL,
+            site_archive_id INTEGER,
+
+            -- Calendar month
+            period_year    INTEGER NOT NULL,
+            period_month   INTEGER NOT NULL CHECK (period_month BETWEEN 1 AND 12),
+
+            -- Provenance copied from the site row
+            generated_at   TEXT NOT NULL,
+            generated_by   TEXT,
+            source         TEXT NOT NULL CHECK (source IN ('scheduled', 'manual')),
+
+            -- File on hub disk
+            filename       TEXT NOT NULL,
+            file_path      TEXT NOT NULL,
+            byte_size      INTEGER NOT NULL,
+            sha256         TEXT NOT NULL,
+            row_count      INTEGER NOT NULL,
+
+            -- Snapshot of label fields the site stamped in
+            town_city      TEXT,
+            region         TEXT,
+            country        TEXT,
+            site_label     TEXT,
+
+            -- How / when the hub got the file
+            received_at    TEXT NOT NULL DEFAULT (datetime('now')),
+            received_via   TEXT NOT NULL CHECK (received_via IN ('push', 'pull'))
+          )
+        `);
+        // Natural dedup key — a site uploading the same .xlsx twice
+        // (push retry, push then pull-fallback) collapses to one row.
+        db.exec(`
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_hub_jti_archive_dedup
+          ON hub_jti_archive(site_id, sha256)
+        `);
+        // Most common UI read: list across all sites, latest period
+        // first.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_hub_jti_archive_period
+          ON hub_jti_archive(period_year DESC, period_month DESC, received_at DESC)
+        `);
+        // Per-site filtered listing.
+        db.exec(`
+          CREATE INDEX IF NOT EXISTS idx_hub_jti_archive_site
+          ON hub_jti_archive(site_id, period_year DESC, period_month DESC)
+        `);
+      },
+    },
   ];
 }
 

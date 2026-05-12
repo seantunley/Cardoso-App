@@ -1,7 +1,7 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.5.4",
+  "version": "2026.5.5",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
@@ -65,6 +65,7 @@
     "date-fns": "^3.6.0",
     "dotenv": "^17.4.2",
     "embla-carousel-react": "^8.5.2",
+    "exceljs": "^4.4.0",
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.1",
     "express-session": "^1.19.0",

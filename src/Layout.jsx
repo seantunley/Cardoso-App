@@ -120,6 +120,23 @@ const IconCreditDebug = ({ className, style }) => (
   </svg>
 );
 
+// JTI — spreadsheet-style document with "JTI" stamped across it in
+// phosphor. Distinct from the BAT Reconciliation icon (compare bars)
+// so the operator can tell at a glance which is which.
+const IconJti = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Document body */}
+    <rect x="3" y="2.5" width="14" height="15" rx="1" fill="#1f2937" stroke="#9ca3af" strokeWidth="0.6"/>
+    {/* Sheet ruling */}
+    <line x1="5" y1="6"  x2="15" y2="6"  stroke="#4b5563" strokeWidth="0.4"/>
+    <line x1="5" y1="9"  x2="15" y2="9"  stroke="#4b5563" strokeWidth="0.4"/>
+    <line x1="5" y1="12" x2="15" y2="12" stroke="#4b5563" strokeWidth="0.4"/>
+    <line x1="5" y1="15" x2="15" y2="15" stroke="#4b5563" strokeWidth="0.4"/>
+    {/* JTI stamp */}
+    <text x="10" y="11.7" textAnchor="middle" fontFamily="monospace" fontSize="4.5" fontWeight="bold" fill="#fb923c">JTI</text>
+  </svg>
+);
+
 // Reconciliation — two parallel columns with a phosphor compare bracket.
 const IconReconciliationCompare = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
@@ -270,6 +287,8 @@ const navItems = [
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
+  { name: "JTI",                 icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true },
+  { name: "JTI",                 icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
   // Operations — admin-only home for background job runs, system errors,
   // deploys, and (in hub mode) per-site sync log. Same admin gating as

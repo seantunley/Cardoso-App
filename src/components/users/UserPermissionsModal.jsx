@@ -30,6 +30,7 @@ const permissionGroups = [
       { key: "can_access_hub_reconciliation", label: "Hub Reconciliation", description: "View cross-site BAT reconciliation summary (hub mode only)" },
       { key: "can_access_connections", label: "Connections", description: "Manage database connections" },
       { key: "can_access_settings", label: "Settings", description: "Access settings panel" },
+      { key: "can_access_jti", label: "JTI Export", description: "Generate JTI sales export from live Accpac (vendor-scoped, replaces the Crystal report + Excel macro flow)" },
     ]
   },
   {

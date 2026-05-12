@@ -19,6 +19,13 @@ import { logAudit } from '../lib/audit.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
 import { getSqlBackupHealth, getMachineHealthSummary } from '../services/hub/hubHealth.js';
 import { pagination, clampInt } from '../lib/httpParams.js';
+import multer from 'multer';
+import {
+  receiveJtiArchive,
+  listHubJtiArchives,
+  getHubJtiArchive,
+} from '../services/hub/jtiHubReceive.js';
+import fs from 'fs';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
@@ -1622,6 +1629,144 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       logError('hub.notify_backup_ready', err, { site_id: matched.id });
       res.status(500).json({ ok: false, error: err.message || 'pull failed' });
     }
+  });
+
+  // ========================================================================
+  // JTI archive intake — site pushes a finished monthly .xlsx + metadata
+  // ========================================================================
+  //
+  // Auth: per-site x-reporting-token (matched against HUB_SITES env list,
+  // same way notify-backup-ready does it above). Multipart body with the
+  // file under field name 'file' + metadata as form fields. Dedup is
+  // enforced on (site_id, sha256), so push retries / pull-fallback hits
+  // are idempotent (200 with the existing hub_archive_id).
+  //
+  // Multer config: accept exactly ONE .xlsx up to 25 MB. The site never
+  // produces files larger than ~500 KB in normal operation; the cap is
+  // a safety net against runaway uploads, not a real expected size.
+  const jtiUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 30 },
+  });
+
+  // Auth FIRST, multer second. If we mounted multer.single('file') as
+  // the first middleware, an unauthenticated caller could still POST a
+  // 25 MB body and have it fully buffered into memory before we got to
+  // the token check — a trivial DoS path. With this gate in front, an
+  // unknown / missing token returns 401 immediately and the body is
+  // discarded by Express without ever being parsed.
+  function requireJtiSiteToken(req, res, next) {
+    const token = req.headers['x-reporting-token'];
+    if (!token) return res.status(401).json({ error: 'Missing x-reporting-token header' });
+    const matched = HUB_SITES.find((s) => s.token && s.token === token);
+    if (!matched) return res.status(401).json({ error: 'Unrecognised reporting token' });
+    req._jtiSite = matched;
+    next();
+  }
+
+  router.post('/api/hub/receive-jti-archive', requireJtiSiteToken, jtiUpload.single('file'), async (req, res) => {
+    const matched = req._jtiSite;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing file part — POST as multipart/form-data with field name "file"' });
+    }
+
+    const f = req.body || {};
+    try {
+      const result = receiveJtiArchive({
+        db,
+        archive: {
+          siteId: matched.id,    // trust the token-mapped id, NOT req.body.site_id
+          siteArchiveId: f.site_archive_id ? Number(f.site_archive_id) : undefined,
+          buffer: req.file.buffer,
+          filename: req.file.originalname || f.filename || 'jti-export.xlsx',
+          periodYear: Number(f.period_year),
+          periodMonth: Number(f.period_month),
+          generatedAt: f.generated_at,
+          generatedBy: f.generated_by || null,
+          source: f.source,
+          rowCount: Number(f.row_count),
+          declaredSha256: f.sha256,
+          declaredByteSize: f.byte_size != null ? Number(f.byte_size) : undefined,
+          townCity: f.town_city || null,
+          region: f.region || null,
+          country: f.country || null,
+          siteLabel: f.site_label || null,
+          receivedVia: 'push',
+        },
+      });
+
+      if (result.deduped) {
+        console.log(`[hub-jti] dedup hit for site=${matched.id} sha256=${result.row.sha256.slice(0, 12)}… (existing hub id ${result.row.id})`);
+      } else {
+        console.log(`[hub-jti] received from site=${matched.id} ${f.period_year}-${String(f.period_month).padStart(2, '0')} (${result.row.byte_size} bytes, ${result.row.row_count} rows) → hub id ${result.row.id}`);
+      }
+
+      res.json({
+        ok: true,
+        deduped: result.deduped,
+        hubArchiveId: result.row.id,
+        siteId: matched.id,
+        sha256: result.row.sha256,
+      });
+    } catch (err) {
+      // Validation errors (sha mismatch, bad period, etc.) → 400.
+      // Anything else → 500. The site's push retry will handle 5xx
+      // automatically; 4xx means the site sent something nonsensical
+      // and retrying won't help.
+      const isValidationError = err instanceof TypeError || err instanceof RangeError;
+      const status = isValidationError ? 400 : 500;
+      console.error(`[hub-jti] receive failed for site=${matched.id}: ${err.message}`);
+      try { logError('hub.jti_receive', err, { site_id: matched.id, status }); } catch {}
+      res.status(status).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/hub/jti/archives — list across all sites (latest first)
+  // OR per-site if ?site_id=... given. UI renders this as a table on
+  // the hub-side JTI dashboard.
+  router.get('/api/hub/jti/archives', requireAuth, requirePermission('can_access_jti'), (req, res) => {
+    try {
+      const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
+        ? req.query.site_id : null;
+      const limitRaw = Number(req.query?.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 60;
+      const archives = listHubJtiArchives({ db, siteId, limit });
+      res.json({ ok: true, archives, limit });
+    } catch (err) {
+      console.error('[hub-jti] list failed:', err.message);
+      res.status(500).json({ error: `Failed to list hub JTI archives: ${err.message}` });
+    }
+  });
+
+  // GET /api/hub/jti/archives/:id/download — stream a previously-
+  // received .xlsx back to the operator. Audited.
+  router.get('/api/hub/jti/archives/:id/download', requireAuth, requirePermission('can_access_jti'), (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid hub archive id' });
+    }
+    const row = getHubJtiArchive({ db, id });
+    if (!row) return res.status(404).json({ error: `Hub JTI archive #${id} not found` });
+    if (!fs.existsSync(row.file_path)) {
+      console.error(`[hub-jti] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
+      logAudit({
+        req, action: 'hub_jti_archive_download', resourceType: 'system', resourceName: row.filename,
+        details: `Hub archive #${id} requested but file missing`, status: 'failure',
+      });
+      return res.status(410).json({ error: `Hub JTI archive #${id} record exists but file missing on disk` });
+    }
+    logAudit({
+      req, action: 'hub_jti_archive_download', resourceType: 'system', resourceName: row.filename,
+      details: `Downloaded hub JTI archive #${id} (site=${row.site_id}, ${row.period_year}-${String(row.period_month).padStart(2, '0')})`,
+    });
+    const buffer = fs.readFileSync(row.file_path);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('X-Hub-JTI-Archive-Id', String(id));
+    res.setHeader('X-JTI-Archive-Sha256', row.sha256);
+    res.end(buffer);
   });
 
   // ========================================================================

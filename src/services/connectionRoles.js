@@ -11,6 +11,7 @@ export const KNOWN_ROLES = [
   { id: 'customer_lookup',  label: 'Customer module — live customer/AR queries' },
   { id: 'inventory_lookup', label: 'Inventory module — live stock/pricing queries' },
   { id: 'bat_sage',         label: 'BAT reconciliation — Sage 300' },
+  { id: 'jti_export',       label: 'JTI export — Sage 300 (OE Shipment History)' },
 ];
 
 const VALID_ROLE_IDS = new Set(KNOWN_ROLES.map(r => r.id));

@@ -12,6 +12,10 @@ import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
+import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
+import { getJtiSagePool } from './services/jti/jtiPool.js';
+import { pushPendingArchives } from './services/jti/jtiHubPush.js';
+import { registerJob } from './lib/scheduledJobs.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -210,8 +214,16 @@ function track(name, fn, contextFn, opts) {
 }
 
 export function startSchedulers() {
-  cronTasks.push(cron.schedule('0,30 6-16 * * 1-5', track('scheduled-sync', runScheduledSyncCycle)));
-  cronTasks.push(cron.schedule('0 17 * * 1-5', track('scheduled-sync', runScheduledSyncCycle)));
+  {
+    const t = cron.schedule('0,30 6-16 * * 1-5', track('scheduled-sync', runScheduledSyncCycle));
+    cronTasks.push(t);
+    registerJob({ name: 'scheduled-sync', type: 'cron', cronExpression: '0,30 6-16 * * 1-5', taskRef: t, mode: 'all', description: 'Site sync cycle — every 30 min during business hours (Mon-Fri)' });
+  }
+  {
+    const t = cron.schedule('0 17 * * 1-5', track('scheduled-sync', runScheduledSyncCycle));
+    cronTasks.push(t);
+    registerJob({ name: 'scheduled-sync', type: 'cron', cronExpression: '0 17 * * 1-5', taskRef: t, mode: 'all', description: 'Site sync cycle — end-of-day catch-up' });
+  }
 
   // BAT Sage week-totals cache — refresh every 3h on weekdays at 7/10/13/16.
   // Site-only: the Hub doesn't have a Sage connection (it aggregates data
@@ -220,7 +232,11 @@ export function startSchedulers() {
   // on every cron tick and on every boot, each call throwing "No Sage
   // connection configured" into the System Log.
   if (process.env.HUB_MODE !== 'true') {
-    cronTasks.push(cron.schedule('0 7,10,13,16 * * 1-5', track('sage-cache-refresh', refreshSageWeekTotalsCache)));
+    {
+      const t = cron.schedule('0 7,10,13,16 * * 1-5', track('sage-cache-refresh', refreshSageWeekTotalsCache));
+      cronTasks.push(t);
+      registerJob({ name: 'sage-cache-refresh', type: 'cron', cronExpression: '0 7,10,13,16 * * 1-5', taskRef: t, mode: 'site', description: 'BAT Sage week-totals cache refresh' });
+    }
 
     // Sage health probe — every 60s. Cheap SELECT 1 that lets the admin
     // banner warn when Sage has been unreachable for more than 5 minutes,
@@ -236,29 +252,37 @@ export function startSchedulers() {
     setTimeout(() => { probeSageHealth().catch(() => {}); }, 8000);
     // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
     setTimeout(track('sage-cache-refresh', refreshSageWeekTotalsCache), 15000);
+    registerJob({ name: 'sage-cache-refresh', type: 'one-shot', delayMs: 15000, mode: 'site', description: 'BAT Sage cache — boot refresh' });
   }
 
   if (process.env.HUB_MODE !== 'true') {
-    // Daily backup at 02:00 — replaces backup.ps1 Task Scheduler dependency
-    cronTasks.push(cron.schedule('0 2 * * *', track('local-backup', runLocalBackup)));
+    {
+      const t = cron.schedule('0 2 * * *', track('local-backup', runLocalBackup));
+      cronTasks.push(t);
+      registerJob({ name: 'local-backup', type: 'cron', cronExpression: '0 2 * * *', taskRef: t, mode: 'site', description: 'Daily SQLite backup' });
+    }
     // Daily backup verification at 03:30 — 90 min after the backup, well
     // before the 06:30 morning sync window. Catches corrupt/truncated/stale
     // backups so an operator finds out before the day they need to restore.
-    cronTasks.push(cron.schedule('30 3 * * *', track(
-      'backup-verify',
-      verifyLatestBackup,
-      // Attach the verification result as the run's context so the
-      // dashboard can show "ok / which file / how stale / row counts"
-      // without an extra log scrape.
-      (result) => result,
-      // verifyLatestBackup signals failure by returning { ok: false, ... }
-      // instead of throwing. Without this hook, recordJob would persist
-      // the row as 'succeeded' and the dashboard / alerts would miss
-      // real backup failures (stale, corrupt, missing). The hook tells
-      // recordJob to record 'failed' when ok===false; the failure
-      // reason from the result is captured in error_message.
-      { successCheck: (r) => r?.ok !== false },
-    )));
+    {
+      const t = cron.schedule('30 3 * * *', track(
+        'backup-verify',
+        verifyLatestBackup,
+        // Attach the verification result as the run's context so the
+        // dashboard can show "ok / which file / how stale / row counts"
+        // without an extra log scrape.
+        (result) => result,
+        // verifyLatestBackup signals failure by returning { ok: false, ... }
+        // instead of throwing. Without this hook, recordJob would persist
+        // the row as 'succeeded' and the dashboard / alerts would miss
+        // real backup failures (stale, corrupt, missing). The hook tells
+        // recordJob to record 'failed' when ok===false; the failure
+        // reason from the result is captured in error_message.
+        { successCheck: (r) => r?.ok !== false },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'backup-verify', type: 'cron', cronExpression: '30 3 * * *', taskRef: t, mode: 'site', description: 'Verify latest backup integrity (PRAGMA integrity_check + row counts)' });
+    }
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
 
     // Boot-time hub-URL probe. Hits ${HUB_URL}/api/health once a few seconds
@@ -305,6 +329,7 @@ export function startSchedulers() {
       ),
       12000,
     );
+    registerJob({ name: 'credit-logic-sync', type: 'one-shot', delayMs: 12000, mode: 'site', description: 'Pull credit-logic config from hub on startup' });
     intervals.push(setInterval(
       track(
         'credit-logic-sync',
@@ -314,6 +339,57 @@ export function startSchedulers() {
       ),
       10 * 60 * 1000,
     ));
+    registerJob({ name: 'credit-logic-sync', type: 'interval', intervalMs: 10 * 60 * 1000, mode: 'site', description: 'Pull credit-logic config from hub every 10 min' });
+
+    // JTI monthly export — fires at 02:00 site-local on the 1st of
+    // every month, generating + archiving the export for the
+    // PREVIOUS calendar month. Site-only: HUB_MODE installs don't
+    // have a Sage pool and receive these archives via the push/pull
+    // bridge instead of producing them.
+    {
+      const t = cron.schedule('0 2 1 * *', track(
+        'jti-monthly-export',
+        () => runScheduledMonthlyJob({ db, getSagePool: getJtiSagePool }),
+        (result) => result,
+        // Skipped runs (already_archived, pool_unavailable) are normal
+        // outcomes for this job, not failures — successCheck only flags
+        // actual thrown errors.
+        { successCheck: (r) => true },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'jti-monthly-export', type: 'cron', cronExpression: '0 2 1 * *', taskRef: t, mode: 'site', description: 'JTI Sales export — generate + archive last calendar month' });
+    }
+
+    // JTI boot-time catch-up — backfills up to 12 missed months on
+    // app startup. Delayed 45s so migrations + pool init have settled
+    // (the catch-up may run dozens of Sage queries back-to-back if
+    // the site has been offline for months; better to start cleanly).
+    setTimeout(track(
+      'jti-boot-catchup',
+      () => runBootCatchUp({ db, getSagePool: getJtiSagePool, monthsBack: 12 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 45_000);
+    registerJob({ name: 'jti-boot-catchup', type: 'one-shot', delayMs: 45_000, mode: 'site', description: 'JTI catch-up — backfill up to 12 missed months on boot' });
+
+    // JTI hub-push retry tick — every 15 minutes, scan for archives
+    // in pending/failed state and try to send them. The post-archive
+    // push trigger in handleExport / generateAndArchivePeriod handles
+    // the happy path; this tick is the safety net for transient hub
+    // outages (network blip, hub restarting, hub disk full). batchSize
+    // = 10 so a stuck site that's accumulated 50+ unpushed archives
+    // doesn't block the tick for too long.
+    intervals.push(setInterval(track(
+      'jti-hub-push-retry',
+      () => pushPendingArchives({ db, batchSize: 10 }),
+      (result) => result,
+      { successCheck: () => true }, // failed-to-push is normal, not a job failure
+    ), 15 * 60 * 1000));
+    registerJob({ name: 'jti-hub-push-retry', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'site', description: 'JTI hub push retry — re-attempt any pending/failed pushes' });
   }
 
   // Alert engine evaluation tick — runs every 60s, evaluates the rules
@@ -330,9 +406,13 @@ export function startSchedulers() {
   // alerts" while waiting for the first 60s tick.
   setTimeout(() => { evaluateAllRules().catch(() => {}); }, 20_000);
   // Daily prune of resolved alerts at 04:30 (after job_runs prune at 04:00).
-  cronTasks.push(cron.schedule('30 4 * * *', () => {
-    try { pruneResolvedAlerts(30); } catch (err) { console.error('[alertEngine] prune failed:', err.message); }
-  }));
+  {
+    const t = cron.schedule('30 4 * * *', () => {
+      try { pruneResolvedAlerts(30); } catch (err) { console.error('[alertEngine] prune failed:', err.message); }
+    });
+    cronTasks.push(t);
+    registerJob({ name: 'prune-resolved-alerts', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'all', description: 'Daily prune of resolved alerts older than 30 days' });
+  }
 
   // Auto-sync interval — wrapped in track() so each invocation lands in
   // job_runs as 'auto-sync-cycle' with a context blob recording how many
@@ -364,12 +444,17 @@ export function startSchedulers() {
     }, (r) => r),
     5 * 60 * 1000,
   ));
+  registerJob({ name: 'auto-sync-cycle', type: 'interval', intervalMs: 5 * 60 * 1000, mode: 'all', description: 'Auto-sync — fire any connection past its sync_interval_hours' });
 
   // Daily prune of job_runs at 04:00 (after backup-verify at 03:30).
   // Keeps the table from growing unbounded over months.
-  cronTasks.push(cron.schedule('0 4 * * *', () => {
-    try { pruneOldJobRuns(30); } catch (err) { console.error('[jobRunner] prune failed:', err.message); }
-  }));
+  {
+    const t = cron.schedule('0 4 * * *', () => {
+      try { pruneOldJobRuns(30); } catch (err) { console.error('[jobRunner] prune failed:', err.message); }
+    });
+    cronTasks.push(t);
+    registerJob({ name: 'prune-job-runs', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'all', description: 'Daily prune of job_runs rows older than 30 days' });
+  }
 
   // Daily prune at 04:15 of the other unbounded tables — error_log,
   // auditlog, syncrun, login_log. Each one's keep-days horizon is
@@ -378,11 +463,15 @@ export function startSchedulers() {
   // writes don't contend for the writer slot. Wrapped in track() so
   // the per-table summary lands in job_runs.context — operator can
   // see at a glance how many rows each prune touched.
-  cronTasks.push(cron.schedule('15 4 * * *', track(
-    'retention-prune',
-    pruneOldRows,
-    (result) => ({ tables: result }),
-  )));
+  {
+    const t = cron.schedule('15 4 * * *', track(
+      'retention-prune',
+      pruneOldRows,
+      (result) => ({ tables: result }),
+    ));
+    cronTasks.push(t);
+    registerJob({ name: 'retention-prune', type: 'cron', cronExpression: '15 4 * * *', taskRef: t, mode: 'all', description: 'Daily prune of error_log / auditlog / syncrun / login_log per env retention horizons' });
+  }
 
   // Monthly VACUUM at 04:45 on the 1st — reclaims pages freed by the
   // daily prunes above (and the v66 record_snapshots drop). Without
@@ -392,11 +481,15 @@ export function startSchedulers() {
   // (typically <5s on a healthy DB, longer on the first run after a
   // bulk drop) so we run it at the quietest hour — well after the
   // 02:00 backup and the daily prunes have settled.
-  cronTasks.push(cron.schedule('45 4 1 * *', track(
-    'vacuum-db',
-    vacuumDb,
-    (result) => result,
-  )));
+  {
+    const t = cron.schedule('45 4 1 * *', track(
+      'vacuum-db',
+      vacuumDb,
+      (result) => result,
+    ));
+    cronTasks.push(t);
+    registerJob({ name: 'vacuum-db', type: 'cron', cronExpression: '45 4 1 * *', taskRef: t, mode: 'all', description: 'Monthly VACUUM — reclaims free pages on the 1st @ 04:45' });
+  }
 }
 
 export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites) {
@@ -417,9 +510,43 @@ export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites)
       .finally(() => { syncRunning = false; });
   };
   setTimeout(guardedSync, 10000);
+  registerJob({ name: 'hub-sync', type: 'one-shot', delayMs: 10000, mode: 'hub', description: 'Hub sync — boot kickoff' });
   intervals.push(setInterval(guardedSync, 5 * 60 * 1000));
+  registerJob({ name: 'hub-sync', type: 'interval', intervalMs: 5 * 60 * 1000, mode: 'hub', description: 'Hub sync — pull records/inventory/KPIs from every site every 5 min' });
 
-  cronTasks.push(cron.schedule('0 3 * * *', track('hub-backup-pull', runHubBackupPull)));
+  {
+    const t = cron.schedule('0 3 * * *', track('hub-backup-pull', runHubBackupPull));
+    cronTasks.push(t);
+    registerJob({ name: 'hub-backup-pull', type: 'cron', cronExpression: '0 3 * * *', taskRef: t, mode: 'hub', description: 'Daily pull of every site\'s SQLite backup' });
+  }
+
+  // Daily JTI pull-fallback at 03:30 — runs after the 03:00 backup
+  // pull so the heavy daily I/O is staggered. For each configured
+  // site, hits /api/reporting/jti/archives, dedups by sha256, and
+  // pulls anything the hub doesn't have. The site→hub push (Phase 2)
+  // is the primary path; this is the safety net for sites that were
+  // offline at push time. Imported lazily so site-mode installs (which
+  // don't call startHubSchedulers) never load the hub-only modules.
+  {
+    const t = cron.schedule('30 3 * * *', track(
+      'hub-jti-pull',
+      async () => {
+        const { pullMissingArchivesAll } = await import('./services/hub/jtiHubPull.js');
+        const { HUB_SITES } = await import('./services/hubEtl.js');
+        return pullMissingArchivesAll({ sites: HUB_SITES, db });
+      },
+      (result) => ({
+        sitesProcessed: result?.sitesProcessed || 0,
+        totalPulled: result?.totalPulled || 0,
+        totalMissing: result?.totalMissing || 0,
+      }),
+      // Per-site failures land in result.results[].status — they're
+      // expected (a site can be offline) and not job-level failures.
+      { successCheck: () => true },
+    ));
+    cronTasks.push(t);
+    registerJob({ name: 'hub-jti-pull', type: 'cron', cronExpression: '30 3 * * *', taskRef: t, mode: 'hub', description: 'JTI pull-fallback — fetch any archives missing from hub_jti_archive' });
+  }
 
   if (pingAllSites) {
     let pingRunning = false;
@@ -431,7 +558,9 @@ export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites)
         .finally(() => { pingRunning = false; });
     };
     setTimeout(guardedPing, 15000);
+    registerJob({ name: 'hub-ping', type: 'one-shot', delayMs: 15000, mode: 'hub', description: 'Hub ping — boot kickoff' });
     intervals.push(setInterval(guardedPing, 15 * 60 * 1000));
+    registerJob({ name: 'hub-ping', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'hub', description: 'Hub ping — health-check every site every 15 min' });
   }
 }
 

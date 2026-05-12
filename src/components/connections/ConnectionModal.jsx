@@ -304,13 +304,19 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
 
   const handleSubmit = async () => {
 
-    if (!formData.sync_query?.trim()) {
-      toast.error("Please enter a SQL query");
-      return;
-    }
-    if (!formData.query_index_field?.trim()) {
-      toast.error("Please specify the index column (unique row identifier)");
-      return;
+    // sync_query / query_index_field are sync-engine concerns. When
+    // the connection is marked module-only (is_bat_only), the scheduler
+    // skips it entirely and the modules using it (BAT recon, JTI
+    // export, …) ship their own SQL. So those fields become optional.
+    if (!formData.is_bat_only) {
+      if (!formData.sync_query?.trim()) {
+        toast.error("Please enter a SQL query (or tick \"Module-only Sage connection\" if this is just for BAT/JTI/Sage queries)");
+        return;
+      }
+      if (!formData.query_index_field?.trim()) {
+        toast.error("Please specify the index column (unique row identifier)");
+        return;
+      }
     }
 
     const dataToSave = {
@@ -474,7 +480,7 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             </div>
           </div>
 
-          {/* ── BAT-only isolation ── */}
+          {/* ── Module-only isolation ── */}
           <div className="flex items-start gap-3 rounded-lg border border-amber-700/50 bg-amber-950/20 px-4 py-3">
             <input
               id="is_bat_only"
@@ -485,10 +491,10 @@ export default function ConnectionModal({ connection, open, onClose, onSave, isS
             />
             <div>
               <label htmlFor="is_bat_only" className="text-sm font-medium text-gray-200 cursor-pointer">
-                BAT-only — exclude from customer search sync
+                Module-only Sage connection — skip sync engine
               </label>
               <p className="text-xs text-gray-400 mt-0.5">
-                Tick this for the BAT Sage SQL connection. The scheduler will skip it, and it won't be imported into the local customer database. The BAT module connects to it directly via its own pool.
+                Tick this for connections used only by BAT reconciliation, JTI export, or other modules that run their own queries. The customer-search scheduler will skip it, and the sync_query field below becomes optional — those modules ship their own SQL.
               </p>
             </div>
           </div>

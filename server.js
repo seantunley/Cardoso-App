@@ -25,6 +25,7 @@ import { createCollectionsRouter } from './src/routes/collections.js';
 import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
+import { createJtiRouter } from './src/routes/jti.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -195,6 +196,9 @@ app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShutting
 // ── BAT Supplier Reconciliation ──
 // (initBatSchema already ran earlier, before the migrations.)
 app.use(createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }));
+
+// ── JTI Sales export (Accpac OE Shipment History → .xlsx) ──
+app.use(createJtiRouter({ requireAuth, requirePermission }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
