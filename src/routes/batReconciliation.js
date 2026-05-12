@@ -183,10 +183,17 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
           details: `Batch upload — Filename: ${file.originalname}; PODs: ${result.podCount}; backfilled: ${result.backfilled}`,
           changes: { fees: result.fees, week_number: result.weekNumber, year: result.year, batch: true },
         });
+        // Lightweight per-row payload only. The full reconciliation
+        // object (extractions[] + creditNotes[]) can run to tens of KB
+        // per recon — multiply by a 50-file batch and the response
+        // gets large for content the modal never renders. The modal
+        // only needs filename/status/week/year/backfilled; the optional
+        // auto-navigate path uses reconciliationId to fetch the full
+        // object when the operator actually clicks through.
         results.push({
           filename: file.originalname,
           status: 'success',
-          reconciliation: result.reconciliation,
+          reconciliationId: result.reconciliation.id,
           weekNumber: result.weekNumber,
           year: result.year,
           backfilled: result.backfilled,

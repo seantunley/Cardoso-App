@@ -122,11 +122,26 @@ export default function FileUpload({ onComplete }) {
   // Auto-navigate to the most recently created recon when the operator
   // closes the modal AFTER a fully-successful batch — same instinct as
   // the single-file path: if it all worked, get them to the result.
-  const closeBatchModal = () => {
+  // The batch endpoint returns only reconciliationId per row (full
+  // recon objects would balloon the response on a 50-file batch); the
+  // full object is fetched here, only when navigation actually happens.
+  // If the fetch fails the operator still lands somewhere sensible —
+  // we close the modal without throwing.
+  const closeBatchModal = async () => {
     const lastSuccess = [...(batchResults || [])].reverse().find((r) => r.status === 'success');
     setBatchResults(null);
-    if (lastSuccess && failCount === 0) {
-      onComplete(lastSuccess.reconciliation, lastSuccess.backfilled || 0);
+    if (lastSuccess && failCount === 0 && lastSuccess.reconciliationId) {
+      try {
+        const r = await fetch(`/api/bat/reconciliation/${lastSuccess.reconciliationId}`, {
+          credentials: 'include',
+        });
+        if (r.ok) {
+          const data = await r.json();
+          onComplete(data.reconciliation || data, lastSuccess.backfilled || 0);
+        }
+      } catch {
+        /* swallow — modal already closed; operator can pick the recon from the list */
+      }
     }
   };
 
