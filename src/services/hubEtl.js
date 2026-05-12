@@ -633,15 +633,47 @@ async function pullBackupForSite(site) {
       // Best-effort body capture — many sites return a JSON {error: "..."}
       // or a plain text reason on 4xx/5xx; it's the difference between
       // "we got 503" and "we got 503: backup file not yet generated, try
-      // again in 30s." Capped so a runaway 5 MB error page can't blow
-      // the log entry up. Read failures don't stop the error from being
-      // recorded — we still log the status line either way.
+      // again in 30s."
+      //
+      // We pull bytes off the stream directly instead of using
+      // upstream.text() — text() buffers the ENTIRE response into
+      // memory before we get a chance to slice it, so a misbehaving
+      // proxy returning a multi-megabyte HTML error page would spike
+      // hub RSS during exactly the failure path operators are most
+      // likely to hit. Stream-read with an explicit byte cap and
+      // cancel the rest of the body as soon as we have enough. Read
+      // failures don't stop the error from being recorded — we still
+      // log the status line either way.
+      const BODY_BYTE_CAP = 2048;        // small read window
+      const BODY_CHAR_CAP = 500;         // what actually lands in the log
       let bodyDetail = '';
       try {
-        const body = await upstream.text();
-        if (body) {
-          const trimmed = body.trim().slice(0, 500);
-          if (trimmed) bodyDetail = `: ${trimmed}`;
+        if (upstream.body) {
+          const reader = upstream.body.getReader();
+          const chunks = [];
+          let total = 0;
+          try {
+            while (total < BODY_BYTE_CAP) {
+              const { value, done } = await reader.read();
+              if (done) break;
+              chunks.push(value);
+              total += value.byteLength;
+            }
+          } finally {
+            // Release the connection so the upstream can stop sending.
+            try { await reader.cancel(); } catch {}
+          }
+          if (total > 0) {
+            const merged = Buffer.concat(
+              chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)),
+            );
+            const trimmed = merged
+              .subarray(0, BODY_BYTE_CAP)
+              .toString('utf8')
+              .trim()
+              .slice(0, BODY_CHAR_CAP);
+            if (trimmed) bodyDetail = `: ${trimmed}`;
+          }
         }
       } catch {
         // ignore — body read failure shouldn't mask the status code
