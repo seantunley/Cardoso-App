@@ -121,6 +121,14 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       // fails (disk full, permission, etc.) we log + continue — losing
       // the archive is regrettable but doesn't invalidate the parsed
       // recon data, so this isn't worth aborting the upload over.
+      //
+      // IMPORTANT: createReconciliation upserts on (week, year). On a
+      // re-upload of the same week, the row may already carry an
+      // archive_path from the previous upload. We MUST null that out
+      // on archive failure — leaving the stale path would point future
+      // dispute replays at a spreadsheet whose contents no longer
+      // match the row's parsed totals. NULL is the honest signal that
+      // "no archive bytes available for this version of the row".
       try {
         const archivePath = archiveSupplierUpload({
           srcPath: req.file.path,
@@ -131,6 +139,8 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
           .run(archivePath, reconId);
       } catch (archiveErr) {
         console.error(`[bat] Failed to archive uploaded spreadsheet for recon ${reconId} (${req.file.originalname}): ${archiveErr.message}`);
+        db.prepare('UPDATE bat_reconciliations SET archive_path = NULL WHERE id = ?')
+          .run(reconId);
       }
 
       // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
