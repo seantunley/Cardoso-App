@@ -23,6 +23,7 @@ import { parentPort, workerData } from 'worker_threads';
 import { promises as fsp } from 'fs';
 import path from 'path';
 import { Buffer } from 'buffer';
+import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
 
 const { previewDir } = workerData || {};
 
@@ -424,92 +425,9 @@ async function ocrViaOcrSpaceEngine(imageBuffer, engine = '2', apiKey, retries =
   }
 }
 
-// ── Invoice number extraction (regex pipeline) ───────────────────────────────
-
-function findInvoiceNumber(text, inDigitLength = 9) {
-  if (!text) return null;
-  const cleaned = text
-    .replace(/[|]/g, 'I')
-    .replace(/[oO](?=\d{3,})/g, '0')
-    .replace(/[lI](?=N\d)/g, 'I')
-    .replace(/\*/g, '')
-    .replace(/[{}[\]()]/g, '')
-    .replace(/[—–-]{2,}/g, ' ');
-
-  // Long-form numeric invoice (legacy "18000xxxxxx" format and the new
-  // "1800042xxxxx" 11-12 digit form). Without the wider {8,10} range the
-  // 10-digit-after-IN format that BAT rolled out recently was never
-  // matched, every row hit no_regex_match, and the cascade walked the
-  // whole engine list before timing out at extract_total.
-  const longMatch = cleaned.match(/\b(18\d{8,10})\b/);
-  if (longMatch) return 'IN' + longMatch[1].substring(2);
-
-  // INQ-prefixed (Cardoso outbound invoice format on some sites).
-  // Must come BEFORE the IN-prefixed match below — INQ would otherwise
-  // partially match IN and return without the Q. Real-world example
-  // from a SASOL DELIGHT MARSHALL POD: GoogleVision read "INQ0214536"
-  // perfectly but findInvoiceNumber dropped it because no INQ pattern
-  // existed and IN\d{8,10} didn't match (Q breaks the digit run).
-  // Result: every row from this customer walked the entire engine
-  // cascade looking for a match it'd never find, hitting extract_total
-  // timeouts and retiring lanes after enough cycles.
-  // No padding — INQ uses a 7-digit canonical that may differ from the
-  // IN-prefix sites' inDigitLength.
-  const inqMatch = cleaned.match(/\bINQ\s*(\d{6,10})\b/i);
-  if (inqMatch) {
-    return `INQ${inqMatch[1]}`;
-  }
-
-  // IN-prefixed long. Range widened from {8,9} to {8,10} for the
-  // post-rollover 10-digit form. Padding to the per-site canonical length
-  // (`inDigitLength`, default 9): a one-short read is treated as a
-  // dropped-zero OCR error and padded; an at-or-above-length read is
-  // returned as-is. Sites whose canonical IN format is 8 digits set
-  // inDigitLength=8 so an 8-digit read isn't padded to 9.
-  const inLongMatch = cleaned.match(/\bIN\s*(\d{8,10})\b/i);
-  if (inLongMatch) {
-    let digits = inLongMatch[1];
-    if (digits.length < inDigitLength) digits = '0'.repeat(inDigitLength - digits.length) + digits;
-    return `IN${digits}`;
-  }
-
-  const partialPatterns = [
-    /\b\d?0{2,3}(422\d{3,6})\b/,
-    /(?:INVOIC|NVOIC|VOICE)[E]?\s*[#:.]?\s*\d{0,5}(422\d{3})\b/i,
-  ];
-  for (const p of partialPatterns) {
-    const m = cleaned.match(p);
-    if (m) {
-      const full = 'IN000' + m[1];
-      // Length range covers BAT's two known invoice formats:
-      //   IN<9 digits>  → 11 chars (e.g. IN000422238 — pre-rollover)
-      //   IN<10 digits> → 12 chars (e.g. IN0004225236 — post-rollover)
-      // Pre-fix the lower bound was 12, which silently dropped every
-      // 9-digit invoice the partial pattern caught — those rows then
-      // fell all the way through the cascade to extract_total. Operator
-      // sent us a real ENGEN KABOKWENI POD where GV correctly returned
-      // "WNVOICE NO\n000422238" and we ignored it because IN000422238
-      // is 11 chars. Now accepts 11-14.
-      if (full.length >= 11 && full.length <= 14) return full;
-    }
-  }
-
-  const inPatterns = [
-    /\bIN\s*(\d{4,7})\b/i,
-    /\bINV\s*(\d{4,7})\b/i,
-    /[IL1]\s*N\s*(\d{4,7})\b/,
-    /IN[^a-zA-Z\n\d]{0,3}(\d{4,7})\b/,
-  ];
-  for (const pattern of inPatterns) {
-    const match = cleaned.match(pattern);
-    if (match) return `IN${match[1]}`;
-  }
-
-  const standaloneMatch = cleaned.match(/\b(55\d{4,7})\b/);
-  if (standaloneMatch) return `IN${standaloneMatch[1]}`;
-
-  return null;
-}
+// findInvoiceNumber (and the regex pipeline) lives in ./bat/findInvoiceNumber.js.
+// Both this worker and batReconciliation.js import from there so the
+// patterns can never drift apart again. Don't re-define here.
 
 // ── pdfUrl validation (defense in depth) ─────────────────────────────────────
 //
@@ -647,7 +565,7 @@ const _MAX_PDF_BYTES = (() => {
   return n * 1024 * 1024;
 })();
 
-async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId, inDigitLength = 9) {
+async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrSpaceKey, msgId, inDigitLength = 9, excludeSet = null) {
   // SSRF guard — see isAllowedPdfUrl above.
   const urlCheck = isAllowedPdfUrl(pdfUrl, process.env.OCR_PDF_ALLOWED_HOSTS);
   if (!urlCheck.ok) {
@@ -690,7 +608,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           const textContent = await page.getTextContent();
           const pageText = textContent.items.map(item => item.str).join(' ');
           if (pageText.trim()) {
-            const invoice = findInvoiceNumber(pageText, inDigitLength);
+            const invoice = findInvoiceNumber(pageText, inDigitLength, excludeSet);
             if (invoice) return { invoice };
           }
         }
@@ -931,7 +849,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         // text — so when the cascade exits without a match, we can tell
         // the parent it was a regex miss (not an all-engines-down miss).
         sawReadableText = true;
-        const invoice = findInvoiceNumber(text, inDigitLength);
+        const invoice = findInvoiceNumber(text, inDigitLength, excludeSet);
         if (invoice) {
           // OCR-cascade hit. Engine + angle let the operator audit
           // "which path produced this number" — useful when a row's
@@ -1032,6 +950,14 @@ parentPort.on('message', async (msg) => {
   if (msg.type === 'extract') {
     const { id, payload } = msg;
     try {
+      // Build the exclude set: parent-supplied dynamic blacklist (numbers
+      // that have already been extracted from N+ PODs in this recon)
+      // unioned with the hard-coded artefact list. The parent re-computes
+      // the dynamic part per row, so each extract call gets a fresh view.
+      const excludeSet = new Set(HARDCODED_POISON_INVOICES);
+      if (Array.isArray(payload.excludeInvoices)) {
+        for (const inv of payload.excludeInvoices) excludeSet.add(inv);
+      }
       // Top-level 90s deadline. Even if every per-stage timeout fires
       // sequentially you can't exceed ~90s of real work for a single
       // PDF on a healthy site (download <60s, pdfjs text <5s, render
@@ -1047,6 +973,7 @@ parentPort.on('message', async (msg) => {
           payload.ocrSpaceKey,
           id,
           payload.inDigitLength,
+          excludeSet,
         ),
         90_000,
         'extract_total',

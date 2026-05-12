@@ -12,6 +12,7 @@ import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/matching.js';
 import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
+import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
@@ -1460,6 +1461,13 @@ async function runGoogleVisionRetry(reconId, rows) {
 async function runGoogleVisionRetryInner(reconId, rows) {
   const sharp = (await import('sharp')).default;
   const inDigitLength = getInvoiceInDigitLength();
+  // Poison-invoice set for this recon: hard-coded artefacts UNION any
+  // number that already shows up on POISON_DUP_THRESHOLD+ found rows.
+  // Snapshotted once at retry entry — the primary cascade has already
+  // run by this point, so the dup population is stable enough that
+  // per-row recompute would just be query churn.
+  const poisonSet = new Set(HARDCODED_POISON_INVOICES);
+  for (const inv of getDynamicPoisonInvoices(reconId)) poisonSet.add(inv);
   const updateExtraction = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extracted_invoice = ?, extraction_status = ?,
@@ -1520,7 +1528,7 @@ async function runGoogleVisionRetryInner(reconId, rows) {
           .toBuffer();
 
         const text = await ocrViaGoogleVision(jpeg);
-        invoice = findInvoiceNumber(text, inDigitLength);
+        invoice = findInvoiceNumber(text, inDigitLength, poisonSet);
         if (invoice) {
           console.log(`[bat-gv] id=${row.id} -> ${invoice} (rot ${angle})`);
           break;
@@ -2095,6 +2103,51 @@ class OcrLane {
   }
 }
 
+// Dynamic poison-invoice detection.
+//
+// When the same invoice number appears as the OCR'd extracted_invoice on
+// THRESHOLD or more PODs in the same recon, that's overwhelmingly likely
+// to be a header/customer-account/footer artefact rather than a genuine
+// multi-delivery invoice. Round-6 baseline of recon 18 had IN578457
+// appearing 7× across unrelated suppliers' PODs — clear smoking gun.
+//
+// Real legit dups (same invoice covering multiple delivery lines for one
+// supplier order) cluster at 2-4×; THRESHOLD is set high enough that
+// 5+ is already suspicious. Tunable via env.
+//
+// Note the chicken-and-egg: poison numbers extracted before the count
+// crosses THRESHOLD won't be caught on this run. Operators can re-run
+// affected rows from the UI; a future iteration could automatically
+// re-queue rows whose final extracted_invoice ends up over threshold.
+const POISON_DUP_THRESHOLD =
+  Number.parseInt(process.env.BAT_POISON_INVOICE_THRESHOLD, 10) >= 2
+    ? Number.parseInt(process.env.BAT_POISON_INVOICE_THRESHOLD, 10)
+    : 5;
+
+function getDynamicPoisonInvoices(reconId) {
+  try {
+    const rows = db.prepare(
+      `SELECT extracted_invoice, COUNT(*) AS c
+         FROM bat_invoice_extractions
+        WHERE reconciliation_id = ?
+          AND extraction_status = 'found'
+          AND extracted_invoice IS NOT NULL
+        GROUP BY extracted_invoice
+       HAVING COUNT(*) >= ?`
+    ).all(reconId, POISON_DUP_THRESHOLD);
+    return rows.map(r => r.extracted_invoice).filter(Boolean);
+  } catch (err) {
+    // Don't let a failed query kill the OCR run — fall back to no
+    // dynamic blacklist (the hard-coded set still applies inside the
+    // worker). Surface so the operator can see if the column or table
+    // shape changed unexpectedly.
+    try {
+      logError('bat.ocr.poison_query_failed', err, { reconciliation_id: reconId });
+    } catch {}
+    return [];
+  }
+}
+
 async function processQueue(reconId) {
   const N = OCR_CONCURRENCY;
   console.log(`[bat-ocr] Starting worker_threads pool (concurrency=${N}) for reconciliation ${reconId}`);
@@ -2628,6 +2681,12 @@ async function processQueue(reconId) {
         stage_at_ms: Date.now(),
       });
       console.log(`[bat-ocr] Processing id=${next.id} ${next.store_name || ''}`);
+      // Dynamic poison-invoice list, computed PER ROW so each extract
+      // call sees the freshest blacklist. The query is a tiny grouped
+      // SELECT against bat_invoice_extractions and is cheap enough at
+      // this rate. Hard-coded poison list is added inside the worker —
+      // we don't ship it across the postMessage boundary.
+      const excludeInvoices = getDynamicPoisonInvoices(reconId);
       try {
         try {
           const result = await lane.worker.extract(
@@ -2637,6 +2696,7 @@ async function processQueue(reconId) {
               googleVisionKey,
               ocrSpaceKey,
               inDigitLength,
+              excludeInvoices,
             },
             PDF_TIMEOUT,
             // onProgress: worker emits these as it transitions between
@@ -3146,77 +3206,9 @@ async function ocrViaGoogleVision(imageBuffer) {
   return annotation?.text || '';
 }
 
-function findInvoiceNumber(text, inDigitLength = 9) {
-  if (!text) return null;
-  // Normalize OCR artifacts: common misreads
-  const cleaned = text
-    .replace(/[|]/g, 'I')
-    .replace(/[oO](?=\d{3,})/g, '0')  // O before digits -> 0
-    .replace(/[lI](?=N\d)/g, 'I')     // l before N+digits -> I
-    .replace(/\*/g, '')               // strip asterisks (*IN555177* → IN555177)
-    .replace(/[{}[\]()]/g, '')        // strip brackets OCR might add
-    .replace(/[—–-]{2,}/g, ' ');      // collapse long dashes
-
-  // Pattern 1: Long invoices — OCR reads "IN" as "18" (I→1, N→8), so 18000422xxx = IN000422xxx
-  const longMatch = cleaned.match(/\b(18\d{8,9})\b/);
-  if (longMatch) {
-    const corrected = 'IN' + longMatch[1].substring(2);
-    console.log(`[bat-ocr] Found long invoice (18→IN): ${corrected}`);
-    return corrected;
-  }
-
-  // Pattern 1b: Already correct IN + 8-9 digits. On legacy sites
-  // (inDigitLength=9, default) an 8-digit read is treated as a dropped-zero
-  // OCR error and padded to 9. On sites whose canonical format is
-  // IN00xxxxxx (inDigitLength=8) an 8-digit read is correct and is
-  // returned as-is — no pad.
-  const inLongMatch = cleaned.match(/\bIN\s*(\d{8,9})\b/i);
-  if (inLongMatch) {
-    let digits = inLongMatch[1];
-    if (digits.length < inDigitLength) digits = '0'.repeat(inDigitLength - digits.length) + digits;
-    console.log(`[bat-ocr] Found long IN invoice: IN${digits}`);
-    return `IN${digits}`;
-  }
-
-  // Pattern 2: Partial long invoice — 000422xxx (core with garbled/missing prefix)
-  const partialPatterns = [
-    /\b\d?0{2,3}(422\d{3,6})\b/,                  // x000422xxx or 00422xxx
-    /(?:INVOIC|NVOIC|VOICE)[E]?\s*[#:.]?\s*\d{0,5}(422\d{3})\b/i,  // near INVOICE keyword
-  ];
-  for (const p of partialPatterns) {
-    const m = cleaned.match(p);
-    if (m) {
-      const full = 'IN000' + m[1];
-      if (full.length >= 12 && full.length <= 14) {
-        console.log(`[bat-ocr] Reconstructed long invoice: ${full}`);
-        return full;
-      }
-    }
-  }
-
-  // Pattern 3: IN-prefix invoices (e.g., IN555177) — but NOT if digits are 8+ (likely a long invoice misread)
-  const inPatterns = [
-    /\bIN\s*(\d{4,7})\b/i,                       // IN55177 (max 7 digits to avoid eating long invoices)
-    /\bINV\s*(\d{4,7})\b/i,                      // INV55177
-    /[IL1]\s*N\s*(\d{4,7})\b/,                   // OCR misread: 1N55177
-    /IN[^a-zA-Z\n\d]{0,3}(\d{4,7})\b/,           // IN + noise + digits
-  ];
-  for (const pattern of inPatterns) {
-    const match = cleaned.match(pattern);
-    if (match) {
-      return `IN${match[1]}`;
-    }
-  }
-
-  // Pattern 4: Standalone 55xxxx (IN555xxx without the IN prefix)
-  const standaloneMatch = cleaned.match(/\b(55\d{4,7})\b/);
-  if (standaloneMatch) {
-    console.log(`[bat-ocr] Found standalone 55... number: ${standaloneMatch[1]}`);
-    return `IN${standaloneMatch[1]}`;
-  }
-
-  return null;
-}
+// findInvoiceNumber moved to ./bat/findInvoiceNumber.js (also imported
+// at the top of this file). Don't re-define here. The shared module
+// is the only place to update the regex pipeline.
 
 // matchExtractedInvoices used to live here. It scanned every BAT-vendor
 // invoice in Sage's APOBL table, then for each OCR'd invoice on a recon
