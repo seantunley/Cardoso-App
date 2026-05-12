@@ -66,23 +66,52 @@ export default function FileUpload({ onComplete }) {
     }
   };
 
+  // Mirror of the server's `upload.array('files', BATCH_MAX)` cap. If
+  // we ever sent more than this in one request, multer would throw
+  // LIMIT_UNEXPECTED_FILE and reject the WHOLE batch (not the
+  // overflow), which would silently lose the per-file pass/fail UX
+  // for any backfill larger than 50. Chunking client-side keeps
+  // arbitrary-size batches working the same way as small ones.
+  const BATCH_CHUNK_SIZE = 50;
+
+  const uploadChunk = async (chunk) => {
+    const form = new FormData();
+    for (const f of chunk) form.append('files', f);
+    form.append('year', String(isoYear(new Date())));
+    const r = await fetch('/api/bat/upload-batch', {
+      method: 'POST',
+      credentials: 'include',
+      body: form,
+    });
+    const data = await r.json();
+    if (!r.ok) {
+      // Whole-chunk failure — surface as per-file errors so the
+      // results modal still has one row per file. Without this, a
+      // network/auth failure on chunk 2 of 4 would silently drop
+      // those 50 files from the visible result list.
+      const message = data.error || 'Batch upload failed';
+      return chunk.map((f) => ({
+        filename: f.name,
+        status: 'error',
+        error: message,
+      }));
+    }
+    return data.results || [];
+  };
+
   const handleBatch = async (files) => {
     setError('');
     setRejection(null);
     setBatchResults(null);
     setUploading(true);
     try {
-      const form = new FormData();
-      for (const f of files) form.append('files', f);
-      form.append('year', String(isoYear(new Date())));
-      const r = await fetch('/api/bat/upload-batch', {
-        method: 'POST',
-        credentials: 'include',
-        body: form,
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || 'Batch upload failed');
-      setBatchResults(data.results || []);
+      const allResults = [];
+      for (let i = 0; i < files.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = files.slice(i, i + BATCH_CHUNK_SIZE);
+        const chunkResults = await uploadChunk(chunk);
+        allResults.push(...chunkResults);
+      }
+      setBatchResults(allResults);
       if (fileRef.current) fileRef.current.value = '';
     } catch (err) {
       setError(err.message);
