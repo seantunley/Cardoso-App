@@ -39,7 +39,24 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
 
   useEffect(() => {
     if (!open) return;
-    const handler = (e) => { if (e.key === 'Enter') handleSave(); };
+    const handler = (e) => {
+      if (e.key !== 'Enter') return;
+      // Enter-to-save is a convenience shortcut, but the modal contains
+      // a multi-line `note` textarea where the user expects Enter to
+      // insert a newline. It also contains <select>s where Enter
+      // confirms the dropdown's current option. Save would silently
+      // submit a half-written record before the user is done typing —
+      // a real data-loss risk. Skip the save when focus is on a
+      // textarea, select, or contenteditable; allow it on plain text
+      // inputs (where Enter would submit anyway by browser convention)
+      // and when no field is focused.
+      const target = e.target;
+      const tag = target?.tagName?.toLowerCase();
+      const isMultiLineOrSelectish =
+        tag === 'textarea' || tag === 'select' || target?.isContentEditable;
+      if (isMultiLineOrSelectish) return;
+      handleSave();
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [open, handleSave]);

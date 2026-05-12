@@ -74,6 +74,18 @@ const SidebarProvider = ({
   React.useEffect(() => {
     const handleKeyDown = event => {
       if (event.key === SIDEBAR_KEYBOARD_SHORTCUT && (event.metaKey || event.ctrlKey)) {
+        // Don't hijack Cmd/Ctrl+B when focus is on an editable element.
+        // It's the universal "bold" shortcut in any rich-text editor
+        // and stealing it inside a contenteditable is a confusing
+        // regression. Plain inputs/textareas don't have a native
+        // Cmd+B action, but gating uniformly avoids per-element
+        // surprise + matches the rest of this codebase's global-
+        // shortcut convention (CardosoEasterEgg, Operations).
+        const target = event.target;
+        const isEditable =
+          target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
+          target?.isContentEditable;
+        if (isEditable) return;
         event.preventDefault();
         toggleSidebar();
       }
