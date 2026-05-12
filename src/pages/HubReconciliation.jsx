@@ -62,7 +62,7 @@ export default function HubReconciliation() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1600px] mx-auto px-8 py-10">
         <div className="border-b border-border pb-5 mb-6">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Hub · Reconciliation</div>
+          <div className="font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Hub · Reconciliation</div>
           <div className="flex items-end justify-between gap-4 flex-wrap">
             <div>
               <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
@@ -173,21 +173,21 @@ function SiteCard({ site }) {
       <div className="pl-2 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <div className="font-mono text-[9px] uppercase tracking-[0.25em] text-muted-foreground">{site.site_slug}</div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground">{site.site_slug}</div>
             <div className="font-display text-xl leading-tight text-foreground truncate" title={site.site_name}>
               {site.site_name || site.site_slug}
             </div>
           </div>
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <Icon className="h-3 w-3" style={{ color }} strokeWidth={1.5} />
-            <span className="font-mono text-[9px] uppercase tracking-[0.2em]" style={{ color }}>{label}</span>
+            <span className="font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color }}>{label}</span>
           </div>
         </div>
 
         {hasError ? (
-          <p className="font-mono text-[10px] text-destructive break-all">{site.last_error}</p>
+          <p className="font-mono text-xs text-destructive break-all">{site.last_error}</p>
         ) : noData ? (
-          <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">No BAT summary returned yet — site may not have any reconciliations uploaded.</p>
+          <p className="font-mono text-xs uppercase tracking-wider text-muted-foreground">No BAT summary returned yet — site may not have any reconciliations uploaded.</p>
         ) : (
           <>
             {/* Year-scoped totals (current ISO year — matches what the site
@@ -195,7 +195,7 @@ function SiteCard({ site }) {
                 selected). The summary_year label tells the operator
                 explicitly which year's data is in the card. */}
             {site.summary_year && (
-              <div className="font-mono text-[9px] uppercase tracking-[0.25em] text-muted-foreground/70">
+              <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground/70">
                 Year {site.summary_year}
               </div>
             )}
@@ -237,11 +237,11 @@ function SiteCard({ site }) {
               <div className="pt-2 border-t border-border">
                 <LabelWithTip
                   tooltip={TIPS.mismatchHeader}
-                  className="font-mono text-[9px] uppercase tracking-[0.15em] text-destructive mb-1 block"
+                  className="font-mono text-[11px] uppercase tracking-[0.15em] text-destructive mb-1 block"
                 >
                   ⚠ Mismatch · {site.mismatch_weeks.length} week{site.mismatch_weeks.length !== 1 ? 's' : ''}
                 </LabelWithTip>
-                <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                <div className="font-mono text-xs tabular-nums text-muted-foreground">
                   {site.mismatch_weeks.map(w => `W${String(w).padStart(2, '0')}`).join(', ')}
                 </div>
               </div>
@@ -251,13 +251,13 @@ function SiteCard({ site }) {
               <div className="pt-2 border-t border-border">
                 <LabelWithTip
                   tooltip={TIPS.missingCreditNotesHeader}
-                  className="font-mono text-[9px] uppercase tracking-[0.15em] mb-1 block"
+                  className="font-mono text-[11px] uppercase tracking-[0.15em] mb-1 block"
                 >
                   <span style={{ color: 'var(--phosphor)' }}>
                     ⚠ Missing credit notes · {site.missing_credit_notes_weeks.length} week{site.missing_credit_notes_weeks.length !== 1 ? 's' : ''}
                   </span>
                 </LabelWithTip>
-                <div className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                <div className="font-mono text-xs tabular-nums text-muted-foreground">
                   {site.missing_credit_notes_weeks.map(w => `W${String(w).padStart(2, '0')}`).join(', ')}
                 </div>
               </div>
@@ -280,8 +280,8 @@ function SiteCard({ site }) {
           </>
         )}
 
-        <div className="pt-2 border-t border-border flex items-center justify-between font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/70">
-          <LabelWithTip tooltip={TIPS.synced} className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/70">
+        <div className="pt-2 border-t border-border flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
+          <LabelWithTip tooltip={TIPS.synced} className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
             Synced {syncedAt}
           </LabelWithTip>
           {site.site_url && (
@@ -335,7 +335,7 @@ function DataRow({ label, value, muted, variance, tooltip }) {
   }
   return (
     <div className="flex items-baseline justify-between gap-2">
-      <LabelWithTip tooltip={tooltip} className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+      <LabelWithTip tooltip={tooltip} className="font-mono text-xs uppercase tracking-wider text-muted-foreground">
         {label}
       </LabelWithTip>
       <span className={`font-mono text-sm tabular-nums ${muted ? 'text-muted-foreground' : 'text-foreground'}`} style={color ? { color } : undefined}>
@@ -348,7 +348,7 @@ function DataRow({ label, value, muted, variance, tooltip }) {
 function Stat({ label, value, color, tooltip }) {
   return (
     <div>
-      <LabelWithTip tooltip={tooltip} className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground block">
+      <LabelWithTip tooltip={tooltip} className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground block">
         {label}
       </LabelWithTip>
       <div className="font-mono text-sm tabular-nums" style={color ? { color } : undefined}>{value}</div>
