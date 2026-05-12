@@ -224,6 +224,46 @@ describe('renderPdfInChild — spawn failure', () => {
   });
 });
 
+describe('renderPdfInChild — stdio drain safety', () => {
+  // Regression: the wrapper used to listen on the child's 'exit' event,
+  // which Node fires BEFORE stdio is guaranteed to have flushed. On a
+  // larger-than-buffer payload, Buffer.concat(stdoutChunks) at 'exit'
+  // time could return a truncated buffer; downstream sharp / OCR
+  // engines would fail with confusing decode errors that looked
+  // unrelated to the renderer. Switching to 'close' (which fires AFTER
+  // all stdio flushes) closes the race.
+  //
+  // We force the race by writing a payload several times the OS pipe
+  // buffer size and exiting the child immediately after the write. If
+  // the wrapper resolves before drain, the returned buffer would be
+  // shorter than what we wrote.
+
+  it('returns the FULL stdout buffer on a large-payload, fast-exit child (no truncation)', async () => {
+    // 4 MB payload — well above the Windows / Linux default pipe buffer
+    // (8 KB – 64 KB typically) so the child must write in chunks.
+    // Pattern is deterministic so the assertion catches truncation
+    // wherever it might happen.
+    writeStub(`
+      process.stdin.on('data', () => {});
+      process.stdin.on('end', () => {
+        const SIZE = 4 * 1024 * 1024;
+        const buf = Buffer.alloc(SIZE);
+        for (let i = 0; i < SIZE; i++) buf[i] = i & 0xFF;
+        // No callback / drain wait — write then exit fast to maximise
+        // the chance the parent sees 'exit' before the pipe flushes.
+        process.stdout.write(buf);
+        process.exit(0);
+      });
+    `);
+    const out = await renderPdfInChild(PDF_STUB, { childScriptPath: scriptPath, timeoutMs: 15000 });
+    expect(out.length).toBe(4 * 1024 * 1024);
+    // Spot-check the pattern at the start, middle, and end.
+    expect(out[0]).toBe(0);
+    expect(out[12345]).toBe(12345 & 0xFF);
+    expect(out[out.length - 1]).toBe((out.length - 1) & 0xFF);
+  }, 20_000);
+});
+
 describe('renderPdfInChild — concurrency', () => {
   it('handles parallel spawns without crosstalk (each gets its own bytes back)', async () => {
     writeStub(`

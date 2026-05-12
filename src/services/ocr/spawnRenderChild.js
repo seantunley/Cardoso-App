@@ -156,7 +156,18 @@ export function renderPdfInChild(pdfBuffer, opts = {}) {
       })));
     });
 
-    child.on('exit', (code, signal) => {
+    // Listen on 'close' rather than 'exit'. Node fires 'exit' as soon as
+    // the child terminates, but stdout/stderr pipes may still have
+    // buffered data the parent hasn't drained — Buffer.concat at that
+    // moment can return a truncated payload, and a 100 KB JPEG arriving
+    // as 87 KB causes sharp/OCR to fail with confusing decode errors
+    // downstream that look unrelated to the renderer. 'close' is fired
+    // AFTER all stdio streams have flushed and closed, so the chunks
+    // array is guaranteed complete.
+    //
+    // From Node docs: 'close' fires for every spawned child, including
+    // the SIGKILL'd one — code is null, signal is the killing signal.
+    child.on('close', (code, signal) => {
       settle(() => {
         if (timedOut) {
           return reject(makeChildError({
