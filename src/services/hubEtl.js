@@ -630,13 +630,38 @@ async function pullBackupForSite(site) {
     });
     clearTimeout(hardTimeout);
     if (!upstream.ok) {
-      const msg = `HTTP ${upstream.status}`;
-      logError('hub.backupPull', new Error(msg), { site_name: site.name, site_id: site.id });
+      // Best-effort body capture — many sites return a JSON {error: "..."}
+      // or a plain text reason on 4xx/5xx; it's the difference between
+      // "we got 503" and "we got 503: backup file not yet generated, try
+      // again in 30s." Capped so a runaway 5 MB error page can't blow
+      // the log entry up. Read failures don't stop the error from being
+      // recorded — we still log the status line either way.
+      let bodyDetail = '';
+      try {
+        const body = await upstream.text();
+        if (body) {
+          const trimmed = body.trim().slice(0, 500);
+          if (trimmed) bodyDetail = `: ${trimmed}`;
+        }
+      } catch {
+        // ignore — body read failure shouldn't mask the status code
+      }
+      const friendly =
+        `HTTP ${upstream.status}${upstream.statusText ? ' ' + upstream.statusText : ''}` +
+        bodyDetail +
+        ` — url=${site.url}/api/backup/download`;
+      logError('hub.backupPull', new Error(friendly), {
+        site_name: site.name,
+        site_id: site.id,
+        site_url: site.url,
+        http_status: upstream.status,
+        friendly,
+      });
       try {
         db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
-          .run(site.id, '(download failed)', `pull_failed: ${msg}`);
+          .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
       } catch {}
-      return { ok: false, error: msg };
+      return { ok: false, error: friendly };
     }
     const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
     mkdirSync(dir, { recursive: true });
