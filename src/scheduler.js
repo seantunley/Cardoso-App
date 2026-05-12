@@ -12,6 +12,8 @@ import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
+import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
+import { getJtiSagePool } from './services/jti/jtiPool.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -314,6 +316,36 @@ export function startSchedulers() {
       ),
       10 * 60 * 1000,
     ));
+
+    // JTI monthly export — fires at 02:00 site-local on the 1st of
+    // every month, generating + archiving the export for the
+    // PREVIOUS calendar month. Site-only: HUB_MODE installs don't
+    // have a Sage pool and receive these archives via the push/pull
+    // bridge instead of producing them.
+    cronTasks.push(cron.schedule('0 2 1 * *', track(
+      'jti-monthly-export',
+      () => runScheduledMonthlyJob({ db, getSagePool: getJtiSagePool }),
+      (result) => result,
+      // Skipped runs (already_archived, pool_unavailable) are normal
+      // outcomes for this job, not failures — successCheck only flags
+      // actual thrown errors.
+      { successCheck: (r) => true },
+    )));
+
+    // JTI boot-time catch-up — backfills up to 12 missed months on
+    // app startup. Delayed 45s so migrations + pool init have settled
+    // (the catch-up may run dozens of Sage queries back-to-back if
+    // the site has been offline for months; better to start cleanly).
+    setTimeout(track(
+      'jti-boot-catchup',
+      () => runBootCatchUp({ db, getSagePool: getJtiSagePool, monthsBack: 12 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 45_000);
   }
 
   // Alert engine evaluation tick — runs every 60s, evaluates the rules
