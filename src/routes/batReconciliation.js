@@ -55,7 +55,7 @@ import {
   getRecentBatReconciliations,
   clearOcrHalt,
 } from '../services/batReconciliation.js';
-import { archiveSupplierUpload } from '../services/bat/uploadArchive.js';
+import { processSupplierUpload } from '../services/bat/uploadProcessor.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -87,89 +87,40 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     res.type('image/jpeg').sendFile(filePath);
   });
 
-  // POST /api/bat/upload — Upload + parse supplier spreadsheet
+  // Per-file processing flow shared with the batch endpoint, see
+  // src/services/bat/uploadProcessor.js. The route handler stays
+  // responsible for: auth, audit logging, multer file lifecycle
+  // (unlinkSync), and HTTP response shaping.
+  const processorDeps = {
+    db,
+    parseSupplierSpreadsheet,
+    createReconciliation,
+    querySageCreditNotes,
+    replaceSageCreditNotes,
+    backfillOrderAmounts,
+    getReconciliation,
+    toIsoYear,
+  };
+
+  // POST /api/bat/upload — Upload + parse a single supplier spreadsheet
   router.post('/api/bat/upload', ...gate, upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     try {
-      // parseSupplierSpreadsheet now throws SpreadsheetValidationError with
-      // a list of human-readable reasons when the file is structurally
-      // unusable (missing sheets, no ODR rows, no PODs, unparseable filename
-      // week, etc.). We catch and 400 it back so NOTHING gets persisted —
-      // the operator gets the full list in a modal and can fix + retry.
-      // Previously bad spreadsheets would sometimes create an empty recon
-      // with zero PODs that polluted the dashboard.
-      const parsed = parseSupplierSpreadsheet(req.file.path, req.file.originalname);
-
-      // Year fallback chain: parser-detected → request body → ISO year of
-      // current date. ISO year (not calendar year) so a late-Dec upload
-      // for a W1 file doesn't get filed under the previous year.
-      const year = parsed.year || parseInt(req.body.year, 10) || toIsoYear(new Date());
-      if (parsed.year) console.log(`[bat] Year detected from spreadsheet: ${parsed.year}`);
-      const reconId = createReconciliation({
-        weekNumber: parsed.weekNumber,
-        year,
-        filename: req.file.originalname,
-        fees: parsed.fees,
-        podUrls: parsed.podUrls,
+      const result = await processSupplierUpload({
+        file: req.file,
+        fallbackYear: parseInt(req.body.year, 10) || null,
         userId: req.currentUser.id,
+        ...processorDeps,
       });
-
-      // Archive the original .xlsx so a later supplier dispute can be
-      // replayed against the source bytes. The temp file is unlinked
-      // in the finally block below either way; if the archive copy
-      // fails (disk full, permission, etc.) we log + continue — losing
-      // the archive is regrettable but doesn't invalidate the parsed
-      // recon data, so this isn't worth aborting the upload over.
-      //
-      // IMPORTANT: createReconciliation upserts on (week, year). On a
-      // re-upload of the same week, the row may already carry an
-      // archive_path from the previous upload. We MUST null that out
-      // on archive failure — leaving the stale path would point future
-      // dispute replays at a spreadsheet whose contents no longer
-      // match the row's parsed totals. NULL is the honest signal that
-      // "no archive bytes available for this version of the row".
-      try {
-        const archivePath = archiveSupplierUpload({
-          srcPath: req.file.path,
-          reconId,
-          originalName: req.file.originalname,
-        });
-        db.prepare('UPDATE bat_reconciliations SET archive_path = ? WHERE id = ?')
-          .run(archivePath, reconId);
-      } catch (archiveErr) {
-        console.error(`[bat] Failed to archive uploaded spreadsheet for recon ${reconId} (${req.file.originalname}): ${archiveErr.message}`);
-        db.prepare('UPDATE bat_reconciliations SET archive_path = NULL WHERE id = ?')
-          .run(reconId);
-      }
-
-      // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
-      // so the UI shows it instead of silently displaying zero credit notes.
-      // Use replaceSageCreditNotes for atomicity even though there's
-      // nothing to delete on a freshly-created recon (the DELETE is a
-      // cheap no-op). One helper across all three call sites prevents
-      // drift if the refresh shape changes again.
-      try {
-        const creditNotes = await querySageCreditNotes(parsed.weekNumber, year);
-        replaceSageCreditNotes(reconId, creditNotes);
-      } catch (sageErr) {
-        console.error('[bat] Sage query failed:', sageErr.message);
-        db.prepare('UPDATE bat_reconciliations SET sage_error = ? WHERE id = ?')
-          .run(String(sageErr.message).slice(0, 500), reconId);
-      }
-
-      // Backfill amounts onto previous weeks' extractions that had no amount
-      const backfilled = backfillOrderAmounts(parsed.orderAmounts);
-
-      const reconciliation = getReconciliation(reconId);
       logAudit({
         req, action: 'bat_upload', resourceType: 'system',
-        resourceId: reconId,
-        resourceName: `Week ${parsed.weekNumber}/${year}`,
-        details: `Filename: ${req.file.originalname}; PODs: ${parsed.podUrls?.length || 0}; backfilled: ${backfilled}`,
-        changes: { fees: parsed.fees, week_number: parsed.weekNumber, year },
+        resourceId: result.reconciliation.id,
+        resourceName: `Week ${result.weekNumber}/${result.year}`,
+        details: `Filename: ${req.file.originalname}; PODs: ${result.podCount}; backfilled: ${result.backfilled}`,
+        changes: { fees: result.fees, week_number: result.weekNumber, year: result.year },
       });
-      res.json({ ok: true, reconciliation, backfilled });
+      res.json({ ok: true, reconciliation: result.reconciliation, backfilled: result.backfilled });
     } catch (err) {
       console.error('[bat] Upload failed:', err.message);
       logAudit({
@@ -191,6 +142,83 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
     }
+  });
+
+  // POST /api/bat/upload-batch — Upload + parse N supplier spreadsheets
+  // in one go. Each file becomes its own recon (different week_number);
+  // per-file try/catch so one bad sheet doesn't tank the rest of the
+  // batch. Designed for backfilling historical weeks (drop W5/6/7/8 in
+  // a single drag).
+  //
+  // Response shape:
+  //   {
+  //     ok: true,
+  //     results: [
+  //       { filename, status: 'success',  reconciliation, weekNumber, year, backfilled },
+  //       { filename, status: 'rejected', reasons: [...] },
+  //       { filename, status: 'error',    error: '...' },
+  //     ]
+  //   }
+  // Always 200 — the per-file status field carries pass/fail.
+  router.post('/api/bat/upload-batch', ...gate, upload.array('files', 50), async (req, res) => {
+    const files = req.files || [];
+    if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+
+    const fallbackYear = parseInt(req.body.year, 10) || null;
+    const results = [];
+
+    // Sequential — the SQLite write path serialises anyway, and
+    // sequential keeps results ordered so the UI modal lists files
+    // in upload order.
+    for (const file of files) {
+      try {
+        const result = await processSupplierUpload({
+          file,
+          fallbackYear,
+          userId: req.currentUser.id,
+          ...processorDeps,
+        });
+        logAudit({
+          req, action: 'bat_upload', resourceType: 'system',
+          resourceId: result.reconciliation.id,
+          resourceName: `Week ${result.weekNumber}/${result.year}`,
+          details: `Batch upload — Filename: ${file.originalname}; PODs: ${result.podCount}; backfilled: ${result.backfilled}`,
+          changes: { fees: result.fees, week_number: result.weekNumber, year: result.year, batch: true },
+        });
+        results.push({
+          filename: file.originalname,
+          status: 'success',
+          reconciliation: result.reconciliation,
+          weekNumber: result.weekNumber,
+          year: result.year,
+          backfilled: result.backfilled,
+        });
+      } catch (err) {
+        console.error(`[bat] Batch upload — file ${file.originalname} failed:`, err.message);
+        logAudit({
+          req, action: 'bat_upload', resourceType: 'system',
+          resourceName: file.originalname,
+          details: `Batch upload — ${err.message}`, status: 'failure',
+        });
+        if (err instanceof SpreadsheetValidationError) {
+          results.push({
+            filename: file.originalname,
+            status: 'rejected',
+            reasons: err.reasons,
+          });
+        } else {
+          results.push({
+            filename: file.originalname,
+            status: 'error',
+            error: err.message || 'Failed to process spreadsheet',
+          });
+        }
+      } finally {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+    }
+
+    res.json({ ok: true, results });
   });
 
   router.get('/api/bat/sage-credit-notes', ...gate, async (req, res) => {
