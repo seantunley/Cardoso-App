@@ -3220,23 +3220,21 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
           </TabsList>
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {tabs.map(t => (
-              <TabsContent key={t.id} value={t.id} className="mt-0">
-                {t.id === "users"    && <UsersTabContent />}
-                {t.id === "creditlogic" && <CreditLogicTab hubMode={hubMode} currentUser={currentUser} />}
-                {t.id === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
-                {t.id === "fields"   && <FieldsTab />}
-                {t.id === "audit"    && <AuditTab />}
-                {t.id === "tls"      && <TlsTab />}
-                {t.id === "synclog"       && <SyncLogTab />}
-                {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
-                {t.id === "maintenance"  && <MaintenanceTab />}
-                {t.id === "hubmaintenance" && <HubMaintenanceTab />}
-                {t.id === "network"      && <NtopngTab />}
-                {t.id === "reconciliation" && <ReconciliationSettingsTab />}
-                {t.id === "accounting"     && <AccountingTab />}
-              </TabsContent>
-            ))}
+            <TabsContent value={activeTab} className="mt-0">
+              {activeTab === "users" && <UsersTabContent />}
+              {activeTab === "creditlogic" && <CreditLogicTab hubMode={hubMode} currentUser={currentUser} />}
+              {activeTab === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
+              {activeTab === "fields" && <FieldsTab />}
+              {activeTab === "audit" && <AuditTab />}
+              {activeTab === "tls" && <TlsTab />}
+              {activeTab === "synclog" && <SyncLogTab />}
+              {activeTab === "connections" && <ConnectionsTab currentUser={currentUser} />}
+              {activeTab === "maintenance" && <MaintenanceTab />}
+              {activeTab === "hubmaintenance" && <HubMaintenanceTab />}
+              {activeTab === "network" && <NtopngTab />}
+              {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
+              {activeTab === "accounting" && <AccountingTab />}
+            </TabsContent>
           </div>
         </Tabs>
       </DialogContent>

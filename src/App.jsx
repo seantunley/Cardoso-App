@@ -6,7 +6,7 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
 import NavigationTracker from "@/lib/NavigationTracker";
 import { pagesConfig } from "./pages.config";
-import { BrowserRouter as Router, Route, Routes, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes, Navigate, Outlet, useLocation } from "react-router-dom";
 import PageNotFound from "./lib/PageNotFound";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
@@ -46,7 +46,16 @@ const LayoutWrapper = ({ children, currentPageName }) =>
     </div>
   );
 
-const ProtectedPage = ({ children, currentPageName }) => {
+function getCurrentPageName(pathname, hubMode) {
+  if (pathname === "/" || pathname === "") {
+    return hubMode ? "HubDashboard" : mainPageKey;
+  }
+
+  const pathSegment = pathname.replace(/^\//, "").split("/")[0];
+  return Object.keys(Pages).find((key) => key.toLowerCase() === pathSegment.toLowerCase()) || mainPageKey;
+}
+
+const ProtectedPage = ({ children }) => {
   const { isAuthenticated, isLoadingAuth, isLoadingPublicSettings } = useAuth();
   const location = useLocation();
 
@@ -62,7 +71,20 @@ const ProtectedPage = ({ children, currentPageName }) => {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  return <LayoutWrapper currentPageName={currentPageName}>{children}</LayoutWrapper>;
+  return children;
+};
+
+const ProtectedLayoutRoute = ({ hubMode }) => {
+  const location = useLocation();
+  const currentPageName = getCurrentPageName(location.pathname, hubMode);
+
+  return (
+    <ProtectedPage>
+      <LayoutWrapper currentPageName={currentPageName}>
+        <Outlet />
+      </LayoutWrapper>
+    </ProtectedPage>
+  );
 };
 
 // Resolves the user's landing page on `/`. If they have access to the
@@ -124,30 +146,28 @@ const AuthenticatedApp = () => {
         element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
       />
 
-      <Route
-        path="/"
-        element={
-          <RootRedirect hubMode={hubMode}>
-            <ProtectedPage currentPageName={hubMode ? "HubDashboard" : mainPageKey}>
-              {hubMode ? <HubDashboard /> : <MainPage />}
-            </ProtectedPage>
-          </RootRedirect>
-        }
-      />
-
-      {Object.entries(Pages).map(([path, Page]) => (
+      <Route element={<ProtectedLayoutRoute hubMode={hubMode} />}>
         <Route
-          key={path}
-          path={`/${path}`}
+          path="/"
           element={
-            <ProtectedPage currentPageName={path}>
+            <RootRedirect hubMode={hubMode}>
+              {hubMode ? <HubDashboard /> : <MainPage />}
+            </RootRedirect>
+          }
+        />
+
+        {Object.entries(Pages).map(([path, Page]) => (
+          <Route
+            key={path}
+            path={`/${path}`}
+            element={
               <ProtectedRoute permission={pagePermissions[path]}>
                 <Page />
               </ProtectedRoute>
-            </ProtectedPage>
-          }
-        />
-      ))}
+            }
+          />
+        ))}
+      </Route>
 
       <Route path="*" element={<PageNotFound />} />
     </Routes>
