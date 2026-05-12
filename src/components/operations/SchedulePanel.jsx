@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { RefreshCw, Calendar, Clock, Repeat, Zap, Server, Cloud } from "lucide-react";
+import { RefreshCw, Calendar, Repeat, Zap, Server, Cloud } from "lucide-react";
 
 const TYPE_META = {
   cron:       { icon: Calendar, label: 'Cron',     tone: 'phosphor' },

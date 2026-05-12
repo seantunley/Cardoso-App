@@ -57,13 +57,17 @@ export const JTI_REQUIRED_COLUMNS = [
  */
 export function toYyyymmddInt(value) {
   if (typeof value === 'number' && Number.isInteger(value)) {
-    if (value < 19000101 || value > 21001231) {
-      throw new RangeError(`toYyyymmddInt: integer ${value} out of plausible YYYYMMDD range`);
-    }
+    assertPlausibleYyyymmdd(value, 'integer');
     return value;
   }
   if (typeof value === 'string' && /^\d{8}$/.test(value.trim())) {
-    return Number(value.trim());
+    // Plausibility was previously NOT enforced on this branch — strings
+    // like '00000000' or '99999999' fell through verbatim and produced
+    // queries that effectively scanned all of Sage history. Run the
+    // same range + month/day check we apply to the integer path.
+    const n = Number(value.trim());
+    assertPlausibleYyyymmdd(n, 'string');
+    return n;
   }
   const d = value instanceof Date ? value : new Date(value);
   if (!(d instanceof Date) || Number.isNaN(d.getTime())) {
@@ -75,6 +79,26 @@ export function toYyyymmddInt(value) {
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
   const dd = String(d.getUTCDate()).padStart(2, '0');
   return Number(`${yyyy}${mm}${dd}`);
+}
+
+// Range + structural sanity. We don't validate per-month day counts
+// (Feb 29 in a non-leap year, etc.) because Sage's TRANDATE filter
+// handles the comparison at INT level — a non-existent date simply
+// matches nothing. The check here exists to reject obviously-bogus
+// inputs ('00000000', '99999999', '20269999') before they reach the
+// query layer and silently widen the export window.
+function assertPlausibleYyyymmdd(n, source) {
+  if (n < 19000101 || n > 21001231) {
+    throw new RangeError(`toYyyymmddInt: ${source} ${n} out of plausible YYYYMMDD range`);
+  }
+  const month = Math.floor((n % 10000) / 100);
+  const day = n % 100;
+  if (month < 1 || month > 12) {
+    throw new RangeError(`toYyyymmddInt: ${source} ${n} has invalid month component ${month}`);
+  }
+  if (day < 1 || day > 31) {
+    throw new RangeError(`toYyyymmddInt: ${source} ${n} has invalid day component ${day}`);
+  }
 }
 
 // Default query — the version-controlled SQL that ships with the

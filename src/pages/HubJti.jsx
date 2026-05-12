@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
-  Loader2, Download, Archive, AlertTriangle, Server, Cloud, ArrowDownToLine,
+  Loader2, Download, Archive, AlertTriangle, Server, Cloud,
 } from "lucide-react";
 
 export default function HubJti() {

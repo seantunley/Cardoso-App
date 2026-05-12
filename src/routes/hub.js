@@ -1648,17 +1648,24 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     storage: multer.memoryStorage(),
     limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 30 },
   });
-  router.post('/api/hub/receive-jti-archive', jtiUpload.single('file'), async (req, res) => {
+
+  // Auth FIRST, multer second. If we mounted multer.single('file') as
+  // the first middleware, an unauthenticated caller could still POST a
+  // 25 MB body and have it fully buffered into memory before we got to
+  // the token check — a trivial DoS path. With this gate in front, an
+  // unknown / missing token returns 401 immediately and the body is
+  // discarded by Express without ever being parsed.
+  function requireJtiSiteToken(req, res, next) {
     const token = req.headers['x-reporting-token'];
     if (!token) return res.status(401).json({ error: 'Missing x-reporting-token header' });
-
-    // Match against the in-env HUB_SITES list — same trust model as
-    // notify-backup-ready. If the token is unknown, the request is
-    // rejected before we even look at the upload payload.
     const matched = HUB_SITES.find((s) => s.token && s.token === token);
-    if (!matched) {
-      return res.status(401).json({ error: 'Unrecognised reporting token' });
-    }
+    if (!matched) return res.status(401).json({ error: 'Unrecognised reporting token' });
+    req._jtiSite = matched;
+    next();
+  }
+
+  router.post('/api/hub/receive-jti-archive', requireJtiSiteToken, jtiUpload.single('file'), async (req, res) => {
+    const matched = req._jtiSite;
 
     if (!req.file) {
       return res.status(400).json({ error: 'Missing file part — POST as multipart/form-data with field name "file"' });

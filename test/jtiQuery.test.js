@@ -48,6 +48,33 @@ describe('toYyyymmddInt', () => {
     expect(() => toYyyymmddInt('not a date')).toThrow(RangeError);
   });
 
+  // Regression: the 8-digit-string branch previously skipped the
+  // plausibility checks that the integer branch enforced, so values
+  // like '00000000' or '99999999' arrived in the SQL layer verbatim.
+  // The malformed values then bypassed the date filter and effectively
+  // expanded the export range across all of Sage history. POST
+  // /api/jti/export takes from/to as JSON strings, so this was the
+  // operative attack surface — not the integer branch.
+  it('rejects "00000000" / "99999999" / other out-of-range 8-digit strings', () => {
+    expect(() => toYyyymmddInt('00000000')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('99999999')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('18991231')).toThrow(/out of plausible YYYYMMDD range/);
+    expect(() => toYyyymmddInt('21010101')).toThrow(/out of plausible YYYYMMDD range/);
+  });
+
+  it('rejects in-range 8-digit strings with bogus month or day components', () => {
+    expect(() => toYyyymmddInt('20260001')).toThrow(/invalid month component/);
+    expect(() => toYyyymmddInt('20261301')).toThrow(/invalid month component/);
+    expect(() => toYyyymmddInt('20260100')).toThrow(/invalid day component/);
+    expect(() => toYyyymmddInt('20260132')).toThrow(/invalid day component/);
+  });
+
+  it('rejects in-range integers with bogus month or day (parity with the string branch)', () => {
+    expect(() => toYyyymmddInt(20260001)).toThrow(/invalid month component/);
+    expect(() => toYyyymmddInt(20261301)).toThrow(/invalid month component/);
+    expect(() => toYyyymmddInt(20260100)).toThrow(/invalid day component/);
+  });
+
   it('UTC anchored — server timezone never shifts the day', () => {
     // Same instant, formatted via UTC components no matter what
     // Date the server's local timezone produces.
