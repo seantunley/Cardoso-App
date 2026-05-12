@@ -26,6 +26,17 @@ export default function CardosoEasterEgg() {
   useEffect(() => {
     const onKeyDown = (event) => {
       if ((event.ctrlKey || event.metaKey) && event.code === "KeyK") {
+        // Don't hijack the browser's omnibox/search shortcut when the
+        // user is typing into an editable element — that's their
+        // expected use of Cmd/Ctrl+K and stealing it is a confusing
+        // regression. Login form, search boxes, comment fields, etc.
+        // The easter egg is also triggerable via the Konami sequence,
+        // so we lose nothing by being conservative here.
+        const target = event.target;
+        const isEditable =
+          target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
+          target?.isContentEditable;
+        if (isEditable) return;
         event.preventDefault();
         setCommandOpen(true);
         setCommandValue("");
