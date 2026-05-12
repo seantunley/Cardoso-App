@@ -1,0 +1,62 @@
+name: PR base gate
+
+# Fails any pull request whose base branch isn't in the allowed list.
+#
+# Why this exists: between 2026-05-11 and 2026-05-12, three PRs (#286,
+# #298, #299) were "merged" by GitHub but their content never reached
+# main — each had been opened against another in-flight PR's branch as
+# a base, and merging took the change INTO the stale base instead of
+# into main. GitHub flips the PR to MERGED and reports green either
+# way, so the issue went unnoticed until a "where did my code go"
+# review surfaced it the next morning.
+#
+# This gate makes that class of mistake impossible to merge: the check
+# fails before the merge button is enabled, with a remediation hint in
+# the error so the operator can fix it without context-switching.
+#
+# Allowed bases:
+# - main: the production branch
+# - dev:  the in-flight integration branch
+# Anything else fails — including \"stacked\" PRs (deliberately, since
+# stacking is what caused the orphan-merge mess in the first place).
+# If you genuinely need to stack, retarget to main once the stack base
+# merges.
+#
+# Note this workflow has NO `branches:` filter on its trigger, unlike
+# ci.yml which only runs on PRs targeting main. That's the whole point
+# — we WANT this to fire on PRs whose base is the wrong thing.
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  base-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR base branch
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          ALLOWED="main dev"
+          if echo " $ALLOWED " | grep -q " $BASE_REF "; then
+            echo "::notice::PR #$PR_NUMBER base is '$BASE_REF' — allowed."
+            exit 0
+          fi
+          echo "::error::PR #$PR_NUMBER base is '$BASE_REF', which is not in the allowed list ($ALLOWED)."
+          echo ""
+          echo "This usually means the PR was opened against another in-flight PR's"
+          echo "branch (a \"stacked\" PR). Merging would land the change INTO that"
+          echo "branch instead of into main — see the orphan-merge incident notes"
+          echo "in the workflow file for the history."
+          echo ""
+          echo "To fix:"
+          echo "  gh pr edit $PR_NUMBER --base main"
+          echo ""
+          echo "Then push any rebases the new base needs and re-run this check."
+          exit 1
