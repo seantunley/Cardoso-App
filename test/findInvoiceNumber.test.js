@@ -1,17 +1,24 @@
-// Tests for the BAT invoice-number regex pipeline + the new
-// excludeSet poison-guard hook. The function used to live inline in
-// both ocrWorker.js and batReconciliation.js; it was extracted to
+// Tests for the BAT invoice-number regex pipeline + the excludeSet
+// poison-guard hook + the textual-proximity positional ranking.
+// The function used to live inline in both ocrWorker.js and
+// batReconciliation.js; it was extracted to
 // src/services/bat/findInvoiceNumber.js so it can be unit-tested
 // (importing ocrWorker.js directly would trigger the worker_threads
 // parentPort.on dispatch at module load).
 //
-// Two test groups:
-//   1. Regression — the original regex behaviour (no excludeSet)
-//      still extracts the same numbers it did before the refactor.
-//      These guard against accidental drift in the regex pipeline.
+// Three test groups:
+//   1. Regression — the original regex behaviour (no excludeSet, no
+//      label keyword) still extracts the same numbers it did before
+//      the refactor. These guard against accidental drift in the
+//      regex pipeline.
 //   2. excludeSet — both the hard-coded HARDCODED_POISON_INVOICES
 //      list and ad-hoc excluded sets cause matchAll to skip the
 //      excluded candidate and continue searching.
+//   3. Positional bias — when an INVOICE-label keyword is present
+//      and at least one candidate is "near" it, the matcher prefers
+//      the closest candidate. When no label is found (or no candidate
+//      is near one), behaviour falls back to v1 pattern-priority
+//      order so unlabelled inputs are unaffected.
 
 import { describe, it, expect } from 'vitest';
 import {
@@ -120,5 +127,77 @@ describe('findInvoiceNumber — excludeSet poison guard', () => {
     // IN500115608 differs by one digit — must NOT be excluded.
     const text = 'IN500115608';
     expect(findInvoiceNumber(text, 9, HARDCODED_POISON_INVOICES)).toBe('IN500115608');
+  });
+});
+
+describe('findInvoiceNumber — positional bias (textual proximity)', () => {
+  it('prefers a candidate near "Invoice Number:" over an earlier candidate without a label', () => {
+    // The footer-style "IN578457001" appears FIRST in the text. Pre-v3
+    // (first-match-wins) would have returned it. v3 sees the second
+    // candidate is right after a label and prefers it.
+    const text =
+      'Header letterhead IN578457001 ' +
+      'and twenty more chars of fluff in between then ' +
+      'Invoice Number: IN999888777';
+    expect(findInvoiceNumber(text)).toBe('IN999888777');
+  });
+
+  it('recognises the "INV #" abbreviation as a label anchor', () => {
+    const text = 'Top IN500115608 / footer / INV # IN777666555';
+    expect(findInvoiceNumber(text)).toBe('IN777666555');
+  });
+
+  it('recognises "Tax Invoice No." as a label anchor', () => {
+    const text = 'Header IN500115608 ... Tax Invoice No. IN888777666';
+    expect(findInvoiceNumber(text)).toBe('IN888777666');
+  });
+
+  it('still anchors when the label itself is OCR-mangled (WNVOICE NO)', () => {
+    const text = 'Top IN500115608 below logo. WNVOICE NO IN999000111';
+    expect(findInvoiceNumber(text)).toBe('IN999000111');
+  });
+
+  it('falls back to v1 first-match order when NO label keyword is present', () => {
+    // Pre-v3 would return the first IN-9-digit match. Post-v3 with no
+    // label, fallback ranks by pattern priority then position — same
+    // outcome.
+    const text = 'IN111222333 ... IN444555666 ... IN777888999';
+    expect(findInvoiceNumber(text)).toBe('IN111222333');
+  });
+
+  it('falls back to v1 order when a label exists but NO candidate is near it', () => {
+    // Label is at the very start. Candidates are ~400 chars away —
+    // beyond the NEAR_LABEL_CHARS threshold. Should NOT use the label
+    // and instead fall back to first-match.
+    const filler = ' lorem ipsum dolor sit amet '.repeat(20); // ~580 chars
+    const text = `Invoice Number: (page break)${filler}IN111222333 then later IN444555666`;
+    expect(findInvoiceNumber(text)).toBe('IN111222333');
+  });
+
+  it('positional bias still respects excludeSet (poison near label is skipped)', () => {
+    // Poison is RIGHT after the label — best position by distance.
+    // But it's in the hard-coded poison set, so it's filtered out
+    // BEFORE positional ranking applies. The far candidate wins.
+    const text = 'Invoice Number: IN500115607 / further down IN578457001';
+    expect(findInvoiceNumber(text, 9, HARDCODED_POISON_INVOICES)).toBe('IN578457001');
+  });
+
+  it('a "naked" INVOICE keyword still anchors when no NO/NUMBER suffix is present', () => {
+    // Some PODs print just "INVOICE" as a heading, with the number on
+    // the next line. The label regex tolerates that.
+    const text = 'Header IN500115608\nINVOICE\nIN111222333\nbody...';
+    expect(findInvoiceNumber(text)).toBe('IN111222333');
+  });
+
+  it('does NOT misread the word "investment" as an INV label', () => {
+    // The (?![a-z]) lookahead on the bare INV form prevents matching
+    // INV inside INVOICE-unrelated words like investment / inverse.
+    // Without that guard, "investment" would create a phantom label
+    // and skew the rank.
+    const text =
+      'Mention of investments and inversions IN555111 ' +
+      'and elsewhere IN999000';
+    // No real label → falls back to first-match → IN555111.
+    expect(findInvoiceNumber(text)).toBe('IN555111');
   });
 });
