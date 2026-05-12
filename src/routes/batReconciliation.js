@@ -530,12 +530,15 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const lastWeekPaidYear = lastPaid?.year ?? null;
 
     const sagePaidWeeks = sageWeekTotals.map(w => w.week_number);
-    // Missing weeks are scoped to the CURRENT ISO YEAR only, and only up to
-    // currentWeek - 2 (a 2-week buffer for Sage processing lag). ISO year — not
-    // calendar year — so e.g. Jan 1 2027 (a Friday) correctly belongs to W53/2026.
+    // Missing weeks are scoped to the CURRENT ISO YEAR only, and run up
+    // through currentWeek - 1 (i.e. every fully-elapsed week of the
+    // current year). The current week itself is excluded because it
+    // isn't done yet — Sage credit notes for the in-progress week
+    // legitimately don't exist. ISO year — not calendar year — so e.g.
+    // Jan 1 2027 (a Friday) correctly belongs to W53/2026.
     const currentYear = isoYear;
     const paidThisYear = new Set(sageWeekTotals.filter(w => w.year === currentYear).map(w => w.week_number));
-    const missingCutoff = Math.max(0, currentWeek - 2);
+    const missingCutoff = Math.max(0, currentWeek - 1);
     const missingWeeks = [];
     for (let w = 1; w <= missingCutoff; w++) {
       if (!paidThisYear.has(w)) missingWeeks.push(w);
