@@ -523,6 +523,24 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // GET /api/system/scheduled-jobs
+  //
+  // Returns the in-memory registry of every cron / interval / one-shot
+  // job that scheduler.js registered at boot, with computed next-fire
+  // times for cron jobs (via node-cron's task.getNextRun()). Backs the
+  // Operations page's Schedule tab so the operator can see WHAT is
+  // scheduled to run and WHEN, not just what HAS run (which is the
+  // existing /api/system/jobs view).
+  router.get('/api/system/scheduled-jobs', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { listScheduledJobs } = await import('../lib/scheduledJobs.js');
+      res.json({ jobs: listScheduledJobs(), serverTime: new Date().toISOString() });
+    } catch (err) {
+      console.error('[system.scheduled-jobs] failed:', err.message);
+      res.status(500).json({ error: 'Failed to load scheduled jobs' });
+    }
+  });
+
   // GET /api/system/alerts?status=active|all
   //
   // Active alerts (resolved_at IS NULL) drive the admin banner; the

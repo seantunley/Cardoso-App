@@ -15,10 +15,11 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Activity, AlertTriangle, Download, RefreshCw, Shield, ScanLine } from "lucide-react";
+import { Activity, AlertTriangle, Download, RefreshCw, Shield, ScanLine, Calendar } from "lucide-react";
 import { toast } from "sonner";
 
 import JobRunsPanel from "@/components/operations/JobRunsPanel";
+import SchedulePanel from "@/components/operations/SchedulePanel";
 import SystemLogPanel from "@/components/operations/SystemLogPanel";
 import UpdatesPanel from "@/components/operations/UpdatesPanel";
 import SecuritySignalsPanel from "@/components/operations/SecuritySignalsPanel";
@@ -143,6 +144,9 @@ export default function Operations() {
             <TabsTrigger value="jobs" className="data-[state=active]:bg-background">
               <Activity className="w-3.5 h-3.5 mr-1.5" /> Job Runs
             </TabsTrigger>
+            <TabsTrigger value="schedule" className="data-[state=active]:bg-background">
+              <Calendar className="w-3.5 h-3.5 mr-1.5" /> Schedule
+            </TabsTrigger>
             <TabsTrigger value="ocr" className="data-[state=active]:bg-background">
               <ScanLine className="w-3.5 h-3.5 mr-1.5" /> OCR
             </TabsTrigger>
@@ -164,6 +168,9 @@ export default function Operations() {
 
           <TabsContent value="jobs" className="mt-0">
             <JobRunsPanel />
+          </TabsContent>
+          <TabsContent value="schedule" className="mt-0">
+            <SchedulePanel />
           </TabsContent>
           <TabsContent value="ocr" className="mt-0">
             <OcrPanel />
