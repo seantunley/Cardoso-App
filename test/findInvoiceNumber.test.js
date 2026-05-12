@@ -190,14 +190,71 @@ describe('findInvoiceNumber — positional bias (textual proximity)', () => {
   });
 
   it('does NOT misread the word "investment" as an INV label', () => {
-    // The (?![a-z]) lookahead on the bare INV form prevents matching
-    // INV inside INVOICE-unrelated words like investment / inverse.
-    // Without that guard, "investment" would create a phantom label
-    // and skew the rank.
+    // The label regex requires the bare INV form to be followed by an
+    // explicit suffix (NO/NUMBER/#/:/.). Words like investment or
+    // inverse have INV followed by other letters — neither suffix nor
+    // word boundary, so they don't anchor.
     const text =
       'Mention of investments and inversions IN555111 ' +
       'and elsewhere IN999000';
     // No real label → falls back to first-match → IN555111.
     expect(findInvoiceNumber(text)).toBe('IN555111');
+  });
+
+  it('does NOT treat bare INV inside an INV<digits> candidate as a label anchor', () => {
+    // Reviewer-flagged regression: an earlier label regex permitted
+    // bare INV (only excluding lowercase letters), so "INV1234"
+    // matched as both a candidate AND a label. The phantom label
+    // anchored AT the candidate, the candidate sat at distance 0
+    // from "its own" label, and the real "Invoice Number:" hit was
+    // out-ranked. The fix: require the bare INV form to carry a
+    // proper label suffix (NO/NUMBER/#/:/.) — INV<digit> doesn't
+    // qualify, so no phantom anchor is created.
+    const text = 'Customer INV1234\nInvoice Number: IN999888777';
+    expect(findInvoiceNumber(text)).toBe('IN999888777');
+  });
+});
+
+describe('findInvoiceNumber — literal-prefix preference', () => {
+  // All real BAT invoices begin with literal IN/INQ in the source PDF.
+  // Patterns whose source already contains that prefix are inherently
+  // more trustworthy than patterns that SYNTHESISE the prefix from a
+  // misread (18→IN), a partial body (000422xxx → IN000422xxx) or a
+  // bare digit run (5555432 → IN5555432). The synthesised set is a
+  // recovery hatch only — it must never outrank a literal match.
+
+  it('prefers a literal-IN candidate over an 18→IN reconstruction even when the latter is closer to a label', () => {
+    // 18→IN reconstruction sits RIGHT after the label (distance 0).
+    // The literal IN candidate sits ~50 chars further on. Without
+    // the literal partition, distance ranking would prefer the
+    // reconstructed one — but reconstructed-prefix is the recovery
+    // hatch, not the trusted path.
+    const text = 'Invoice Number: 1800042238 and elsewhere on the page IN578457001';
+    expect(findInvoiceNumber(text)).toBe('IN578457001');
+  });
+
+  it('prefers a literal-IN candidate over a bare 55... synthesised match', () => {
+    // 5555432 alone would synthesise IN5555432; the literal IN777666
+    // wins regardless of order or position.
+    const text = 'Stamp 5555432 then later: IN777666';
+    expect(findInvoiceNumber(text)).toBe('IN777666');
+  });
+
+  it('falls back to the synthesised set when NO literal-IN/INQ candidate exists', () => {
+    // Only the 18→IN reconstruction matches. With no literal candidate,
+    // the synthesised partition gets used and we still get a result.
+    const text = 'Long invoice number 1800042238 on the page';
+    expect(findInvoiceNumber(text)).toBe('IN00042238');
+  });
+
+  it('falls back to the synthesised set for the bare 55... pattern when no literal exists', () => {
+    expect(findInvoiceNumber('Reference 5555432 on the POD')).toBe('IN5555432');
+  });
+
+  it('the literal INQ pattern competes in the literal partition (not partitioned out by Q)', () => {
+    // INQ-prefix is also literal in the source; should sit alongside
+    // IN-prefix candidates. Here the only candidate is INQ, and it
+    // wins (no synthesised competition).
+    expect(findInvoiceNumber('Document INQ0214536 dated')).toBe('INQ0214536');
   });
 });
