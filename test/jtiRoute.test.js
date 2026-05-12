@@ -57,6 +57,14 @@ beforeEach(() => {
   tmpArchiveRoot = path.join(os.tmpdir(), `jti-archive-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 });
 
+// No-op pushToHub injected into handleExport calls. Without this,
+// the route's fire-and-forget post-archive push would call the real
+// pushArchiveToHub which inspects HUB_URL/REPORTING_TOKEN env vars
+// and (without them) marks rows as 'skipped_no_hub' asynchronously
+// — racey vs the test's row assertions. Tests that explicitly want
+// to inspect push behaviour are in test/jtiHubPush.test.js.
+const noopPush = vi.fn(async () => ({ status: 'pushed' }));
+
 // Stub req/res factory. Captures status / json / setHeader / end so
 // tests can assert on what the handler did. role defaults to 'admin'
 // because most JTI endpoints are admin-permissive; tests that check
@@ -308,6 +316,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -328,6 +337,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     const wb = XLSX.read(res.raw, { cellNF: true });
@@ -351,6 +361,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows.slice(0, 1) }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     const wb = XLSX.read(res.raw);
@@ -370,6 +381,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows.slice(0, 1) }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     const wb = XLSX.read(res.raw);
@@ -387,6 +399,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit,
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     // The success-path audit is called once at the end; the failure-path
@@ -408,6 +421,7 @@ describe('handleExport — happy path', () => {
       getSagePool: async () => makeSagePool({ recordset: [] }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -428,6 +442,7 @@ describe('handleExport — Unknown site fallback', () => {
       getSagePool: async () => makeSagePool({ recordset: [] }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.headers['content-disposition']).toBe('attachment; filename="JTI_Cardoso_Sales_Unknown_20260430.xlsx"');
@@ -456,6 +471,7 @@ describe('handleExport — auto-archive on full-month range', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -488,6 +504,7 @@ describe('handleExport — auto-archive on full-month range', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -505,6 +522,7 @@ describe('handleExport — auto-archive on full-month range', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -556,6 +574,7 @@ describe('handleExport — auto-archive on full-month range', () => {
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit,
       archiveRoot: tmpArchiveRoot,
+      pushToHub: noopPush,
       req, res,
     });
     const arg = audit.mock.calls[0][0];

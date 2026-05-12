@@ -38,6 +38,7 @@ import {
   getJtiArchive,
   periodFromExactMonth,
 } from '../services/jti/jtiArchive.js';
+import { pushArchiveToHub } from '../services/jti/jtiHubPush.js';
 import fs from 'fs';
 import path from 'path';
 
@@ -148,7 +149,7 @@ export function handlePutSettings({ db, audit, resetPool, req, res }) {
  *     townCity?, region?, country?  // override saved defaults
  *   }
  */
-export async function handleExport({ db, getSagePool, audit, archiveRoot, req, res }) {
+export async function handleExport({ db, getSagePool, audit, archiveRoot, pushToHub = pushArchiveToHub, req, res }) {
   const { from, to } = req.body || {};
   if (!from || !to) {
     return res.status(400).json({ error: 'Date range required: provide both `from` and `to`' });
@@ -217,9 +218,10 @@ export async function handleExport({ db, getSagePool, audit, archiveRoot, req, r
   const period = periodFromExactMonth(from, to);
   let archivedId = null;
   let archiveError = null;
+  let archivedRow = null;
   if (period) {
     try {
-      const row = archiveJtiExport({
+      archivedRow = archiveJtiExport({
         db,
         archiveRoot,
         archive: {
@@ -236,7 +238,7 @@ export async function handleExport({ db, getSagePool, audit, archiveRoot, req, r
           siteLabel,
         },
       });
-      archivedId = row.id;
+      archivedId = archivedRow.id;
     } catch (err) {
       // Archive failure must not block the download — operator still
       // gets their file. We surface the error in the audit trail and
@@ -267,6 +269,21 @@ export async function handleExport({ db, getSagePool, audit, archiveRoot, req, r
   res.setHeader('Content-Length', String(buffer.length));
   if (archivedId) res.setHeader('X-JTI-Archive-Id', String(archivedId));
   res.end(buffer);
+
+  // Fire-and-forget hub push — only after the response is sent so
+  // operator wait time is unaffected. The push function never throws;
+  // any failure lands in the row's hub_push_status/_error and gets
+  // retried by the periodic retry tick. Skipped because the env vars
+  // aren't set is a totally normal site mode.
+  if (archivedRow) {
+    Promise.resolve()
+      .then(() => pushToHub({ db, archive: archivedRow }))
+      .catch(err => {
+        // pushArchiveToHub doesn't throw, but a downstream injection
+        // in tests might — log loudly so we don't lose the signal.
+        console.error(`[jti] post-archive hub push threw for #${archivedRow.id}:`, err.message);
+      });
+  }
 }
 
 /**

@@ -14,6 +14,7 @@ import { pruneResolvedAlerts } from './lib/alertEngine.js';
 import { pruneOldRows, vacuumDb } from './lib/retention.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
+import { pushPendingArchives } from './services/jti/jtiHubPush.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -346,6 +347,20 @@ export function startSchedulers() {
       }),
       { successCheck: (r) => !r?.failed },
     ), 45_000);
+
+    // JTI hub-push retry tick — every 15 minutes, scan for archives
+    // in pending/failed state and try to send them. The post-archive
+    // push trigger in handleExport / generateAndArchivePeriod handles
+    // the happy path; this tick is the safety net for transient hub
+    // outages (network blip, hub restarting, hub disk full). batchSize
+    // = 10 so a stuck site that's accumulated 50+ unpushed archives
+    // doesn't block the tick for too long.
+    intervals.push(setInterval(track(
+      'jti-hub-push-retry',
+      () => pushPendingArchives({ db, batchSize: 10 }),
+      (result) => result,
+      { successCheck: () => true }, // failed-to-push is normal, not a job failure
+    ), 15 * 60 * 1000));
   }
 
   // Alert engine evaluation tick — runs every 60s, evaluates the rules

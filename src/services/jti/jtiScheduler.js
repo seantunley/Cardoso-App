@@ -20,6 +20,7 @@ import { getJtiSettings } from './jtiSettings.js';
 import { queryJtiSales } from './jtiQuery.js';
 import { buildJtiWorkbook } from './jtiSpreadsheet.js';
 import { buildJtiFilename } from './jtiFilename.js';
+import { pushArchiveToHub } from './jtiHubPush.js';
 import { logError } from '../../lib/errorLog.js';
 
 /**
@@ -57,9 +58,10 @@ function ymd(year, month, day) {
  * @param {() => Promise<any>} args.getSagePool
  * @param {number} args.year
  * @param {number} args.month
+ * @param {(args: any) => Promise<any>} [args.pushToHub]  injectable for tests
  * @returns {Promise<{ status: 'archived'|'skipped', reason?: string, archiveId?: number, rowCount?: number }>}
  */
-export async function generateAndArchivePeriod({ db, getSagePool, year, month }) {
+export async function generateAndArchivePeriod({ db, getSagePool, year, month, pushToHub = pushArchiveToHub }) {
   if (hasScheduledArchive({ db, periodYear: year, periodMonth: month })) {
     return { status: 'skipped', reason: 'already_archived' };
   }
@@ -102,11 +104,25 @@ export async function generateAndArchivePeriod({ db, getSagePool, year, month })
     },
   });
 
+  // Immediately try to push to the hub. Don't block on it (or
+  // fail the whole archive if it doesn't go through) — the periodic
+  // retry tick will pick it up if this attempt fails. Awaited here
+  // (not fire-and-forget) so the lifecycle wrapper records the
+  // push outcome in job_runs.context, but wrapped in try/catch
+  // because pushArchiveToHub returning a 'failed' status is normal.
+  let pushResult = null;
+  try {
+    pushResult = await pushToHub({ db, archive: archiveRow });
+  } catch (err) {
+    console.error(`[jti-scheduler] post-archive push threw for #${archiveRow.id}: ${err.message}`);
+  }
+
   return {
     status: 'archived',
     archiveId: archiveRow.id,
     rowCount: rows.length,
     filename,
+    push: pushResult ? { status: pushResult.status, error: pushResult.error } : null,
   };
 }
 
