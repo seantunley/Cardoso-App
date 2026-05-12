@@ -294,6 +294,42 @@ describe('pushPendingArchives', () => {
     expect(res.considered).toBe(0);
   });
 
+  it('INCLUDES skipped_no_hub rows when hub is now reachable (operator just configured the URL)', async () => {
+    // Pre-existing archive sitting at skipped_no_hub from before the
+    // operator set bat_settings.hub_sync_url. Once hub IS reachable,
+    // the retry tick must pick these up — otherwise they stay stranded
+    // forever and the operator has no in-UI way to force a re-push.
+    const a = seedArchive({ year: 2026, month: 3 });
+    db.prepare(`UPDATE jti_archive SET hub_push_status='skipped_no_hub' WHERE id=?`).run(a.id);
+    const b = seedArchive({ year: 2026, month: 4 }); // pending — would always be eligible
+    const res = await pushPendingArchives({
+      db,
+      hubUrl: 'http://hub.example', reportingToken: 't', siteId: 's1',
+      fetchImpl: fetchOk(),
+    });
+    expect(res.considered).toBe(2);
+    expect(res.pushed).toBe(2);
+    const aRow = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(a.id);
+    const bRow = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(b.id);
+    expect(aRow.hub_push_status).toBe('pushed');
+    expect(bRow.hub_push_status).toBe('pushed');
+  });
+
+  it('EXCLUDES skipped_no_hub rows when hub is unreachable (no URL/token) — no churn', async () => {
+    const a = seedArchive({ year: 2026, month: 3 });
+    db.prepare(`UPDATE jti_archive SET hub_push_status='skipped_no_hub' WHERE id=?`).run(a.id);
+    const res = await pushPendingArchives({
+      db,
+      hubUrl: '', reportingToken: '', siteId: 's1',
+      fetchImpl: fetchOk(),
+    });
+    // Hub unreachable → don't even consider skipped_no_hub. (A pending
+    // archive WOULD still be scanned — and it'd get marked
+    // skipped_no_hub by pushArchiveToHub's first-line check — but the
+    // already-skipped row is not re-walked just to re-mark it.)
+    expect(res.considered).toBe(0);
+  });
+
   it('returns immediately with zero counts when no archives exist', async () => {
     const res = await pushPendingArchives({
       db,
