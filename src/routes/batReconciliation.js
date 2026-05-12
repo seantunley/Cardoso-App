@@ -53,20 +53,70 @@ import {
   getRecentBatReconciliations,
   clearOcrHalt,
 } from '../services/batReconciliation.js';
-import { archiveSupplierUpload } from '../services/bat/uploadArchive.js';
+import { processSupplierUpload } from '../services/bat/uploadProcessor.js';
 
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
+const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024;       // 50 MB / file
+const UPLOAD_MAX_BATCH_FILES = 50;                    // per batch request
+const UPLOAD_ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls']);
+
 const upload = multer({
   dest: uploadsDir,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: UPLOAD_MAX_FILE_BYTES, files: UPLOAD_MAX_BATCH_FILES },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (['.xlsx', '.xls'].includes(ext)) cb(null, true);
-    else cb(new Error('Only .xlsx and .xls files are accepted'));
+    // Silent-skip via cb(null, false) instead of cb(new Error(...)).
+    // Throwing in the filter aborts the WHOLE request (multer errors
+    // out at the middleware layer, the route's per-file loop never
+    // runs), which on a batch upload means one stray .pdf in a 50-
+    // file backfill tanks the other 49. Silent-skip drops only the
+    // offender; the route handler then notices req.files came back
+    // empty (or missing the wrong-extension file) and reports
+    // accordingly. The single-file route below also handles the
+    // resulting empty-file case with a clear message.
+    if (UPLOAD_ALLOWED_EXTENSIONS.has(ext)) cb(null, true);
+    else cb(null, false);
   },
 });
+
+// Wrap multer's middleware so failures it surfaces (LIMIT_FILE_SIZE,
+// LIMIT_FILE_COUNT, generic upload errors) become a structured 400
+// response rather than the default "next(err)" which propagates to
+// the global error handler as an opaque 500. Without this wrapper,
+// multer-level failures bypass the batch route's per-file try/catch
+// and the operator gets a useless "Internal Server Error" toast for
+// what's a recoverable input problem.
+//
+// The shape carries a top-level `error` so the existing client
+// chunk-failure path (which already maps !r.ok responses to per-file
+// error rows) renders the right thing in the batch modal. For the
+// single-upload route, the same response is fine — the client there
+// also uses the `error` field for its toast.
+function uploadMiddlewareWithErrorCapture(multerHandler) {
+  return (req, res, next) => {
+    multerHandler(req, res, (err) => {
+      if (!err) {
+        next();
+        return;
+      }
+      let message;
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        message = `One or more files exceed the ${Math.round(UPLOAD_MAX_FILE_BYTES / 1024 / 1024)} MB upload limit`;
+      } else if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+        message = `Too many files in this batch (max ${UPLOAD_MAX_BATCH_FILES} per request)`;
+      } else {
+        message = err.message || 'Upload failed';
+      }
+      console.error(`[bat] upload middleware rejected request: ${err.code || 'no-code'} — ${message}`);
+      res.status(400).json({ error: message, code: err.code || 'UPLOAD_ERROR' });
+    });
+  };
+}
+
+const uploadSingle = uploadMiddlewareWithErrorCapture(upload.single('file'));
+const uploadBatch = uploadMiddlewareWithErrorCapture(upload.array('files', UPLOAD_MAX_BATCH_FILES));
 
 export function createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
@@ -85,89 +135,47 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     res.type('image/jpeg').sendFile(filePath);
   });
 
-  // POST /api/bat/upload — Upload + parse supplier spreadsheet
-  router.post('/api/bat/upload', ...gate, upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  // Per-file processing flow shared with the batch endpoint, see
+  // src/services/bat/uploadProcessor.js. The route handler stays
+  // responsible for: auth, audit logging, multer file lifecycle
+  // (unlinkSync), and HTTP response shaping.
+  const processorDeps = {
+    db,
+    parseSupplierSpreadsheet,
+    createReconciliation,
+    querySageCreditNotes,
+    replaceSageCreditNotes,
+    backfillOrderAmounts,
+    getReconciliation,
+    toIsoYear,
+  };
+
+  // POST /api/bat/upload — Upload + parse a single supplier spreadsheet
+  router.post('/api/bat/upload', ...gate, uploadSingle, async (req, res) => {
+    if (!req.file) {
+      // fileFilter silent-skips non-.xlsx/.xls (so batch uploads
+      // don't tank on one wrong extension). For the single-upload
+      // route, that means we get here with no req.file when the
+      // uploaded file had the wrong extension — make the message
+      // actionable rather than the generic "No file uploaded".
+      return res.status(400).json({ error: 'No file uploaded — only .xlsx and .xls files are accepted' });
+    }
 
     try {
-      // parseSupplierSpreadsheet now throws SpreadsheetValidationError with
-      // a list of human-readable reasons when the file is structurally
-      // unusable (missing sheets, no ODR rows, no PODs, unparseable filename
-      // week, etc.). We catch and 400 it back so NOTHING gets persisted —
-      // the operator gets the full list in a modal and can fix + retry.
-      // Previously bad spreadsheets would sometimes create an empty recon
-      // with zero PODs that polluted the dashboard.
-      const parsed = parseSupplierSpreadsheet(req.file.path, req.file.originalname);
-
-      // Year fallback chain: parser-detected → request body → ISO year of
-      // current date. ISO year (not calendar year) so a late-Dec upload
-      // for a W1 file doesn't get filed under the previous year.
-      const year = parsed.year || parseInt(req.body.year, 10) || toIsoYear(new Date());
-      if (parsed.year) console.log(`[bat] Year detected from spreadsheet: ${parsed.year}`);
-      const reconId = createReconciliation({
-        weekNumber: parsed.weekNumber,
-        year,
-        filename: req.file.originalname,
-        fees: parsed.fees,
-        podUrls: parsed.podUrls,
+      const result = await processSupplierUpload({
+        file: req.file,
+        fallbackYear: parseInt(req.body.year, 10) || null,
         userId: req.currentUser.id,
+        ...processorDeps,
       });
-
-      // Archive the original .xlsx so a later supplier dispute can be
-      // replayed against the source bytes. The temp file is unlinked
-      // in the finally block below either way; if the archive copy
-      // fails (disk full, permission, etc.) we log + continue — losing
-      // the archive is regrettable but doesn't invalidate the parsed
-      // recon data, so this isn't worth aborting the upload over.
-      //
-      // IMPORTANT: createReconciliation upserts on (week, year). On a
-      // re-upload of the same week, the row may already carry an
-      // archive_path from the previous upload. We MUST null that out
-      // on archive failure — leaving the stale path would point future
-      // dispute replays at a spreadsheet whose contents no longer
-      // match the row's parsed totals. NULL is the honest signal that
-      // "no archive bytes available for this version of the row".
-      try {
-        const archivePath = archiveSupplierUpload({
-          srcPath: req.file.path,
-          reconId,
-          originalName: req.file.originalname,
-        });
-        db.prepare('UPDATE bat_reconciliations SET archive_path = ? WHERE id = ?')
-          .run(archivePath, reconId);
-      } catch (archiveErr) {
-        console.error(`[bat] Failed to archive uploaded spreadsheet for recon ${reconId} (${req.file.originalname}): ${archiveErr.message}`);
-        db.prepare('UPDATE bat_reconciliations SET archive_path = NULL WHERE id = ?')
-          .run(reconId);
-      }
-
-      // Auto-query Sage for credit notes — non-blocking on failure but the error is persisted
-      // so the UI shows it instead of silently displaying zero credit notes.
-      // Use replaceSageCreditNotes for atomicity even though there's
-      // nothing to delete on a freshly-created recon (the DELETE is a
-      // cheap no-op). One helper across all three call sites prevents
-      // drift if the refresh shape changes again.
-      try {
-        const creditNotes = await querySageCreditNotes(parsed.weekNumber, year);
-        replaceSageCreditNotes(reconId, creditNotes);
-      } catch (sageErr) {
-        console.error('[bat] Sage query failed:', sageErr.message);
-        db.prepare('UPDATE bat_reconciliations SET sage_error = ? WHERE id = ?')
-          .run(String(sageErr.message).slice(0, 500), reconId);
-      }
-
-      // Backfill amounts onto previous weeks' extractions that had no amount
-      const backfilled = backfillOrderAmounts(parsed.orderAmounts);
-
-      const reconciliation = getReconciliation(reconId);
       logAudit({
         req, action: 'bat_upload', resourceType: 'system',
-        resourceId: reconId,
-        resourceName: `Week ${parsed.weekNumber}/${year}`,
-        details: `Filename: ${req.file.originalname}; PODs: ${parsed.podUrls?.length || 0}; backfilled: ${backfilled}`,
-        changes: { fees: parsed.fees, week_number: parsed.weekNumber, year },
+        resourceId: result.reconciliation.id,
+        resourceName: `Week ${result.weekNumber}/${result.year}`,
+        details: `Filename: ${req.file.originalname}; PODs: ${result.podCount}; backfilled: ${result.backfilled}`,
+        changes: { fees: result.fees, week_number: result.weekNumber, year: result.year },
       });
-      res.json({ ok: true, reconciliation, backfilled });
+      res.json({ ok: true, reconciliation: result.reconciliation, backfilled: result.backfilled });
     } catch (err) {
       console.error('[bat] Upload failed:', err.message);
       logAudit({
@@ -189,6 +197,94 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     } finally {
       try { fs.unlinkSync(req.file.path); } catch {}
     }
+  });
+
+  // POST /api/bat/upload-batch — Upload + parse N supplier spreadsheets
+  // in one go. Each file becomes its own recon (different week_number);
+  // per-file try/catch so one bad sheet doesn't tank the rest of the
+  // batch. Designed for backfilling historical weeks (drop W5/6/7/8 in
+  // a single drag).
+  //
+  // Response shape:
+  //   {
+  //     ok: true,
+  //     results: [
+  //       { filename, status: 'success',  reconciliation, weekNumber, year, backfilled },
+  //       { filename, status: 'rejected', reasons: [...] },
+  //       { filename, status: 'error',    error: '...' },
+  //     ]
+  //   }
+  // Always 200 — the per-file status field carries pass/fail.
+  router.post('/api/bat/upload-batch', ...gate, uploadBatch, async (req, res) => {
+    const files = req.files || [];
+    if (files.length === 0) {
+      // Either nothing was sent OR fileFilter silent-skipped every
+      // entry as a non-.xlsx/.xls. Either way, nothing to process.
+      return res.status(400).json({ error: 'No files uploaded — only .xlsx and .xls files are accepted' });
+    }
+
+    const fallbackYear = parseInt(req.body.year, 10) || null;
+    const results = [];
+
+    // Sequential — the SQLite write path serialises anyway, and
+    // sequential keeps results ordered so the UI modal lists files
+    // in upload order.
+    for (const file of files) {
+      try {
+        const result = await processSupplierUpload({
+          file,
+          fallbackYear,
+          userId: req.currentUser.id,
+          ...processorDeps,
+        });
+        logAudit({
+          req, action: 'bat_upload', resourceType: 'system',
+          resourceId: result.reconciliation.id,
+          resourceName: `Week ${result.weekNumber}/${result.year}`,
+          details: `Batch upload — Filename: ${file.originalname}; PODs: ${result.podCount}; backfilled: ${result.backfilled}`,
+          changes: { fees: result.fees, week_number: result.weekNumber, year: result.year, batch: true },
+        });
+        // Lightweight per-row payload only. The full reconciliation
+        // object (extractions[] + creditNotes[]) can run to tens of KB
+        // per recon — multiply by a 50-file batch and the response
+        // gets large for content the modal never renders. The modal
+        // only needs filename/status/week/year/backfilled; the optional
+        // auto-navigate path uses reconciliationId to fetch the full
+        // object when the operator actually clicks through.
+        results.push({
+          filename: file.originalname,
+          status: 'success',
+          reconciliationId: result.reconciliation.id,
+          weekNumber: result.weekNumber,
+          year: result.year,
+          backfilled: result.backfilled,
+        });
+      } catch (err) {
+        console.error(`[bat] Batch upload — file ${file.originalname} failed:`, err.message);
+        logAudit({
+          req, action: 'bat_upload', resourceType: 'system',
+          resourceName: file.originalname,
+          details: `Batch upload — ${err.message}`, status: 'failure',
+        });
+        if (err instanceof SpreadsheetValidationError) {
+          results.push({
+            filename: file.originalname,
+            status: 'rejected',
+            reasons: err.reasons,
+          });
+        } else {
+          results.push({
+            filename: file.originalname,
+            status: 'error',
+            error: err.message || 'Failed to process spreadsheet',
+          });
+        }
+      } finally {
+        try { fs.unlinkSync(file.path); } catch {}
+      }
+    }
+
+    res.json({ ok: true, results });
   });
 
   router.get('/api/bat/sage-credit-notes', ...gate, async (req, res) => {
@@ -829,8 +925,8 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
   });
 
   // ── Cardoso Invoice Upload & Matching (global — across all weeks) ──
-  router.post('/api/bat/cardoso-upload', ...gate, upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  router.post('/api/bat/cardoso-upload', ...gate, uploadSingle, async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded — only .xlsx and .xls files are accepted' });
     try {
       const duplicateMode = req.body.duplicateMode || 'skip'; // 'skip' or 'overwrite'
       const invoices = parseCardosoSpreadsheet(req.file.path);
