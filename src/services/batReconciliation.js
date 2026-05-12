@@ -11,6 +11,7 @@ import { getRoleConnectionId } from './connectionRoles.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/matching.js';
+import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
