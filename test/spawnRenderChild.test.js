@@ -271,12 +271,26 @@ describe('renderPdfInChild — stdio drain safety', () => {
   // time could return a truncated buffer; downstream sharp / OCR
   // engines would fail with confusing decode errors that looked
   // unrelated to the renderer. Switching to 'close' (which fires AFTER
-  // all stdio flushes) closes the race.
+  // all stdio flushes) closes the race we care about.
   //
-  // We force the race by writing a payload several times the OS pipe
-  // buffer size and exiting the child immediately after the write. If
-  // the wrapper resolves before drain, the returned buffer would be
-  // shorter than what we wrote.
+  // We exercise the race by writing a payload several times the OS
+  // pipe buffer size, then closing the child's stdout cleanly. The
+  // pipe is still buffered in the kernel; the parent must keep reading
+  // after the child has exited until it sees EOF. If the wrapper
+  // resolved on 'exit' instead of 'close', the returned buffer would
+  // be shorter than what we wrote.
+  //
+  // Earlier rev of this test had the child do
+  //   process.stdout.write(buf);
+  //   process.exit(0);
+  // which loses data before the parent ever sees it: process.exit is
+  // synchronous and does NOT wait for Node's writable buffer to flush
+  // to the kernel pipe. That made the test flaky in CI even when the
+  // wrapper was perfectly correct — the failure was the STUB losing
+  // bytes, not the wrapper truncating them. Switched to write+callback
+  // so the exit only fires after the kernel has acknowledged the bytes.
+  // The race we're testing — parent reading after child close — is
+  // unchanged.
 
   it('returns the FULL stdout buffer on a large-payload, fast-exit child (no truncation)', async () => {
     // 4 MB payload — well above the Windows / Linux default pipe buffer
@@ -289,10 +303,15 @@ describe('renderPdfInChild — stdio drain safety', () => {
         const SIZE = 4 * 1024 * 1024;
         const buf = Buffer.alloc(SIZE);
         for (let i = 0; i < SIZE; i++) buf[i] = i & 0xFF;
-        // No callback / drain wait — write then exit fast to maximise
-        // the chance the parent sees 'exit' before the pipe flushes.
-        process.stdout.write(buf);
-        process.exit(0);
+        // Callback-after-flush is the safest "as fast as possible
+        // without losing bytes" pattern: Node fires the cb only once
+        // the underlying stdio handle has accepted the write. Then we
+        // exit. Equivalent to process.stdout.end(buf) + natural exit
+        // but a touch more explicit about intent.
+        process.stdout.write(buf, (err) => {
+          if (err) { process.exit(1); }
+          process.exit(0);
+        });
       });
     `);
     const out = await renderPdfInChild(PDF_STUB, { childScriptPath: scriptPath, timeoutMs: 15000 });
