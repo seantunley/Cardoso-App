@@ -82,25 +82,27 @@ export function toYyyymmddInt(value) {
 // (admin-gated UI on the JTI page). The default + override go through
 // the same param-binding path; only the SQL string differs.
 //
-// String columns are wrapped in RTRIM() because Sage 300 stores
-// most identifier/name fields as CHAR(N) with right-side space
-// padding; without the RTRIM, "10" arrives as "10        " and
-// breaks downstream consumers comparing on equality. Compared
-// byte-for-byte against the macro's reference output and matched.
+// String columns are trimmed to match the macro's output exactly.
 //
-// LEADING whitespace on ICITEM.[DESC] (e.g. "  CAMEL CLASSIC ...")
-// is intentional — Sage stores it that way for some product names,
-// and the consumer pipeline depends on it. RTRIM only, not LTRIM,
-// preserves that.
+// Most fields use LTRIM(RTRIM(...)) — Sage 300 stores them as CHAR(N)
+// with right-side space padding, and a small number of records carry
+// a leading space from data-entry slips. Both kinds of whitespace
+// are noise to the consumer pipeline.
+//
+// ICITEM.[DESC] is the EXCEPTION — RTRIM only, no LTRIM. Some
+// product names are stored with INTENTIONAL leading whitespace (e.g.
+// "  CAMEL CLASSIC **BOX**") to control how they sort/group on
+// printed reports. The downstream pipeline relies on that exact
+// value; stripping the leading spaces would diverge from the macro.
 export const DEFAULT_JTI_SQL = `
     SELECT
-      RTRIM(OESHDT.TRANNUM)   AS TRANNUM,
-      OESHDT.TRANDATE         AS TRANDATE,
-      RTRIM(OESHDT.ITEM)      AS ITEM,
-      RTRIM(ICITEM.[DESC])    AS [DESC],
-      RTRIM(OESHDT.CUSTOMER)  AS CUSTOMER,
-      RTRIM(ARCUS.NAMECUST)   AS NAMECUST,
-      OESHDT.QTYSOLD          AS QTYSOLD
+      LTRIM(RTRIM(OESHDT.TRANNUM))   AS TRANNUM,
+      OESHDT.TRANDATE                AS TRANDATE,
+      LTRIM(RTRIM(OESHDT.ITEM))      AS ITEM,
+      RTRIM(ICITEM.[DESC])           AS [DESC],
+      LTRIM(RTRIM(OESHDT.CUSTOMER))  AS CUSTOMER,
+      LTRIM(RTRIM(ARCUS.NAMECUST))   AS NAMECUST,
+      OESHDT.QTYSOLD                 AS QTYSOLD
     FROM OESHDT OESHDT
     INNER JOIN ICITEM ICITEM
       ON OESHDT.ITEM = ICITEM.ITEMNO

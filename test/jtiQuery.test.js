@@ -76,20 +76,26 @@ describe('buildJtiSql — SQL shape', () => {
     expect(sql).toMatch(/AS\s+QTYSOLD\b/);
   });
 
-  it('wraps string columns in RTRIM to strip Sage CHAR padding', () => {
+  it('trims string columns: LTRIM+RTRIM on identifiers/names, RTRIM-only on DESC', () => {
     // Trailing space padding from Sage CHAR fields breaks downstream
-    // equality comparisons + diverges from the macro's RTRIM'd output.
-    // Pinning so a refactor that drops the RTRIM wrappers gets caught.
+    // equality. A small number of records also have leading-space
+    // data-entry slips. LTRIM+RTRIM strips both. ICITEM.[DESC] is
+    // RTRIM-only because some product names have INTENTIONAL leading
+    // whitespace (e.g. "  CAMEL CLASSIC **BOX**") that the consumer
+    // pipeline depends on — stripping it would diverge from the
+    // macro's reference output.
     const { sql } = build();
-    expect(sql).toMatch(/RTRIM\(OESHDT\.TRANNUM\)/);
-    expect(sql).toMatch(/RTRIM\(OESHDT\.ITEM\)/);
+    expect(sql).toMatch(/LTRIM\(RTRIM\(OESHDT\.TRANNUM\)\)/);
+    expect(sql).toMatch(/LTRIM\(RTRIM\(OESHDT\.ITEM\)\)/);
+    expect(sql).toMatch(/LTRIM\(RTRIM\(OESHDT\.CUSTOMER\)\)/);
+    expect(sql).toMatch(/LTRIM\(RTRIM\(ARCUS\.NAMECUST\)\)/);
+    // DESC: RTRIM only, NOT wrapped in LTRIM.
     expect(sql).toMatch(/RTRIM\(ICITEM\.\[DESC\]\)/);
-    expect(sql).toMatch(/RTRIM\(OESHDT\.CUSTOMER\)/);
-    expect(sql).toMatch(/RTRIM\(ARCUS\.NAMECUST\)/);
-    // Numeric columns stay un-wrapped — RTRIM on a number is a no-op
+    expect(sql).not.toMatch(/LTRIM\(RTRIM\(ICITEM\.\[DESC\]\)\)/);
+    // Numeric columns stay un-wrapped — TRIM on a number is a no-op
     // and would just confuse the recordset shape.
-    expect(sql).not.toMatch(/RTRIM\(OESHDT\.TRANDATE\)/);
-    expect(sql).not.toMatch(/RTRIM\(OESHDT\.QTYSOLD\)/);
+    expect(sql).not.toMatch(/[LR]TRIM\(OESHDT\.TRANDATE\)/);
+    expect(sql).not.toMatch(/[LR]TRIM\(OESHDT\.QTYSOLD\)/);
   });
 
   it('LEFT JOINs ARCUS so rows survive when the customer master is missing', () => {
