@@ -30,12 +30,17 @@
 // inline comment naming the originating supplier/POD pattern so a
 // future engineer can audit.
 export const HARDCODED_POISON_INVOICES = new Set([
-  // Recurs across SKY CITY and several other RBA suppliers' PODs;
-  // appears 5-7× per week of recon-18-shaped data, never matches an
-  // actual Sage invoice. Spotted by Sean during round 6 PDFium QA.
+  // The 'IN[5/8][0/8]0115[68]07' family — four near-identical numbers
+  // that all behave the same way: appear on PODs from unrelated RBA
+  // suppliers across multiple weeks/recons (one per recon, never
+  // exceeds a per-recon dup threshold), never match an actual Sage
+  // invoice. Cross-recon analysis on 2026-05-12 confirmed all four
+  // recur across 3-8 different recons each. Almost certainly a
+  // recurring header/account/branch artefact in the same template.
   'IN500115607',
-  // Sister artefact to IN500115607, same suppliers, same recurrence.
+  'IN500115807',
   'IN580115607',
+  'IN580115807',
 ]);
 
 // `excludeSet` accepts a Set OR an Array (some callers find it easier

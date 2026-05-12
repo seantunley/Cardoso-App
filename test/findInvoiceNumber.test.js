@@ -65,12 +65,15 @@ describe('findInvoiceNumber — regression on original regex pipeline', () => {
 });
 
 describe('findInvoiceNumber — excludeSet poison guard', () => {
-  it('exports the hard-coded poison set with the known artefacts', () => {
-    // These two are the smoking-gun numbers Sean spotted recurring across
-    // unrelated suppliers' PODs in round 6 (recon 18) — see
-    // src/services/bat/findInvoiceNumber.js for the audit trail.
+  it('exports the hard-coded poison set with the full known-artefact family', () => {
+    // The IN[5/8][0/8]0115[68]07 family — four near-identical numbers
+    // that recur across 3-8 different recons each, never match a real
+    // Sage invoice. See src/services/bat/findInvoiceNumber.js for the
+    // audit trail.
     expect(HARDCODED_POISON_INVOICES.has('IN500115607')).toBe(true);
+    expect(HARDCODED_POISON_INVOICES.has('IN500115807')).toBe(true);
     expect(HARDCODED_POISON_INVOICES.has('IN580115607')).toBe(true);
+    expect(HARDCODED_POISON_INVOICES.has('IN580115807')).toBe(true);
   });
 
   it('skips an excluded candidate and returns the next match in the same pattern', () => {
