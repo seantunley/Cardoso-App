@@ -52,17 +52,33 @@ function dailySeed(date) {
   return date.getFullYear() * 10000 + (date.getMonth() + 1) * 100 + date.getDate();
 }
 
+function getSafeLocalStorage() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    return window.localStorage || null;
+  } catch {
+    return null;
+  }
+}
+
 export function cleanImportMessage(fallback = "Import complete") {
   const index = Math.floor(Date.now() / 60000) % CLEAN_IMPORT_MESSAGES.length;
   return CLEAN_IMPORT_MESSAGES[index] || fallback;
 }
 
 export function recordCleanSyncStreak() {
-  if (typeof window === "undefined") return 0;
+  const storage = getSafeLocalStorage();
+  if (!storage) return 0;
+
   const key = "cardoso-clean-sync-streak";
-  const next = Number(window.localStorage.getItem(key) || "0") + 1;
-  window.localStorage.setItem(key, String(next));
-  return next;
+  try {
+    const next = Number(storage.getItem(key) || "0") + 1;
+    storage.setItem(key, String(next));
+    return next;
+  } catch {
+    return 0;
+  }
 }
 
 export function cleanImportToastMessage({ imported = 0, target } = {}) {
@@ -76,8 +92,14 @@ export function cleanImportToastMessage({ imported = 0, target } = {}) {
 }
 
 export function resetCleanSyncStreak() {
-  if (typeof window === "undefined") return;
-  window.localStorage.removeItem("cardoso-clean-sync-streak");
+  const storage = getSafeLocalStorage();
+  if (!storage) return;
+
+  try {
+    storage.removeItem("cardoso-clean-sync-streak");
+  } catch {
+    // Storage may be blocked in restricted contexts; sync error handling must continue.
+  }
 }
 
 export function getLedgerFortune(date = new Date()) {
