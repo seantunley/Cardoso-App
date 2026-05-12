@@ -40,7 +40,10 @@ const SIGTERM_GRACE_MS = 2_000;
  * @property {number} [maxHeight=4000]     capped against base viewport height
  * @property {number} [maxPixels=6000000]  total raster pixel cap
  * @property {number} [minScale=0.3]       refuse-to-render floor
- * @property {number} [jpegQuality=0.85]
+ * @property {number} [jpegQuality]        no default here — when omitted, the
+ *                                         child's own default (currently 0.95)
+ *                                         applies. Pass an explicit value to
+ *                                         override it.
  * @property {number} [timeoutMs=30000]    parent-side wall-clock kill timeout
  * @property {string} [childScriptPath]    test-only override for the script path
  */
@@ -78,14 +81,20 @@ export function renderPdfInChild(pdfBuffer, opts = {}) {
     maxHeight = 4000,
     maxPixels = 6_000_000,
     minScale = 0.3,
-    jpegQuality = 0.85,
+    // No default for jpegQuality — see RenderOpts typedef. The child
+    // owns the default (currently 0.95, bumped from 0.85 in Phase 2
+    // round-2 because heavier compression bled digit edges and OCR
+    // misread 9 vs 8 / 5). If we defaulted to a value here, the
+    // child's default would be unreachable and the migration's
+    // quality bump would silently regress.
+    jpegQuality,
     timeoutMs = 30_000,
     childScriptPath = CHILD_SCRIPT,
   } = opts;
 
-  const paramsJson = JSON.stringify({
-    pageNum, requestedScale, maxWidth, maxHeight, maxPixels, minScale, jpegQuality,
-  });
+  const params = { pageNum, requestedScale, maxWidth, maxHeight, maxPixels, minScale };
+  if (jpegQuality !== undefined) params.jpegQuality = jpegQuality;
+  const paramsJson = JSON.stringify(params);
 
   return new Promise((resolve, reject) => {
     let child;

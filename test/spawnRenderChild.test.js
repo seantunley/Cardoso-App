@@ -90,6 +90,46 @@ describe('renderPdfInChild — happy path (stub child)', () => {
     expect(params.maxHeight).toBe(4000); // default
   });
 
+  it('does NOT include jpegQuality in params when caller omits it (child default applies)', async () => {
+    // Regression guard for a Phase-2 bug: the parent used to default
+    // jpegQuality to 0.85 and serialise it unconditionally, shadowing
+    // the child's bumped 0.95 default. Result was every render came
+    // out at the lower quality even though the migration's reasoning
+    // about digit-edge bleed assumed 0.95. The fix: don't default in
+    // the parent; only include the field in paramsJson when the caller
+    // explicitly asked for one. The child's default then wins.
+    writeStub(`
+      process.stdin.on('data', () => {});
+      process.stdin.on('end', () => {
+        process.stdout.write(Buffer.from(process.argv[2], 'utf8'));
+        process.exit(0);
+      });
+    `);
+    const out = await renderPdfInChild(PDF_STUB, {
+      childScriptPath: scriptPath,
+      timeoutMs: 5000,
+    });
+    const params = JSON.parse(out.toString('utf8'));
+    expect(params).not.toHaveProperty('jpegQuality');
+  });
+
+  it('passes jpegQuality through unchanged when caller does provide it', async () => {
+    writeStub(`
+      process.stdin.on('data', () => {});
+      process.stdin.on('end', () => {
+        process.stdout.write(Buffer.from(process.argv[2], 'utf8'));
+        process.exit(0);
+      });
+    `);
+    const out = await renderPdfInChild(PDF_STUB, {
+      childScriptPath: scriptPath,
+      jpegQuality: 0.7,
+      timeoutMs: 5000,
+    });
+    const params = JSON.parse(out.toString('utf8'));
+    expect(params.jpegQuality).toBe(0.7);
+  });
+
   it('forwards the PDF buffer to the child stdin (round-trip)', async () => {
     // The stub echoes whatever it received on stdin straight to stdout.
     writeStub(`
