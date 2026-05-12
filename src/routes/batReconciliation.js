@@ -58,15 +58,65 @@ import { processSupplierUpload } from '../services/bat/uploadProcessor.js';
 const uploadsDir = path.join(process.cwd(), 'uploads', 'bat');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
+const UPLOAD_MAX_FILE_BYTES = 50 * 1024 * 1024;       // 50 MB / file
+const UPLOAD_MAX_BATCH_FILES = 50;                    // per batch request
+const UPLOAD_ALLOWED_EXTENSIONS = new Set(['.xlsx', '.xls']);
+
 const upload = multer({
   dest: uploadsDir,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: UPLOAD_MAX_FILE_BYTES, files: UPLOAD_MAX_BATCH_FILES },
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
-    if (['.xlsx', '.xls'].includes(ext)) cb(null, true);
-    else cb(new Error('Only .xlsx and .xls files are accepted'));
+    // Silent-skip via cb(null, false) instead of cb(new Error(...)).
+    // Throwing in the filter aborts the WHOLE request (multer errors
+    // out at the middleware layer, the route's per-file loop never
+    // runs), which on a batch upload means one stray .pdf in a 50-
+    // file backfill tanks the other 49. Silent-skip drops only the
+    // offender; the route handler then notices req.files came back
+    // empty (or missing the wrong-extension file) and reports
+    // accordingly. The single-file route below also handles the
+    // resulting empty-file case with a clear message.
+    if (UPLOAD_ALLOWED_EXTENSIONS.has(ext)) cb(null, true);
+    else cb(null, false);
   },
 });
+
+// Wrap multer's middleware so failures it surfaces (LIMIT_FILE_SIZE,
+// LIMIT_FILE_COUNT, generic upload errors) become a structured 400
+// response rather than the default "next(err)" which propagates to
+// the global error handler as an opaque 500. Without this wrapper,
+// multer-level failures bypass the batch route's per-file try/catch
+// and the operator gets a useless "Internal Server Error" toast for
+// what's a recoverable input problem.
+//
+// The shape carries a top-level `error` so the existing client
+// chunk-failure path (which already maps !r.ok responses to per-file
+// error rows) renders the right thing in the batch modal. For the
+// single-upload route, the same response is fine — the client there
+// also uses the `error` field for its toast.
+function uploadMiddlewareWithErrorCapture(multerHandler) {
+  return (req, res, next) => {
+    multerHandler(req, res, (err) => {
+      if (!err) {
+        next();
+        return;
+      }
+      let message;
+      if (err.code === 'LIMIT_FILE_SIZE') {
+        message = `One or more files exceed the ${Math.round(UPLOAD_MAX_FILE_BYTES / 1024 / 1024)} MB upload limit`;
+      } else if (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE') {
+        message = `Too many files in this batch (max ${UPLOAD_MAX_BATCH_FILES} per request)`;
+      } else {
+        message = err.message || 'Upload failed';
+      }
+      console.error(`[bat] upload middleware rejected request: ${err.code || 'no-code'} — ${message}`);
+      res.status(400).json({ error: message, code: err.code || 'UPLOAD_ERROR' });
+    });
+  };
+}
+
+const uploadSingle = uploadMiddlewareWithErrorCapture(upload.single('file'));
+const uploadBatch = uploadMiddlewareWithErrorCapture(upload.array('files', UPLOAD_MAX_BATCH_FILES));
 
 export function createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
@@ -101,8 +151,15 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
   };
 
   // POST /api/bat/upload — Upload + parse a single supplier spreadsheet
-  router.post('/api/bat/upload', ...gate, upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  router.post('/api/bat/upload', ...gate, uploadSingle, async (req, res) => {
+    if (!req.file) {
+      // fileFilter silent-skips non-.xlsx/.xls (so batch uploads
+      // don't tank on one wrong extension). For the single-upload
+      // route, that means we get here with no req.file when the
+      // uploaded file had the wrong extension — make the message
+      // actionable rather than the generic "No file uploaded".
+      return res.status(400).json({ error: 'No file uploaded — only .xlsx and .xls files are accepted' });
+    }
 
     try {
       const result = await processSupplierUpload({
@@ -158,9 +215,13 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
   //     ]
   //   }
   // Always 200 — the per-file status field carries pass/fail.
-  router.post('/api/bat/upload-batch', ...gate, upload.array('files', 50), async (req, res) => {
+  router.post('/api/bat/upload-batch', ...gate, uploadBatch, async (req, res) => {
     const files = req.files || [];
-    if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+    if (files.length === 0) {
+      // Either nothing was sent OR fileFilter silent-skipped every
+      // entry as a non-.xlsx/.xls. Either way, nothing to process.
+      return res.status(400).json({ error: 'No files uploaded — only .xlsx and .xls files are accepted' });
+    }
 
     const fallbackYear = parseInt(req.body.year, 10) || null;
     const results = [];
@@ -864,8 +925,8 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
   });
 
   // ── Cardoso Invoice Upload & Matching (global — across all weeks) ──
-  router.post('/api/bat/cardoso-upload', ...gate, upload.single('file'), async (req, res) => {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  router.post('/api/bat/cardoso-upload', ...gate, uploadSingle, async (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded — only .xlsx and .xls files are accepted' });
     try {
       const duplicateMode = req.body.duplicateMode || 'skip'; // 'skip' or 'overwrite'
       const invoices = parseCardosoSpreadsheet(req.file.path);
