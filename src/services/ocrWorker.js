@@ -677,42 +677,60 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     } catch {}
   }
 
-  // Step 2: render to image. 30s hard cap — pdfjs + node-canvas can hang
-  // forever on a malformed PDF (the page.render Promise never resolves).
-  // Without this cap, render hangs ate ~90s of the per-row budget on every
-  // bad PDF and the row only ever surfaced as a generic 'extract_total'
-  // timeout with no stage attribution.
+  // Step 2: render to image. The render now runs in a SHORT-LIVED CHILD
+  // PROCESS (see src/services/ocr/spawnRenderChild.js); the wrapper
+  // enforces a wall-clock timeout (default 30s, env OCR_RENDER_CHILD_TIMEOUT_MS)
+  // backed by SIGTERM → grace → SIGKILL. The previous outer
+  // `withTimeout(...,30_000)` is now removed — it was both redundant
+  // with the child wrapper's bounded completion AND actively harmful:
+  // any value above 30s set via OCR_RENDER_CHILD_TIMEOUT_MS would be
+  // silently ignored because the outer 30s fired first, and the child
+  // would keep running orphaned (the outer rejection didn't kill it).
+  // The child-process wrapper is now the single source of truth for
+  // render-stage timeouts.
   emitProgress(msgId, 'render');
   let imageBuffer;
   try {
-    imageBuffer = await withTimeout(pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0), 30_000, 'render');
+    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
   } catch (err) {
-    // Verbose, plain-English error so the operator can triage from System
-    // Log alone. Three patterns the caller will see:
-    //   - "Timeout after 30000ms in stage: render" → in-worker timeout fired
-    //     (rare on real wedges — JS can't fire a setTimeout while pdfjs is
-    //     in node-canvas native code, so this usually only fires on the
-    //     "tame slow" cases).
-    //   - "PDF page N is too large to render safely..." → preflight reject
-    //     from pdfPageToImage (the new behaviour). Already verbose.
-    //   - Anything else → pdfjs internal error, message preserved verbatim.
-    const stage = err?.stage || 'render';
-    const isTimeout = err?.code === 'OCR_TIMEOUT';
-    const isPreflightReject = String(err?.message || '').startsWith('PDF page ');
+    // The child-process wrapper rejects with structured codes:
+    //   - 'RENDER_TIMEOUT'      → wall-clock kill fired (SIGKILL after grace).
+    //                             The wedge can't have leaked back into this
+    //                             thread because the OS reaped the child.
+    //   - 'PAGE_TOO_LARGE'      → preflight reject (page exceeds the configured
+    //                             pixel / width / height caps). Operator-readable.
+    //   - 'CHILD_FAILED'        → child exited non-zero without a structured stderr
+    //                             line (rare; usually a pdfjs internal throw on a
+    //                             malformed PDF).
+    //   - 'CHILD_SPAWN_FAILED'  → couldn't even start the child process. Indicates
+    //                             a Node binary / packaging issue, not a PDF issue.
+    //   - 'BAD_INPUT'           → empty / non-Buffer arrived at the wrapper.
+    // The pre-Phase-1 'OCR_TIMEOUT' from the old in-worker withTimeout is
+    // gone — that classifier branch is kept for back-compat only and won't
+    // fire under the new code path.
+    const code = err?.code || 'render_failed';
+    const isTimeout       = code === 'RENDER_TIMEOUT' || err?.code === 'OCR_TIMEOUT';
+    const isPreflight     = code === 'PAGE_TOO_LARGE' || String(err?.message || '').startsWith('PDF page ');
+    const isSpawnFailure  = code === 'CHILD_SPAWN_FAILED';
     let detail;
-    if (isPreflightReject) {
+    if (isPreflight) {
       detail = err.message; // already operator-readable
     } else if (isTimeout) {
       detail =
-        `In-worker ${stage}-stage timeout fired after ${err.timeoutMs}ms but this rarely actually ` +
-        `aborts pdfjs+node-canvas — the native render call typically holds the JS event loop, ` +
-        `so the parent-side 120s PDF_TIMEOUT in batReconciliation.js is the real recovery here. ` +
-        `If this URL keeps wedging, it has been added to the per-run skip list to stop it ` +
-        `grinding the rest of the queue. Operator action: download the PDF URL manually and ` +
-        `inspect it; common culprits are banner-format documents, scans with very large ` +
-        `embedded images, or malformed pages that hit a known pdfjs bug.`;
+        `Render child wall-clock killed after ${err.timeoutMs || 30000}ms. ` +
+        `The OS SIGKILL'd the wedged renderer; this worker thread is unaffected. ` +
+        `If this URL keeps wedging, it has been added to the per-run skip list to stop ` +
+        `it grinding the rest of the queue. Operator action: download the PDF URL ` +
+        `manually and inspect it (banner-format, multi-page-merged, or scans with very ` +
+        `large embedded images are the usual culprits). To allow slower-but-valid PDFs ` +
+        `more time, raise OCR_RENDER_CHILD_TIMEOUT_MS in the site's .env.`;
+    } else if (isSpawnFailure) {
+      detail =
+        `Could not spawn the render child process: ${err?.message || String(err)}. ` +
+        `This is a packaging / Node-binary issue, NOT a PDF issue. Check that ` +
+        `the app's bundled node.exe exists and is runnable.`;
     } else {
-      detail = `Underlying error: ${err?.message || String(err)}`;
+      detail = `Underlying error (${code}): ${err?.message || String(err)}`;
     }
     return {
       invoice: null,
