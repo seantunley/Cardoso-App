@@ -117,7 +117,9 @@ function isRateLimitError(err) {
 let _tesseract = null;
 let _sharp = null;
 let _pdfjs = null;
-let _canvas = null;
+// _canvas removed: rendering moved out-of-process to renderPdfChild.js.
+// pdfjs is still loaded HERE for the text-layer fast-path (page.getTextContent),
+// which doesn't wedge in native code the way page.render() does.
 
 // Trained data ships with the app under vendor/tessdata/. We point
 // tesseract.js at that directory instead of letting it download from
@@ -175,12 +177,6 @@ async function getPdfjs() {
   if (_pdfjs) return _pdfjs;
   _pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   return _pdfjs;
-}
-
-async function getCanvas() {
-  if (_canvas) return _canvas;
-  _canvas = await import('canvas');
-  return _canvas;
 }
 
 // ── PDF render ───────────────────────────────────────────────────────────────
@@ -255,76 +251,34 @@ const MAX_RENDER_HEIGHT = Number.isFinite(_envMaxRenderHeight) && _envMaxRenderH
 // inevitable parent-side PDF_TIMEOUT.
 const MIN_RENDER_SCALE = 0.3;
 
+// Wall-clock cap the PARENT (this worker thread) enforces on the
+// render-child process. Same envelope as the previous in-worker timeout,
+// but actually enforceable now: the parent process is on the safe side
+// of any native wedge, so its setTimeout can always fire.
+const DEFAULT_RENDER_CHILD_TIMEOUT_MS = 30_000;
+const _envRenderChildTimeoutMs = parseInt(process.env.OCR_RENDER_CHILD_TIMEOUT_MS ?? '', 10);
+const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _envRenderChildTimeoutMs > 1000
+  ? _envRenderChildTimeoutMs
+  : DEFAULT_RENDER_CHILD_TIMEOUT_MS;
+
+// pdfPageToImage now hosts pdfjs+node-canvas in a short-lived child
+// process. The render either completes within the wall-clock timeout
+// or the parent SIGKILLs it — a wedge inside native code can't take
+// down this worker thread, and a wedge can't accumulate libcairo state
+// across renders because each render gets a fresh process. See
+// docs/plans/pdf-engine-migration.md (Phase 1) for the architectural
+// rationale and src/services/ocr/spawnRenderChild.js for the wrapper.
 async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
-  const pdfjsLib = await getPdfjs();
-  const { createCanvas } = await getCanvas();
-
-  const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  let canvas = null;
-  try {
-    const page = await pdfDoc.getPage(pageNum);
-    // Compute the actual scale by capping against ALL three limits
-    // (width, height, total pixels). The previous width-only cap let
-    // tall A3 / banner-format PODs through at 12+ MP, which is what
-    // wedged production after PR #230 — node-canvas blocks the worker
-    // thread synchronously on those, and the in-worker render timeout
-    // can't fire while native code holds the JS event loop.
-    const baseViewport = page.getViewport({ scale: 1.0 });
-    const widthCap  = MAX_RENDER_WIDTH  / baseViewport.width;
-    const heightCap = MAX_RENDER_HEIGHT / baseViewport.height;
-    // Pixel area scales as scale², so the scale that lands at exactly
-    // MAX_RENDER_PIXELS is sqrt(MAX_PIXELS / baseArea).
-    const baseArea = baseViewport.width * baseViewport.height;
-    const pixelCap = Math.sqrt(MAX_RENDER_PIXELS / baseArea);
-    const scale = Math.min(requestedScale, widthCap, heightCap, pixelCap);
-
-    // Refuse to render if the chosen scale would shrink the page below
-    // the OCR-readable floor. Sending such a page into pdfjs+node-canvas
-    // is strictly worse than refusing — the operator gets a loud,
-    // structured reason in System Log instead of waiting 2 minutes for
-    // the parent-side PDF_TIMEOUT, and the worker thread stays free to
-    // process the rest of the queue.
-    if (scale < MIN_RENDER_SCALE) {
-      const baseW  = Math.round(baseViewport.width);
-      const baseH  = Math.round(baseViewport.height);
-      const baseMP = (baseArea / 1_000_000).toFixed(1);
-      const maxMP  = (MAX_RENDER_PIXELS / 1_000_000).toFixed(1);
-      throw new Error(
-        `PDF page ${pageNum} is too large to render safely. ` +
-        `Native page size is ${baseW}×${baseH} (${baseMP} megapixels at scale 1.0). ` +
-        `The largest scale that fits within the configured caps ` +
-        `(width ${MAX_RENDER_WIDTH}px, height ${MAX_RENDER_HEIGHT}px, total ${maxMP} megapixels) ` +
-        `would be ${scale.toFixed(3)}, which is below the OCR-readable floor of ${MIN_RENDER_SCALE}. ` +
-        `Skipping this page rather than handing it to pdfjs/node-canvas — those would wedge ` +
-        `the worker thread inside native code and the in-worker timeout cannot abort native ` +
-        `calls. Operator action: this PDF is most likely a malformed or banner-format document; ` +
-        `download the URL and inspect it. To accept very large pages anyway, raise ` +
-        `OCR_MAX_RENDER_PIXELS in the site's .env (e.g. set it to 12000000 for 12 MP).`
-      );
-    }
-
-    const viewport = page.getViewport({ scale });
-    canvas = createCanvas(viewport.width, viewport.height);
-    const context = canvas.getContext('2d');
-    await page.render({ canvasContext: context, viewport }).promise;
-    // JPEG, not PNG. PNG keeps the raster in memory longer through its
-    // encoder (DEFLATE pipeline) and produces much larger payloads —
-    // the engines (GV / ocr.space) don't benefit from PNG's
-    // losslessness on document scans, and the smaller JPEG is faster
-    // to base64-encode and POST. Quality 85 is the standard
-    // "perceptually lossless for documents" level.
-    const out = canvas.toBuffer('image/jpeg', { quality: 0.85 });
-    return out;
-  } finally {
-    // Explicit teardown to nudge node-canvas's native allocator. Without
-    // this, the canvas object stays referenced until V8 GC decides to
-    // collect it, which can be many seconds after the function returns
-    // — and during a tight render loop those seconds compound across
-    // rows. Zeroing the dimensions tells node-canvas to release the
-    // backing pixel buffer immediately.
-    try { if (canvas) { canvas.width = 0; canvas.height = 0; } } catch { /* canvas may be null on early throw */ }
-    try { await pdfDoc.destroy(); } catch { /* destroy can throw on already-destroyed; ignore */ }
-  }
+  const { renderPdfInChild } = await import('./ocr/spawnRenderChild.js');
+  return renderPdfInChild(buffer, {
+    pageNum,
+    requestedScale,
+    maxWidth: MAX_RENDER_WIDTH,
+    maxHeight: MAX_RENDER_HEIGHT,
+    maxPixels: MAX_RENDER_PIXELS,
+    minScale: MIN_RENDER_SCALE,
+    timeoutMs: RENDER_CHILD_TIMEOUT_MS,
+  });
 }
 
 // ── OCR engines ──────────────────────────────────────────────────────────────
