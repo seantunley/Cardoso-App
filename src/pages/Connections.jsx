@@ -5,6 +5,7 @@ import { Database, Plus, RefreshCw, Workflow } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { toast } from "sonner";
+import { cleanImportToastMessage, getLedgerFortune, resetCleanSyncStreak } from "@/lib/fun";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 import ConnectionCard from "../components/dashboard/ConnectionCard";
 import ConnectionModal from "../components/connections/ConnectionModal";
@@ -297,12 +298,13 @@ export default function Connections() {
         totalImported += result.imported || 0;
       }
 
-      toast.success(`Sync complete. ${totalImported} records imported.`);
+      toast.success(cleanImportToastMessage({ imported: totalImported }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
     } catch (error) {
       console.error("Sync all error:", error);
+      resetCleanSyncStreak();
       toast.error(humanizeApiError(error, "sync all connections"));
     } finally {
       setIsSyncingAll(false);
@@ -314,14 +316,17 @@ export default function Connections() {
 
     try {
       const result = await runLocalImport(connection.id);
-      toast.success(
-        result.message || `Synced data from ${connection.name} (${result.imported || 0} records)`
-      );
+      // Always run cleanImportToastMessage (so the streak ticks).
+      // Falling back via `result.message ||` would short-circuit on
+      // every successful sync since runConnectionImport always returns
+      // a non-empty success message. See ConnectionModal.handleImport.
+      toast.success(cleanImportToastMessage({ imported: result.imported || 0, target: connection.name }));
       queryClient.invalidateQueries({ queryKey: ["connections"] });
       queryClient.invalidateQueries({ queryKey: ["records"] });
       queryClient.invalidateQueries({ queryKey: ["reports-records"] });
     } catch (error) {
       console.error("Sync connection error:", error);
+      resetCleanSyncStreak();
       toast.error(humanizeApiError(error, `sync "${connection.name}"`));
     } finally {
       setSyncingId(null);
@@ -412,7 +417,7 @@ export default function Connections() {
             </h3>
             <p className="text-muted-foreground mt-1 mb-6">
               {isAdmin
-                ? "Add your first SQL database connection to start syncing data"
+                ? getLedgerFortune()
                 : "No database connections have been configured yet. Contact an admin."}
             </p>
             {isAdmin && (

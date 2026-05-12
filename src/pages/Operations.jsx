@@ -16,6 +16,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Activity, AlertTriangle, Download, RefreshCw, Shield, ScanLine } from "lucide-react";
+import { toast } from "sonner";
 
 import JobRunsPanel from "@/components/operations/JobRunsPanel";
 import SystemLogPanel from "@/components/operations/SystemLogPanel";
@@ -27,6 +28,9 @@ import HubSyncLog from "@/pages/HubSyncLog";
 export default function Operations() {
   const { user } = useAuth();
   const [hubMode, setHubMode] = useState(false);
+  const [activeTab, setActiveTab] = useState("jobs");
+  const [detectiveMode, setDetectiveMode] = useState(false);
+  const [traceMode, setTraceMode] = useState(false);
 
   // Hub Sync Log tab only renders in hub mode (the underlying endpoints
   // /api/hub/sync-log and /api/hub/sync don't exist on a site install).
@@ -37,6 +41,58 @@ export default function Operations() {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d?.hub_mode) setHubMode(true); })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    let logsIndex = 0;
+    let traceIndex = 0;
+    const logsSequence = ["KeyL", "KeyO", "KeyG", "KeyS"];
+    const traceSequence = ["KeyT", "KeyR", "KeyA", "KeyC", "KeyE"];
+
+    const handleKeyDown = (event) => {
+      // Bail out when the user is typing into a form control. This
+      // handler is global (window.addEventListener), so without this
+      // check, typing "LOGS" or "TRACE" into the OCR / system-log
+      // filter inputs (or any other input/textarea/select on the
+      // Operations page) would silently switch tabs and fire a toast
+      // mid-typing — confusing user-visible disruption during normal
+      // input.
+      const target = event.target;
+      const isEditable =
+        target?.matches?.('input, textarea, select, [contenteditable="true"], [contenteditable=""]') ||
+        target?.isContentEditable;
+      if (isEditable) return;
+
+      logsIndex = event.code === logsSequence[logsIndex]
+        ? logsIndex + 1
+        : event.code === logsSequence[0]
+          ? 1
+          : 0;
+      traceIndex = event.code === traceSequence[traceIndex]
+        ? traceIndex + 1
+        : event.code === traceSequence[0]
+          ? 1
+          : 0;
+
+      if (logsIndex === logsSequence.length) {
+        logsIndex = 0;
+        setActiveTab("system-log");
+        setDetectiveMode(true);
+        toast("Detective mode enabled");
+        window.setTimeout(() => setDetectiveMode(false), 5000);
+      }
+
+      if (traceIndex === traceSequence.length) {
+        traceIndex = 0;
+        setActiveTab("system-log");
+        setTraceMode(true);
+        toast("Trace mode armed");
+        window.setTimeout(() => setTraceMode(false), 7000);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
   // Defence in depth — the route is gated by ProtectedRoute already, but
@@ -71,7 +127,18 @@ export default function Operations() {
           </p>
         </div>
 
-        <Tabs defaultValue="jobs" className="space-y-6">
+        {detectiveMode && (
+          <div className="border border-accent/50 bg-accent/10 px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] text-accent">
+            Detective mode enabled · System Log highlighted
+          </div>
+        )}
+        {traceMode && (
+          <div className="border border-emerald-500/50 bg-emerald-500/10 px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-300">
+            Trace mode armed · Following the clues
+          </div>
+        )}
+
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="bg-muted/40">
             <TabsTrigger value="jobs" className="data-[state=active]:bg-background">
               <Activity className="w-3.5 h-3.5 mr-1.5" /> Job Runs
@@ -101,7 +168,14 @@ export default function Operations() {
           <TabsContent value="ocr" className="mt-0">
             <OcrPanel />
           </TabsContent>
-          <TabsContent value="system-log" className="mt-0">
+          <TabsContent
+            value="system-log"
+            className={`mt-0 ${
+              detectiveMode || traceMode
+                ? "ring-1 ring-accent/70 shadow-[0_0_24px_hsla(33,95%,55%,0.18)]"
+                : ""
+            }`}
+          >
             <SystemLogPanel />
           </TabsContent>
           <TabsContent value="security" className="mt-0">

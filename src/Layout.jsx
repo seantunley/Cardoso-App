@@ -293,6 +293,9 @@ export default function Layout({ children, currentPageName }) {
   const [updateInstalling, setUpdateInstalling] = useState(false);
   const [showUpdateConfirm, setShowUpdateConfirm] = useState(false);
   const [backupAttention, setBackupAttention] = useState(false);
+  const [, setBuildClickCount] = useState(0);
+  const [showBuildDiagnostics, setShowBuildDiagnostics] = useState(false);
+  const [layoutStartedAt] = useState(() => new Date());
   // Sage MSSQL connectivity. When the pool has been failing for >5 min the
   // server-side probe sets attention=true; we render a top-of-page banner
   // so an operator notices before they start chasing "missing credit notes"
@@ -387,6 +390,21 @@ export default function Layout({ children, currentPageName }) {
     setShowUpdateConfirm(true);
   };
 
+  const handleBuildBadgeClick = () => {
+    setBuildClickCount((count) => {
+      const next = count + 1;
+      if (next >= 7) {
+        setShowBuildDiagnostics(true);
+        return 0;
+      }
+      return next;
+    });
+
+    if (versionStatus.updateAvailable && isAdmin && !showUpdateConfirm) {
+      triggerUpdate();
+    }
+  };
+
   const confirmUpdate = async () => {
     setShowUpdateConfirm(false);
     setUpdateInstalling(true);
@@ -463,7 +481,7 @@ export default function Layout({ children, currentPageName }) {
               )}
             >
               <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[hsl(var(--sidebar-foreground))/0.6] whitespace-nowrap">
-                Cardoso
+                Cardoso Cigarettes
               </div>
               <div className="font-display text-lg leading-tight text-[hsl(var(--sidebar-foreground))] whitespace-nowrap">
                 Ledger
@@ -636,9 +654,9 @@ export default function Layout({ children, currentPageName }) {
                       ? "Installing update…"
                       : `New: v${versionStatus.latestVersion} — click to install`
                     : `New: v${versionStatus.latestVersion}`
-                  : `v${versionStatus.currentVersion}`
+                  : `v${versionStatus.currentVersion} — shipped with care. Probably coffee.`
               }
-              onClick={versionStatus.updateAvailable && isAdmin && !showUpdateConfirm ? triggerUpdate : undefined}
+              onClick={handleBuildBadgeClick}
             >
               <div className="flex items-center justify-between">
                 <span>Build</span>
@@ -683,7 +701,7 @@ export default function Layout({ children, currentPageName }) {
             }}
           />
           <div className="flex flex-col leading-tight">
-            <span className="font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>Cardoso</span>
+            <span className="font-mono text-[9px] uppercase tracking-[0.25em]" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>Cardoso Cigarettes</span>
             <span className="font-display text-base">Ledger</span>
           </div>
         </div>
@@ -743,6 +761,42 @@ export default function Layout({ children, currentPageName }) {
         onClose={() => setSettingsOpen(false)}
         hubMode={hubMode}
       />
+
+      {showBuildDiagnostics && (
+        <div className="fixed inset-0 z-[1002] flex items-center justify-center bg-background/60 px-6 backdrop-blur-sm">
+          <div className="w-full max-w-md border border-border bg-card p-5 shadow-[0_0_36px_hsla(33,95%,55%,0.18)]">
+            <div className="mb-4 flex items-start justify-between gap-4 border-b border-border pb-3">
+              <div>
+                <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent">
+                  Build diagnostics
+                </div>
+                <h2 className="mt-2 font-display text-2xl text-foreground">Operator mode: calm</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowBuildDiagnostics(false)}
+                className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Close
+              </button>
+            </div>
+            <dl className="grid grid-cols-[110px_1fr] gap-x-4 gap-y-3 font-mono text-[10px] uppercase tracking-[0.14em]">
+              <dt className="text-muted-foreground">Current</dt>
+              <dd className="text-foreground tabular-nums">v{versionStatus.currentVersion}</dd>
+              <dt className="text-muted-foreground">Latest</dt>
+              <dd className="text-foreground tabular-nums">v{versionStatus.latestVersion}</dd>
+              <dt className="text-muted-foreground">Mode</dt>
+              <dd className="text-foreground">{hubMode ? "Hub" : "Site"}</dd>
+              <dt className="text-muted-foreground">Role</dt>
+              <dd className="text-foreground">{currentUser?.role || "Unknown"}</dd>
+              <dt className="text-muted-foreground">Uptime</dt>
+              <dd className="text-foreground">{Math.max(1, Math.round((Date.now() - layoutStartedAt.getTime()) / 60000))} min</dd>
+              <dt className="text-muted-foreground">Status</dt>
+              <dd className="text-foreground">{versionStatus.updateAvailable ? "Update waiting" : "Current"}</dd>
+            </dl>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

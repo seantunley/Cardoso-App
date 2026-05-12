@@ -15,6 +15,7 @@ import Login from "@/pages/Login";
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import ProtectedRoute from "@/components/auth/ProtectedAuth";
+import CardosoEasterEgg from "@/components/easter/CardosoEasterEgg";
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => <></>;
@@ -163,6 +164,7 @@ function App() {
           <NavigationTracker />
           <SessionExpiryWatcher />
           <AuthenticatedApp />
+          <CardosoEasterEgg />
         </Router>
         <Toaster />
         <SonnerToaster richColors position="top-right" duration={5000} closeButton />

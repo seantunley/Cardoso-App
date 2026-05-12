@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { getLedgerFortune } from "@/lib/fun";
 
 const STATUS_META = {
   pending: { label: "Pending", className: "border-slate-500/30 bg-slate-500/10 text-slate-300" },
@@ -235,7 +236,7 @@ export default function Collections() {
             <PhoneCall className="mb-4 h-12 w-12 text-muted-foreground" />
             <h2 className="text-lg font-semibold text-foreground">No collections items right now</h2>
             <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Hold and caution customers will appear here once flagged records have outstanding balances.
+              {getLedgerFortune()}
             </p>
           </div>
         )}
