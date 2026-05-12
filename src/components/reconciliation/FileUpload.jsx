@@ -6,6 +6,12 @@ export default function FileUpload({ onComplete }) {
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  // Soft warning for files that were filtered out client-side before
+  // the upload even started (e.g. a stray .pdf in a drag-multi). Lives
+  // in its own state so the upload handlers' setError('') reset can't
+  // wipe it before the user has a chance to read it. Persists until
+  // the next drop replaces it.
+  const [skippedNotice, setSkippedNotice] = useState('');
   // Structured rejection — set when the SINGLE-file path returns a 400
   // with a `reasons` array. Each reason renders as its own bullet so
   // the operator can fix them all before retrying.
@@ -87,6 +93,9 @@ export default function FileUpload({ onComplete }) {
 
   const handleFiles = async (fileList) => {
     if (!fileList || fileList.length === 0) return;
+    // Reset the skipped notice on every new drop — last drop's
+    // soft-skip warning isn't relevant once the user starts a new one.
+    setSkippedNotice('');
     const accepted = filterAccepted(fileList);
     const skipped = fileList.length - accepted.length;
     if (accepted.length === 0) {
@@ -95,9 +104,10 @@ export default function FileUpload({ onComplete }) {
     }
     if (skipped > 0) {
       // Soft warning — proceed with the accepted files but tell the
-      // operator we dropped some. Better than the all-or-nothing
-      // server-side reject.
-      setError(`Skipped ${skipped} non-spreadsheet file${skipped !== 1 ? 's' : ''} from the drop`);
+      // operator we dropped some. Stored in skippedNotice (separate
+      // from `error`) so the upload handlers' setError('') reset can't
+      // wipe it before the user reads it.
+      setSkippedNotice(`Skipped ${skipped} non-spreadsheet file${skipped !== 1 ? 's' : ''} from the drop`);
     }
     if (accepted.length === 1) {
       await handleSingle(accepted[0]);
@@ -176,6 +186,20 @@ export default function FileUpload({ onComplete }) {
             style={{ background: 'hsl(var(--destructive))', boxShadow: '0 0 10px hsla(0,72%,50%,0.3)' }}
           />
           <p className="font-mono text-xs text-destructive pl-2">{error}</p>
+        </div>
+      )}
+      {skippedNotice && (
+        <div
+          className="relative overflow-hidden border border-border bg-card mt-3 px-4 py-2.5"
+          style={{ borderRadius: '12px' }}
+        >
+          <div
+            className="absolute left-0 top-0 bottom-0 w-[2px]"
+            style={{ background: 'var(--phosphor)', boxShadow: '0 0 10px hsla(33, 95%, 55%, 0.3)' }}
+          />
+          <p className="font-mono text-xs pl-2" style={{ color: 'var(--phosphor)' }}>
+            {skippedNotice}
+          </p>
         </div>
       )}
 
