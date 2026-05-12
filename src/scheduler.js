@@ -468,6 +468,30 @@ export function startHubSchedulers(syncAllSites, runHubBackupPull, pingAllSites)
 
   cronTasks.push(cron.schedule('0 3 * * *', track('hub-backup-pull', runHubBackupPull)));
 
+  // Daily JTI pull-fallback at 03:30 — runs after the 03:00 backup
+  // pull so the heavy daily I/O is staggered. For each configured
+  // site, hits /api/reporting/jti/archives, dedups by sha256, and
+  // pulls anything the hub doesn't have. The site→hub push (Phase 2)
+  // is the primary path; this is the safety net for sites that were
+  // offline at push time. Imported lazily so site-mode installs (which
+  // don't call startHubSchedulers) never load the hub-only modules.
+  cronTasks.push(cron.schedule('30 3 * * *', track(
+    'hub-jti-pull',
+    async () => {
+      const { pullMissingArchivesAll } = await import('./services/hub/jtiHubPull.js');
+      const { HUB_SITES } = await import('./services/hubEtl.js');
+      return pullMissingArchivesAll({ sites: HUB_SITES, db });
+    },
+    (result) => ({
+      sitesProcessed: result?.sitesProcessed || 0,
+      totalPulled: result?.totalPulled || 0,
+      totalMissing: result?.totalMissing || 0,
+    }),
+    // Per-site failures land in result.results[].status — they're
+    // expected (a site can be offline) and not job-level failures.
+    { successCheck: () => true },
+  )));
+
   if (pingAllSites) {
     let pingRunning = false;
     const guardedPing = () => {

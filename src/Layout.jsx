@@ -288,6 +288,7 @@ const navItems = [
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
   { name: "JTI",                 icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true },
+  { name: "JTI",                 icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
   // Operations — admin-only home for background job runs, system errors,
   // deploys, and (in hub mode) per-site sync log. Same admin gating as

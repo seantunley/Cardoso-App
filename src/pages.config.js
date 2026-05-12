@@ -67,6 +67,7 @@ const CreditDebug = React.lazy(() => import('./pages/CreditDebug'));
 const Reconciliation = React.lazy(() => import('./pages/Reconciliation'));
 const Operations = React.lazy(() => import('./pages/Operations'));
 const Jti = React.lazy(() => import('./pages/Jti'));
+const HubJti = React.lazy(() => import('./pages/HubJti'));
 
 
 export const PAGES = {
@@ -91,6 +92,7 @@ export const PAGES = {
     "Reconciliation": Reconciliation,
     "Operations": Operations,
     "Jti": Jti,
+    "HubJti": HubJti,
 }
 
 export const pagesConfig = {
