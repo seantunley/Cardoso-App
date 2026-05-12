@@ -32,6 +32,7 @@ import {
 import { buildJtiWorkbook } from '../services/jti/jtiSpreadsheet.js';
 import { buildJtiFilename } from '../services/jti/jtiFilename.js';
 import { getJtiSettings, setJtiSettings } from '../services/jti/jtiSettings.js';
+import { archiveJtiExport, periodFromExactMonth } from '../services/jti/jtiArchive.js';
 
 /**
  * Read the install's saved JTI defaults plus the effective SQL +
@@ -140,7 +141,7 @@ export function handlePutSettings({ db, audit, resetPool, req, res }) {
  *     townCity?, region?, country?  // override saved defaults
  *   }
  */
-export async function handleExport({ db, getSagePool, audit, req, res }) {
+export async function handleExport({ db, getSagePool, audit, archiveRoot, req, res }) {
   const { from, to } = req.body || {};
   if (!from || !to) {
     return res.status(400).json({ error: 'Date range required: provide both `from` and `to`' });
@@ -202,18 +203,62 @@ export async function handleExport({ db, getSagePool, audit, req, res }) {
 
   const filename = buildJtiFilename({ site: siteLabel, endDate: to });
 
+  // Archive when the manual range is exactly one calendar month
+  // (e.g. 2026-04-01 → 2026-04-30). Partial-month exports remain
+  // download-only — they're ad-hoc operator queries, not canonical
+  // monthly artefacts.
+  const period = periodFromExactMonth(from, to);
+  let archivedId = null;
+  let archiveError = null;
+  if (period) {
+    try {
+      const row = archiveJtiExport({
+        db,
+        archiveRoot,
+        archive: {
+          buffer,
+          filename,
+          periodYear: period.periodYear,
+          periodMonth: period.periodMonth,
+          source: 'manual',
+          generatedBy: req.currentUser?.email || 'unknown',
+          rowCount: rows.length,
+          townCity: manual.townCity,
+          region: manual.region,
+          country: manual.country,
+          siteLabel,
+        },
+      });
+      archivedId = row.id;
+    } catch (err) {
+      // Archive failure must not block the download — operator still
+      // gets their file. We surface the error in the audit trail and
+      // log loudly so it shows up in System Log.
+      archiveError = err.message;
+      console.error(`[jti] archive write failed for ${period.periodYear}-${period.periodMonth} (${filename}): ${err.message}`);
+    }
+  }
+
   audit({
     req,
     action: 'jti_export',
     resourceType: 'system',
     resourceName: filename,
-    details: `Generated JTI export (${from} → ${to}); ${rows.length} row(s)`,
-    changes: { from, to, rowCount: rows.length, manual, usedOverride: Boolean(sqlOverride) },
+    details: `Generated JTI export (${from} → ${to}); ${rows.length} row(s)`
+      + (period ? ` — full month ${period.periodYear}-${String(period.periodMonth).padStart(2, '0')}` : '')
+      + (archivedId ? `; archived as #${archivedId}` : '')
+      + (archiveError ? `; ARCHIVE FAILED: ${archiveError}` : ''),
+    changes: {
+      from, to, rowCount: rows.length, manual, usedOverride: Boolean(sqlOverride),
+      archivedId, archiveError,
+    },
+    status: archiveError ? 'partial' : 'success',
   });
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.setHeader('Content-Length', String(buffer.length));
+  if (archivedId) res.setHeader('X-JTI-Archive-Id', String(archivedId));
   res.end(buffer);
 }
 

@@ -3,9 +3,12 @@
 // no supertest, no live Sage. The handlers were extracted as plain
 // functions specifically so they're testable this way.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import XLSX from 'xlsx';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import {
   handleGetSettings,
   handlePutSettings,
@@ -13,8 +16,12 @@ import {
   pickFirst,
 } from '../src/routes/jti.js';
 
-// Minimal in-memory DB matching migration v69's jti_settings shape.
+// Minimal in-memory DB matching migrations v69 (jti_settings) +
+// v70 (jti_archive). The archive table is needed because
+// handleExport now writes a row when the range is a full calendar
+// month — see src/services/jti/jtiArchive.js.
 let db;
+let tmpArchiveRoot;
 beforeEach(() => {
   db = new Database(':memory:');
   db.exec(`
@@ -22,8 +29,29 @@ beforeEach(() => {
       key TEXT PRIMARY KEY,
       value TEXT,
       updated_at TEXT DEFAULT (datetime('now'))
-    )
+    );
+    CREATE TABLE jti_archive (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      period_year INTEGER NOT NULL,
+      period_month INTEGER NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      generated_by TEXT,
+      source TEXT NOT NULL,
+      filename TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      row_count INTEGER NOT NULL,
+      town_city TEXT, region TEXT, country TEXT, site_label TEXT,
+      hub_push_status TEXT NOT NULL DEFAULT 'pending',
+      hub_push_at TEXT, hub_push_error TEXT,
+      hub_push_attempts INTEGER NOT NULL DEFAULT 0
+    );
   `);
+  // Per-test archive root so disk writes from one test can't leak
+  // into another. cleanup not strictly necessary (OS tmp), but kept
+  // tidy via afterEach below if needed.
+  tmpArchiveRoot = path.join(os.tmpdir(), `jti-archive-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 });
 
 // Stub req/res factory. Captures status / json / setHeader / end so
@@ -276,6 +304,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -295,6 +324,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     const wb = XLSX.read(res.raw, { cellNF: true });
@@ -317,6 +347,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: sageRows.slice(0, 1) }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     const wb = XLSX.read(res.raw);
@@ -335,6 +366,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: sageRows.slice(0, 1) }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     const wb = XLSX.read(res.raw);
@@ -351,6 +383,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: sageRows }),
       audit,
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     // The success-path audit is called once at the end; the failure-path
@@ -371,6 +404,7 @@ describe('handleExport — happy path', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: [] }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     expect(res.statusCode).toBe(200);
@@ -390,8 +424,140 @@ describe('handleExport — Unknown site fallback', () => {
       db,
       getSagePool: async () => makeSagePool({ recordset: [] }),
       audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
       req, res,
     });
     expect(res.headers['content-disposition']).toBe('attachment; filename="JTI_Cardoso_Sales_Unknown_20260430.xlsx"');
+  });
+});
+
+describe('handleExport — auto-archive on full-month range', () => {
+  const sageRows = [
+    { TRANNUM: 'IN000428009', TRANDATE: 20260401, ITEM: '87',
+      DESC: '  CAMEL CLASSIC', CUSTOMER: '10', NAMECUST: 'LIQUOR CITY WHITERIVER', QTYSOLD: 2 },
+  ];
+
+  afterEach(() => {
+    if (tmpArchiveRoot && fs.existsSync(tmpArchiveRoot)) {
+      fs.rmSync(tmpArchiveRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('writes an archive row + sets X-JTI-Archive-Id when the range is a full calendar month', async () => {
+    db.prepare(`INSERT INTO jti_settings (key, value) VALUES ('site_label', 'Ermelo')`).run();
+    const { req, res } = makeReqRes({
+      body: { from: '20260401', to: '20260430', townCity: 'ERMELO', region: 'MPUMALANGA', country: 'SOUTH AFRICA' },
+    });
+    await handleExport({
+      db,
+      getSagePool: async () => makeSagePool({ recordset: sageRows }),
+      audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
+      req, res,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-jti-archive-id']).toBeDefined();
+
+    const archived = db.prepare(`SELECT * FROM jti_archive`).all();
+    expect(archived).toHaveLength(1);
+    const row = archived[0];
+    expect(row.period_year).toBe(2026);
+    expect(row.period_month).toBe(4);
+    expect(row.source).toBe('manual');
+    expect(row.generated_by).toBe('op@example.com');
+    expect(row.row_count).toBe(1);
+    expect(row.town_city).toBe('ERMELO');
+    expect(row.region).toBe('MPUMALANGA');
+    expect(row.country).toBe('SOUTH AFRICA');
+    expect(row.site_label).toBe('Ermelo');
+    expect(row.byte_size).toBe(res.raw.length);
+    expect(row.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(fs.existsSync(row.file_path)).toBe(true);
+    expect(fs.statSync(row.file_path).size).toBe(res.raw.length);
+  });
+
+  it('does NOT archive when the range is a partial month', async () => {
+    const { req, res } = makeReqRes({
+      body: { from: '20260405', to: '20260412' },
+    });
+    await handleExport({
+      db,
+      getSagePool: async () => makeSagePool({ recordset: sageRows }),
+      audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
+      req, res,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-jti-archive-id']).toBeUndefined();
+    const archived = db.prepare(`SELECT COUNT(*) AS n FROM jti_archive`).get();
+    expect(archived.n).toBe(0);
+  });
+
+  it('does NOT archive when the range crosses two calendar months', async () => {
+    const { req, res } = makeReqRes({
+      body: { from: '20260315', to: '20260415' },
+    });
+    await handleExport({
+      db,
+      getSagePool: async () => makeSagePool({ recordset: sageRows }),
+      audit: vi.fn(),
+      archiveRoot: tmpArchiveRoot,
+      req, res,
+    });
+    expect(res.statusCode).toBe(200);
+    const archived = db.prepare(`SELECT COUNT(*) AS n FROM jti_archive`).get();
+    expect(archived.n).toBe(0);
+  });
+
+  it('still returns 200 + the .xlsx download when the archive write fails', async () => {
+    // Force archive write to fail by passing an unwritable archive
+    // root (a path under a non-existent file rather than directory).
+    const blocked = path.join(tmpArchiveRoot, 'not-a-dir', 'cant-create-here');
+    // Pre-create a FILE at the parent so mkdirSync recursive throws
+    // (you can't create a directory under a file).
+    fs.mkdirSync(tmpArchiveRoot, { recursive: true });
+    fs.writeFileSync(path.join(tmpArchiveRoot, 'not-a-dir'), 'blocker');
+
+    const audit = vi.fn();
+    const { req, res } = makeReqRes({
+      body: { from: '20260401', to: '20260430' },
+    });
+    await handleExport({
+      db,
+      getSagePool: async () => makeSagePool({ recordset: sageRows }),
+      audit,
+      archiveRoot: blocked,
+      req, res,
+    });
+    // The download still succeeds — operator gets their file.
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['x-jti-archive-id']).toBeUndefined();
+    // Audit captures the archive failure and marks status='partial'.
+    const arg = audit.mock.calls[0][0];
+    expect(arg.status).toBe('partial');
+    expect(arg.details).toMatch(/ARCHIVE FAILED/);
+    expect(arg.changes.archiveError).toBeTruthy();
+    expect(arg.changes.archivedId).toBeNull();
+    // No row was persisted (transaction rolled back).
+    const archived = db.prepare(`SELECT COUNT(*) AS n FROM jti_archive`).get();
+    expect(archived.n).toBe(0);
+  });
+
+  it('records the audit details suffix "archived as #N" on success', async () => {
+    const audit = vi.fn();
+    const { req, res } = makeReqRes({
+      body: { from: '20260401', to: '20260430' },
+    });
+    await handleExport({
+      db,
+      getSagePool: async () => makeSagePool({ recordset: sageRows }),
+      audit,
+      archiveRoot: tmpArchiveRoot,
+      req, res,
+    });
+    const arg = audit.mock.calls[0][0];
+    expect(arg.details).toMatch(/full month 2026-04/);
+    expect(arg.details).toMatch(/archived as #\d+/);
+    expect(arg.changes.archivedId).toBeTypeOf('number');
   });
 });
