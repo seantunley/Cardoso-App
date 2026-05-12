@@ -255,9 +255,15 @@ const MIN_RENDER_SCALE = 0.3;
 // render-child process. Same envelope as the previous in-worker timeout,
 // but actually enforceable now: the parent process is on the safe side
 // of any native wedge, so its setTimeout can always fire.
+// Floor is 1000ms — operators in incident-response sometimes
+// intentionally set a 1s kill window to drop a stuck batch fast.
+// `>=`, not `>`: the previous strict-> let exactly 1000 silently
+// fall back to the 30s default, which made the documented floor
+// behave unpredictably (set 1000, get 30000).
 const DEFAULT_RENDER_CHILD_TIMEOUT_MS = 30_000;
+const RENDER_CHILD_TIMEOUT_FLOOR_MS = 1000;
 const _envRenderChildTimeoutMs = parseInt(process.env.OCR_RENDER_CHILD_TIMEOUT_MS ?? '', 10);
-const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _envRenderChildTimeoutMs > 1000
+const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _envRenderChildTimeoutMs >= RENDER_CHILD_TIMEOUT_FLOOR_MS
   ? _envRenderChildTimeoutMs
   : DEFAULT_RENDER_CHILD_TIMEOUT_MS;
 
