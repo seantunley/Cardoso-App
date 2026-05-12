@@ -1368,17 +1368,37 @@ export function createReportingRouter({ requireAuth }) {
         // leave count at 0 rather than reporting a negative gap.
       }
 
-      // Missing credit notes (current-year scope): weeks where BAT was
-      // uploaded but Sage hasn't posted credit notes yet — same definition
-      // as the site's own "Missing Credit Notes" tile.
-      const missingCreditNotesList = prep(
-        `SELECT r.week_number
-         FROM bat_reconciliations r
-         LEFT JOIN bat_sage_week_cache c
-           ON c.year = r.year AND c.week_number = r.week_number
-         WHERE r.year = ? AND c.year IS NULL
-         ORDER BY r.week_number ASC`
-      ).all(summary_year).map(x => x.week_number);
+      // Missing credit notes: every week of summary_year (capped at the
+      // last fully-elapsed week, currentWeek - 1, when summary_year is
+      // the current year) where Sage hasn't posted credit notes —
+      // regardless of whether a BAT spreadsheet has been uploaded for
+      // that week. This is the SAME definition the site's own
+      // /api/bat/week-status uses for its "Missing Credit Notes" tile,
+      // so the per-site hub tile and the site UI are guaranteed to
+      // surface the same list. (See feedback_hub_mirrors_site.md.)
+      //
+      // Previous formulation joined bat_reconciliations LEFT JOIN
+      // bat_sage_week_cache, which restricted the list to weeks where
+      // BAT was uploaded — hiding gaps in weeks the operator hadn't
+      // uploaded yet. That hid the very thing the tile is meant to
+      // surface (credit-note gaps).
+      let missingCutoffYear;
+      if (summary_year < cur.year) {
+        missingCutoffYear = weeksInIsoYear(summary_year);
+      } else if (summary_year === cur.year) {
+        missingCutoffYear = Math.max(0, cur.week - 1);
+      } else {
+        missingCutoffYear = 0;
+      }
+      const sageWeeksInYear = new Set(
+        prep(`SELECT week_number FROM bat_sage_week_cache WHERE year = ?`)
+          .all(summary_year)
+          .map(r => r.week_number)
+      );
+      const missingCreditNotesList = [];
+      for (let w = 1; w <= missingCutoffYear; w++) {
+        if (!sageWeeksInYear.has(w)) missingCreditNotesList.push(w);
+      }
 
       // Mismatch weeks (current-year scope): weeks where both BAT and Sage
       // exist but the variance exceeds R0.01.

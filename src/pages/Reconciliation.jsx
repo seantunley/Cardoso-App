@@ -829,8 +829,7 @@ export default function Reconciliation() {
                           </span>
                         </div>
                         <div className="font-mono text-[10px] text-muted-foreground tabular-nums">
-                          {weekStatus.missingWeeks.slice(0, 12).join(', ')}
-                          {weekStatus.missingWeeks.length > 12 ? '…' : ''}
+                          {weekStatus.missingWeeks.map(w => `W${String(w).padStart(2, '0')}`).join(', ')}
                         </div>
                       </>
                     ) : (
