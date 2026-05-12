@@ -262,11 +262,27 @@ export async function pushPendingArchives({
     ? ['pending', 'failed', 'skipped_no_hub']
     : ['pending', 'failed'];
   const placeholders = statusList.map(() => '?').join(', ');
+  // Explicit status priority instead of `ORDER BY hub_push_status DESC`.
+  // The lexicographic order would put skipped_no_hub (which starts with
+  // 's') ahead of pending ('p') and failed ('f') — meaning when an
+  // operator FIRST configures the hub URL and a backlog of historical
+  // skipped_no_hub rows exists, every 15-minute tick would spend its
+  // whole batchSize on the backlog and starve newly-archived rows of
+  // their active retry slot. CASE priority: active retries first,
+  // historical recovery last, so a normal recon-day operator never
+  // notices the backfill is happening.
   const rows = db.prepare(`
     SELECT * FROM jti_archive
     WHERE hub_push_status IN (${placeholders})
       AND hub_push_attempts < ?
-    ORDER BY hub_push_status DESC, period_year ASC, period_month ASC, id ASC
+    ORDER BY
+      CASE hub_push_status
+        WHEN 'pending'        THEN 0
+        WHEN 'failed'         THEN 1
+        WHEN 'skipped_no_hub' THEN 2
+        ELSE 99
+      END,
+      period_year ASC, period_month ASC, id ASC
     LIMIT ?
   `).all(...statusList, maxAttempts, batchSize);
 
