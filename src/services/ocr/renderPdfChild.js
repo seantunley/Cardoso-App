@@ -30,8 +30,15 @@
 
 import { Buffer } from 'buffer';
 
-const STDIN_TIMEOUT_MS = 10_000; // operator never sends >25 MB; if no
-                                 // bytes arrive in 10s the parent is broken
+// IDLE timeout (reset on each data event), not a wall-clock from start
+// of read. A large valid PDF (up to OCR_MAX_PDF_MB on the worker side,
+// default 25 MB) can legitimately take longer than a fixed 10s to
+// transit a slow pipe / busy event loop, so a wall-clock timer
+// classified a healthy transfer as STDIN_TIMEOUT and the child exited
+// while data was still streaming. Idle-timeout fires only when no
+// chunk has arrived for N ms — handles a stuck-from-the-start parent
+// AND a parent that started transmitting then froze.
+const STDIN_IDLE_TIMEOUT_MS = 10_000;
 
 async function main() {
   // ── Parse args ────────────────────────────────────────────────────
@@ -65,7 +72,7 @@ async function main() {
   }
 
   // ── Read PDF bytes from stdin ─────────────────────────────────────
-  const pdfBuffer = await readStdinWithTimeout(STDIN_TIMEOUT_MS);
+  const pdfBuffer = await readStdinWithIdleTimeout(STDIN_IDLE_TIMEOUT_MS);
   if (pdfBuffer.length === 0) {
     failStructured({ code: 'EMPTY_INPUT', message: 'no PDF bytes received on stdin' });
   }
@@ -133,24 +140,38 @@ async function main() {
   }
 }
 
-// Read all of stdin into a Buffer, with a wall-clock timeout. Without
-// this, a parent that opens the pipe but never writes would leave the
-// child blocked on `for await`. The parent's spawn-side timer would
-// eventually SIGKILL us, but the structured-error path is friendlier.
-async function readStdinWithTimeout(ms) {
+// Read all of stdin into a Buffer with an IDLE timeout that resets
+// every time a chunk arrives. Without resetting, a 25 MB PDF on a slow
+// pipe (busy event loop, antivirus on the parent side, etc.) gets
+// classified as STDIN_TIMEOUT mid-transfer and the child exits while
+// data is still streaming — even though nothing is wrong. The reset
+// lets a healthy-but-slow transfer take as long as it needs while
+// still catching the genuine "parent opened the pipe but stopped
+// writing" failure within `ms` of the stall.
+async function readStdinWithIdleTimeout(ms) {
   const chunks = [];
-  let timer;
+  let idleTimer;
   try {
     await new Promise((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error(`stdin idle for ${ms}ms`)), ms);
-      process.stdin.on('data', (c) => { chunks.push(c); });
+      const armIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = setTimeout(
+          () => reject(new Error(`stdin idle for ${ms}ms with no new chunks (parent stopped writing?)`)),
+          ms,
+        );
+      };
+      armIdleTimer(); // start the clock — covers "parent never writes at all"
+      process.stdin.on('data', (c) => {
+        chunks.push(c);
+        armIdleTimer(); // reset on every chunk
+      });
       process.stdin.once('end', resolve);
       process.stdin.once('error', reject);
     });
   } catch (e) {
     failStructured({ code: 'STDIN_TIMEOUT', message: e.message });
   } finally {
-    clearTimeout(timer);
+    if (idleTimer) clearTimeout(idleTimer);
   }
   return Buffer.concat(chunks);
 }
