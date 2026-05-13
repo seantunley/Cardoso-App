@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
+import DisasterRecoveryWizard from "@/components/settings/DisasterRecoveryWizard";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -3305,6 +3306,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     // out of Settings to avoid two-places-to-look for the same data.
     isAdmin && { id: "tls", label: "TLS" },
     !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
+    !hubMode && isAdmin && { id: "dr", label: "Disaster Recovery" },
     hubMode && { id: "synclog", label: "Sync Log" },
     hubMode && isAdmin && { id: "hubmaintenance", label: "Maintenance" },
     hubMode && isAdmin && { id: "network", label: "Network" },
@@ -3347,6 +3349,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
               {activeTab === "synclog" && <SyncLogTab />}
               {activeTab === "connections" && <ConnectionsTab currentUser={currentUser} />}
               {activeTab === "maintenance" && <MaintenanceTab />}
+              {activeTab === "dr" && <DisasterRecoveryWizard />}
               {activeTab === "hubmaintenance" && <HubMaintenanceTab />}
               {activeTab === "network" && <NtopngTab />}
               {activeTab === "reconciliation" && <ReconciliationSettingsTab />}

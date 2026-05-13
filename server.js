@@ -19,6 +19,7 @@ import { initHubTables, initHubSiteRegistry, syncAllSites, runHubBackupPull, pin
 import { createHubRouter, createNonHubFallbackRouter, createReceiveUsersRouter } from './src/routes/hub.js';
 import { createReportingRouter } from './src/routes/reporting.js';
 import { createBackupRouter } from './src/routes/backup.js';
+import { createDrRouter } from './src/routes/dr.js';
 import { createSystemRouter } from './src/routes/system.js';
 import { createCreditLogicRouter } from './src/routes/creditLogic.js';
 import { createCollectionsRouter } from './src/routes/collections.js';
@@ -188,6 +189,7 @@ app.use(createAuthRouter({ db, stmts, getUserById, requireAuth, requireAdmin, re
 app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createCreditLogicRouter({ requireAuth, requirePermission }));
 app.use(createBackupRouter());
+app.use(createDrRouter());
 app.use(createReportingRouter({ requireAuth }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
