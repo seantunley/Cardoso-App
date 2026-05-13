@@ -46,6 +46,7 @@ import AccountingTab from "@/components/settings/tabs/AccountingTab";
 import ReconciliationSettingsTab from "@/components/settings/tabs/ReconciliationSettingsTab";
 import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
+import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
 
 
 
@@ -145,13 +146,3 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
   );
 }
 
-// UsersTabContent — render the Users page in embedded mode
-function UsersTabContent() {
-  // Dynamic import to avoid circular issues at module load time
-  const [UsersPage, setUsersPage] = useState(null);
-  useEffect(() => {
-    import("../../pages/Users").then(m => setUsersPage(() => m.default));
-  }, []);
-  if (!UsersPage) return <div className="h-20 animate-pulse bg-muted rounded-xl" />;
-  return <UsersPage embedded />;
-}
