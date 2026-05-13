@@ -103,14 +103,22 @@ export default function DisasterRecoveryWizard() {
     previews: true, jti_archive: true, bat_archive: true, env: true,
   });
 
-  // Local install state — drives whether step 5 (override) shows.
-  const [installState, setInstallState] = useState(null); // { empty, hub_mode } or null
-  useEffect(() => {
+  // Local install state — used only for the wizard's UX summary
+  // ("this install has X reconciliations, restoring will overwrite").
+  // The auth gate (step 5) is REQUIRED ALWAYS regardless — the previous
+  // design's "skip the gate on empty installs" was a real LAN-attacker
+  // race. Re-fetched on entering step 4 in case anything changed
+  // mid-wizard. Fail-CLOSED: a fetch error reports the install as
+  // non-empty so the wizard's UX warning still appears.
+  const [installState, setInstallState] = useState(null); // { empty, hub_mode } | null
+  const refreshInstallState = useCallback(() => {
     fetch("/api/dr/install-state")
       .then((r) => r.json())
       .then((data) => setInstallState(data))
-      .catch(() => setInstallState({ empty: true })); // fail-open: skip override gate
+      .catch(() => setInstallState({ empty: false })); // fail-closed
   }, []);
+  useEffect(() => { refreshInstallState(); }, [refreshInstallState]);
+  useEffect(() => { if (step === 4) refreshInstallState(); }, [step, refreshInstallState]);
 
   // Step 5: override gate
   const [overrideAck, setOverrideAck] = useState(false);
@@ -139,9 +147,9 @@ export default function DisasterRecoveryWizard() {
     return `OVERWRITE ${selectedSite.name}`;
   }, [selectedSite]);
 
-  // Whether we need to show step 5 — non-empty install AND not yet
-  // confirmed via valid override block.
-  const installIsNonEmpty = installState && !installState.empty;
+  // Whether the install is in "empty" state — affects only the
+  // wizard's UX copy. The override gate (step 5) shows ALWAYS.
+  const installIsNonEmpty = !!(installState && !installState.empty);
 
   // ── Step 1 → 2: fetch sites ──
   const handleListSites = useCallback(async () => {
@@ -190,14 +198,16 @@ export default function DisasterRecoveryWizard() {
         snapshot_filename: selectedSnapshotFilename,
         includes,
         new_site_url: newSiteUrl,
-      };
-      if (installIsNonEmpty) {
-        body.override = {
+        // Override block is REQUIRED ALWAYS. The server derives the
+        // expected phrase from the Hub's authoritative site name — we
+        // do NOT send our local `expectedPhrase` since the server
+        // shouldn't trust a client-supplied "what I'm supposed to
+        // match" value.
+        override: {
           local_admin_password: overrideLocalPassword,
           confirmation_phrase: overrideConfirmPhrase,
-          expected_phrase: expectedPhrase,
-        };
-      }
+        },
+      };
       const data = await jsonFetch("/api/dr/restore-from-hub", {
         method: "POST",
         body,
@@ -263,7 +273,7 @@ export default function DisasterRecoveryWizard() {
         </p>
       </div>
 
-      <StepIndicator step={step} showOverride={installIsNonEmpty} />
+      <StepIndicator step={step} />
 
       {step === 1 && (
         <Step1Credentials
@@ -300,8 +310,7 @@ export default function DisasterRecoveryWizard() {
           includes={includes} setIncludes={setIncludes}
           installIsNonEmpty={installIsNonEmpty}
           onBack={() => setStep(3)}
-          onNext={() => setStep(installIsNonEmpty ? 5 : 6)}
-          onStartIfEmpty={installIsNonEmpty ? null : handleStartRestore}
+          onNext={() => setStep(5)}
           startError={pollError}
         />
       )}
@@ -329,15 +338,12 @@ export default function DisasterRecoveryWizard() {
 
 // ── Step indicator ────────────────────────────────────────────────
 
-function StepIndicator({ step, showOverride }) {
-  const labels = [
-    "1. Credentials", "2. Site", "3. Snapshot", "4. Confirm",
-    showOverride && "5. Override gate", "6. Restoring",
-  ].filter(Boolean);
+function StepIndicator({ step }) {
+  const labels = ["1. Credentials", "2. Site", "3. Snapshot", "4. Confirm", "5. Override gate", "6. Restoring"];
   return (
     <div className="flex items-center gap-2 text-xs font-mono">
       {labels.map((label, i) => {
-        const stepNum = i + 1 + (showOverride ? 0 : (i >= 4 ? 1 : 0));
+        const stepNum = i + 1;
         const active = step === stepNum;
         const done = step > stepNum;
         return (
@@ -549,7 +555,7 @@ function Step4Confirm(props) {
   const {
     site, snapshot, meta, metaLoading, metaError,
     includes, setIncludes, installIsNonEmpty,
-    onBack, onNext, onStartIfEmpty, startError,
+    onBack, onNext, startError,
   } = props;
 
   const toggleInclude = (key) =>
@@ -630,17 +636,17 @@ function Step4Confirm(props) {
         </div>
       </div>
 
-      {installIsNonEmpty && (
-        <Alert variant="destructive">
-          <ShieldAlert className="h-4 w-4" />
-          <AlertTitle>This install is not empty</AlertTitle>
-          <AlertDescription>
-            Continuing will OVERWRITE the live database, .env, and uploads
-            folders. Next step requires the local admin password and a typed
-            confirmation phrase.
-          </AlertDescription>
-        </Alert>
-      )}
+      <Alert variant={installIsNonEmpty ? "destructive" : "default"}>
+        <ShieldAlert className="h-4 w-4" />
+        <AlertTitle>
+          {installIsNonEmpty ? "This install is not empty" : "Confirmation required"}
+        </AlertTitle>
+        <AlertDescription>
+          {installIsNonEmpty
+            ? "Continuing will OVERWRITE the live database, .env, and uploads folders. Next step requires the local admin password and a typed confirmation phrase."
+            : "Even on a fresh install you must enter the local admin password and a typed confirmation phrase in the next step. This prevents a stolen Hub credential from being enough on its own to clobber this machine."}
+        </AlertDescription>
+      </Alert>
 
       {startError && (
         <Alert variant="destructive"><AlertDescription>{startError}</AlertDescription></Alert>
@@ -650,15 +656,9 @@ function Step4Confirm(props) {
         <Button variant="outline" onClick={onBack}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back
         </Button>
-        {onStartIfEmpty ? (
-          <Button onClick={onStartIfEmpty}>
-            <Download className="h-4 w-4 mr-2" /> Start restore
-          </Button>
-        ) : (
-          <Button onClick={onNext}>
-            <ArrowRight className="h-4 w-4 mr-2" /> Continue to confirm
-          </Button>
-        )}
+        <Button onClick={onNext}>
+          <ArrowRight className="h-4 w-4 mr-2" /> Continue to confirm
+        </Button>
       </div>
     </div>
   );
@@ -675,7 +675,11 @@ function Step5Override(props) {
   } = props;
 
   const phraseMatches = confirmPhrase === expectedPhrase;
-  const canStart = ack && localPassword && phraseMatches;
+  // `ack === true` rather than truthy — Radix's Checkbox can pass
+  // `"indeterminate"` to onCheckedChange (a stray click on the
+  // chevron-area on some browsers), which would otherwise be truthy
+  // and unlock the Restore button on a half-tick.
+  const canStart = ack === true && localPassword && phraseMatches;
 
   return (
     <div className="space-y-4 border border-destructive rounded-lg p-5 bg-destructive/5">
@@ -690,7 +694,7 @@ function Step5Override(props) {
       </Alert>
 
       <label className="flex items-start gap-3 p-3 border border-border rounded">
-        <Checkbox checked={ack} onCheckedChange={setAck} className="mt-0.5" />
+        <Checkbox checked={ack === true} onCheckedChange={(v) => setAck(v === true)} className="mt-0.5" />
         <div className="text-sm">
           <strong>I understand this will replace all local data.</strong>
           <p className="text-xs text-muted-foreground mt-1">

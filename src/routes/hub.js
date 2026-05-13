@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { readdirSync, statSync, createReadStream, existsSync } from 'fs';
+import { readdirSync, statSync, fstatSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
@@ -1937,6 +1937,20 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     return true;
   }
 
+  // Reject siteIds that could escape hub-backups/. Without this, raw
+  // req.params.siteId interpolates into path.join — on Express versions
+  // that decode %2F a crafted siteId could read sibling directories.
+  function isSafeSiteId(name) {
+    if (typeof name !== 'string' || !name) return false;
+    return /^[a-zA-Z0-9_-]{1,64}$/.test(name);
+  }
+
+  // Strip control characters and cap length. Used on every user-supplied
+  // value before it lands in a log row.
+  function sanitizeForLog(value, max = 200) {
+    return String(value ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, max);
+  }
+
   // GET /api/hub/sites/:siteId/snapshots
   // Lists every .db snapshot the hub has on disk for this site,
   // with size + mtime + integrity (joined from hub_backup_integrity).
@@ -2189,8 +2203,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!user || !user.password_hash) {
       try {
         logError('hub.dr.auth_failed', new Error(`Unknown or inactive Hub user '${email}'`), {
-          email_attempted: String(email).slice(0, 200),
-          ip: String(req?.ip || '').slice(0, 64),
+          email_attempted: sanitizeForLog(email),
+          ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
       } catch {}
       return null;
@@ -2199,8 +2213,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!ok) {
       try {
         logError('hub.dr.auth_failed', new Error(`Bad password for Hub user '${email}'`), {
-          email_attempted: String(email).slice(0, 200),
-          ip: String(req?.ip || '').slice(0, 64),
+          email_attempted: sanitizeForLog(email),
+          ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
       } catch {}
       return null;
@@ -2296,6 +2310,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
 
     const { siteId, filename } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
     if (!isSafeBackupFilename(filename) || !filename.endsWith('.db')) {
       return res.status(400).json({ error: 'Invalid filename.' });
     }
@@ -2329,12 +2344,24 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         try { return snap.prepare(sql).get()?.m ?? null; } catch { return null; }
       };
 
-      const integrity = (() => {
-        try {
-          const rows = snap.prepare('PRAGMA integrity_check').all();
-          return rows.length === 1 && rows[0].integrity_check === 'ok' ? 'ok' : 'corrupt';
-        } catch { return 'unknown'; }
-      })();
+      // Integrity verdict comes from the cached hub_backup_integrity
+      // row written by the daily backup pull — NOT from running
+      // PRAGMA integrity_check inline. better-sqlite3 is synchronous;
+      // PRAGMA integrity_check on a multi-GB snapshot blocks the Hub's
+      // event loop for minutes, freezing every other request and any
+      // scheduled cron during that window. The cached verdict is
+      // typically <24h old (the Hub re-checks on every pull) which is
+      // fine for "should the operator pick this snapshot" decision.
+      let integrity = 'unknown';
+      try {
+        const cached = db.prepare(`
+          SELECT result FROM hub_backup_integrity
+          WHERE site_id = ? AND filename = ?
+          ORDER BY created_at DESC LIMIT 1
+        `).get(siteId, filename);
+        if (cached?.result === 'ok') integrity = 'ok';
+        else if (cached?.result) integrity = 'corrupt';
+      } catch { /* fall through with 'unknown' */ }
 
       res.json({
         filename,
@@ -2371,6 +2398,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
 
     const { siteId, filename } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
     if (!isSafeBackupFilename(filename)) {
       return res.status(400).json({ error: 'Invalid filename.' });
     }
@@ -2390,7 +2418,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           resourceType: 'system',
           resourceId: siteId,
           resourceName: filename,
-          details: `bytes=${bytesStreamed}` + (extra.error ? `, error=${extra.error}` : ''),
+          details: `bytes=${bytesStreamed}` + (extra.error ? `, error=${sanitizeForLog(extra.error)}` : ''),
           status,
           userOverride: { email: user.email, full_name: user.full_name },
         });
@@ -2402,12 +2430,20 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     res.setHeader('Content-Type', 'application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     res.setHeader('Cache-Control', 'no-store');
-    try {
-      const size = statSync(filePath).size;
-      res.setHeader('Content-Length', String(size));
-    } catch {}
 
+    // Open the read stream FIRST, then derive Content-Length from
+    // fstat(stream.fd). Doing statSync(filePath) before opening leaves
+    // a window where a concurrent backup-pull cycle could rotate the
+    // file underneath us — Content-Length would advertise the old size
+    // while the bytes streamed reflect the new file. fstat on the
+    // already-open FD pins to the file we're actually streaming.
     const stream = createReadStream(filePath);
+    stream.on('open', (fd) => {
+      try {
+        const size = fstatSync(fd).size;
+        if (!res.headersSent) res.setHeader('Content-Length', String(size));
+      } catch { /* fall through; client gets chunked transfer */ }
+    });
     stream.on('data', (chunk) => { bytesStreamed += chunk.length; });
     stream.on('error', (err) => {
       console.error('[hub.dr.fetch] stream error:', err.message);
@@ -2430,6 +2466,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
 
     const { siteId } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
     if (typeof new_url !== 'string' || !/^https?:\/\/.+/i.test(new_url)) {
       return res.status(400).json({ error: 'new_url must be an http(s):// URL.' });
     }
