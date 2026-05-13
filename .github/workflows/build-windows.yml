@@ -22,13 +22,11 @@ jobs:
         run: npm ci
         shell: powershell
 
-      # Phase 2 of docs/plans/pdf-engine-migration.md removed the
-      # pdfjs-dist 4.8.69 pin — the rendering path moved to PDFium
-      # (@hyzyla/pdfium) and node-canvas was removed entirely. pdfjs
-      # is still used for the text-layer fast-path (getTextContent),
-      # which has no canvas dependency and no ImageBitmap interop
-      # issue — it can bump freely now. The CI guard that used to
-      # live here has been deleted as obsolete.
+      # docs/plans/pdf-engine-migration.md fully landed: Phase 2
+      # moved the renderer to PDFium (@hyzyla/pdfium) and removed
+      # node-canvas; Phase 3 moved the text-layer fast-path to
+      # PDFium too and removed pdfjs-dist. The 4.8.69 CI guard that
+      # used to live here has been deleted as obsolete.
 
       - name: Lint
         run: npm run lint

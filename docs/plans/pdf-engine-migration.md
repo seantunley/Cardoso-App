@@ -1,10 +1,25 @@
 # PDF Engine Migration
 
-**Status: Phase 1 + Phase 2 SHIPPED.** Renderer is now PDFium
-(@hyzyla/pdfium), node-canvas removed, pdfjs unpinned (still in use
-for the text-layer fast-path only). The CI guard that enforced the
-4.8.69 pin has been deleted. The narrative below is preserved as the
-record of what motivated the work and the staging that got it done.
+**Status: COMPLETE — Phase 1, Phase 2, and Phase 3 all SHIPPED.**
+
+- **Phase 1** isolated rendering in a short-lived child process so the
+  node-canvas/pdfjs wedge couldn't take down the worker thread. (PR
+  #237 region.)
+- **Phase 2** swapped the renderer to PDFium (`@hyzyla/pdfium`, WASM,
+  no native binary required) via `src/services/ocr/renderPdfChild.js`,
+  removed node-canvas, and unpinned pdfjs-dist (still used at the
+  time for the text-layer fast-path only). Validated on recon 18 at
+  scale: 185/185 found, zero in-recon duplicates. (PR #315.)
+- **Phase 3** swapped the text-layer fast-path to PDFium's
+  `page.getText()`, removed pdfjs-dist + the `getPdfjs` lazy loader,
+  removed the dependabot ignore + the CI-guard / build-windows
+  comments that referenced the 4.8.69 pin. The OCR pipeline now has
+  no pdfjs / node-canvas dependency anywhere; the engine identifier
+  emitted on a fast-path hit also flipped from `'pdfjs'` to `'pdfium'`
+  to keep the audit trail honest. (This PR.)
+
+The narrative below is preserved as the record of what motivated the
+work and the staging that got it done.
 
 ---
 

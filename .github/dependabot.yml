@@ -28,10 +28,6 @@ updates:
           - minor
 
     ignore:
-      # pdfjs-dist is a load-bearing pin. The CI guard fails the build if
-      # this changes. See docs/plans/pdf-engine-migration.md.
-      - dependency-name: pdfjs-dist
-
       # Tier 3 deferrals — major versions only. See tech-debt.md.
       # Minor/patch within the current major still gets PR'd.
       - dependency-name: tailwindcss

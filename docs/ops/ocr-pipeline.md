@@ -51,14 +51,14 @@ The design that emerged: a **worker_thread pool** owned by the main Node process
            ▼              ▼
    ┌──────────────┐  ┌──────────────┐
    │ worker thread│  │ worker thread│   each owns a Tesseract worker,
-   │ (ocrWorker)  │  │ (ocrWorker)  │   sharp pipeline, pdfjs render
-   └──────────────┘  └──────────────┘
+   │ (ocrWorker)  │  │ (ocrWorker)  │   sharp pipeline, PDFium text-extract
+   └──────────────┘  └──────────────┘   (rendering is in a child process)
 ```
 
 Key boundaries:
 
 - **Parent main thread** runs Express, SQLite (better-sqlite3 is synchronous), the SSE streams, and the orchestration logic in `processQueue`. It must stay responsive.
-- **Worker threads** do the CPU- and IO-heavy work: PDF download, pdfjs render, sharp preprocessing, Tesseract recognition, OCR-engine API calls.
+- **Worker threads** do the CPU- and IO-heavy work: PDF download, PDFium text extraction, sharp preprocessing, Tesseract recognition, OCR-engine API calls. PDF rasterising runs in a separate short-lived child process per page.
 - **Communication is by `postMessage`** with a numeric `id` for correlation. No shared memory, no shared DB handle. The worker has zero database access.
 - **One PDF per lane at a time.** A lane never has more than one in-flight extraction. This makes the timeout and watchdog logic tractable.
 
@@ -110,9 +110,10 @@ const buffer = Buffer.from(await response.arrayBuffer());
 ### Stage 2: `pdf_text`
 
 ```js
-const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
-  const textContent = await page.getTextContent();
+const lib = await getPdfium();
+const doc = await lib.loadDocument(buffer);
+for (let p = 0; p < Math.min(doc.getPageCount(), 3); p++) {
+  const pageText = String(await doc.getPage(p).getText() || '');
   // ...findInvoiceNumber...
 }
 ```
@@ -120,7 +121,7 @@ for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
 - Tries to read the PDF's text layer (no OCR). Works for ~30 % of PODs that have an embedded text layer rather than just a scan.
 - Up to the first 3 pages.
 - If we find an invoice number here, we short-circuit and **skip the rest of the pipeline entirely**. This is the cheapest happy path — no rendering, no engine calls.
-- If `pdfjs.getDocument` itself throws (corrupt PDF, encrypted, etc.), we silently fall through to image render.
+- If `loadDocument` itself throws (corrupt PDF, encrypted, etc.), we silently fall through to image render.
 
 ### Stage 3: `render`
 
@@ -128,9 +129,9 @@ for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
 imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
 ```
 
-- Renders page 1 to a PNG using **pdfjs-dist + node-canvas**.
-- Render scale: 2.0× normally, 1.5× for PDFs > 2 MB (memory pressure).
-- **`pdfjs-dist` is pinned at 4.8.69**. Newer versions use browser-only `ImageBitmap` APIs that node-canvas rejects with "Image or Canvas expected". See `docs/plans/pdf-engine-migration.md` for the long-term plan to migrate off node-canvas.
+- Renders page 1 to a JPEG using **PDFium (`@hyzyla/pdfium`, WASM) + sharp**, in a short-lived child process (`src/services/ocr/renderPdfChild.js`).
+- Render scale: 2.0× small / 3.0× default normally, with hard caps on width / height / total pixels (`OCR_MAX_RENDER_*` env vars).
+- pdfjs-dist + node-canvas are no longer dependencies. See `docs/plans/pdf-engine-migration.md` for the migration history (Phase 1 process-isolation → Phase 2 PDFium renderer → Phase 3 PDFium text-layer fast-path).
 
 ### Stage 4: `preview_save`
 
@@ -198,7 +199,7 @@ If nothing matches, returns `null` and the caller falls through to the next engi
 
 ## 6. Concurrency model
 
-- **`OCR_CONCURRENCY` env var, default 2.** Each lane is a worker_thread that owns its own Tesseract worker, sharp pipeline, and pdfjs renderer.
+- **`OCR_CONCURRENCY` env var, default 2.** Each lane is a worker_thread that owns its own Tesseract worker, sharp pipeline, and PDFium text-extraction handle. (Rendering runs out-of-process per call, so it isn't owned by the lane.)
 - Why 2 by default: on a constrained Windows site, 4 parallel lanes saturate every CPU core and the main API thread starves for context-switch slots even though it isn't directly blocked. 2 keeps OCR throughput roughly the same (most time is in network calls to Google Vision / ocr.space) while leaving CPU headroom for the rest of the app.
 - A queue of pending rows (`SELECT … WHERE extraction_status = 'pending'`) is drained by all lanes in parallel via the in-memory `inFlight` Set, which prevents two lanes from claiming the same row.
 
@@ -221,9 +222,9 @@ Tesseract's trained-data file ships with the app at
 `vendor/tessdata/eng.traineddata.gz` (~10 MB). `ocrWorker.js` points
 `createWorker` at that local path with `cacheMethod: 'none'`, so init
 completes in ~1 s with no network call. The 30 s timeout is retained
-purely as a backstop in case sharp or pdfjs native init wedges (AV
-interference, missing VC++ runtime, etc.). Air-gapped sites OCR cleanly
-because no CDN download is required.
+purely as a backstop in case sharp native init or PDFium WASM init
+wedges (AV interference, missing VC++ runtime, etc.). Air-gapped sites
+OCR cleanly because no CDN download is required.
 
 A stuck SharePoint connection, a blocked CDN, or a hung corporate proxy all surface as `Timeout in stage: <label>` instead of an indefinite wait.
 

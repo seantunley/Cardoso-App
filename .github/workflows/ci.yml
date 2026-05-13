@@ -39,11 +39,11 @@ jobs:
         run: npm ci
         shell: powershell
 
-      # pdfjs-dist 4.8.69 pin guard removed in Phase 2 of the PDF-engine
-      # migration. The renderer moved to PDFium (@hyzyla/pdfium) and
-      # node-canvas was removed entirely. pdfjs is still used for the
-      # text-layer fast-path (no canvas dependency, no ImageBitmap
-      # interop) and can bump freely now.
+      # The PDF-engine migration is fully landed: Phase 2 moved the
+      # renderer to PDFium (@hyzyla/pdfium) and removed node-canvas;
+      # Phase 3 moved the text-layer fast-path to PDFium too and
+      # removed pdfjs-dist. The 4.8.69 CI guard that used to live
+      # here has been deleted as obsolete.
 
       - name: Lint
         run: npm run lint
