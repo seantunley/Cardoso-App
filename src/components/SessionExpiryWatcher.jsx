@@ -127,6 +127,41 @@ export default function SessionExpiryWatcher() {
       // source of truth and lets future server-side changes (rotated
       // claims etc.) propagate without touching this component.
       await refreshUser();
+      // Force the OPEN-decision effect to see the new expiry on its very
+      // next run. Without this, there's a race: setOpen(false) below
+      // applies, the effect re-fires with open=false and remaining
+      // STILL <= WARN_AT_SEC (the value held over from the warn
+      // window — the user/session_expires_at recompute effect hasn't
+      // ticked yet), the condition `remaining <= WARN_AT_SEC && !open`
+      // is satisfied, and setOpen(true) re-opens the dialog. The next
+      // interval tick catches up `remaining` to the new ~12h value, but
+      // the dialog is already showing again with a 12-hour countdown —
+      // exactly the "stay signed in just made it re-prompt" behaviour
+      // operators reported.
+      //
+      // Compute the fresh remaining from the user we now have in hand
+      // and push it to state BEFORE closing the dialog. Both state
+      // updates batch into one render where the effect sees
+      // remaining=12h AND open=false → no re-open.
+      try {
+        // Re-read user via refreshUser already updated the AuthContext —
+        // but the `user` ref captured by useCallback may be stale this
+        // render. Read the freshest expiry by going through the same
+        // /me endpoint refreshUser just hit. Cheap (the response is
+        // already warmed) and avoids assumptions about React batching.
+        const meRes = await fetch('/api/auth/me', { credentials: 'include' });
+        if (meRes.ok) {
+          const meBody = await meRes.json().catch(() => ({}));
+          const newExpiry = meBody?.session_expires_at || meBody?.user?.session_expires_at;
+          if (newExpiry) {
+            const ms = new Date(newExpiry).getTime();
+            if (Number.isFinite(ms)) {
+              const fresh = Math.max(0, Math.floor((ms - Date.now()) / 1000));
+              setRemaining(fresh);
+            }
+          }
+        }
+      } catch { /* if /me fails we still close the dialog; next tick recovers */ }
       setOpen(false);
     } catch (err) {
       setExtendError(err.message || 'Failed to extend session');

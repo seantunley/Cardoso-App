@@ -52,6 +52,51 @@ function WriteStatus($state, $errorMessage) {
   } catch {}
 }
 
+# Resume a paused service before we try to stop/start it. Returns nothing;
+# best-effort. NSSM and SCM both reject START on a paused service with
+# "Unexpected status SERVICE_PAUSED in response to START control", which
+# rolls back every update attempt and leaves the operator stuck. Production
+# 2026-05-12 saw exactly this: a service paused for unrelated reasons
+# (operator-initiated, services.msc, or Windows admin tooling) blocked
+# every UI-driven update until a manual install fixed the underlying state.
+#
+# Idempotent: if the service is already Running, this is a no-op. If it's
+# Stopped, this is also a no-op (Resume-Service throws on Stopped, we catch).
+function Resume-IfPaused($svcName) {
+  try {
+    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+    if (-not $svc) { return }
+    if ($svc.Status -eq 'Paused' -or $svc.Status -eq 'PausePending') {
+      Log "Service $svcName is in state '$($svc.Status)' — resuming before lifecycle operation"
+      try {
+        Resume-Service -Name $svcName -ErrorAction Stop
+        Start-Sleep -Seconds 2
+        $after = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        Log "  Service now in state '$($after.Status)' after Resume"
+      } catch {
+        Log "  Resume-Service failed: $($_.Exception.Message) (continuing anyway)"
+      }
+    }
+  } catch {
+    Log "Resume-IfPaused probe failed: $($_.Exception.Message) (continuing)"
+  }
+}
+
+# Wait until the service reaches one of the target states (or timeout).
+# Returns $true on hit, $false on timeout. Used after stop/start to
+# verify the operation actually took effect — without this, the script
+# would press on with files still locked by a not-yet-stopped service.
+function Wait-ForServiceState($svcName, [string[]]$targetStates, $timeoutSec = 20) {
+  $sw = [System.Diagnostics.Stopwatch]::StartNew()
+  while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+    $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+    if (-not $svc) { return $false }
+    if ($targetStates -contains [string]$svc.Status) { return $true }
+    Start-Sleep -Milliseconds 500
+  }
+  return $false
+}
+
 # Move-Item with retry. Newly-stopped Node sometimes leaves *.js / app.asar
 # briefly locked (sub-second) by lingering file handles, antivirus scanners,
 # or the search indexer. A single Move-Item -Force fails immediately in
@@ -96,6 +141,11 @@ try {
     Log "Checksum verified."
   }
 
+  # Resume the service if it's currently paused — NSSM/SCM will reject
+  # both stop AND start on a paused service in some transitional states,
+  # and a paused service still holds file handles that block the swap.
+  Resume-IfPaused $ServiceName
+
   # Stop service. Tolerate "service not installed" / "already stopped".
   Log "Stopping service $ServiceName..."
   $nssm = Join-Path $AppDir "nssm\nssm.exe"
@@ -104,7 +154,13 @@ try {
   } else {
     Stop-Service -Name $ServiceName -Force -ErrorAction SilentlyContinue
   }
-  Start-Sleep -Seconds 3
+  # Wait for actual Stopped state instead of a fixed 3s sleep. A service
+  # mid-stop holds file handles; moving over those handles is what
+  # produces the partial-extract + rollback loops we used to see.
+  if (-not (Wait-ForServiceState $ServiceName @('Stopped') 20)) {
+    $current = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue).Status
+    Log "WARN: service did not reach Stopped state within 20s (current: $current). Continuing."
+  }
 
   # Extract zip to a staging directory adjacent to the install
   $ts = [DateTimeOffset]::Now.ToUnixTimeSeconds()
@@ -143,19 +199,39 @@ try {
     Log "Wrote .installed-version: $NewVersion"
   }
 
-  # Start service
+  # Start service. The pre-stop Resume-IfPaused should have ensured we
+  # come into this in Stopped state, but a race (operator clicks Pause
+  # in services.msc mid-update, NSSM transient state, etc.) can land us
+  # in Paused at start time too — handle that defensively below.
   Log "Starting service..."
   if (Test-Path $nssm) {
     & $nssm start $ServiceName 2>&1 | Out-Null
   } else {
     Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
   }
-  Start-Sleep -Seconds 4
-
-  # Verify the service actually came up
-  $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-  if (-not $svc -or $svc.Status -ne 'Running') {
-    throw "Service did not start after update (status: $($svc.Status))"
+  # Wait up to 30s for Running. If we land in Paused (the production
+  # 2026-05-12 failure mode), explicitly Resume — the start succeeded
+  # but SCM ended up in Paused state for reasons that are usually
+  # external (operator action mid-update, group policy, etc.).
+  if (-not (Wait-ForServiceState $ServiceName @('Running') 30)) {
+    $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($svc -and $svc.Status -eq 'Paused') {
+      Log "Service landed in Paused state after start — attempting Resume"
+      try {
+        Resume-Service -Name $ServiceName -ErrorAction Stop
+        if (Wait-ForServiceState $ServiceName @('Running') 10) {
+          Log "  Resume succeeded; service is Running"
+        } else {
+          $svc2 = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+          throw "Service stayed in '$($svc2.Status)' after Resume — manual intervention needed (services.msc → $ServiceName → Resume). Update files swapped; rollback will restore the previous version."
+        }
+      } catch {
+        throw "Service was Paused after start and Resume failed: $($_.Exception.Message)"
+      }
+    } else {
+      $observed = if ($svc) { $svc.Status } else { 'not-installed' }
+      throw "Service did not reach Running within 30s after start (observed: $observed). NSSM/SCM start completed but the service did not begin executing — most common causes: missing dependency, port conflict, or service binary path broken. Check Windows Event Viewer → Application log for service startup errors."
+    }
   }
   Log "Service running. Backup retained at $backupDir"
   Log "=== Update complete ==="
@@ -192,13 +268,24 @@ try {
     Remove-Item -Recurse -Force $stagingDir -ErrorAction SilentlyContinue
   }
 
-  # Best-effort restart
+  # Best-effort restart. Pause-aware so the rollback path can recover
+  # from the same SERVICE_PAUSED failure mode that caused the rollback.
   Log "Attempting to restart service..."
   try {
+    Resume-IfPaused $ServiceName
     if (Test-Path (Join-Path $AppDir "nssm\nssm.exe")) {
       & (Join-Path $AppDir "nssm\nssm.exe") start $ServiceName 2>&1 | Out-Null
     } else {
       Start-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    }
+    # If we still land in Paused, Resume one more time so the operator
+    # at least gets a Running service after the rollback — separately
+    # from the failed-update status the WriteStatus call records below.
+    Start-Sleep -Seconds 2
+    $svcAfter = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+    if ($svcAfter -and $svcAfter.Status -eq 'Paused') {
+      Log "  Service Paused after rollback restart — Resume"
+      try { Resume-Service -Name $ServiceName -ErrorAction Stop } catch {}
     }
   } catch {}
 

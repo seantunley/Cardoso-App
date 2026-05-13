@@ -867,6 +867,28 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   }
 
+  // Compare two YYYY.M.P version strings. Returns positive if a > b,
+  // negative if a < b, 0 if equal. Used to decide whether a recorded
+  // failed-update marker is still operationally relevant: if the
+  // current installed version is already AT or PAST the version the
+  // failed attempt was targeting (operator manually installed a newer
+  // build to recover, etc.), the banner is just historical noise and
+  // shouldn't dominate the UI forever. Tolerant of missing / malformed
+  // inputs — returns 0 so the gate "expected > current" defaults to
+  // FALSE (banner hides) when we can't tell.
+  function compareVersions(a, b) {
+    if (!a || !b) return 0;
+    const pa = String(a).split('.').map((s) => parseInt(s, 10));
+    const pb = String(b).split('.').map((s) => parseInt(s, 10));
+    const len = Math.max(pa.length, pb.length);
+    for (let i = 0; i < len; i++) {
+      const ai = Number.isFinite(pa[i]) ? pa[i] : 0;
+      const bi = Number.isFinite(pb[i]) ? pb[i] : 0;
+      if (ai !== bi) return ai - bi;
+    }
+    return 0;
+  }
+
   // GET /api/app-version-status
   router.get('/api/app-version-status', requireAuth, async (req, res) => {
     try {
@@ -887,12 +909,16 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         lastUpdate &&
         lastUpdate.state &&
         lastUpdate.state !== 'ok' &&
-        // Only flag if the marker was for THIS version's update attempt;
-        // an old failed marker from a previous version's botched update
-        // shouldn't keep nagging after a successful manual reinstall.
+        // Only flag if the failed attempt was targeting a version we
+        // still HAVEN'T installed. The previous check used !== which
+        // kept the banner alive forever after a manual reinstall of a
+        // newer build — if an operator caught up past the attempted
+        // version some other way, the failure is historical and not
+        // actionable. Switch to strict-NEWER: only nag while the box
+        // is still behind the version the failed attempt was for.
         lastUpdate.expected_version &&
         versionStatus.currentVersion &&
-        lastUpdate.expected_version !== versionStatus.currentVersion
+        compareVersions(lastUpdate.expected_version, versionStatus.currentVersion) > 0
       );
       res.json({
         ...versionStatus,

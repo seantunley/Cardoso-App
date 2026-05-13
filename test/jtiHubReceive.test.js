@@ -33,6 +33,14 @@ beforeEach(() => {
       received_via TEXT NOT NULL
     );
     CREATE UNIQUE INDEX idx_hub_jti_archive_dedup ON hub_jti_archive(site_id, sha256);
+    -- listHubJtiArchives LEFT JOINs hub_sites for site name + slug;
+    -- create the table here so the join query plans against a real
+    -- table (LEFT JOIN against a missing table errors in SQLite).
+    CREATE TABLE hub_sites (
+      id TEXT PRIMARY KEY,
+      slug TEXT,
+      name TEXT
+    );
   `);
   tmpRoot = path.join(os.tmpdir(), `jti-hub-receive-test-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 });
@@ -195,6 +203,24 @@ describe('listHubJtiArchives + getHubJtiArchive + knownSha256ForSite', () => {
     const onlyA = listHubJtiArchives({ db, siteId: 'A' });
     expect(onlyA).toHaveLength(1);
     expect(onlyA[0].site_id).toBe('A');
+  });
+
+  it('listHubJtiArchives joins hub_sites for site_name + site_slug', () => {
+    db.prepare(`INSERT INTO hub_sites (id, slug, name) VALUES (?, ?, ?)`).run(
+      'A', 'cardoso-witkoppen', 'Cardoso Witkoppen',
+    );
+    receiveJtiArchive({ db, archiveRoot: tmpRoot, archive: buildInput({ siteId: 'A', buffer: Buffer.from('a') }) });
+    // Orphan archive — site_id with no matching hub_sites row.
+    receiveJtiArchive({ db, archiveRoot: tmpRoot, archive: buildInput({ siteId: 'B', buffer: Buffer.from('b') }) });
+    const all = listHubJtiArchives({ db });
+    const a = all.find(r => r.site_id === 'A');
+    const b = all.find(r => r.site_id === 'B');
+    expect(a.site_name).toBe('Cardoso Witkoppen');
+    expect(a.site_slug).toBe('cardoso-witkoppen');
+    // Orphan: LEFT JOIN yields NULL for the joined columns; the
+    // frontend falls back to site_id for display.
+    expect(b.site_name).toBeNull();
+    expect(b.site_slug).toBeNull();
   });
 
   it('getHubJtiArchive returns row by id, null on miss', () => {

@@ -270,14 +270,40 @@ export default function UpdatesPanel() {
           </div>
         )}
         {status === "error" && (
-          <div className="space-y-3">
-            <div className="flex items-center gap-2 text-sm text-destructive">
-              <AlertCircle className="h-4 w-4" /> Something went wrong. Check server logs.
-            </div>
+          // Two cases:
+          //   1. Sticky failure banner ABOVE is already showing — it
+          //      carries state + structured reason + a View update log
+          //      button. This block was duplicating it with the useless
+          //      "Something went wrong" line. Hide entirely; just offer
+          //      "Try again" so the operator isn't stranded.
+          //   2. No sticky banner (transient error before any rollback
+          //      marker landed, or trigger POST failed before the script
+          //      could write a marker). Show the reason we have — toast
+          //      already flashed it, but we want it persistent too.
+          info?.lastUpdateFailed ? (
             <Button variant="outline" size="sm" onClick={() => { setStatus(null); }}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
               Try again
             </Button>
-          </div>
+          ) : (
+            <div className="space-y-3 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2">
+              <div className="flex items-start gap-2 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <div className="space-y-1">
+                  <div className="font-medium">Update did not complete</div>
+                  <div className="text-xs opacity-90">
+                    {info?.lastUpdateError
+                      ? <span className="break-words">{info.lastUpdateError}</span>
+                      : <span>The updater didn't write a status marker — most likely the script never started, or the install directory is read-only. Check the update log for detail; if that's also empty, the trigger endpoint itself failed (toast above).</span>}
+                  </div>
+                </div>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => { setStatus(null); }}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Try again
+              </Button>
+            </div>
+          )
         )}
       </div>
     </div>

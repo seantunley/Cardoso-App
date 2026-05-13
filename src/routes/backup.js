@@ -4,16 +4,17 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { pipeline } from 'stream/promises';
 import { createRequire } from 'module';
-// archiver v8 is published as CommonJS without an ESM-compatible default
-// export, so `import archiver from 'archiver'` throws at boot under Node
-// 22 ESM with `SyntaxError: The requested module 'archiver' does not
-// provide an export named 'default'`. The whole service then refuses to
-// start (this route module is loaded eagerly at boot from server.js).
-// createRequire gives us the CJS module's actual export — same factory
-// function `archiver(format, opts)` that the rest of the file expects.
-// Dropping back to require here is intentional and load-bearing; do not
-// "modernise" without first checking that `archiver` ships an ESM build.
-const archiver = createRequire(import.meta.url)('archiver');
+// archiver v8 is published as CommonJS AND removed the legacy
+// `archiver(format, opts)` factory in favour of explicit format
+// classes — the module's runtime export is now an object with
+// { Archiver, ZipArchive, TarArchive, JsonArchive }, not a callable
+// function. The previous code here did `archiver('zip', opts)` and
+// crashed every nightly preview-zip backup at 03:01 with
+// "archiver is not a function" since the v8 bump. createRequire is
+// still the cleanest way to reach archiver from ESM (the package
+// has no usable default export), but the result needs to be
+// destructured into the format class.
+const { ZipArchive } = createRequire(import.meta.url)('archiver');
 import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
@@ -759,7 +760,7 @@ export function createBackupRouter() {
       // store=true (zip with no compression) — JPEGs are already
       // compressed; deflate would burn CPU for ~no size win and slow
       // the stream. Hub-side restore unzips with the same setting.
-      const archive = archiver('zip', { store: true });
+      const archive = new ZipArchive({ store: true });
 
       archive.on('warning', (err) => {
         if (err.code === 'ENOENT') {
