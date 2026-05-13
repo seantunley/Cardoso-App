@@ -241,6 +241,32 @@ describe('findInvoiceNumber — positional bias (textual proximity)', () => {
     const text = 'INVOICE\nIN999888777\nbody body body IN111222333';
     expect(findInvoiceNumber(text)).toBe('IN999888777');
   });
+
+  it('prefers an after-label candidate over a closer-but-pre-label one', () => {
+    // Reviewer-flagged regression: pure absolute distance let a
+    // candidate sitting a few chars BEFORE the label out-rank one
+    // sitting further AFTER. On real PODs the layout is
+    // "Invoice Number: <num>" — pre-label tokens (customer refs,
+    // order numbers, account codes) that look like invoices but
+    // aren't are common; the post-label number is the real one.
+    //
+    // The ref IN1234567 sits 5 chars before the label end; the real
+    // IN999888777 sits ~30 chars after. With absolute distance the
+    // ref would have won (5 < 30). Directional score gives the ref
+    // PRE_LABEL_PENALTY+5 = 10005, the real number 5. Real wins.
+    const text = 'Ref IN1234567 Invoice Number: \n  IN999888777';
+    expect(findInvoiceNumber(text)).toBe('IN999888777');
+  });
+
+  it('falls back to the closest pre-label candidate when no after-label one exists', () => {
+    // Unconventional layout — the number precedes the label. Both
+    // candidates are pre-label; nothing has the post-label score
+    // advantage, so the one CLOSEST to the label wins (last-resort
+    // tier). IN111222333 is 5 chars before the label end;
+    // IN444555666 is the opener of the line, much further off.
+    const text = 'IN444555666 ... (much filler in between) IN111222333 Invoice Number';
+    expect(findInvoiceNumber(text)).toBe('IN111222333');
+  });
 });
 
 describe('findInvoiceNumber — literal-prefix preference', () => {

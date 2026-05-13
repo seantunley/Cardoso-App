@@ -279,26 +279,73 @@ export function findInvoiceNumber(text, inDigitLength = 9, excludeSet = null) {
   }
 
   // ── 3. If at least one candidate is "near" any label, rank by
-  // minimum absolute distance. Otherwise fall back to v1 pattern
-  // priority. The fallback preserves backwards-compatibility on
-  // POD layouts where no label keyword survives the OCR pass — we
-  // then trust the regex priority order as before. ──────────────────
-  const distance = (idx) => {
+  // minimum DIRECTIONAL distance: candidates AFTER a label outrank
+  // those before it. Real PODs lay out as "Invoice Number: <num>",
+  // so the number is overwhelmingly to the RIGHT of the label.
+  // Pre-label tokens are typically unrelated identifiers — customer
+  // refs, order numbers, account codes — that happen to look like
+  // invoice numbers but aren't.
+  //
+  // Concrete failure the directional bias closes:
+  //   "Ref IN1234567 Invoice Number: ... IN999888777"
+  // Pure absolute distance scored IN1234567 (a few chars BEFORE the
+  // label) closer than IN999888777 (further AFTER), so the wrong
+  // number won. Now the after-label candidate always beats any
+  // before-label candidate, regardless of raw distance.
+  //
+  // We still keep before-label candidates in the running as a
+  // last-resort tier — heavily penalised — for the rare unconventional
+  // layout where the number really does precede the label. If no
+  // after-label candidate exists, the closest before-label one wins.
+  //
+  // Otherwise fall back to v1 pattern priority. The fallback preserves
+  // backwards-compatibility on POD layouts where no label keyword
+  // survives the OCR pass — we then trust the regex priority order
+  // as before.
+  const PRE_LABEL_PENALTY = 10_000;
+
+  // Raw absolute distance — used ONLY for the "is any candidate near
+  // a label?" gate, NOT for ranking. The penalty score below would
+  // disqualify all pre-label candidates from being "near" if we used
+  // it in the gate, and we'd lose the rare-but-real number-before-
+  // label layouts entirely.
+  const rawDistance = (idx) => {
     let best = Infinity;
     for (const lEnd of labelEnds) {
-      const d = Math.abs(idx - lEnd);
-      if (d < best) best = d;
+      const abs = Math.abs(idx - lEnd);
+      if (abs < best) best = abs;
     }
     return best;
   };
 
+  // Directional rank score — lower is better. After-label candidates
+  // get their post-label distance directly; before-label candidates
+  // are PRE_LABEL_PENALTY + their pre-label distance. Any after-label
+  // candidate (even one ~1000 chars away) beats any before-label one,
+  // matching real-POD layout conventions.
+  const directionalScore = (idx) => {
+    let bestAfter = Infinity;   // smallest (idx - lEnd) for idx >= lEnd
+    let bestBefore = Infinity;  // smallest (lEnd - idx) for idx < lEnd
+    for (const lEnd of labelEnds) {
+      const delta = idx - lEnd;
+      if (delta >= 0) {
+        if (delta < bestAfter) bestAfter = delta;
+      } else {
+        const abs = -delta;
+        if (abs < bestBefore) bestBefore = abs;
+      }
+    }
+    if (bestAfter !== Infinity) return bestAfter;
+    return PRE_LABEL_PENALTY + bestBefore;
+  };
+
   const anyNearLabel = labelEnds.length > 0
-    && candidates.some(c => distance(c.index) <= NEAR_LABEL_CHARS);
+    && candidates.some(c => rawDistance(c.index) <= NEAR_LABEL_CHARS);
 
   if (anyNearLabel) {
     candidates.sort((a, b) => {
-      const da = distance(a.index);
-      const db = distance(b.index);
+      const da = directionalScore(a.index);
+      const db = directionalScore(b.index);
       if (da !== db) return da - db;
       if (a.patternPriority !== b.patternPriority) return a.patternPriority - b.patternPriority;
       return a.index - b.index;
