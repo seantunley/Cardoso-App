@@ -182,7 +182,7 @@ items that were considered and rejected:
 
 ## Process / merge-hygiene
 
-### CI guard for migration version contiguity
+### CI guard for migration version contiguity — DONE (2026-05-13)
 
 The week of 2026-05-08 hit four merge-loss-class bugs in production
 (PR #221, #223, #228, #235): a feature PR shipped with its supporting
@@ -191,14 +191,15 @@ merge silently dropped one half during conflict resolution. The
 runtime contract broke; nobody noticed until a downstream operation
 hit the missing piece in production.
 
-Concrete fix: a tiny CI check that asserts every committed migration
-version is contiguous (no gaps between `v1` and `vN`). Would have
-caught the missing v62 immediately at PR open time instead of after
-production deploy. ~30 lines of script in the existing
-`build-windows.yml` workflow.
-
-Lower-effort variant: assert the migrations array length equals
-`max(version)` — same signal, simpler check.
+Shipped: `scripts/check-migration-versions.mjs` runs at PR-open and
+push-to-main time via `ci.yml` and `build-windows.yml` (wired as the
+`Check migration version contiguity` step). It loads
+`src/db/migrations.js` with a no-op stub db (the `up()` functions
+don't fire at array-build time), pulls every `.version` number, and
+asserts: first version is 1, no duplicates, no gaps, max version
+equals array length. On failure it names the missing/duplicate
+version(s) and points the operator at the most likely cause (parallel
+merge that dropped one). Local invocation: `npm run check:migrations`.
 
 ### Audit other CHECK-constraint whitelists for the same merge-loss risk
 
