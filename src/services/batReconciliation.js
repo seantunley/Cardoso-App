@@ -1392,11 +1392,20 @@ export async function runInvoiceExtraction(reconId) {
 // re-OCR everything that hasn't yet been matched without re-doing successful
 // extractions.
 export function resetUnsuccessfulExtractions() {
+  // extracted_invoice + manual_override are wiped here too for the same
+  // reason as resetUnsuccessfulExtractionsForRecon below — see that
+  // comment for the full rationale. Briefly: matchCardosoToSupplier
+  // filters by `extracted_invoice IS NOT NULL` rather than by status, so
+  // a stale value carried by a not_found/failed row would still match
+  // after this "reset" otherwise; manual_override left at 1 would opt
+  // the row out of fuzzy auto-correction on the next OCR pass.
   const info = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extraction_status = 'pending',
+        extracted_invoice = NULL,
         extraction_error = NULL,
-        extraction_attempts = 0
+        extraction_attempts = 0,
+        manual_override = 0
     WHERE extraction_status IN ('not_found', 'failed')
   `).run();
   return { reset: info.changes };
@@ -1465,10 +1474,18 @@ export function resetAllExtractionsForRecon(reconId) {
   return { reset: info.changes };
 }
 
+// extracted_invoice is wiped too even though not_found/failed rows
+// "shouldn't" carry a value — reviewer-flagged: matchCardosoToSupplier
+// filters by `extracted_invoice IS NOT NULL` rather than by status, so a
+// stale value from a legacy migration or a past manual entry that later
+// got re-marked failed would still participate in matching after this
+// "reset" runs. The modal copy promises the reset wipes invoice values;
+// honour that promise on every scope, not just 'all' and 'duplicates'.
 export function resetUnsuccessfulExtractionsForRecon(reconId) {
   const info = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extraction_status = 'pending',
+        extracted_invoice = NULL,
         extraction_error = NULL,
         extraction_attempts = 0,
         manual_override = 0
