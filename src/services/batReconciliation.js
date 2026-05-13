@@ -1508,6 +1508,16 @@ export function resetUnsuccessfulExtractionsForRecon(reconId) {
 // above this block) — if a manually-edited row's invoice happens to be
 // part of a duplicate cluster, the re-OCR'd replacement should NOT
 // inherit the manual-override sacred-edit treatment.
+//
+// SCOPE NOTE (reviewer-flagged): the duplicate KEYS are computed from
+// status='found' rows only — that's what the modal preview counts and
+// shows the operator. The UPDATE must narrow to the same scope; without
+// `extraction_status = 'found'` on the UPDATE, a stale not_found/failed
+// row that happened to carry one of those invoice values would also be
+// wiped, even though it wasn't in the count the operator approved. The
+// duplicates scope is supposed to be "wipe the over-replicated SUCCESS
+// rows so re-OCR splits them into distinct invoices" — out-of-scope
+// rows belong to one of the OTHER reset buttons.
 export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
   const dups = db.prepare(`
     SELECT extracted_invoice
@@ -1528,6 +1538,7 @@ export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
         extraction_attempts = 0,
         manual_override = 0
     WHERE reconciliation_id = ?
+      AND extraction_status = 'found'
       AND extracted_invoice IN (${placeholders})
   `).run(reconId, ...dups);
   return { reset: info.changes, duplicateInvoices: dups.length };
