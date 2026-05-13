@@ -379,6 +379,32 @@ describe('renderPdfInChild — end-to-end with the real child script', () => {
     },
     25_000,
   );
+
+  it(
+    'surfaces the structured PAGE_OUT_OF_RANGE code from the real child (no CHILD_FAILED fallback)',
+    async () => {
+      // Regression guard for failStructured's exit-before-flush race: if
+      // the child writes its JSON error line to stderr and immediately
+      // exits, the line can be lost in the pipe buffer and the parent
+      // falls back to the generic CHILD_FAILED code, dropping the
+      // diagnostic operators rely on. The fix uses a write-callback so
+      // the exit only fires after the kernel has acknowledged the
+      // bytes; this test catches a regression by asking the real
+      // renderPdfChild.js for a page that doesn't exist (1-page PDF,
+      // pageNum=99) and asserting the structured code makes it back
+      // through.
+      let caught;
+      try {
+        await renderPdfInChild(MINIMAL_PDF, { pageNum: 99, timeoutMs: 20_000 });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeDefined();
+      expect(caught.code).toBe('PAGE_OUT_OF_RANGE');
+      expect(String(caught.message || '')).toMatch(/pageNum 99/);
+    },
+    25_000,
+  );
 });
 
 // ── helpers ───────────────────────────────────────────────────────────

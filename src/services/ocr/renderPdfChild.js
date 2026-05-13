@@ -33,6 +33,7 @@
 //   exit:   0 on success, 1 on any failure
 
 import { Buffer } from 'buffer';
+import { writeSync } from 'fs';
 
 // IDLE timeout (reset on each data event) — see Phase 1 commit
 // 9d59b90 for the wall-clock-from-start regression this avoids.
@@ -207,9 +208,43 @@ function writeAll(stream, buf) {
 }
 
 function failStructured(obj) {
+  // Why fs.writeSync(2, ...) instead of process.stderr.write(...):
+  //
+  // process.exit() is synchronous and does NOT wait for stderr to
+  // flush. When stderr is pipe-backed (which is exactly what the
+  // parent gives us via spawn) Node's process.stderr.write is
+  // asynchronous, so the JSON line can be lost in the kernel/V8
+  // buffer between the write call and the exit — common on POSIX,
+  // occasionally on Windows. The parent then fails to parse the
+  // structured-error line and falls back to the generic CHILD_FAILED
+  // code, so actionable codes (PAGE_TOO_LARGE / BAD_ARGS /
+  // PAGE_OUT_OF_RANGE / STDIN_TIMEOUT / EMPTY_INPUT) are silently
+  // lost and the operator gets "child process failed" instead of the
+  // diagnostic we built.
+  //
+  // fs.writeSync(2, line) is a synchronous POSIX-style write
+  // straight to the fd-2 file descriptor; it blocks until the bytes
+  // are at the kernel level, regardless of whether stderr is TTY or
+  // pipe. After it returns, process.exit() can't lose them. This
+  // also preserves the original "calling code stops here" semantic
+  // — failStructured is followed by code that assumes execution
+  // ends inside it, so it has to remain synchronous.
+  let line;
   try {
-    process.stderr.write(JSON.stringify(obj) + '\n');
-  } catch {}
+    line = JSON.stringify(obj) + '\n';
+  } catch {
+    // JSON.stringify itself failed (circular refs / bigints / ...).
+    // Emit a minimal valid line so the parent at least gets *some*
+    // code rather than the generic CHILD_FAILED fallback.
+    line = '{"code":"FAILSTRUCTURED_SERIALIZE_FAILED","message":"failStructured payload could not be serialised"}\n';
+  }
+  try {
+    writeSync(2, line);
+  } catch {
+    // Even the synchronous write failed (closed fd, etc.). Nothing
+    // we can do — exit anyway, the parent's wall-clock timeout
+    // backstops this case.
+  }
   process.exit(1);
 }
 
