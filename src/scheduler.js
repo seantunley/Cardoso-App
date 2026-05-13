@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import path from 'path';
-import { mkdirSync } from 'fs';
+import { mkdirSync, linkSync, readdirSync as readdirSyncTop, rmSync } from 'fs';
 import Database from 'better-sqlite3';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
@@ -160,6 +160,65 @@ export async function runLocalBackup() {
     await db.backup(destPath);
     console.log(`[backup] Saved to ${destPath}`);
 
+    // BAT preview snapshot. The .db backup above only restores OCR text
+    // (extracted_invoice, status, etc.) — the actual JPEG previews live
+    // on disk under uploads/bat-previews/<extractionId>.jpg, so a restore
+    // without them leaves the UI showing "Open PDF" only and forces a
+    // full re-OCR to regenerate thumbnails.
+    //
+    // Strategy: hardlink each preview into a sibling directory next to
+    // the .db. Hardlinks share the underlying inode, so disk cost is one
+    // copy total no matter how many snapshots we keep — previews are
+    // append-only (named by extractionId, never overwritten or deleted),
+    // so the inodes stay valid as long as the original or any snapshot
+    // still references them. NTFS supports hardlinks via fs.linkSync on
+    // the same volume; cross-volume hardlinks fail with EXDEV (caller
+    // would see it in the error log; not a concern here since uploads/
+    // and database/backups/ are both under cwd).
+    const previewSrc = path.join(process.cwd(), 'uploads', 'bat-previews');
+    const snapshotDir = destPath.replace(/\.db$/, '.previews');
+    let linkedCount = 0;
+    let skippedCount = 0;
+    try {
+      const previewFiles = readdirSyncTop(previewSrc).filter((f) => f.toLowerCase().endsWith('.jpg'));
+      if (previewFiles.length > 0) {
+        mkdirSync(snapshotDir, { recursive: true });
+        for (const f of previewFiles) {
+          try {
+            linkSync(path.join(previewSrc, f), path.join(snapshotDir, f));
+            linkedCount += 1;
+          } catch (linkErr) {
+            // EEXIST shouldn't happen (fresh dir), EXDEV means the
+            // uploads/ folder is on a different volume than database/ —
+            // fall back to a copy in that case so we still snapshot
+            // *something* rather than silently skipping.
+            if (linkErr.code === 'EXDEV') {
+              try {
+                const { copyFileSync } = await import('fs');
+                copyFileSync(path.join(previewSrc, f), path.join(snapshotDir, f));
+                linkedCount += 1;
+              } catch (copyErr) {
+                skippedCount += 1;
+                try { logError('backup.preview_snapshot_copy', copyErr, { file: f }); } catch {}
+              }
+            } else {
+              skippedCount += 1;
+              try { logError('backup.preview_snapshot_link', linkErr, { file: f }); } catch {}
+            }
+          }
+        }
+        console.log(`[backup] Preview snapshot: ${linkedCount} linked, ${skippedCount} skipped → ${snapshotDir}`);
+      } else {
+        console.log('[backup] No previews to snapshot (uploads/bat-previews/ is empty)');
+      }
+    } catch (previewErr) {
+      // ENOENT is normal on a fresh install with no OCR runs yet.
+      if (previewErr.code !== 'ENOENT') {
+        console.error(`[backup] Preview snapshot failed: ${previewErr.message}`);
+        try { logError('backup.preview_snapshot', previewErr, { src: previewSrc, dest: snapshotDir }); } catch {}
+      }
+    }
+
     // Prune: keep last 6 by default (one week of daily backups). Override
     // via BACKUP_KEEP_COUNT env. Was 30 originally — but on a site that
     // hits multi-GB cardoso.db (the production case that prompted PR #245),
@@ -182,9 +241,15 @@ export async function runLocalBackup() {
     const keep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 6;
     files.slice(keep).forEach((f) => {
       try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
+      // Also drop the sibling .previews/ snapshot directory if present.
+      // Hardlinked files keep the underlying inode alive as long as any
+      // other snapshot (or the live previews dir) still references them,
+      // so this rm only frees disk if every other reference is also gone.
+      const siblingPreviews = path.join(backupDir, f.name.replace(/\.db$/, '.previews'));
+      try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (_) {}
     });
     if (files.length > keep) {
-      console.log(`[backup] Pruned ${files.length - keep} old backup(s), keeping ${keep}`);
+      console.log(`[backup] Pruned ${files.length - keep} old backup(s) and sibling preview snapshots, keeping ${keep}`);
     }
   } catch (err) {
     console.error('[backup] Failed:', err.message);
