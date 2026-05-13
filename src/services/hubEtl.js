@@ -791,6 +791,7 @@ async function pullBackupForSite(site) {
     // previews to restore — better than the .db pull silently failing
     // because of a previews issue.
     let previewsResult = { ok: false, count: 0 };
+    const previewFile = path.join(dir, `bat-previews-${site.id}-${ts}.zip`);
     try {
       const prevCtrl = new AbortController();
       const prevTimeout = setTimeout(() => prevCtrl.abort(), 5 * 60 * 1000);
@@ -801,16 +802,35 @@ async function pullBackupForSite(site) {
       clearTimeout(prevTimeout);
       if (prevRes.ok) {
         const previewCount = parseInt(prevRes.headers.get('x-backup-preview-count') || '0', 10);
-        const previewFile = path.join(dir, `bat-previews-${site.id}-${ts}.zip`);
+        const expectedSize = parseInt(prevRes.headers.get('content-length') || '', 10);
         await pipeline(Readable.fromWeb(prevRes.body), createWriteStream(previewFile));
-        const { statSync } = await import('fs');
+        const { statSync, unlinkSync } = await import('fs');
         const previewSize = statSync(previewFile).size;
-        console.log(`[HUB BACKUP] ${site.name}: BAT previews saved (${previewCount} files, ${(previewSize / 1024 / 1024).toFixed(1)} MB)`);
-        previewsResult = { ok: true, count: previewCount, size: previewSize, file: previewFile };
+        // Empty store-mode zip is 22 bytes (EOCD only). Anything smaller
+        // is a truncated/aborted download that would silently look like
+        // a valid 0-file snapshot to a future restore.
+        const MIN_ZIP_BYTES = 22;
+        if (previewSize < MIN_ZIP_BYTES) {
+          try { unlinkSync(previewFile); } catch {}
+          console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch returned ${previewSize} bytes — too small to be a valid zip; deleted.`);
+          previewsResult = { ok: false, error: `zip too small: ${previewSize} bytes` };
+        } else if (Number.isFinite(expectedSize) && expectedSize > 0 && previewSize !== expectedSize) {
+          try { unlinkSync(previewFile); } catch {}
+          console.warn(`[HUB BACKUP] ${site.name}: BAT previews truncated download (${previewSize} of ${expectedSize} bytes) — deleted.`);
+          previewsResult = { ok: false, error: `truncated: ${previewSize}/${expectedSize}` };
+        } else {
+          console.log(`[HUB BACKUP] ${site.name}: BAT previews saved (${previewCount} files, ${(previewSize / 1024 / 1024).toFixed(1)} MB)`);
+          previewsResult = { ok: true, count: previewCount, size: previewSize, file: previewFile };
+        }
       } else {
         console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch HTTP ${prevRes.status} — skipping (existing previews on hub remain)`);
       }
     } catch (prevErr) {
+      // Mid-stream failure leaves a partial file — clean it up.
+      try {
+        const { unlinkSync, existsSync } = await import('fs');
+        if (existsSync(previewFile)) unlinkSync(previewFile);
+      } catch {}
       console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
     }
 
@@ -825,7 +845,14 @@ async function pullBackupForSite(site) {
       { name: 'bat-archive', label: 'BAT archive' },
     ];
     const archiveResults = {};
+    // Empty store-mode zip is 22 bytes (just the End-of-Central-Directory
+    // record). Anything smaller can't be a valid zip; treat as a failed
+    // download (truncation, proxy interrupt, archiver finalize race) and
+    // delete so a future restore doesn't pick a 0-byte file as a
+    // "snapshot".
+    const MIN_ZIP_BYTES = 22;
     for (const { name, label } of archiveTargets) {
+      const file = path.join(dir, `${name}-${site.id}-${ts}.zip`);
       try {
         const ctrl = new AbortController();
         const timeout = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
@@ -835,10 +862,27 @@ async function pullBackupForSite(site) {
         });
         clearTimeout(timeout);
         if (res.ok) {
-          const file = path.join(dir, `${name}-${site.id}-${ts}.zip`);
+          // Capture Content-Length BEFORE streaming — used after pipeline
+          // to detect truncation. The site's nestedArchiveEndpoint streams
+          // and only sets Content-Length if it can know the total ahead
+          // of time (it can't — archiver writes incrementally), so this
+          // header may be absent. When absent we accept any size > MIN.
+          const expectedSize = parseInt(res.headers.get('content-length') || '', 10);
           await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
-          const { statSync } = await import('fs');
+          const { statSync, unlinkSync } = await import('fs');
           const size = statSync(file).size;
+          if (size < MIN_ZIP_BYTES) {
+            try { unlinkSync(file); } catch {}
+            console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch returned ${size} bytes — too small to be a valid zip; deleted.`);
+            archiveResults[name] = { ok: false, error: `zip too small: ${size} bytes` };
+            continue;
+          }
+          if (Number.isFinite(expectedSize) && expectedSize > 0 && size !== expectedSize) {
+            try { unlinkSync(file); } catch {}
+            console.warn(`[HUB BACKUP] ${site.name}: ${label} truncated download (${size} of ${expectedSize} bytes) — deleted.`);
+            archiveResults[name] = { ok: false, error: `truncated: ${size}/${expectedSize}` };
+            continue;
+          }
           console.log(`[HUB BACKUP] ${site.name}: ${label} saved (${(size / 1024 / 1024).toFixed(1)} MB)`);
           archiveResults[name] = { ok: true, size, file };
         } else {
@@ -846,6 +890,12 @@ async function pullBackupForSite(site) {
           archiveResults[name] = { ok: false, status: res.status };
         }
       } catch (err) {
+        // Clean up partial file from a mid-stream failure so a future
+        // restore doesn't pick it up.
+        try {
+          const { unlinkSync, existsSync } = await import('fs');
+          if (existsSync(file)) unlinkSync(file);
+        } catch {}
         console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch failed — ${describeFetchError(err, `${site.url}/api/backup/${name}`)}`);
         archiveResults[name] = { ok: false, error: err.message };
       }

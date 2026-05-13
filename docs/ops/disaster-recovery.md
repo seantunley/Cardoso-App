@@ -219,7 +219,7 @@ clean one:
 ```sql
 SELECT filename, result, created_at
 FROM hub_backup_integrity
-WHERE site_id = '<siteId>' AND result LIKE '%ok%'
+WHERE site_id = '<siteId>' AND result = 'ok'
 ORDER BY created_at DESC LIMIT 5;
 ```
 

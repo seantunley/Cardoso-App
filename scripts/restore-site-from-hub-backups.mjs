@@ -23,9 +23,11 @@
 //   node scripts/restore-site-from-hub-backups.mjs \
 //     --backups <path-to-hub-backups-site-folder> \
 //     --target  <path-to-fresh-app-install> \
-//     [--at <YYYY-MM-DD-HH-MM-SS>]     # default: latest snapshot
-//     [--skip-env]                      # don't overwrite an existing .env
-//     [--dry-run]                       # print what would happen, don't touch disk
+//     [--at <YYYY-MM-DD-HH-MM-SS>]      # default: latest snapshot
+//     [--skip-env]                       # don't overwrite an existing .env
+//     [--allow-missing-env]              # proceed even if no .env in backup
+//     [--dry-run]                        # print plan, don't touch disk
+//     [--yes]                            # skip interactive confirmation prompt
 //
 // EXAMPLE:
 //   node scripts/restore-site-from-hub-backups.mjs \
@@ -39,23 +41,47 @@ import { pathToFileURL } from 'url';
 
 const require = createRequire(import.meta.url);
 
+// Boolean flags don't take a value; everything else is `--key value`.
+const BOOLEAN_FLAGS = new Set(['dry-run', 'skip-env', 'allow-missing-env', 'yes']);
+
 function parseArgs(argv) {
   const out = {};
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
-    if (a === '--dry-run' || a === '--skip-env') { out[a.slice(2)] = true; continue; }
-    if (a.startsWith('--')) {
-      const k = a.slice(2);
-      const v = argv[i + 1];
-      if (v === undefined || v.startsWith('--')) {
-        console.error(`Missing value for ${a}`);
-        process.exit(2);
-      }
-      out[k] = v;
-      i += 1;
+    if (!a.startsWith('--')) {
+      console.error(`Unexpected positional argument: ${a}`);
+      process.exit(2);
     }
+    const k = a.slice(2);
+    if (BOOLEAN_FLAGS.has(k)) { out[k] = true; continue; }
+    const v = argv[i + 1];
+    if (v === undefined || v.startsWith('--')) {
+      console.error(`Missing value for ${a}`);
+      process.exit(2);
+    }
+    out[k] = v;
+    i += 1;
   }
   return out;
+}
+
+// Block until the user types "yes" verbatim. Returns true on yes, false
+// on anything else. stdin is read line-by-line via the readline module
+// (works on Windows cmd.exe + PowerShell + git-bash). Skipped when --yes
+// is on or when stdin isn't a TTY (e.g. running from CI / Task Scheduler
+// — in which case the operator must opt in via --yes).
+async function confirmInteractive(prompt) {
+  if (!process.stdin.isTTY) {
+    bail('stdin is not a TTY — cannot prompt. Re-run with --yes if you intend to proceed non-interactively.');
+  }
+  const readline = await import('readline');
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = await new Promise((resolve) => rl.question(prompt, resolve));
+    return answer.trim().toLowerCase() === 'yes';
+  } finally {
+    rl.close();
+  }
 }
 
 function bail(msg) {
@@ -73,7 +99,12 @@ function findArtifact(backupsDir, prefix, suffix, ts) {
     .sort()
     .reverse();
   if (ts) {
-    return files.find((f) => f.includes(ts)) || null;
+    // Anchored match on `-<ts><suffix>` to avoid `.includes(ts)` matching
+    // a hypothetical `bat-previews-…-2026-05-13-02-00-00-PARTIAL.zip` or a
+    // nested timestamp in the siteId portion. Each file's timestamp must
+    // be the suffix immediately before the extension.
+    const anchor = `-${ts}${suffix}`;
+    return files.find((f) => f.endsWith(anchor)) || null;
   }
   return files[0] || null;
 }
@@ -100,14 +131,17 @@ async function unzipInto(zipPath, destDir, dryRun) {
     await new Promise((resolve, reject) => {
       yauzl.open(zipPath, { lazyEntries: true }, (err, zipfile) => {
         if (err) return reject(err);
+        // Single failure path that closes the zipfile FD before
+        // bubbling up — yauzl doesn't auto-close on stream error.
+        const fail = (e) => { try { zipfile.close(); } catch {} reject(e); };
         zipfile.readEntry();
         zipfile.on('entry', (entry) => {
           // Reject path-traversal entries. Zips from our own endpoints
           // are safe but a third-party-modified backup could embed
           // ../etc/passwd-style names; refuse them rather than write
           // outside destDir.
-          if (entry.fileName.includes('..') || path.isAbsolute(entry.fileName)) {
-            return reject(new Error(`Unsafe path in zip: ${entry.fileName}`));
+          if (!isSafeZipEntryName(entry.fileName)) {
+            return fail(new Error(`Unsafe path in zip: ${entry.fileName}`));
           }
           const target = path.join(destDir, entry.fileName);
           if (/\/$/.test(entry.fileName)) {
@@ -117,29 +151,66 @@ async function unzipInto(zipPath, destDir, dryRun) {
           }
           fs.mkdirSync(path.dirname(target), { recursive: true });
           zipfile.openReadStream(entry, (e2, readStream) => {
-            if (e2) return reject(e2);
+            if (e2) return fail(e2);
             const ws = fs.createWriteStream(target);
             readStream.pipe(ws);
             ws.on('finish', () => zipfile.readEntry());
-            ws.on('error', reject);
+            ws.on('error', fail);
           });
         });
-        zipfile.on('end', resolve);
-        zipfile.on('error', reject);
+        zipfile.on('end', () => { try { zipfile.close(); } catch {} resolve(); });
+        zipfile.on('error', fail);
       });
     });
   } else if (process.platform === 'win32') {
     // Standalone fallback — PowerShell ships on every Windows install.
+    // CRITICAL: Expand-Archive does NOT validate entry paths; a malicious
+    // zip with `..\..\Windows\System32\…` entries would be written there.
+    // Pre-scan via [IO.Compression.ZipFile]::OpenRead and refuse the
+    // archive before invoking Expand-Archive if any entry is unsafe.
     const { execFileSync } = await import('child_process');
+    const psQuoteSafe = (s) => s.replace(/'/g, "''");
+    const preScan = `
+      Add-Type -AssemblyName System.IO.Compression.FileSystem
+      $zip = [IO.Compression.ZipFile]::OpenRead('${psQuoteSafe(zipPath)}')
+      try {
+        foreach ($e in $zip.Entries) {
+          $name = $e.FullName
+          if ($name -match '\\.\\.' -or $name -match '^[\\\\/]' -or $name -match '^[A-Za-z]:') {
+            Write-Error "Unsafe entry in zip: $name"
+            exit 2
+          }
+        }
+      } finally { $zip.Dispose() }
+    `;
+    try {
+      execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', preScan], { stdio: 'inherit' });
+    } catch (preScanErr) {
+      throw new Error(`Refusing to expand ${zipPath}: pre-scan failed (likely an unsafe entry path). ${preScanErr.message}`);
+    }
     execFileSync('powershell.exe', [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      `Expand-Archive -Path '${zipPath.replace(/'/g, "''")}' -DestinationPath '${destDir.replace(/'/g, "''")}' -Force`,
+      `Expand-Archive -Path '${psQuoteSafe(zipPath)}' -DestinationPath '${psQuoteSafe(destDir)}' -Force`,
     ], { stdio: 'inherit' });
   } else {
     bail(`yauzl not installed and not on Windows — install dependencies first or unzip ${zipPath} manually into ${destDir}`);
   }
+}
+
+// Reject entries that would escape destDir on any OS:
+//   - parent-dir hops (`..` anywhere — covers `../`, `..\\`, `foo/../bar`)
+//   - absolute paths (leading `/` or `\`)
+//   - Windows drive-letter paths (`C:` etc.)
+//   - leading dot-slash variants normalised away by path.join may still escape
+function isSafeZipEntryName(name) {
+  if (typeof name !== 'string' || !name) return false;
+  if (name.includes('..')) return false;
+  if (path.isAbsolute(name)) return false;
+  if (/^[A-Za-z]:/.test(name)) return false;
+  if (/^[\\/]/.test(name)) return false;
+  return true;
 }
 
 async function integrityCheck(dbPath) {
@@ -176,9 +247,18 @@ async function main() {
   const at = args.at || null;
   const dryRun = !!args['dry-run'];
   const skipEnv = !!args['skip-env'];
+  const allowMissingEnv = !!args['allow-missing-env'];
+  const yes = !!args.yes;
 
   if (!fs.existsSync(backupsDir)) bail(`Backups dir not found: ${backupsDir}`);
   if (!fs.statSync(backupsDir).isDirectory()) bail(`Not a directory: ${backupsDir}`);
+
+  // Refuse to write into well-known system locations even if the operator
+  // typed them. Defence-in-depth against `--target C:\` typo.
+  const SYS_PATH_RE = /^([a-z]:\\?|\/|c:\\windows|c:\\program\s+files|c:\\programdata)$/i;
+  if (SYS_PATH_RE.test(targetDir)) {
+    bail(`--target ${targetDir} looks like a system root; refusing to write here. Pick a directory like C:\\Cardoso Customer App.`);
+  }
 
   // Find the .db first — it's the anchor everything else timestamp-matches against.
   const dbFile = findArtifact(backupsDir, 'cardoso-', '.db', at);
@@ -202,11 +282,27 @@ async function main() {
   const batZip = findArtifact(backupsDir, 'bat-archive-', '.zip', ts);
 
   console.log('Companion artifacts (matched on timestamp):');
-  console.log(`  config .env:      ${envFile || '(missing — operator must supply .env manually)'}`);
+  console.log(`  config .env:      ${envFile || '(missing — see below)'}`);
   console.log(`  bat-previews zip: ${previewsZip || '(missing — UI will show "Open PDF" only)'}`);
   console.log(`  jti-archive zip:  ${jtiZip || '(missing — JTI monthly export history will be empty)'}`);
   console.log(`  bat-archive zip:  ${batZip || '(missing — BAT supplier dispute replay unavailable)'}`);
   console.log('');
+
+  // Env is critical — without ENCRYPTION_KEY the restored DB cannot decrypt
+  // databaseconnection.encrypted_password rows; the site will boot but Sage
+  // queries / BAT recon / JTI export all fail at first attempt. Bail by
+  // default unless the operator explicitly opts in. --skip-env is a separate
+  // flag (means "don't OVERWRITE my existing .env"); --allow-missing-env
+  // is the override for "I know the backup has no .env and that's fine
+  // because BACKUP_CONFIG_EXPORT_MODE was disabled, I'll supply one manually".
+  if (!envFile && !skipEnv && !allowMissingEnv) {
+    bail(
+      `No matching .env in backup folder for snapshot ${ts}.\n` +
+      '  Without ENCRYPTION_KEY the restored DB cannot decrypt connection passwords.\n' +
+      '  Re-run with --allow-missing-env if you intend to supply an .env yourself,\n' +
+      '  or pick a snapshot whose timestamp also has a config-*.env file.'
+    );
+  }
 
   // Pre-restore: verify the .db is not corrupt.
   const dbSrcPath = path.join(backupsDir, dbFile);
@@ -221,6 +317,23 @@ async function main() {
   if (dryRun) {
     console.log('=== DRY RUN — the following would be done ===');
   } else {
+    // Final confirmation gate. Skipped if --yes was passed or stdin
+    // is non-interactive (in which case --yes is required, see
+    // confirmIneractive). This is the last safety against
+    // "I typed the wrong --target".
+    if (!yes) {
+      const ok = await confirmInteractive(
+        `\nAbout to OVERWRITE files in ${targetDir}.\n` +
+        '  - database/cardoso.db\n' +
+        '  - .env (if a .env is present in the backup)\n' +
+        '  - uploads/bat-previews/ uploads/jti-archive/ uploads/bat-archive/ (each unzipped, pre-existing files preserved by zip semantics)\n\n' +
+        'Type "yes" to proceed: '
+      );
+      if (!ok) {
+        console.log('Aborted.');
+        process.exit(0);
+      }
+    }
     console.log('=== Applying restore ===');
   }
 

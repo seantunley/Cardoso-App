@@ -1936,6 +1936,17 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     return true;
   }
 
+  // Reject siteIds that could escape hub-backups/. Site IDs in the wild
+  // are UUIDs and short slugs; this whitelist is conservative but covers
+  // every legitimate format we've seen. The earlier code passed siteId
+  // straight from `req.params` into `path.join`, which on Express
+  // versions that decode `%2F` could be exploited to read sibling
+  // directories under `database/`.
+  function isSafeSiteId(name) {
+    if (typeof name !== 'string' || !name) return false;
+    return /^[a-zA-Z0-9_-]{1,64}$/.test(name);
+  }
+
   // GET /api/hub/sites/:siteId/snapshots
   // Lists every .db snapshot the hub has on disk for this site,
   // with size + mtime + integrity (joined from hub_backup_integrity).
@@ -1992,10 +2003,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         if (!f) return null;
         try { return statSync(path.join(dir, f)).size; } catch { return null; }
       };
-      const previewsFile = ts ? previewZips.find((z) => z.includes(ts)) : null;
-      const jtiArchiveFile = ts ? jtiArchiveZips.find((z) => z.includes(ts)) : null;
-      const batArchiveFile = ts ? batArchiveZips.find((z) => z.includes(ts)) : null;
-      const envFile = ts ? envFiles.find((e) => e.includes(ts)) : null;
+      // Anchored match on `-<ts><suffix>` instead of substring `.includes(ts)`
+      // — guards against a hypothetical filename like
+      // `bat-previews-<id>-2026-05-13-02-00-00-PARTIAL.zip` over-matching.
+      const previewsFile   = ts ? previewZips.find((z)     => z.endsWith(`-${ts}.zip`)) : null;
+      const jtiArchiveFile = ts ? jtiArchiveZips.find((z)  => z.endsWith(`-${ts}.zip`)) : null;
+      const batArchiveFile = ts ? batArchiveZips.find((z)  => z.endsWith(`-${ts}.zip`)) : null;
+      const envFile        = ts ? envFiles.find((e)        => e.endsWith(`-${ts}.env`)) : null;
       const integrity = integrityMap.get(dbFile);
       return {
         filename: dbFile,
@@ -2071,8 +2085,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const ts = tsMatch ? tsMatch[1] : null;
     const findCompanion = (prefix, ext) => {
       if (!ts) return null;
+      // Anchored on `-<ts><ext>` so a partial-download leftover named e.g.
+      // `bat-previews-<id>-<ts>-PARTIAL.zip` doesn't satisfy the match.
+      const tail = `-${ts}${ext}`;
       const candidate = readdirSync(snapDir).find(
-        (f) => f.startsWith(prefix) && f.includes(ts) && f.endsWith(ext)
+        (f) => f.startsWith(prefix) && f.endsWith(tail)
       );
       return candidate && existsSync(path.join(snapDir, candidate)) ? candidate : null;
     };
@@ -2184,6 +2201,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     if (!token) return res.status(401).json({ error: 'Missing x-restore-token header' });
     if (!isSafeBackupFilename(filename)) return res.status(400).json({ error: 'Invalid filename' });
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId' });
     if (!consumeRestoreToken(token, siteId, filename)) {
       return res.status(401).json({ error: 'Invalid, expired, or already-consumed restore token' });
     }
@@ -2577,20 +2595,27 @@ export function createReceiveUsersRouter() {
       // bubble up the same as the DB; the apply script handles missing
       // optional artifacts gracefully.
       const optionalCompanions = [
-        { spec: previews,    nameRef: (p) => { previewsStaging = p; } },
-        { spec: jti_archive, nameRef: (p) => { jtiArchiveStaging = p; } },
-        { spec: bat_archive, nameRef: (p) => { batArchiveStaging = p; } },
-        { spec: env,         nameRef: (p) => { envStaging = p; } },
+        { label: 'previews',    spec: previews,    nameRef: (p) => { previewsStaging = p; } },
+        { label: 'jti_archive', spec: jti_archive, nameRef: (p) => { jtiArchiveStaging = p; } },
+        { label: 'bat_archive', spec: bat_archive, nameRef: (p) => { batArchiveStaging = p; } },
+        { label: 'env',         spec: env,         nameRef: (p) => { envStaging = p; } },
       ];
-      for (const { spec, nameRef } of optionalCompanions) {
+      for (const { label, spec, nameRef } of optionalCompanions) {
         if (!spec?.filename || !spec?.token) continue;
         const destPath = pathModule.join(stagingDir, spec.filename);
-        await downloadFile(
-          `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(spec.filename)}`,
-          spec.token,
-          destPath,
-        );
-        nameRef(destPath);
+        try {
+          await downloadFile(
+            `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(spec.filename)}`,
+            spec.token,
+            destPath,
+          );
+          nameRef(destPath);
+        } catch (companionErr) {
+          // Re-throw with the label prefixed so the operator knows WHICH
+          // artifact failed instead of seeing a bare "HTTP 502" with no
+          // context. Caller catch below cleans up staging.
+          throw new Error(`${label}: ${companionErr.message}`);
+        }
       }
     } catch (err) {
       // Clean up staging on download failure — don't leave orphaned

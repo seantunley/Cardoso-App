@@ -297,14 +297,16 @@ process.exit(ok ? 0 : 1);
   $primaryError = "$_"
   Log "ERROR: $primaryError"
 
-  # Roll back. Move the just-saved backup files BACK on top of the
-  # restored copies. If the rollback also fails (rare — would need a
-  # second file-lock window) the .before-restore-* files stay in
-  # place for manual recovery.
+  # Roll back. Each artifact in its own try/catch so a single failure
+  # (e.g. a leftover file lock on previews) doesn't abort the rollback
+  # of the OTHER artifacts. The .before-restore-* files stay on disk for
+  # manual recovery if any individual rollback throws — operator can
+  # see the full state in the WriteStatus payload below.
   $rollbackOk = $true
-  $rollbackError = $null
-  try {
-    if ($dbBackupPath -and (Test-Path $dbBackupPath)) {
+  $rollbackErrors = @()
+
+  if ($dbBackupPath -and (Test-Path $dbBackupPath)) {
+    try {
       Log "Rolling back live DB from $dbBackupPath..."
       $liveDbPath = Join-Path $AppDir "database\cardoso.db"
       if (Test-Path $liveDbPath) { Remove-Item -Force $liveDbPath -ErrorAction SilentlyContinue }
@@ -312,40 +314,70 @@ process.exit(ok ? 0 : 1);
       Remove-Item -Force "$liveDbPath-wal" -ErrorAction SilentlyContinue
       Remove-Item -Force "$liveDbPath-shm" -ErrorAction SilentlyContinue
       Log "Live DB rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "db: $_"
+      Log "Rollback FAILED for live DB: $_. Backup at $dbBackupPath for manual recovery."
     }
-    if ($previewsBackupPath -and (Test-Path $previewsBackupPath)) {
+  }
+
+  if ($previewsBackupPath -and (Test-Path $previewsBackupPath)) {
+    try {
       Log "Rolling back previews dir from $previewsBackupPath..."
       $previewsDir = Join-Path $AppDir "uploads\bat-previews"
       if (Test-Path $previewsDir) { Remove-Item -Recurse -Force $previewsDir -ErrorAction SilentlyContinue }
       Move-Item -Path $previewsBackupPath -Destination $previewsDir -Force
       Log "Previews dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "previews: $_"
+      Log "Rollback FAILED for previews: $_. Backup at $previewsBackupPath for manual recovery."
     }
-    if ($jtiArchiveBackupPath -and (Test-Path $jtiArchiveBackupPath)) {
+  }
+
+  if ($jtiArchiveBackupPath -and (Test-Path $jtiArchiveBackupPath)) {
+    try {
       Log "Rolling back JTI archive dir from $jtiArchiveBackupPath..."
       $jtiArchiveDir = Join-Path $AppDir "uploads\jti-archive"
       if (Test-Path $jtiArchiveDir) { Remove-Item -Recurse -Force $jtiArchiveDir -ErrorAction SilentlyContinue }
       Move-Item -Path $jtiArchiveBackupPath -Destination $jtiArchiveDir -Force
       Log "JTI archive dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "jti_archive: $_"
+      Log "Rollback FAILED for JTI archive: $_. Backup at $jtiArchiveBackupPath for manual recovery."
     }
-    if ($batArchiveBackupPath -and (Test-Path $batArchiveBackupPath)) {
+  }
+
+  if ($batArchiveBackupPath -and (Test-Path $batArchiveBackupPath)) {
+    try {
       Log "Rolling back BAT archive dir from $batArchiveBackupPath..."
       $batArchiveDir = Join-Path $AppDir "uploads\bat-archive"
       if (Test-Path $batArchiveDir) { Remove-Item -Recurse -Force $batArchiveDir -ErrorAction SilentlyContinue }
       Move-Item -Path $batArchiveBackupPath -Destination $batArchiveDir -Force
       Log "BAT archive dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "bat_archive: $_"
+      Log "Rollback FAILED for BAT archive: $_. Backup at $batArchiveBackupPath for manual recovery."
     }
-    if ($envBackupPath -and (Test-Path $envBackupPath)) {
+  }
+
+  if ($envBackupPath -and (Test-Path $envBackupPath)) {
+    try {
       Log "Rolling back .env from $envBackupPath..."
       $liveEnvPath = Join-Path $AppDir ".env"
       if (Test-Path $liveEnvPath) { Remove-Item -Force $liveEnvPath -ErrorAction SilentlyContinue }
       Move-Item -Path $envBackupPath -Destination $liveEnvPath -Force
       Log ".env rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "env: $_"
+      Log "Rollback FAILED for .env: $_. Backup at $envBackupPath for manual recovery."
     }
-  } catch {
-    $rollbackOk = $false
-    $rollbackError = "$_"
-    Log "Rollback ALSO failed: $rollbackError. Backup files at $dbBackupPath / $previewsBackupPath for manual recovery."
   }
+
+  $rollbackError = if ($rollbackErrors.Count -gt 0) { $rollbackErrors -join '; ' } else { $null }
 
   # Best-effort restart so the service comes back even on failure.
   Log "Attempting to restart service..."
