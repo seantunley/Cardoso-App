@@ -21,6 +21,7 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import { logError } from '../../lib/errorLog.js';
+import { getHubSyncBaseUrl } from '../creditLogic.js';
 
 // Re-tries are scheduled by jtiScheduler's pushRetry tick. Cap on
 // attempts before we stop logging loudly — a row that's failed 20
@@ -50,7 +51,7 @@ const VERBOSE_LOG_ATTEMPT_CAP = 5;
  *          generated_at:string,generated_by:string|null,row_count:number,
  *          town_city:string|null,region:string|null,country:string|null,
  *          site_label:string|null,byte_size:number}} args.archive
- * @param {string} [args.hubUrl=process.env.HUB_URL]
+ * @param {string} [args.hubUrl]              defaults to getHubSyncBaseUrl()
  * @param {string} [args.reportingToken=process.env.REPORTING_TOKEN]
  * @param {string} [args.siteId=process.env.SITE_ID]
  * @param {(...args: any[]) => Promise<Response>} [args.fetchImpl]
@@ -59,11 +60,23 @@ const VERBOSE_LOG_ATTEMPT_CAP = 5;
 export async function pushArchiveToHub({
   db,
   archive,
-  hubUrl = process.env.HUB_URL,
+  // Resolve via the same helper the rest of the system uses
+  // (bat_settings.hub_sync_url with env-var fallbacks). Reading
+  // process.env.HUB_URL directly is a footgun — sites set the hub URL
+  // through Settings → TLS, not .env, so a direct env read returns
+  // empty on every real production install and the push silently
+  // marks every archive 'skipped_no_hub'.
+  //
+  // Caller-provided `hubUrl` still wins (used by tests) — the default
+  // only fires when undefined is passed.
+  hubUrl,
   reportingToken = process.env.REPORTING_TOKEN,
   siteId = process.env.SITE_ID,
   fetchImpl = globalThis.fetch,
 }) {
+  if (hubUrl === undefined) {
+    try { hubUrl = getHubSyncBaseUrl(); } catch { hubUrl = ''; }
+  }
   if (!archive || !archive.id) {
     throw new TypeError('pushArchiveToHub: archive (with id) is required');
   }
@@ -229,18 +242,58 @@ export async function pushPendingArchives({
   siteId,
   fetchImpl,
 }) {
+  // Resolve hub URL here too — if no hub is configured we should skip
+  // the whole scan rather than walking rows just to re-mark each one
+  // 'skipped_no_hub'. That also tells us whether to include rows
+  // currently marked 'skipped_no_hub' in this tick: when the operator
+  // FIRST configures the hub URL (Settings → TLS), previously-archived
+  // rows are sitting at 'skipped_no_hub' and would otherwise stay that
+  // way forever (the old scan only included pending/failed). Re-
+  // including them when a hub URL is now resolvable means the catch-up
+  // happens automatically on the next 15-min retry tick.
+  let effectiveHubUrl = hubUrl;
+  if (effectiveHubUrl === undefined) {
+    try { effectiveHubUrl = getHubSyncBaseUrl(); } catch { effectiveHubUrl = ''; }
+  }
+  const effectiveToken = reportingToken !== undefined ? reportingToken : process.env.REPORTING_TOKEN;
+  const hubReachable = !!(effectiveHubUrl && effectiveToken);
+
+  const statusList = hubReachable
+    ? ['pending', 'failed', 'skipped_no_hub']
+    : ['pending', 'failed'];
+  const placeholders = statusList.map(() => '?').join(', ');
+  // Explicit status priority instead of `ORDER BY hub_push_status DESC`.
+  // The lexicographic order would put skipped_no_hub (which starts with
+  // 's') ahead of pending ('p') and failed ('f') — meaning when an
+  // operator FIRST configures the hub URL and a backlog of historical
+  // skipped_no_hub rows exists, every 15-minute tick would spend its
+  // whole batchSize on the backlog and starve newly-archived rows of
+  // their active retry slot. CASE priority: active retries first,
+  // historical recovery last, so a normal recon-day operator never
+  // notices the backfill is happening.
   const rows = db.prepare(`
     SELECT * FROM jti_archive
-    WHERE hub_push_status IN ('pending', 'failed')
+    WHERE hub_push_status IN (${placeholders})
       AND hub_push_attempts < ?
-    ORDER BY hub_push_status DESC, period_year ASC, period_month ASC, id ASC
+    ORDER BY
+      CASE hub_push_status
+        WHEN 'pending'        THEN 0
+        WHEN 'failed'         THEN 1
+        WHEN 'skipped_no_hub' THEN 2
+        ELSE 99
+      END,
+      period_year ASC, period_month ASC, id ASC
     LIMIT ?
-  `).all(maxAttempts, batchSize);
+  `).all(...statusList, maxAttempts, batchSize);
 
   let pushed = 0, failed = 0, skipped = 0;
   for (const archive of rows) {
     const result = await pushArchiveToHub({
-      db, archive, hubUrl, reportingToken, siteId, fetchImpl,
+      db, archive,
+      hubUrl: effectiveHubUrl,
+      reportingToken: effectiveToken,
+      siteId,
+      fetchImpl,
     });
     if (result.status === 'pushed') pushed++;
     else if (result.status === 'failed') failed++;
