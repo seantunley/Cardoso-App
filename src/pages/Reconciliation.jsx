@@ -182,7 +182,10 @@ export default function Reconciliation() {
   const [cardosoOpen, setCardosoOpen] = useState(false);
   const [expandedWeeks, setExpandedWeeks] = useState(() => new Set());
   const [hideBalanced, setHideBalanced] = useState(true);
-  const [hideMatched, setHideMatched] = useState(true);
+  // Default off — operator feedback: "very annoying to have the recons
+  // hidden all the time." Show everything by default; the toggle stays
+  // available for narrowing the view when the matched count gets noisy.
+  const [hideMatched, setHideMatched] = useState(false);
   const [genFromDate, setGenFromDate] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 14); return d.toISOString().slice(0, 10);
   });
