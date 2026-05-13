@@ -66,6 +66,7 @@ export function useColumnWidths(defaults, storageKey, containerRef) {
   // and the only state worth persisting is the one the operator stops
   // at. Schedule 200ms after the last change; on unmount/dep-change
   // flush whatever's pending so persistence isn't lost on navigate-away.
+  /** @type {import('react').MutableRefObject<ReturnType<typeof setTimeout> | null>} */
   const writeTimerRef = useRef(null);
   useEffect(() => {
     widthsRef.current = widths;
