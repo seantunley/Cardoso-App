@@ -1,37 +1,17 @@
-import { useState, useEffect, useCallback } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+// SettingsPanel — thin shell that builds the tab list based on
+// hubMode/permission flags, then mounts the matching tab component.
+// All tab bodies live under src/components/settings/tabs/<TabName>.jsx;
+// this file just composes them. See issue #285 for the split history.
+
+import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
-import { toast } from "sonner";
-import { reportClientError } from "@/lib/clientLog";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
-import { humanizeApiError } from "@/lib/humanizeApiError";
-import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
 
 // UI
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
-
-// Icons
-import {
-  Zap, Plus,
-  RefreshCw, AlertCircle, CheckCircle2, Clock, LogIn, ClipboardList,
-  Download, Upload, GitBranch, Send, Info, Workflow, AlertTriangle,
-  Lock, ShieldCheck, ShieldAlert, ExternalLink, Save, Database,
-} from "lucide-react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import ReconResetModal from "@/components/reconciliation/ReconResetModal";
-
-// Sub-components
-import AutoFlagRuleForm from "@/components/settings/AutoFlagRuleForm";
-import AuditLogTable from "@/components/audit/AuditLogTable";
 
 // Tabs
 import ConnectionsTab from "@/components/settings/tabs/ConnectionsTab";
@@ -48,12 +28,8 @@ import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
 import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
 
-
-
-// ─── Main SettingsPanel ──────────────────────────────────────────────────────
-
-
-
+// Section/Row — tiny layout helpers used (only) by TlsTab. Kept here and
+// re-exported (rather than moved to a _shared file) per the issue brief.
 
 
 export function Section({ title, children }) {
