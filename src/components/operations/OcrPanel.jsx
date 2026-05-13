@@ -480,15 +480,19 @@ export default function OcrPanel() {
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Pending</th>
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Not found</th>
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Failed</th>
+                <th
+                  className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase"
+                  title="Found rows whose extracted invoice number appears 2+ times in the same recon. High counts often mean a recurring OCR misread or a letterhead/header-number artefact — the Reset → Reset duplicates flow in the per-recon panel wipes them so a fresh OCR pass can split the cluster."
+                >Dups</th>
                 <th className="px-4 py-2 text-left text-[10px] font-medium text-muted-foreground uppercase">Last error</th>
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase w-28">Action</th>
               </tr>
             </thead>
             <tbody>
               {recentRuns.isLoading ? (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
               ) : (recentRuns.data?.rows?.length ?? 0) === 0 ? (
-                <tr><td colSpan={10} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
+                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
               ) : (
                 recentRuns.data.rows.map(row => {
                   // Action-button states:
@@ -520,6 +524,16 @@ export default function OcrPanel() {
                       <td className={`px-4 py-2 text-right font-mono ${row.rows_pending > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>{row.rows_pending}</td>
                       <td className="px-4 py-2 text-right font-mono text-muted-foreground">{row.rows_not_found}</td>
                       <td className={`px-4 py-2 text-right font-mono ${row.rows_failed > 0 ? 'text-rose-400' : 'text-muted-foreground'}`}>{row.rows_failed}</td>
+                      <td
+                        className={`px-4 py-2 text-right font-mono ${row.rows_duplicates > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}
+                        title={
+                          row.rows_duplicates > 0
+                            ? `${row.rows_duplicates} row${row.rows_duplicates === 1 ? '' : 's'} across ${row.duplicate_invoices} distinct duplicate invoice value${row.duplicate_invoices === 1 ? '' : 's'}`
+                            : 'No duplicate invoice values among found rows in this recon'
+                        }
+                      >
+                        {row.rows_duplicates || 0}
+                      </td>
                       <td className="px-4 py-2 text-xs text-muted-foreground max-w-[40ch] truncate" title={row.last_error || ''}>
                         {row.last_error || '—'}
                       </td>
