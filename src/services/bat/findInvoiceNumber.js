@@ -108,6 +108,31 @@ function normalizeExclude(excludeSet) {
   return null;
 }
 
+// Position of the captured digit body inside the source text.
+//
+// For most patterns the regex starts at the digits, so this is just
+// m.index. The keyword-anchored partial pattern
+//   /(?:INVOIC|NVOIC|VOICE)...(422\d{3})/
+// is the exception: its match starts at the LABEL ("Invoice"), so
+// using m.index would put the candidate AT the label and the
+// directional-distance ranker would treat it as pre-label — an
+// invoice the OCR cleanly read out of "Invoice 422238" would lose
+// to anything that came after the label, even an unrelated digit
+// run that happened to match a bare-55 fallback. Anchoring on the
+// captured group's offset fixes that.
+//
+// lastIndexOf (rather than indexOf) is a small belt-and-braces
+// guard for patterns where the captured group's text could appear
+// EARLIER inside m[0] (e.g. label "Invoice 0214" + digit body
+// containing "0214"). For our pattern set indexOf would be fine,
+// but lastIndexOf costs nothing extra and means the helper stays
+// correct if the pattern table grows.
+function candidateIndex(m) {
+  if (m == null || m[1] == null) return m?.index ?? 0;
+  const offset = m[0].lastIndexOf(m[1]);
+  return offset >= 0 ? m.index + offset : m.index;
+}
+
 // Each pattern config is { regex, build, literal }.
 //
 // `regex` MUST have /g — asserted at module load via
@@ -230,6 +255,19 @@ export function findInvoiceNumber(text, inDigitLength = 9, excludeSet = null) {
   // overlapping patterns counts once; on dedupe we keep the entry
   // with the highest "literal-ness" + lowest patternPriority — i.e.
   // the most-trusted reading of that number wins.
+  //
+  // The candidate's `index` is the position of the captured DIGIT
+  // BODY — not the start of the whole match. For most patterns the
+  // two are identical (the regex anchors right at the digits). But
+  // for the keyword-anchored partial pattern
+  //   /(?:INVOIC|NVOIC|VOICE)...(422\d{3})/
+  // the match starts at "Invoice" (the label) while the captured
+  // group is the digit run several chars later. Using m.index
+  // verbatim placed those candidates AT the label, which looks
+  // pre-label to the directional-distance ranker and unfairly
+  // penalised them. Anchoring on the digit body fixes a regression
+  // where "Invoice 422238 ref 5512345" returned IN5512345 instead
+  // of IN000422238.
   const allCandidates = [];
   const seen = new Map();
   const patterns = buildPatternConfigs(inDigitLength);
@@ -239,9 +277,10 @@ export function findInvoiceNumber(text, inDigitLength = 9, excludeSet = null) {
       const value = build(m);
       if (!value) continue;
       if (exclude && exclude.has(value)) continue;
-      const dedupKey = `${value}@${m.index}`;
+      const digitsIndex = candidateIndex(m);
+      const dedupKey = `${value}@${digitsIndex}`;
       const existing = seen.get(dedupKey);
-      const candidate = { value, index: m.index, patternPriority: pIdx, literal };
+      const candidate = { value, index: digitsIndex, patternPriority: pIdx, literal };
       if (!existing) {
         seen.set(dedupKey, candidate);
         allCandidates.push(candidate);

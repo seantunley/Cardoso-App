@@ -267,6 +267,28 @@ describe('findInvoiceNumber — positional bias (textual proximity)', () => {
     const text = 'IN444555666 ... (much filler in between) IN111222333 Invoice Number';
     expect(findInvoiceNumber(text)).toBe('IN111222333');
   });
+
+  it('keyword-anchored partial pattern anchors on the digit body, not the label token', () => {
+    // Reviewer-flagged regression #5 on this branch: the keyword
+    // partial pattern /(?:INVOIC|NVOIC|VOICE)\s*[#:.]?\s*\d{0,5}(422\d{3})/
+    // had m.index at the LABEL ("Invoice"), not the digit body. The
+    // directional-distance ranker then treated the reconstructed
+    // candidate as PRE-label and penalised it, so an unrelated
+    // post-label match (e.g. a bare 55... fallback) would win.
+    //
+    // Pre-fix on this input:
+    //   "Invoice 422238 ref 5512345"
+    //   - pattern 4 → IN000422238 at index 0 ("Invoice")
+    //   - label "Invoice" ends at 7 → IN000422238 scored as pre-label
+    //     (penalty 10000+), 5512345 scored as post-label (small).
+    //   - returned IN5512345 — wrong.
+    //
+    // Post-fix: anchor on the captured digit body. IN000422238's
+    // index is now where "422238" actually sits (post-label), so it
+    // wins on directional distance.
+    const text = 'Invoice 422238 ref 5512345';
+    expect(findInvoiceNumber(text)).toBe('IN000422238');
+  });
 });
 
 describe('findInvoiceNumber — literal-prefix preference', () => {
