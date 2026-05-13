@@ -26,6 +26,7 @@ import {
   getCardosoInvoices,
   matchCardosoToSupplier,
   getReconciliation,
+  getReconciliationMeta,
   listReconciliations,
   runInvoiceExtraction,
   getExtractionProgress,
@@ -758,8 +759,13 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ error: 'Invalid reconciliation id' });
     }
-    const recon = getReconciliation(id);
-    if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
+    // Existence-only check — getReconciliationMeta is one row, no joins.
+    // The full getReconciliation() loads every extraction + credit note +
+    // cross-recon duplicate stats; heavy work the modal preview doesn't
+    // need on every open.
+    if (!getReconciliationMeta(id)) {
+      return res.status(404).json({ error: 'Reconciliation not found' });
+    }
     try {
       res.json(countExtractionsForRecon(id));
     } catch (err) {
@@ -772,7 +778,11 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ error: 'Invalid reconciliation id' });
     }
-    const recon = getReconciliation(id);
+    // Existence + week/year only — same lightweight lookup the
+    // reset-counts endpoint uses, for the same reason. The reset
+    // handler doesn't need the extractions/creditNotes/dup-stats
+    // payload that getReconciliation eagerly builds.
+    const recon = getReconciliationMeta(id);
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     const scope = req.body?.scope;
     const reconLabel = `Week ${recon.week_number}/${recon.year}`;

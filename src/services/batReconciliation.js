@@ -988,6 +988,22 @@ export function storeSageCreditNotes(reconId, creditNotes) {
   `).run(sageTotals['DELIVERY FEE'], sageTotals['DISCOUNT FEE'], sageTotals['PRICING ADJ'], sageTotal, reconId);
 }
 
+// Lightweight existence + week/year lookup for endpoints that don't need
+// the full extraction/credit-note payload that getReconciliation builds.
+// getReconciliation eagerly loads every row in bat_invoice_extractions,
+// every bat_sage_credit_notes row, AND computes cross-recon duplicate
+// stats — heavy work that the per-recon reset endpoints (which only
+// need to verify the recon exists and assemble an audit-log label)
+// previously paid on every modal open and every Reset click. On larger
+// backlogs that adds noticeable latency to a frequently-invoked UI
+// action. Returns null when the row doesn't exist; never throws.
+export function getReconciliationMeta(id) {
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return db.prepare(
+    'SELECT id, week_number, year FROM bat_reconciliations WHERE id = ?'
+  ).get(id) || null;
+}
+
 export function getReconciliation(id) {
   const recon = db.prepare('SELECT * FROM bat_reconciliations WHERE id = ?').get(id);
   if (!recon) return null;
