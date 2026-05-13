@@ -264,13 +264,14 @@ const IconReconciliation = ({ className, style }) => (
 );
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
-import ChangePasswordModal from "@/components/users/ChangePasswordModal";
-import SettingsPanel from "@/components/settings/SettingsPanel";
 import { toast } from "sonner";
 import { reportClientError } from "@/lib/clientLog";
+
+const ChangePasswordModal = lazy(() => import("@/components/users/ChangePasswordModal"));
+const SettingsPanel = lazy(() => import("@/components/settings/SettingsPanel"));
 
 const APP_VERSION = "2026.3.9";
 
@@ -765,21 +766,27 @@ export default function Layout({ children, currentPageName }) {
         )}
         {children}
       </main>
-      {currentUser && (
-        <ChangePasswordModal
-          user={currentUser}
-          open={changePasswordOpen}
-          onClose={() => setChangePasswordOpen(false)}
-          onSave={handleChangePassword}
-          isSaving={isSavingPassword}
-        />
+      {currentUser && changePasswordOpen && (
+        <Suspense fallback={null}>
+          <ChangePasswordModal
+            user={currentUser}
+            open={changePasswordOpen}
+            onClose={() => setChangePasswordOpen(false)}
+            onSave={handleChangePassword}
+            isSaving={isSavingPassword}
+          />
+        </Suspense>
       )}
 
-      <SettingsPanel
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        hubMode={hubMode}
-      />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsPanel
+            open={settingsOpen}
+            onClose={() => setSettingsOpen(false)}
+            hubMode={hubMode}
+          />
+        </Suspense>
+      )}
 
       {showBuildDiagnostics && (
         <div className="fixed inset-0 z-[1002] flex items-center justify-center bg-background/60 px-6 backdrop-blur-sm">

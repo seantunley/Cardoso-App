@@ -3152,22 +3152,29 @@ function recordReconciliationError(reconId, message) {
 const previewDir = path.join(process.cwd(), 'uploads', 'bat-previews');
 if (!fs.existsSync(previewDir)) fs.mkdirSync(previewDir, { recursive: true });
 
-// pdfjs-dist is PINNED to 4.8.69. See the long-form comment in
-// src/services/ocrWorker.js for why — short version: pdfjs 4.10+ uses
-// ImageBitmap which node-canvas doesn't accept. Migration to a
-// Node-native PDF engine is queued in docs/plans/pdf-engine-migration.md.
+// pdfjs+node-canvas rendering moved out-of-process to renderPdfChild.js
+// — same Phase 1 isolation the hot path now uses. The cold path here
+// is the "Retry with Google Vision" button on the recon page, which is
+// operator-triggered and infrequent, but the same wedge risk applies
+// (node-canvas blocking the main thread synchronously would freeze the
+// whole API event loop, not just one worker thread — arguably worse
+// than the hot-path failure mode).
+//
+// Caps default to the same envelope ocrWorker.js uses; this cold path
+// doesn't read OCR_MAX_RENDER_* env vars directly because it's
+// historically allowed scale up to 3.0 and per-page caps are enforced
+// inside the child anyway.
 async function pdfPageToImage(buffer, pageNum, scale = 3.0) {
-  const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { createCanvas } = await import('canvas');
-
-  const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const page = await pdfDoc.getPage(pageNum);
-  const viewport = page.getViewport({ scale });
-  const canvas = createCanvas(viewport.width, viewport.height);
-  const context = canvas.getContext('2d');
-  await page.render({ canvasContext: context, viewport }).promise;
-  await pdfDoc.destroy();
-  return canvas.toBuffer('image/png');
+  const { renderPdfInChild } = await import('./ocr/spawnRenderChild.js');
+  return renderPdfInChild(buffer, {
+    pageNum,
+    requestedScale: scale,
+    // 60s timeout (vs the hot path's 30s) — the operator is sitting
+    // there waiting on the retry button to come back. A genuinely
+    // wedged page should fail fast, but a slow render shouldn't kill
+    // the retry mid-stream.
+    timeoutMs: 60_000,
+  });
 }
 
 async function ocrViaGoogleVision(imageBuffer) {
