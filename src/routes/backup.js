@@ -796,5 +796,115 @@ export function createBackupRouter() {
     }
   });
 
+  // Helper for the two nested-archive endpoints below. Both stream a
+  // zip of an uploads/ subdir where files live in per-period (jti) or
+  // per-recon (bat) subdirectories — unlike bat-previews above which
+  // is a flat dir. archive.directory(src, false) preserves the
+  // relative paths under src so the hub-side unzip restores the
+  // original layout. Auth + rate-limit + audit mirror bat-previews.
+  function nestedArchiveEndpoint({ urlPath, srcRelPath, filePrefix, auditAction }) {
+    router.get(urlPath, backupHeavyRateLimiter, requireReportingToken, async (req, res) => {
+      const srcDir = path.join(process.cwd(), srcRelPath);
+      const siteId = process.env.SITE_ID || 'site';
+      const filename = `${filePrefix}-${siteId}-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.zip`;
+
+      let auditWritten = false;
+      let bytesStreamed = 0;
+      const writeAudit = (status, extra = {}) => {
+        if (auditWritten) return; auditWritten = true;
+        try {
+          logAudit({
+            req,
+            action: auditAction,
+            resourceType: 'system',
+            resourceId: siteId,
+            resourceName: filename,
+            details: `bytes=${bytesStreamed}` + (extra.error ? `, error=${extra.error}` : ''),
+            status,
+            userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
+          });
+        } catch {}
+      };
+
+      res.on('finish', () => writeAudit('success'));
+      res.on('close', () => { if (!res.writableFinished) writeAudit('failure'); });
+
+      try {
+        // Empty/missing dir is valid — a site that has never archived
+        // anything still returns a well-formed (empty) zip rather than
+        // a 404, so the hub-side puller's only error path is a true
+        // failure (auth, network, disk).
+        const dirExists = fs.existsSync(srcDir);
+
+        res.setHeader('Content-Type', 'application/zip');
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Cache-Control', 'no-store');
+
+        // store=true: .xlsx files are already zip-compressed internally,
+        // deflating again burns CPU for ~no size win. Matches the
+        // bat-previews handling and the hub-side unzip mode.
+        const archive = new ZipArchive({ store: true });
+
+        archive.on('warning', (err) => {
+          if (err.code === 'ENOENT') {
+            console.warn(`[${auditAction}] non-fatal warning: ${err.message}`);
+          } else {
+            throw err;
+          }
+        });
+        archive.on('error', (err) => {
+          console.error(`[${auditAction}] archive error:`, err.message);
+          try { logError(auditAction, err); } catch {}
+          try { res.destroy(err); } catch {}
+        });
+        archive.on('data', (chunk) => { bytesStreamed += chunk.length; });
+
+        archive.pipe(res);
+        if (dirExists) {
+          // false → strip the parent dir name so contents land directly
+          // at zip root with their relative paths preserved
+          // (e.g. "2026-04/47-JTI_….xlsx" inside the zip).
+          archive.directory(srcDir, false);
+        }
+        await archive.finalize();
+      } catch (err) {
+        console.error(`[${auditAction}] failed:`, err.message);
+        try { logError(auditAction, err); } catch {}
+        writeAudit('failure', { error: err.message });
+        if (!res.headersSent) {
+          res.status(500).json({ error: err.message });
+        } else {
+          try { res.destroy(err); } catch {}
+        }
+      }
+    });
+  }
+
+  // GET /api/backup/jti-archive
+  // Streams uploads/jti-archive/ (nested: <YYYY>-<MM>/<id>-<filename>).
+  // Each .xlsx is the canonical monthly JTI export — generated once and
+  // never regenerated, so this archive IS the source of truth for the
+  // operator's audit trail of monthly exports. Restoring a site without
+  // it loses the export history.
+  nestedArchiveEndpoint({
+    urlPath: '/api/backup/jti-archive',
+    srcRelPath: path.join('uploads', 'jti-archive'),
+    filePrefix: 'jti-archive',
+    auditAction: 'backup_jti_archive_exported',
+  });
+
+  // GET /api/backup/bat-archive
+  // Streams uploads/bat-archive/ (nested: <reconId>/<safeName>.xlsx).
+  // Each .xlsx is the original supplier spreadsheet uploaded for a BAT
+  // recon — kept so a later dispute can be replayed against the source
+  // bytes. The multer temp file is deleted after parsing, so this
+  // archive is the only surviving copy.
+  nestedArchiveEndpoint({
+    urlPath: '/api/backup/bat-archive',
+    srcRelPath: path.join('uploads', 'bat-archive'),
+    filePrefix: 'bat-archive',
+    auditAction: 'backup_bat_archive_exported',
+  });
+
   return router;
 }

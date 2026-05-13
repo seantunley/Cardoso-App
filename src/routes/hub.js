@@ -1959,11 +1959,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       return res.status(500).json({ error: `Cannot read backups dir: ${err.message}` });
     }
 
-    // Pull every db file's metadata + previews-zip companion (if any).
-    // Match on the timestamp suffix `-YYYY-MM-DD-HH-MM-SS` since the
-    // .db and .zip share that part — see hubEtl.pullBackupForSite.
+    // Pull every db file's metadata + companion files (if any). Match
+    // on the timestamp suffix `-YYYY-MM-DD-HH-MM-SS` since the .db and
+    // each companion share that part — see hubEtl.pullBackupForSite.
     const dbFiles = allFiles.filter((f) => f.endsWith('.db'));
     const previewZips = allFiles.filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'));
+    const jtiArchiveZips = allFiles.filter((f) => f.startsWith('jti-archive-') && f.endsWith('.zip'));
+    const batArchiveZips = allFiles.filter((f) => f.startsWith('bat-archive-') && f.endsWith('.zip'));
+    const envFiles = allFiles.filter((f) => f.startsWith('config-') && f.endsWith('.env'));
 
     // Pre-load integrity statuses in one query keyed by filename, so
     // the snapshots list shows whether the hub already verified each.
@@ -1985,11 +1988,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       // zip filename: bat-previews-<siteId>-YYYY-MM-DD-HH-MM-SS.zip
       const tsMatch = dbFile.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
       const ts = tsMatch ? tsMatch[1] : null;
+      const sizeOf = (f) => {
+        if (!f) return null;
+        try { return statSync(path.join(dir, f)).size; } catch { return null; }
+      };
       const previewsFile = ts ? previewZips.find((z) => z.includes(ts)) : null;
-      let previewsStat = null;
-      if (previewsFile) {
-        try { previewsStat = statSync(path.join(dir, previewsFile)); } catch {}
-      }
+      const jtiArchiveFile = ts ? jtiArchiveZips.find((z) => z.includes(ts)) : null;
+      const batArchiveFile = ts ? batArchiveZips.find((z) => z.includes(ts)) : null;
+      const envFile = ts ? envFiles.find((e) => e.includes(ts)) : null;
       const integrity = integrityMap.get(dbFile);
       return {
         filename: dbFile,
@@ -1998,7 +2004,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         integrity: integrity?.result || null,
         integrity_checked_at: integrity?.last_check || null,
         previews_filename: previewsFile || null,
-        previews_size_bytes: previewsStat?.size ?? null,
+        previews_size_bytes: sizeOf(previewsFile),
+        jti_archive_filename: jtiArchiveFile || null,
+        jti_archive_size_bytes: sizeOf(jtiArchiveFile),
+        bat_archive_filename: batArchiveFile || null,
+        bat_archive_size_bytes: sizeOf(batArchiveFile),
+        env_filename: envFile || null,
+        env_size_bytes: sizeOf(envFile),
       };
     }).sort((a, b) => (b.mtime || '').localeCompare(a.mtime || ''));
 
@@ -2014,7 +2026,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // Operator-initiated restore. Pushes a snapshot back to the named site.
   router.post('/api/hub/sites/:siteId/restore', requireAuth, requireAdmin, async (req, res) => {
     const { siteId } = req.params;
-    const { snapshot_filename, password, include_previews } = req.body || {};
+    const {
+      snapshot_filename,
+      password,
+      include_previews,
+      include_jti_archive,
+      include_bat_archive,
+      include_env,
+    } = req.body || {};
 
     if (!password) {
       return res.status(400).json({ error: 'Password is required to initiate a restore.' });
@@ -2044,22 +2063,31 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       return res.status(404).json({ error: `Snapshot '${snapshot_filename}' not found on hub.` });
     }
 
-    // Find the matching previews zip (if include_previews is set).
-    let previewsFilename = null;
-    if (include_previews) {
-      const tsMatch = snapshot_filename.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
-      if (tsMatch) {
-        const ts = tsMatch[1];
-        const candidate = readdirSync(snapDir).find((f) => f.startsWith('bat-previews-') && f.includes(ts) && f.endsWith('.zip'));
-        if (candidate && existsSync(path.join(snapDir, candidate))) {
-          previewsFilename = candidate;
-        }
-      }
-    }
+    // Find each companion artifact by timestamp match. Each is opt-in
+    // via the matching include_* flag — operator may want a partial
+    // restore (e.g. DB only, leave the archives alone) when fixing
+    // corruption rather than recovering a lost site.
+    const tsMatch = snapshot_filename.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
+    const ts = tsMatch ? tsMatch[1] : null;
+    const findCompanion = (prefix, ext) => {
+      if (!ts) return null;
+      const candidate = readdirSync(snapDir).find(
+        (f) => f.startsWith(prefix) && f.includes(ts) && f.endsWith(ext)
+      );
+      return candidate && existsSync(path.join(snapDir, candidate)) ? candidate : null;
+    };
+
+    const previewsFilename   = include_previews    ? findCompanion('bat-previews-', '.zip') : null;
+    const jtiArchiveFilename = include_jti_archive ? findCompanion('jti-archive-',  '.zip') : null;
+    const batArchiveFilename = include_bat_archive ? findCompanion('bat-archive-',  '.zip') : null;
+    const envFilename        = include_env         ? findCompanion('config-',       '.env') : null;
 
     // Mint one-shot tokens — one per file the site needs to pull.
-    const dbToken = mintRestoreToken(siteId, snapshot_filename);
-    const previewsToken = previewsFilename ? mintRestoreToken(siteId, previewsFilename) : null;
+    const dbToken          = mintRestoreToken(siteId, snapshot_filename);
+    const previewsToken    = previewsFilename   ? mintRestoreToken(siteId, previewsFilename)   : null;
+    const jtiArchiveToken  = jtiArchiveFilename ? mintRestoreToken(siteId, jtiArchiveFilename) : null;
+    const batArchiveToken  = batArchiveFilename ? mintRestoreToken(siteId, batArchiveFilename) : null;
+    const envToken         = envFilename        ? mintRestoreToken(siteId, envFilename)        : null;
     const restoreId = crypto.randomBytes(8).toString('hex');
 
     // Determine the hub's URL the site will fetch from. Same env
@@ -2089,6 +2117,15 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           previews: previewsToken
             ? { filename: previewsFilename, token: previewsToken }
             : null,
+          jti_archive: jtiArchiveToken
+            ? { filename: jtiArchiveFilename, token: jtiArchiveToken }
+            : null,
+          bat_archive: batArchiveToken
+            ? { filename: batArchiveFilename, token: batArchiveToken }
+            : null,
+          env: envToken
+            ? { filename: envFilename, token: envToken }
+            : null,
         }),
       });
       const body = await r.json().catch(() => ({}));
@@ -2101,12 +2138,18 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         resourceName: site.name || site.slug,
         details:
           `Pushed snapshot ${snapshot_filename}` +
-          (previewsFilename ? ` + previews ${previewsFilename}` : ' (no previews)') +
+          ` + previews=${previewsFilename || 'none'}` +
+          ` + jti_archive=${jtiArchiveFilename || 'none'}` +
+          ` + bat_archive=${batArchiveFilename || 'none'}` +
+          ` + env=${envFilename || 'none'}` +
           ` to ${site.url}. Site response: ${r.status} ${body.message || body.error || ''}`,
         changes: {
           restore_id: restoreId,
           snapshot_filename,
           previews_filename: previewsFilename,
+          jti_archive_filename: jtiArchiveFilename,
+          bat_archive_filename: batArchiveFilename,
+          env_filename: envFilename,
           site_response_status: r.status,
         },
         status: r.ok ? 'success' : 'failure',
@@ -2470,7 +2513,15 @@ export function createReceiveUsersRouter() {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const { restore_id, hub_url, snapshot, previews } = req.body || {};
+    const {
+      restore_id,
+      hub_url,
+      snapshot,
+      previews,
+      jti_archive,
+      bat_archive,
+      env,
+    } = req.body || {};
     if (!restore_id || !hub_url || !snapshot?.filename || !snapshot?.token) {
       return res.status(400).json({ error: 'Missing restore_id, hub_url, or snapshot {filename, token}' });
     }
@@ -2507,6 +2558,9 @@ export function createReceiveUsersRouter() {
 
     let dbStaging = null;
     let previewsStaging = null;
+    let jtiArchiveStaging = null;
+    let batArchiveStaging = null;
+    let envStaging = null;
     try {
       // Download DB snapshot
       dbStaging = pathModule.join(stagingDir, snapshot.filename);
@@ -2517,14 +2571,26 @@ export function createReceiveUsersRouter() {
         dbStaging,
       );
 
-      // Optional previews zip
-      if (previews?.filename && previews?.token) {
-        previewsStaging = pathModule.join(stagingDir, previews.filename);
+      // Each companion is independent — if the hub didn't include one
+      // (operator unchecked the box, or the file wasn't on hub disk)
+      // the field will be null and we skip it. Failures on companions
+      // bubble up the same as the DB; the apply script handles missing
+      // optional artifacts gracefully.
+      const optionalCompanions = [
+        { spec: previews,    nameRef: (p) => { previewsStaging = p; } },
+        { spec: jti_archive, nameRef: (p) => { jtiArchiveStaging = p; } },
+        { spec: bat_archive, nameRef: (p) => { batArchiveStaging = p; } },
+        { spec: env,         nameRef: (p) => { envStaging = p; } },
+      ];
+      for (const { spec, nameRef } of optionalCompanions) {
+        if (!spec?.filename || !spec?.token) continue;
+        const destPath = pathModule.join(stagingDir, spec.filename);
         await downloadFile(
-          `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(previews.filename)}`,
-          previews.token,
-          previewsStaging,
+          `/api/hub/restore-fetch/${encodeURIComponent(siteId)}/${encodeURIComponent(spec.filename)}`,
+          spec.token,
+          destPath,
         );
+        nameRef(destPath);
       }
     } catch (err) {
       // Clean up staging on download failure — don't leave orphaned
@@ -2567,9 +2633,10 @@ export function createReceiveUsersRouter() {
       ['-AppDir', appDir],
       ['-RestoreId', restore_id],
     ];
-    if (previewsStaging) {
-      psArgsList.push(['-SnapshotPreviewsZipPath', previewsStaging]);
-    }
+    if (previewsStaging)   { psArgsList.push(['-SnapshotPreviewsZipPath',   previewsStaging]);   }
+    if (jtiArchiveStaging) { psArgsList.push(['-SnapshotJtiArchiveZipPath', jtiArchiveStaging]); }
+    if (batArchiveStaging) { psArgsList.push(['-SnapshotBatArchiveZipPath', batArchiveStaging]); }
+    if (envStaging)        { psArgsList.push(['-SnapshotEnvPath',           envStaging]);        }
     const psArgs = psArgsList
       .map(([k, v]) => `${k} '${String(v).replace(/'/g, "''")}'`)
       .join(' ');
@@ -2598,6 +2665,9 @@ export function createReceiveUsersRouter() {
       staging_dir: stagingDir,
       snapshot_filename: snapshot.filename,
       previews_filename: previews?.filename || null,
+      jti_archive_filename: jti_archive?.filename || null,
+      bat_archive_filename: bat_archive?.filename || null,
+      env_filename: env?.filename || null,
     });
   });
 

@@ -814,6 +814,43 @@ async function pullBackupForSite(site) {
       console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
     }
 
+    // Source-of-truth archives: JTI monthly exports + BAT supplier
+    // uploads. Neither can be regenerated from the .db alone — JTI
+    // archive rows reference files on disk; BAT supplier dispute
+    // workflows replay against the original uploaded bytes. Same
+    // best-effort pattern as bat-previews: a failure here doesn't
+    // fail the whole backup.
+    const archiveTargets = [
+      { name: 'jti-archive', label: 'JTI archive' },
+      { name: 'bat-archive', label: 'BAT archive' },
+    ];
+    const archiveResults = {};
+    for (const { name, label } of archiveTargets) {
+      try {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
+        const res = await fetch(`${site.url}/api/backup/${name}`, {
+          headers: { 'x-reporting-token': site.token || '' },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          const file = path.join(dir, `${name}-${site.id}-${ts}.zip`);
+          await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
+          const { statSync } = await import('fs');
+          const size = statSync(file).size;
+          console.log(`[HUB BACKUP] ${site.name}: ${label} saved (${(size / 1024 / 1024).toFixed(1)} MB)`);
+          archiveResults[name] = { ok: true, size, file };
+        } else {
+          console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch HTTP ${res.status} — skipping (existing on hub remains)`);
+          archiveResults[name] = { ok: false, status: res.status };
+        }
+      } catch (err) {
+        console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch failed — ${describeFetchError(err, `${site.url}/api/backup/${name}`)}`);
+        archiveResults[name] = { ok: false, error: err.message };
+      }
+    }
+
     // Prune older per-site backups so the hub doesn't accumulate
     // forever. Mirrors the site-side prune in scheduler.runLocalBackup.
     // Default 30 (HUB_BACKUP_KEEP_COUNT) — higher than site default
@@ -843,18 +880,32 @@ async function pullBackupForSite(site) {
         console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
       }
 
-      const previewZips = readdirSync(dir)
-        .filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'))
-        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-      const parsedPrevKeep = parseInt(process.env.HUB_BAT_PREVIEWS_KEEP, 10);
-      const prevKeep = Number.isFinite(parsedPrevKeep) && parsedPrevKeep >= 1 ? parsedPrevKeep : 3;
-      const prevToDelete = previewZips.slice(prevKeep);
-      for (const f of prevToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
-      }
-      if (prevToDelete.length > 0) {
-        console.log(`[HUB BACKUP] ${site.name}: pruned ${prevToDelete.length} old preview zip(s), keeping ${prevKeep}`);
+      // Append-only zip prunes. bat-previews, jti-archive, bat-archive
+      // all share the same property — the LATEST zip already contains
+      // all historical entries (previews are written-once by extractionId,
+      // jti exports are written-once per period, bat archives are
+      // written-once per recon), so keeping a long tail of zips is
+      // pure disk waste. Defaults are deliberately small; operators can
+      // raise via env if they want belt-and-braces.
+      const appendOnlyZipPrunes = [
+        { prefix: 'bat-previews-',  envVar: 'HUB_BAT_PREVIEWS_KEEP',  defaultKeep: 3, label: 'preview zip' },
+        { prefix: 'jti-archive-',   envVar: 'HUB_JTI_ARCHIVE_KEEP',   defaultKeep: 3, label: 'JTI archive zip' },
+        { prefix: 'bat-archive-',   envVar: 'HUB_BAT_ARCHIVE_KEEP',   defaultKeep: 3, label: 'BAT archive zip' },
+      ];
+      for (const { prefix, envVar, defaultKeep, label } of appendOnlyZipPrunes) {
+        const zips = readdirSync(dir)
+          .filter((f) => f.startsWith(prefix) && f.endsWith('.zip'))
+          .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        const parsed = parseInt(process.env[envVar], 10);
+        const keepN = Number.isFinite(parsed) && parsed >= 1 ? parsed : defaultKeep;
+        const toDelete = zips.slice(keepN);
+        for (const f of toDelete) {
+          try { unlinkSync(path.join(dir, f.name)); } catch {}
+        }
+        if (toDelete.length > 0) {
+          console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old ${label}(s), keeping ${keepN}`);
+        }
       }
     } catch (pruneErr) {
       console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
@@ -865,6 +916,7 @@ async function pullBackupForSite(site) {
       file: integrity.finalPath,
       integrity: integrity.integrity,
       previews: previewsResult,
+      archives: archiveResults,
     };
   } catch (err) {
     const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
