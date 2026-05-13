@@ -4,24 +4,41 @@
 // ocrWorker.js and batReconciliation.js. Both files now import from
 // here so the patterns can never drift apart again.
 //
-// New in this rev: optional `excludeSet` parameter. When supplied, any
-// candidate string that appears in the set is treated as "not a match"
-// and the loop falls through to the next candidate (within the same
-// pattern via matchAll, then to subsequent patterns). Use cases:
-//   1. HARDCODED_POISON_INVOICES — known-bad numbers we've manually
-//      identified (e.g. customer-account / branch-reference tokens that
-//      look like invoice numbers and recur on every POD from a sender).
-//   2. Per-recon dynamic blacklist — invoice numbers that have already
-//      been extracted from N or more PODs in the same recon. Above a
-//      threshold this is overwhelmingly likely to be a header/footer
-//      artefact rather than a legitimate multi-delivery invoice.
+// History of the matcher's selection logic:
+//   v1 (pre-PR-#316) — first match wins, in pattern-priority order.
+//                      Vulnerable to letterhead numbers that appear
+//                      before the real invoice number on the page.
+//   v2 (PR #316)     — same first-wins logic, but with `excludeSet`:
+//                      any candidate string in the set is skipped and
+//                      the loop falls through to the next match.
+//                      Hard-coded poison set + per-recon dynamic
+//                      blacklist drove down the cross-recon poison
+//                      family that round-6 PDFium QA surfaced.
+//   v3 (this PR)     — POSITIONAL BIAS via textual proximity. We now
+//                      collect EVERY candidate from EVERY pattern
+//                      (with its index in the cleaned text), then if
+//                      ANY candidate is "near" an "INVOICE NUMBER:" /
+//                      "INV #" / similar label, rank by min absolute
+//                      distance to the nearest such label. If no
+//                      candidate is near any label (or the text has
+//                      no labels), fall back to the v1 pattern-
+//                      priority order. excludeSet from v2 still
+//                      applies — we just have a smarter tie-breaker
+//                      among the surviving candidates.
 //
-// Why not positional bias / bounding-box matching? A second PR is
-// planned for that (see docs/plans/ocr-future-work.md). It needs every
-// engine (Google Vision, ocr.space, Tesseract, pdfjs-text) to start
-// returning {text, boxes[]} and the cascade plumbed accordingly. That's
-// a real refactor; this excludeSet hook is the safety net while we
-// design it.
+// Why textual proximity rather than full bounding-box positional?
+// Bounding boxes would require plumbing {text, boxes[]} through
+// EVERY OCR engine (ocr.space, Google Vision, Tesseract, the
+// pdfjs text-layer fast path) and threading the new shape through
+// the whole cascade. That's a real refactor for a marginal
+// improvement: on every real BAT POD I have seen, the engine's
+// linearised text already preserves the relative order of the
+// "Invoice Number:" label and the number that follows it — that
+// order IS the positional signal. Bounding-box plumbing would
+// rule out a small minority of two-column layouts where the
+// linearisation interleaves regions, but those are rare and for
+// the cost we get a much bigger blast radius. Punting until the
+// data justifies it.
 
 // Hard-coded poison set — numbers we have confirmed by hand are
 // header/account/footer artefacts mistaken for invoice numbers.
@@ -43,6 +60,45 @@ export const HARDCODED_POISON_INVOICES = new Set([
   'IN580115807',
 ]);
 
+// "Invoice Number" / "Inv #" / "Tax Invoice No." / etc. — the labels
+// that, when present, anchor positional ranking. OCR mangling tolerated:
+// "WNVOICE" / "NVOICE" / "INVOIC" all show up in real engine output.
+// Captures the END of the label so candidates AFTER the label score
+// the smallest absolute distances.
+//
+// Two branches in the alternation:
+//   1. Word-form labels — INVOICE / INVOIC / WNVOICE / WNVOIC / NVOICE
+//      / NVOIC. Each may stand alone (e.g. just "INVOICE" as a heading)
+//      or carry an optional NO/NUMBER/#/etc. suffix and a colon. A
+//      trailing \b is REQUIRED on the word-form group — otherwise
+//      "INVOICE" matches inside "INVOICES" / "INVOICED" / "INVOICING"
+//      etc. (any -s/-d/-r/-ing suffix on a real word), creating a
+//      phantom label anchor in ordinary prose like "summary invoices"
+//      that flips the rank to a nearby candidate.
+//   2. Abbreviated INV — REQUIRES an explicit suffix from the same
+//      list. Without this requirement the bare "INV" matches inside
+//      every "INV1234" candidate (the digit doesn't break the alt's
+//      old (?![a-z]) lookahead), creating a phantom label anchor at
+//      the candidate itself; that phantom can outrank the real
+//      "Invoice Number:" label and mis-extract.
+//
+// Also note `INVOICE?` rather than the original `INVOIC|INVOICE` — in
+// alternation, the engine takes the first hit, so listing INVOIC first
+// would consume only "INVOIC" out of "INVOICE", leaving a stray E and
+// shifting the captured label-end position 1 char to the left of where
+// the number actually sits.
+//
+// `g` flag is required so matchAll works.
+const INVOICE_LABEL_RE =
+  /\b(?:TAX\s+)?(?:(?:INVOICE?|WNVOICE?|NVOICE?)\b(?:\s*(?:NO\.?|NUMBER|NUM|N°|#))?\s*[:.]?|INV\s*(?:NO\.?|NUMBER|NUM|N°|#|[:.]))/gi;
+
+// A candidate within this many characters of a label is "near" enough
+// for the positional rank to apply. ~140 chars covers most "Invoice
+// Number: IN578001" header lines and the 1-2 line block typically
+// underneath, but stays well below the typical body-text + footer
+// distance where an unrelated number could live.
+const NEAR_LABEL_CHARS = 140;
+
 // `excludeSet` accepts a Set OR an Array (some callers find it easier
 // to build an array; we coerce here so callers can pass either).
 function normalizeExclude(excludeSet) {
@@ -52,24 +108,132 @@ function normalizeExclude(excludeSet) {
   return null;
 }
 
-// Try every match of `regex` in `text`. For each, build a candidate
-// via `buildCandidate(match)`. Return the first candidate that is
-// non-null AND not in `excludeSet`. Returns null if none qualify.
+// Position of the captured digit body inside the source text.
 //
-// `regex` MUST be /g — without it `text.matchAll` throws. Asserted
-// here so the call sites stay readable.
-function firstAcceptedMatch(text, regex, buildCandidate, excludeSet) {
-  if (!regex.global) {
-    throw new Error(`firstAcceptedMatch: regex must have /g flag (got /${regex.source}/${regex.flags})`);
-  }
-  for (const m of text.matchAll(regex)) {
-    const candidate = buildCandidate(m);
-    if (!candidate) continue;
-    if (excludeSet && excludeSet.has(candidate)) continue;
-    return candidate;
-  }
-  return null;
+// For most patterns the regex starts at the digits, so this is just
+// m.index. The keyword-anchored partial pattern
+//   /(?:INVOIC|NVOIC|VOICE)...(422\d{3})/
+// is the exception: its match starts at the LABEL ("Invoice"), so
+// using m.index would put the candidate AT the label and the
+// directional-distance ranker would treat it as pre-label — an
+// invoice the OCR cleanly read out of "Invoice 422238" would lose
+// to anything that came after the label, even an unrelated digit
+// run that happened to match a bare-55 fallback. Anchoring on the
+// captured group's offset fixes that.
+//
+// lastIndexOf (rather than indexOf) is a small belt-and-braces
+// guard for patterns where the captured group's text could appear
+// EARLIER inside m[0] (e.g. label "Invoice 0214" + digit body
+// containing "0214"). For our pattern set indexOf would be fine,
+// but lastIndexOf costs nothing extra and means the helper stays
+// correct if the pattern table grows.
+function candidateIndex(m) {
+  if (m == null || m[1] == null) return m?.index ?? 0;
+  const offset = m[0].lastIndexOf(m[1]);
+  return offset >= 0 ? m.index + offset : m.index;
 }
+
+// Each pattern config is { regex, build, literal }.
+//
+// `regex` MUST have /g — asserted at module load via
+// assertGlobalRegexes() below.
+//
+// `build(match)` returns the candidate string OR null to reject this
+// match (e.g. partial-pattern length check).
+//
+// `literal` declares whether the pattern's match in the SOURCE text
+// already contains a literal IN/INQ prefix that we hand back unchanged,
+// or whether the build step SYNTHESISES the IN prefix from a misread
+// or naked-digit form. All real BAT invoices begin with IN/INQ, so
+// patterns whose source contains the literal prefix are inherently
+// more trustworthy than patterns that reconstruct the prefix from a
+// guess. `literal: true` candidates outrank any `literal: false`
+// candidate at selection time — see findInvoiceNumber for the
+// partition.
+//
+// Pattern order is the v1 priority order; within a literal/synthesized
+// partition it is the tie-breaker when positional ranking is
+// unavailable AND when two candidates are equally close to a label.
+function buildPatternConfigs(inDigitLength) {
+  return [
+    // 0. Long-form numeric invoice (legacy "18000xxxxxx" + new
+    //    "1800042xxxxx"). OCR sometimes reads I→1 N→8 so the leading
+    //    "18" is actually "IN" — the IN we return is RECONSTRUCTED.
+    {
+      regex: /\b(18\d{8,10})\b/g,
+      build: (m) => 'IN' + m[1].substring(2),
+      literal: false,
+    },
+    // 1. INQ-prefixed (Cardoso outbound on some sites). Must come
+    //    before plain IN — otherwise "INQ0214536" partially matches
+    //    "IN" and we'd drop the Q.
+    {
+      regex: /\bINQ\s*(\d{6,10})\b/gi,
+      build: (m) => `INQ${m[1]}`,
+      literal: true,
+    },
+    // 2. IN-prefixed long (8-10 digit body). Padded up to inDigitLength
+    //    when short — treats a one-short read as dropped-zero OCR.
+    {
+      regex: /\bIN\s*(\d{8,10})\b/gi,
+      build: (m) => {
+        let digits = m[1];
+        if (digits.length < inDigitLength) {
+          digits = '0'.repeat(inDigitLength - digits.length) + digits;
+        }
+        return `IN${digits}`;
+      },
+      literal: true,
+    },
+    // 3. Partial 422-core: garbled prefix, recognisable body.
+    //    SYNTHESISED — IN000 prefix invented from a 422-core.
+    {
+      regex: /\b\d?0{2,3}(422\d{3,6})\b/g,
+      build: (m) => {
+        const full = 'IN000' + m[1];
+        return (full.length >= 11 && full.length <= 14) ? full : null;
+      },
+      literal: false,
+    },
+    // 4. Partial 422-core anchored on INVOICE keyword. Source has the
+    //    label but not the IN prefix — IN000 is still SYNTHESISED.
+    {
+      regex: /(?:INVOIC|NVOIC|VOICE)[E]?\s*[#:.]?\s*\d{0,5}(422\d{3})\b/gi,
+      build: (m) => {
+        const full = 'IN000' + m[1];
+        return (full.length >= 11 && full.length <= 14) ? full : null;
+      },
+      literal: false,
+    },
+    // 5. IN-prefixed short (4-7 digit body).
+    { regex: /\bIN\s*(\d{4,7})\b/gi, build: (m) => `IN${m[1]}`, literal: true },
+    { regex: /\bINV\s*(\d{4,7})\b/gi, build: (m) => `IN${m[1]}`, literal: true },
+    // 6. OCR misread: 1N / LN read as IN-short. The character class
+    //    [IL1] accepts non-I letters, so the IN we return is partially
+    //    SYNTHESISED — treat as such for ranking.
+    { regex: /[IL1]\s*N\s*(\d{4,7})\b/g, build: (m) => `IN${m[1]}`, literal: false },
+    // IN with non-letter junk between IN and the digits — the IN itself
+    // is literal in the source, so this stays literal.
+    { regex: /IN[^a-zA-Z\n\d]{0,3}(\d{4,7})\b/g, build: (m) => `IN${m[1]}`, literal: true },
+    // 7. Standalone 55... numbers (IN555xxx without ANY prefix in the
+    //    source). Heaviest synthesis — entirely invents the IN.
+    { regex: /\b(55\d{4,7})\b/g, build: (m) => `IN${m[1]}`, literal: false },
+  ];
+}
+
+// Module-load sanity: every pattern.regex must be /g. Failing fast
+// here makes a mistake in the table impossible to ship — the test
+// suite will see the throw on first import.
+(function assertGlobalRegexes() {
+  for (const p of buildPatternConfigs(9)) {
+    if (!p.regex.global) {
+      throw new Error(
+        `findInvoiceNumber pattern config missing /g flag: ` +
+        `/${p.regex.source}/${p.regex.flags}`,
+      );
+    }
+  }
+})();
 
 export function findInvoiceNumber(text, inDigitLength = 9, excludeSet = null) {
   if (!text) return null;
@@ -83,90 +247,153 @@ export function findInvoiceNumber(text, inDigitLength = 9, excludeSet = null) {
     .replace(/[{}[\]()]/g, '')
     .replace(/[—–-]{2,}/g, ' ');
 
-  // Long-form numeric invoice (legacy "18000xxxxxx" format and the new
-  // "1800042xxxxx" 11-12 digit form). Without the wider {8,10} range the
-  // 10-digit-after-IN format that BAT rolled out recently was never
-  // matched, every row hit no_regex_match, and the cascade walked the
-  // whole engine list before timing out at extract_total.
-  const long = firstAcceptedMatch(
-    cleaned,
-    /\b(18\d{8,10})\b/g,
-    (m) => 'IN' + m[1].substring(2),
-    exclude,
-  );
-  if (long) return long;
+  // ── 1. Collect every accepted candidate from every pattern. ─────
+  // Each candidate carries (value, index, patternPriority, literal)
+  // so we can partition by literal-vs-synthesised first, then rank
+  // by position, then break remaining ties by pattern priority. We
+  // dedupe by (value, index) so the same number matched by two
+  // overlapping patterns counts once; on dedupe we keep the entry
+  // with the highest "literal-ness" + lowest patternPriority — i.e.
+  // the most-trusted reading of that number wins.
+  //
+  // The candidate's `index` is the position of the captured DIGIT
+  // BODY — not the start of the whole match. For most patterns the
+  // two are identical (the regex anchors right at the digits). But
+  // for the keyword-anchored partial pattern
+  //   /(?:INVOIC|NVOIC|VOICE)...(422\d{3})/
+  // the match starts at "Invoice" (the label) while the captured
+  // group is the digit run several chars later. Using m.index
+  // verbatim placed those candidates AT the label, which looks
+  // pre-label to the directional-distance ranker and unfairly
+  // penalised them. Anchoring on the digit body fixes a regression
+  // where "Invoice 422238 ref 5512345" returned IN5512345 instead
+  // of IN000422238.
+  const allCandidates = [];
+  const seen = new Map();
+  const patterns = buildPatternConfigs(inDigitLength);
+  for (let pIdx = 0; pIdx < patterns.length; pIdx++) {
+    const { regex, build, literal } = patterns[pIdx];
+    for (const m of cleaned.matchAll(regex)) {
+      const value = build(m);
+      if (!value) continue;
+      if (exclude && exclude.has(value)) continue;
+      const digitsIndex = candidateIndex(m);
+      const dedupKey = `${value}@${digitsIndex}`;
+      const existing = seen.get(dedupKey);
+      const candidate = { value, index: digitsIndex, patternPriority: pIdx, literal };
+      if (!existing) {
+        seen.set(dedupKey, candidate);
+        allCandidates.push(candidate);
+      } else if (
+        // Prefer literal over synthesised; among same-literalness,
+        // prefer the lower (earlier) pattern priority.
+        (candidate.literal && !existing.literal)
+        || (candidate.literal === existing.literal && candidate.patternPriority < existing.patternPriority)
+      ) {
+        existing.literal = candidate.literal;
+        existing.patternPriority = candidate.patternPriority;
+      }
+    }
+  }
+  if (allCandidates.length === 0) return null;
 
-  // INQ-prefixed (Cardoso outbound invoice format on some sites).
-  // Must come BEFORE the IN-prefixed match below — INQ would otherwise
-  // partially match IN and return without the Q. Real-world example
-  // from a SASOL DELIGHT MARSHALL POD: GoogleVision read "INQ0214536"
-  // perfectly but findInvoiceNumber dropped it because no INQ pattern
-  // existed and IN\d{8,10} didn't match (Q breaks the digit run).
-  // No padding — INQ uses a 7-digit canonical that may differ from the
-  // IN-prefix sites' inDigitLength.
-  const inq = firstAcceptedMatch(
-    cleaned,
-    /\bINQ\s*(\d{6,10})\b/gi,
-    (m) => `INQ${m[1]}`,
-    exclude,
-  );
-  if (inq) return inq;
+  // Partition: literal-prefix candidates beat synthesised-prefix
+  // candidates unconditionally. All real BAT invoices begin with
+  // IN/INQ in the source; the synthesised set exists ONLY as a
+  // recovery hatch for OCR misreads, so it should only fire when the
+  // text contains nothing more trustworthy. Past hard-learned lesson
+  // (see commented-out dominant-prefix detection in batReconciliation.js
+  // around the runGoogleVisionRetryInner block): heuristics that
+  // synthesise prefixes have rewritten correct invoice numbers in
+  // production. Don't let them outrank a real match.
+  const literalCandidates = allCandidates.filter(c => c.literal);
+  const candidates = literalCandidates.length > 0 ? literalCandidates : allCandidates;
 
-  // IN-prefixed long. Range widened from {8,9} to {8,10} for the
-  // post-rollover 10-digit form. Padding to the per-site canonical length
-  // (`inDigitLength`, default 9): a one-short read is treated as a
-  // dropped-zero OCR error and padded; an at-or-above-length read is
-  // returned as-is.
-  const inLong = firstAcceptedMatch(
-    cleaned,
-    /\bIN\s*(\d{8,10})\b/gi,
-    (m) => {
-      let digits = m[1];
-      if (digits.length < inDigitLength) digits = '0'.repeat(inDigitLength - digits.length) + digits;
-      return `IN${digits}`;
-    },
-    exclude,
-  );
-  if (inLong) return inLong;
-
-  const partialPatterns = [
-    /\b\d?0{2,3}(422\d{3,6})\b/g,
-    /(?:INVOIC|NVOIC|VOICE)[E]?\s*[#:.]?\s*\d{0,5}(422\d{3})\b/gi,
-  ];
-  for (const p of partialPatterns) {
-    const cand = firstAcceptedMatch(
-      cleaned,
-      p,
-      (m) => {
-        const full = 'IN000' + m[1];
-        // Length range covers BAT's two known invoice formats:
-        //   IN<9 digits>  → 11 chars (e.g. IN000422238 — pre-rollover)
-        //   IN<10 digits> → 12 chars (e.g. IN0004225236 — post-rollover)
-        return (full.length >= 11 && full.length <= 14) ? full : null;
-      },
-      exclude,
-    );
-    if (cand) return cand;
+  // ── 2. Find every label position. We use the END of the label as
+  // the anchor — typically "INVOICE NUMBER:" is followed within a
+  // few chars by the number. ────────────────────────────────────────
+  const labelEnds = [];
+  for (const m of cleaned.matchAll(INVOICE_LABEL_RE)) {
+    labelEnds.push(m.index + m[0].length);
   }
 
-  const inPatterns = [
-    /\bIN\s*(\d{4,7})\b/gi,
-    /\bINV\s*(\d{4,7})\b/gi,
-    /[IL1]\s*N\s*(\d{4,7})\b/g,
-    /IN[^a-zA-Z\n\d]{0,3}(\d{4,7})\b/g,
-  ];
-  for (const pattern of inPatterns) {
-    const cand = firstAcceptedMatch(cleaned, pattern, (m) => `IN${m[1]}`, exclude);
-    if (cand) return cand;
+  // ── 3. If at least one candidate is "near" any label, rank by
+  // minimum DIRECTIONAL distance: candidates AFTER a label outrank
+  // those before it. Real PODs lay out as "Invoice Number: <num>",
+  // so the number is overwhelmingly to the RIGHT of the label.
+  // Pre-label tokens are typically unrelated identifiers — customer
+  // refs, order numbers, account codes — that happen to look like
+  // invoice numbers but aren't.
+  //
+  // Concrete failure the directional bias closes:
+  //   "Ref IN1234567 Invoice Number: ... IN999888777"
+  // Pure absolute distance scored IN1234567 (a few chars BEFORE the
+  // label) closer than IN999888777 (further AFTER), so the wrong
+  // number won. Now the after-label candidate always beats any
+  // before-label candidate, regardless of raw distance.
+  //
+  // We still keep before-label candidates in the running as a
+  // last-resort tier — heavily penalised — for the rare unconventional
+  // layout where the number really does precede the label. If no
+  // after-label candidate exists, the closest before-label one wins.
+  //
+  // Otherwise fall back to v1 pattern priority. The fallback preserves
+  // backwards-compatibility on POD layouts where no label keyword
+  // survives the OCR pass — we then trust the regex priority order
+  // as before.
+  const PRE_LABEL_PENALTY = 10_000;
+
+  // Raw absolute distance — used ONLY for the "is any candidate near
+  // a label?" gate, NOT for ranking. The penalty score below would
+  // disqualify all pre-label candidates from being "near" if we used
+  // it in the gate, and we'd lose the rare-but-real number-before-
+  // label layouts entirely.
+  const rawDistance = (idx) => {
+    let best = Infinity;
+    for (const lEnd of labelEnds) {
+      const abs = Math.abs(idx - lEnd);
+      if (abs < best) best = abs;
+    }
+    return best;
+  };
+
+  // Directional rank score — lower is better. After-label candidates
+  // get their post-label distance directly; before-label candidates
+  // are PRE_LABEL_PENALTY + their pre-label distance. Any after-label
+  // candidate (even one ~1000 chars away) beats any before-label one,
+  // matching real-POD layout conventions.
+  const directionalScore = (idx) => {
+    let bestAfter = Infinity;   // smallest (idx - lEnd) for idx >= lEnd
+    let bestBefore = Infinity;  // smallest (lEnd - idx) for idx < lEnd
+    for (const lEnd of labelEnds) {
+      const delta = idx - lEnd;
+      if (delta >= 0) {
+        if (delta < bestAfter) bestAfter = delta;
+      } else {
+        const abs = -delta;
+        if (abs < bestBefore) bestBefore = abs;
+      }
+    }
+    if (bestAfter !== Infinity) return bestAfter;
+    return PRE_LABEL_PENALTY + bestBefore;
+  };
+
+  const anyNearLabel = labelEnds.length > 0
+    && candidates.some(c => rawDistance(c.index) <= NEAR_LABEL_CHARS);
+
+  if (anyNearLabel) {
+    candidates.sort((a, b) => {
+      const da = directionalScore(a.index);
+      const db = directionalScore(b.index);
+      if (da !== db) return da - db;
+      if (a.patternPriority !== b.patternPriority) return a.patternPriority - b.patternPriority;
+      return a.index - b.index;
+    });
+  } else {
+    candidates.sort((a, b) => {
+      if (a.patternPriority !== b.patternPriority) return a.patternPriority - b.patternPriority;
+      return a.index - b.index;
+    });
   }
-
-  const standalone = firstAcceptedMatch(
-    cleaned,
-    /\b(55\d{4,7})\b/g,
-    (m) => `IN${m[1]}`,
-    exclude,
-  );
-  if (standalone) return standalone;
-
-  return null;
+  return candidates[0].value;
 }
