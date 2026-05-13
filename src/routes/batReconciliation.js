@@ -776,6 +776,33 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
     const scope = req.body?.scope;
     const reconLabel = `Week ${recon.week_number}/${recon.year}`;
+
+    // Race guard — reviewer-flagged: without this, a reset fired while
+    // the OCR worker is mid-flight on this recon would set rows back to
+    // pending/null but the in-flight workers would then finish and write
+    // OLD results back by id. Net effect: the recon ends up partially
+    // re-reset immediately after the green toast, defeating the "full
+    // wipe and reprocess" intent. Two signals together: workerRunning &&
+    // workerReconId === id (the worker is targeting THIS recon), and
+    // any currentlyProcessing row whose reconciliation_id matches (a
+    // row is actively in flight). getExtractionProgress already
+    // aggregates both.
+    //
+    // Operator path on 409: pause OCR (Settings → OCR worker → Pause),
+    // wait for in-flight rows to drain, click Reset, then resume OCR
+    // and click Extract.
+    const progress = getExtractionProgress(id);
+    if (progress && (progress.running || (progress.in_flight && progress.in_flight.length > 0))) {
+      const inFlightCount = progress.in_flight?.length || 0;
+      return res.status(409).json({
+        error:
+          `OCR is currently processing ${reconLabel} (${inFlightCount} row${inFlightCount === 1 ? '' : 's'} in flight). ` +
+          `A reset right now would race with the workers — they would finish their current rows and write old results back ` +
+          `into rows we just wiped. Pause OCR (Settings → OCR worker → Pause), wait for the in-flight rows to drain, then retry the reset.`,
+        running: !!progress.running,
+        in_flight: inFlightCount,
+      });
+    }
     try {
       let result;
       let action;
