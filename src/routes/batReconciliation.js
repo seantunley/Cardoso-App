@@ -34,6 +34,10 @@ import {
   retryNotFound,
   resetUnsuccessfulExtractions,
   countUnsuccessfulExtractions,
+  resetAllExtractionsForRecon,
+  resetUnsuccessfulExtractionsForRecon,
+  resetDuplicateExtractionsForRecon,
+  countExtractionsForRecon,
   resetSagePool,
   getCachedSageWeekTotals,
   getLastPaidSageWeek,
@@ -738,6 +742,71 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
         details: `Reset ${result.reset} not_found/failed extraction(s) back to pending`,
       });
       res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Per-recon reset (Reset ALL / failed+not_found / duplicates only) ─────
+  //
+  // Drives the three-button reset block on the recon page AND the per-recon
+  // reset section in Settings. The counts endpoint feeds the confirmation
+  // dialog so the operator sees what they're about to wipe BEFORE clicking.
+
+  router.get('/api/bat/reconciliations/:id/reset-counts', ...gate, (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reconciliation id' });
+    }
+    const recon = getReconciliation(id);
+    if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
+    try {
+      res.json(countExtractionsForRecon(id));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/bat/reconciliations/:id/reset', ...gate, (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reconciliation id' });
+    }
+    const recon = getReconciliation(id);
+    if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
+    const scope = req.body?.scope;
+    const reconLabel = `Week ${recon.week_number}/${recon.year}`;
+    try {
+      let result;
+      let action;
+      let details;
+      switch (scope) {
+        case 'all':
+          result = resetAllExtractionsForRecon(id);
+          action = 'bat_reset_recon_all';
+          details = `Reset ALL ${result.reset} extraction(s) in ${reconLabel} back to pending (incl. found + manual edits)`;
+          break;
+        case 'unsuccessful':
+          result = resetUnsuccessfulExtractionsForRecon(id);
+          action = 'bat_reset_recon_unsuccessful';
+          details = `Reset ${result.reset} not_found/failed extraction(s) in ${reconLabel} back to pending`;
+          break;
+        case 'duplicates':
+          result = resetDuplicateExtractionsForRecon(id);
+          action = 'bat_reset_recon_duplicates';
+          details = `Reset ${result.reset} duplicate extraction(s) in ${reconLabel} (${result.duplicateInvoices} dup invoice value(s))`;
+          break;
+        default:
+          return res.status(400).json({
+            error: "scope must be one of: 'all', 'unsuccessful', 'duplicates'",
+          });
+      }
+      logAudit({
+        req, action, resourceType: 'system',
+        resourceId: id, resourceName: reconLabel,
+        details,
+      });
+      res.json({ ...result, scope });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

@@ -1411,6 +1411,120 @@ export function countUnsuccessfulExtractions() {
   return row?.c || 0;
 }
 
+// ── Per-recon reset (Settings + recon page Reset buttons) ────────────────────
+//
+// Three scopes, each with its own UI button. All share the same row-shape
+// after the reset (extraction_status='pending', extracted_invoice=NULL,
+// extraction_error=NULL, extraction_attempts=0). After a reset the recon
+// is re-extracted via the existing OCR queue — the operator clicks Extract
+// (or the worker picks it up on next start).
+//
+// Why three scopes:
+//   - 'all'           — wipe every row, including 'found' and any manual
+//                       edits. Use when a regression / engine swap
+//                       (e.g. PDFium round 6) means the existing data is
+//                       likely wrong even where it looks right.
+//   - 'unsuccessful'  — only not_found + failed. The cheapest re-OCR; keeps
+//                       successful rows alone. Same scope as the existing
+//                       /api/bat/reset-pending GLOBAL action, just narrowed
+//                       to one recon.
+//   - 'duplicates'    — only rows whose extracted_invoice value appears on
+//                       N+ found rows in the same recon. The poison-detection
+//                       criterion (PR #316) used as a reset criterion. Aimed
+//                       at cleaning up the recurring-letterhead artefact
+//                       case where the same wrong number lands on multiple
+//                       PODs in one recon.
+//
+// Audit-action shapes are bat_reset_recon_<scope> so the audit table can
+// colour them distinctly.
+
+export function resetAllExtractionsForRecon(reconId) {
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extracted_invoice = NULL,
+        extraction_error = NULL,
+        extraction_attempts = 0
+    WHERE reconciliation_id = ?
+  `).run(reconId);
+  return { reset: info.changes };
+}
+
+export function resetUnsuccessfulExtractionsForRecon(reconId) {
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extraction_error = NULL,
+        extraction_attempts = 0
+    WHERE reconciliation_id = ?
+      AND extraction_status IN ('not_found', 'failed')
+  `).run(reconId);
+  return { reset: info.changes };
+}
+
+// Reset rows whose extracted_invoice appears on `threshold` or more rows
+// in the same recon. Default threshold=2 (any in-recon dup is suspect for
+// a manual re-pass; the PR-#316 dynamic poison detection used 5 because
+// it was making an autonomous call mid-extraction — here the operator is
+// triggering deliberately so we err on the side of catching more).
+//
+// Returns { reset, duplicateInvoices } so the toast can say
+// "4 duplicate numbers spread across 12 rows".
+export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
+  const dups = db.prepare(`
+    SELECT extracted_invoice
+      FROM bat_invoice_extractions
+     WHERE reconciliation_id = ?
+       AND extraction_status = 'found'
+       AND extracted_invoice IS NOT NULL
+     GROUP BY extracted_invoice
+    HAVING COUNT(*) >= ?
+  `).all(reconId, threshold).map(r => r.extracted_invoice);
+  if (dups.length === 0) return { reset: 0, duplicateInvoices: 0 };
+  const placeholders = dups.map(() => '?').join(',');
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extracted_invoice = NULL,
+        extraction_error = NULL,
+        extraction_attempts = 0
+    WHERE reconciliation_id = ?
+      AND extracted_invoice IN (${placeholders})
+  `).run(reconId, ...dups);
+  return { reset: info.changes, duplicateInvoices: dups.length };
+}
+
+// Counts that drive the per-button confirmation dialogs. Single round-trip
+// — the UI renders all three button counts from one call.
+export function countExtractionsForRecon(reconId) {
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN extraction_status = 'found'                    THEN 1 ELSE 0 END) AS found,
+      SUM(CASE WHEN extraction_status IN ('not_found', 'failed')   THEN 1 ELSE 0 END) AS unsuccessful,
+      SUM(CASE WHEN extraction_status = 'pending'                  THEN 1 ELSE 0 END) AS pending,
+      COUNT(*) AS total
+    FROM bat_invoice_extractions
+    WHERE reconciliation_id = ?
+  `).get(reconId);
+  const dupAgg = db.prepare(`
+    SELECT extracted_invoice, COUNT(*) AS c
+      FROM bat_invoice_extractions
+     WHERE reconciliation_id = ?
+       AND extraction_status = 'found'
+       AND extracted_invoice IS NOT NULL
+     GROUP BY extracted_invoice
+    HAVING COUNT(*) >= 2
+  `).all(reconId);
+  const dupRowCount = dupAgg.reduce((s, r) => s + r.c, 0);
+  return {
+    total:        row?.total || 0,
+    found:        row?.found || 0,
+    unsuccessful: row?.unsuccessful || 0,
+    pending:      row?.pending || 0,
+    duplicates:   { invoices: dupAgg.length, rows: dupRowCount },
+  };
+}
+
 export function retryNotFound(reconId) {
   const rows = db.prepare(
     "SELECT id, pdf_url, store_name FROM bat_invoice_extractions WHERE reconciliation_id = ? AND extraction_status IN ('not_found', 'failed')"
