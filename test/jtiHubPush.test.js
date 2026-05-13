@@ -294,6 +294,75 @@ describe('pushPendingArchives', () => {
     expect(res.considered).toBe(0);
   });
 
+  it('INCLUDES skipped_no_hub rows when hub is now reachable (operator just configured the URL)', async () => {
+    // Pre-existing archive sitting at skipped_no_hub from before the
+    // operator set bat_settings.hub_sync_url. Once hub IS reachable,
+    // the retry tick must pick these up — otherwise they stay stranded
+    // forever and the operator has no in-UI way to force a re-push.
+    const a = seedArchive({ year: 2026, month: 3 });
+    db.prepare(`UPDATE jti_archive SET hub_push_status='skipped_no_hub' WHERE id=?`).run(a.id);
+    const b = seedArchive({ year: 2026, month: 4 }); // pending — would always be eligible
+    const res = await pushPendingArchives({
+      db,
+      hubUrl: 'http://hub.example', reportingToken: 't', siteId: 's1',
+      fetchImpl: fetchOk(),
+    });
+    expect(res.considered).toBe(2);
+    expect(res.pushed).toBe(2);
+    const aRow = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(a.id);
+    const bRow = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(b.id);
+    expect(aRow.hub_push_status).toBe('pushed');
+    expect(bRow.hub_push_status).toBe('pushed');
+  });
+
+  it('PRIORITISES pending/failed over skipped_no_hub when both exist (no starvation of active retries)', async () => {
+    // Seed a backlog of skipped_no_hub rows (older, like a site that
+    // ran for months without hub config) plus newly-archived pending
+    // rows. The retry tick MUST work the pending rows first — without
+    // explicit CASE priority, lexicographic ORDER BY hub_push_status
+    // DESC sorts 's' (skipped) ahead of 'p' (pending) and 'f' (failed),
+    // so the whole batchSize would be eaten by backlog and newly-
+    // archived rows would wait many cycles before being attempted.
+    for (let m = 1; m <= 6; m++) {
+      const a = seedArchive({ year: 2026, month: m });
+      db.prepare(`UPDATE jti_archive SET hub_push_status='skipped_no_hub' WHERE id=?`).run(a.id);
+    }
+    const fresh1 = seedArchive({ year: 2026, month: 7 }); // status='pending'
+    const fresh2 = seedArchive({ year: 2026, month: 8 });
+
+    const { fn, calls } = fetchCapture();
+    await pushPendingArchives({
+      db, batchSize: 2,
+      hubUrl: 'http://hub.example', reportingToken: 't', siteId: 's1',
+      fetchImpl: fn,
+    });
+    // Only the two pending rows were touched in this tick; the
+    // skipped_no_hub backlog must wait.
+    expect(calls).toHaveLength(2);
+    const fresh1Row = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(fresh1.id);
+    const fresh2Row = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id=?`).get(fresh2.id);
+    expect(fresh1Row.hub_push_status).toBe('pushed');
+    expect(fresh2Row.hub_push_status).toBe('pushed');
+    // The skipped backlog is still skipped_no_hub (untouched this tick).
+    const backlogStatuses = db.prepare(`SELECT hub_push_status FROM jti_archive WHERE id < ?`).all(fresh1.id);
+    expect(backlogStatuses.every((r) => r.hub_push_status === 'skipped_no_hub')).toBe(true);
+  });
+
+  it('EXCLUDES skipped_no_hub rows when hub is unreachable (no URL/token) — no churn', async () => {
+    const a = seedArchive({ year: 2026, month: 3 });
+    db.prepare(`UPDATE jti_archive SET hub_push_status='skipped_no_hub' WHERE id=?`).run(a.id);
+    const res = await pushPendingArchives({
+      db,
+      hubUrl: '', reportingToken: '', siteId: 's1',
+      fetchImpl: fetchOk(),
+    });
+    // Hub unreachable → don't even consider skipped_no_hub. (A pending
+    // archive WOULD still be scanned — and it'd get marked
+    // skipped_no_hub by pushArchiveToHub's first-line check — but the
+    // already-skipped row is not re-walked just to re-mark it.)
+    expect(res.considered).toBe(0);
+  });
+
   it('returns immediately with zero counts when no archives exist', async () => {
     const res = await pushPendingArchives({
       db,

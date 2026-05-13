@@ -32,7 +32,15 @@ export function setHubSyncUrlInDb(url) {
   return cleaned;
 }
 
-function getHubSyncBaseUrl() {
+// Exported so other modules (JTI hub push, etc.) resolve the hub URL
+// through the SAME source of truth — the operator-editable
+// bat_settings.hub_sync_url row, with env-var fallbacks. Reading
+// process.env.HUB_URL directly is a footgun: sites configure the hub
+// URL via Settings → TLS, NOT via .env, so any module that bypasses
+// this helper sees an empty value and silently misbehaves
+// (jti_archive rows with hub_push_status='skipped_no_hub' on a site
+// that's clearly hub-connected, as observed 2026-05-12).
+export function getHubSyncBaseUrl() {
   const dbUrl = getHubSyncUrlFromDb();
   const envUrl = process.env.HUB_SYNC_URL || process.env.HUB_REDIRECT_URL || "";
   return (dbUrl || envUrl).replace(/\/$/, "");
