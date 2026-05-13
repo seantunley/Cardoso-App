@@ -384,8 +384,10 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     if (raw.length < 3) return res.status(400).json({ error: 'Invoice number too short.' });
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 730, 1), 3650);
     // Build a tolerant LIKE — match either the raw value or its digit-tail
-    // (so "587925" finds "IN587925"). Escape SQL single-quotes.
-    const safe = raw.replace(/'/g, "''");
+    // (so "587925" finds "IN587925"). Values are bound as named @-parameters,
+    // not string-interpolated — defence in depth against injection AND lets
+    // MSSQL reuse the cached plan across calls (string-interpolated SQL is
+    // unique per call, so Sage's plan cache misses every time).
     const digitsOnly = raw.replace(/[^0-9]/g, '');
     // Date bound: AROBL grows to millions of rows over years. Default 2 years
     // back; client can override with ?days=N up to 10 years.
@@ -397,9 +399,15 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       // date, customer). Join ARCUS for name + current balance + national-
       // account roll-up. Search is unbounded by row count — no 5-invoice cap
       // like the sync engine has — but bounded by date for query speed.
-      const digitsClauseCte = digitsOnly && digitsOnly.length >= 3
-        ? `OR LTRIM(RTRIM(IDINVC)) LIKE '%${digitsOnly}'`
-        : '';
+      const params = {
+        cutoff: cutoffInt,
+        rawPattern: `%${raw}%`,
+      };
+      let digitsClause = '';
+      if (digitsOnly && digitsOnly.length >= 3) {
+        digitsClause = 'OR LTRIM(RTRIM(IDINVC)) LIKE @digitsPattern';
+        params.digitsPattern = `%${digitsOnly}`;
+      }
       const result = await runCustomerSqlQuery(`
         WITH agg AS (
           SELECT
@@ -408,8 +416,8 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             LTRIM(RTRIM(IDCUST))      AS customer_number,
             SUM(ISNULL(AMTINVCHC, 0)) AS invoice_amount
           FROM AROBL
-          WHERE DATEINVC >= ${cutoffInt}
-            AND (LTRIM(RTRIM(IDINVC)) LIKE '%${safe}%' ${digitsClauseCte})
+          WHERE DATEINVC >= @cutoff
+            AND (LTRIM(RTRIM(IDINVC)) LIKE @rawPattern ${digitsClause})
           GROUP BY LTRIM(RTRIM(IDINVC)), DATEINVC, LTRIM(RTRIM(IDCUST))
         )
         SELECT TOP 200
@@ -423,7 +431,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         FROM agg
         LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = agg.customer_number
         ORDER BY agg.invoice_date DESC
-      `);
+      `, params);
       const matches = (result.recordset || []).map(r => ({
         invoice_number: r.invoice_number || '',
         invoice_date: r.invoice_date || null,
@@ -458,6 +466,9 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       // Aggregate AROBL invoice lines per IDINVC, then filter by amount.
       // Limit to invoices (IN*) — receipts (PY*) carry negative amounts and
       // would also match the BETWEEN range with the wrong sign semantics.
+      // Values bound as named @-parameters for plan-cache reuse and to
+      // remove the (already mitigated by parseFloat) string-interpolation
+      // surface area.
       const result = await runCustomerSqlQuery(`
         WITH agg AS (
           SELECT
@@ -466,7 +477,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             LTRIM(RTRIM(IDCUST))      AS customer_number,
             SUM(ISNULL(AMTINVCHC, 0)) AS invoice_amount
           FROM AROBL
-          WHERE DATEINVC >= ${cutoffInt}
+          WHERE DATEINVC >= @cutoff
             AND LTRIM(RTRIM(IDINVC)) LIKE 'IN%'
           GROUP BY LTRIM(RTRIM(IDINVC)), DATEINVC, LTRIM(RTRIM(IDCUST))
         )
@@ -477,12 +488,17 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
           LTRIM(RTRIM(c.NAMECUST)) AS customer_name,
           agg.invoice_amount,
           ISNULL(c.AMTBALDUEH, 0)  AS outstanding_balance,
-          ABS(agg.invoice_amount - ${target}) AS abs_diff
+          ABS(agg.invoice_amount - @target) AS abs_diff
         FROM agg
         LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = agg.customer_number
-        WHERE agg.invoice_amount BETWEEN ${lower} AND ${upper}
-        ORDER BY ABS(agg.invoice_amount - ${target}) ASC, agg.invoice_date DESC
-      `);
+        WHERE agg.invoice_amount BETWEEN @lower AND @upper
+        ORDER BY ABS(agg.invoice_amount - @target) ASC, agg.invoice_date DESC
+      `, {
+        cutoff: cutoffInt,
+        target,
+        lower: Number(lower),
+        upper: Number(upper),
+      });
       const matches = (result.recordset || []).map(r => {
         const amt = Number(r.invoice_amount) || 0;
         const diff = Math.round((amt - target) * 100) / 100;
