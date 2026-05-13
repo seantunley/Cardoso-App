@@ -1558,6 +1558,7 @@ export default function Reconciliation() {
               extractions={selected.extractions}
               stats={selected.extractionStats}
               reconciliationId={selected.id}
+              reconLabel={`Week ${selected.week_number}/${selected.year}`}
               onReconciliationUpdate={(recon) => setSelected(recon)}
             />
           </>

@@ -27,6 +27,7 @@ import {
   Lock, ShieldCheck, ShieldAlert, ExternalLink, Save, Database,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import ReconResetModal from "@/components/reconciliation/ReconResetModal";
 
 // Sub-components
 import AutoFlagRuleForm from "@/components/settings/AutoFlagRuleForm";
@@ -2344,6 +2345,7 @@ function ReconciliationSettingsTab() {
         <div className="space-y-6">
           <OcrPauseToggle embedded />
           <ResetPendingOcrTool embedded />
+          <PerReconResetTool embedded />
         </div>
       </section>
 
@@ -2421,6 +2423,121 @@ function ResetPendingOcrTool({ embedded = false }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Per-recon reset list — companion to the global Re-queue button above.
+// Lists the most recent reconciliations and lets the operator open the
+// shared ReconResetModal for any one of them. Same modal the recon page
+// uses; same three scopes (ALL / failed+not_found / duplicates only).
+//
+// Why a separate Settings entry rather than only the recon-page button:
+// after an engine swap (PDFium round 6) the operator wants to walk
+// through a backlog of historical recons and re-OCR each. From the recon
+// page that's "navigate → reset → wait → navigate to next"; from
+// Settings it's a flat list, much faster.
+function PerReconResetTool({ embedded = false }) {
+  const [recons, setRecons] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [openId, setOpenId] = useState(null);
+  const [openLabel, setOpenLabel] = useState('');
+
+  const refresh = useCallback(() => {
+    setLoadError('');
+    fetch('/api/bat/reconciliations', { credentials: 'include' })
+      .then(async (r) => {
+        if (!r.ok) {
+          let detail = `HTTP ${r.status}`;
+          try { detail = (await r.json()).error || detail; } catch {}
+          throw new Error(detail);
+        }
+        return r.json();
+      })
+      .then((data) => {
+        const list = Array.isArray(data?.reconciliations) ? data.reconciliations : [];
+        // Most-recent-first; year DESC, then week DESC.
+        list.sort((a, b) => (b.year - a.year) || (b.week_number - a.week_number));
+        setRecons(list);
+      })
+      .catch((err) => setLoadError(err.message));
+  }, []);
+  useEffect(() => { refresh(); }, [refresh]);
+
+  return (
+    <div className={`space-y-3 ${embedded ? '' : 'pt-4 border-t border-border'}`}>
+      <div>
+        <h3 className="text-sm font-semibold mb-1">Per-recon reset</h3>
+        <p className="text-xs text-muted-foreground">
+          Pick a reconciliation to reset extractions for, then choose a scope:
+          ALL rows, only failed/not_found, or only duplicates. Same dialog the
+          Reset button on the recon page opens — convenient when working through
+          a backlog after an OCR engine change.
+        </p>
+      </div>
+
+      {loadError && (
+        <div className="text-xs text-destructive flex items-start gap-2">
+          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
+          Couldn't load reconciliations: {loadError}
+        </div>
+      )}
+
+      {recons == null ? (
+        <div className="text-xs text-muted-foreground">Loading reconciliations…</div>
+      ) : recons.length === 0 ? (
+        <div className="text-xs text-muted-foreground">No reconciliations yet.</div>
+      ) : (
+        <div className="border border-border bg-card overflow-hidden" style={{ borderRadius: '8px' }}>
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground bg-muted/30">
+                <th className="px-3 py-2">Week</th>
+                <th className="px-3 py-2">Year</th>
+                <th className="px-3 py-2 text-right">Rows</th>
+                <th className="px-3 py-2 text-right">Found</th>
+                <th className="px-3 py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recons.map((r) => {
+                const label = `Week ${r.week_number}/${r.year}`;
+                return (
+                  <tr key={r.id} className="border-b border-border/40 last:border-b-0">
+                    <td className="px-3 py-1.5 font-mono">{r.week_number}</td>
+                    <td className="px-3 py-1.5 font-mono">{r.year}</td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                      {r.pod_count ?? 0}
+                    </td>
+                    <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                      {r.found_count ?? 0}
+                    </td>
+                    <td className="px-3 py-1.5 text-right">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setOpenId(r.id); setOpenLabel(label); }}
+                        className="h-7 px-2.5 text-[11px] border-border text-muted-foreground hover:text-foreground"
+                      >
+                        <RefreshCw className="w-3 h-3 mr-1.5" />
+                        Reset…
+                      </Button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <ReconResetModal
+        open={openId != null}
+        onOpenChange={(open) => { if (!open) { setOpenId(null); setOpenLabel(''); } }}
+        reconciliationId={openId}
+        reconLabel={openLabel}
+        onResetComplete={() => refresh()}
+      />
     </div>
   );
 }
@@ -3220,23 +3337,21 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
           </TabsList>
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
-            {tabs.map(t => (
-              <TabsContent key={t.id} value={t.id} className="mt-0">
-                {t.id === "users"    && <UsersTabContent />}
-                {t.id === "creditlogic" && <CreditLogicTab hubMode={hubMode} currentUser={currentUser} />}
-                {t.id === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
-                {t.id === "fields"   && <FieldsTab />}
-                {t.id === "audit"    && <AuditTab />}
-                {t.id === "tls"      && <TlsTab />}
-                {t.id === "synclog"       && <SyncLogTab />}
-                {t.id === "connections"  && <ConnectionsTab currentUser={currentUser} />}
-                {t.id === "maintenance"  && <MaintenanceTab />}
-                {t.id === "hubmaintenance" && <HubMaintenanceTab />}
-                {t.id === "network"      && <NtopngTab />}
-                {t.id === "reconciliation" && <ReconciliationSettingsTab />}
-                {t.id === "accounting"     && <AccountingTab />}
-              </TabsContent>
-            ))}
+            <TabsContent value={activeTab} className="mt-0">
+              {activeTab === "users" && <UsersTabContent />}
+              {activeTab === "creditlogic" && <CreditLogicTab hubMode={hubMode} currentUser={currentUser} />}
+              {activeTab === "autoflag" && <AutoFlagTab hubMode={hubMode} />}
+              {activeTab === "fields" && <FieldsTab />}
+              {activeTab === "audit" && <AuditTab />}
+              {activeTab === "tls" && <TlsTab />}
+              {activeTab === "synclog" && <SyncLogTab />}
+              {activeTab === "connections" && <ConnectionsTab currentUser={currentUser} />}
+              {activeTab === "maintenance" && <MaintenanceTab />}
+              {activeTab === "hubmaintenance" && <HubMaintenanceTab />}
+              {activeTab === "network" && <NtopngTab />}
+              {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
+              {activeTab === "accounting" && <AccountingTab />}
+            </TabsContent>
           </div>
         </Tabs>
       </DialogContent>

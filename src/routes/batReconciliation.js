@@ -26,6 +26,7 @@ import {
   getCardosoInvoices,
   matchCardosoToSupplier,
   getReconciliation,
+  getReconciliationMeta,
   listReconciliations,
   runInvoiceExtraction,
   getExtractionProgress,
@@ -34,6 +35,10 @@ import {
   retryNotFound,
   resetUnsuccessfulExtractions,
   countUnsuccessfulExtractions,
+  resetAllExtractionsForRecon,
+  resetUnsuccessfulExtractionsForRecon,
+  resetDuplicateExtractionsForRecon,
+  countExtractionsForRecon,
   resetSagePool,
   getCachedSageWeekTotals,
   getLastPaidSageWeek,
@@ -738,6 +743,107 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
         details: `Reset ${result.reset} not_found/failed extraction(s) back to pending`,
       });
       res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Per-recon reset (Reset ALL / failed+not_found / duplicates only) ─────
+  //
+  // Drives the three-button reset block on the recon page AND the per-recon
+  // reset section in Settings. The counts endpoint feeds the confirmation
+  // dialog so the operator sees what they're about to wipe BEFORE clicking.
+
+  router.get('/api/bat/reconciliations/:id/reset-counts', ...gate, (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reconciliation id' });
+    }
+    // Existence-only check — getReconciliationMeta is one row, no joins.
+    // The full getReconciliation() loads every extraction + credit note +
+    // cross-recon duplicate stats; heavy work the modal preview doesn't
+    // need on every open.
+    if (!getReconciliationMeta(id)) {
+      return res.status(404).json({ error: 'Reconciliation not found' });
+    }
+    try {
+      res.json(countExtractionsForRecon(id));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/bat/reconciliations/:id/reset', ...gate, (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reconciliation id' });
+    }
+    // Existence + week/year only — same lightweight lookup the
+    // reset-counts endpoint uses, for the same reason. The reset
+    // handler doesn't need the extractions/creditNotes/dup-stats
+    // payload that getReconciliation eagerly builds.
+    const recon = getReconciliationMeta(id);
+    if (!recon) return res.status(404).json({ error: 'Reconciliation not found' });
+    const scope = req.body?.scope;
+    const reconLabel = `Week ${recon.week_number}/${recon.year}`;
+
+    // Race guard — reviewer-flagged: without this, a reset fired while
+    // the OCR worker is mid-flight on this recon would set rows back to
+    // pending/null but the in-flight workers would then finish and write
+    // OLD results back by id. Net effect: the recon ends up partially
+    // re-reset immediately after the green toast, defeating the "full
+    // wipe and reprocess" intent. Two signals together: workerRunning &&
+    // workerReconId === id (the worker is targeting THIS recon), and
+    // any currentlyProcessing row whose reconciliation_id matches (a
+    // row is actively in flight). getExtractionProgress already
+    // aggregates both.
+    //
+    // Operator path on 409: pause OCR (Settings → OCR worker → Pause),
+    // wait for in-flight rows to drain, click Reset, then resume OCR
+    // and click Extract.
+    const progress = getExtractionProgress(id);
+    if (progress && (progress.running || (progress.in_flight && progress.in_flight.length > 0))) {
+      const inFlightCount = progress.in_flight?.length || 0;
+      return res.status(409).json({
+        error:
+          `OCR is currently processing ${reconLabel} (${inFlightCount} row${inFlightCount === 1 ? '' : 's'} in flight). ` +
+          `A reset right now would race with the workers — they would finish their current rows and write old results back ` +
+          `into rows we just wiped. Pause OCR (Settings → OCR worker → Pause), wait for the in-flight rows to drain, then retry the reset.`,
+        running: !!progress.running,
+        in_flight: inFlightCount,
+      });
+    }
+    try {
+      let result;
+      let action;
+      let details;
+      switch (scope) {
+        case 'all':
+          result = resetAllExtractionsForRecon(id);
+          action = 'bat_reset_recon_all';
+          details = `Reset ALL ${result.reset} extraction(s) in ${reconLabel} back to pending (incl. found + manual edits)`;
+          break;
+        case 'unsuccessful':
+          result = resetUnsuccessfulExtractionsForRecon(id);
+          action = 'bat_reset_recon_unsuccessful';
+          details = `Reset ${result.reset} not_found/failed extraction(s) in ${reconLabel} back to pending`;
+          break;
+        case 'duplicates':
+          result = resetDuplicateExtractionsForRecon(id);
+          action = 'bat_reset_recon_duplicates';
+          details = `Reset ${result.reset} duplicate extraction(s) in ${reconLabel} (${result.duplicateInvoices} dup invoice value(s))`;
+          break;
+        default:
+          return res.status(400).json({
+            error: "scope must be one of: 'all', 'unsuccessful', 'duplicates'",
+          });
+      }
+      logAudit({
+        req, action, resourceType: 'system',
+        resourceId: id, resourceName: reconLabel,
+        details,
+      });
+      res.json({ ...result, scope });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

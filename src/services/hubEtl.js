@@ -630,13 +630,104 @@ async function pullBackupForSite(site) {
     });
     clearTimeout(hardTimeout);
     if (!upstream.ok) {
-      const msg = `HTTP ${upstream.status}`;
-      logError('hub.backupPull', new Error(msg), { site_name: site.name, site_id: site.id });
+      // Best-effort body capture — many sites return a JSON {error: "..."}
+      // or a plain text reason on 4xx/5xx; it's the difference between
+      // "we got 503" and "we got 503: backup file not yet generated, try
+      // again in 30s."
+      //
+      // We pull bytes off the stream directly instead of using
+      // upstream.text() — text() buffers the ENTIRE response into
+      // memory before we get a chance to slice it, so a misbehaving
+      // proxy returning a multi-megabyte HTML error page would spike
+      // hub RSS during exactly the failure path operators are most
+      // likely to hit. Stream-read with an explicit byte cap and
+      // cancel the rest of the body as soon as we have enough.
+      //
+      // SEPARATE timeout for this read, independent of hardTimeout
+      // above. hardTimeout was cleared as soon as fetch returned —
+      // fine for a successful download (the pipeline below has its
+      // own progress) but a stalling/trickling error body has nothing
+      // bounding it. Without this guard, one site whose proxy returns
+      // headers fast then hangs on the body would block this call
+      // indefinitely; runHubBackupPull awaits batches via
+      // Promise.allSettled, so the whole batch (and any later batches)
+      // would be held up by that one stuck site.
+      //
+      // Read failures still don't mask the error — we record the
+      // status line + URL either way; if the read stalled we annotate
+      // bodyDetail so the operator can tell the body never arrived.
+      const BODY_BYTE_CAP = 2048;        // small read window
+      const BODY_CHAR_CAP = 500;         // what actually lands in the log
+      const BODY_READ_TIMEOUT_MS = 10_000;
+      let bodyDetail = '';
+      let bodyTimedOut = false;
+      try {
+        if (upstream.body) {
+          const reader = upstream.body.getReader();
+          const chunks = [];
+          let total = 0;
+          const bodyTimer = setTimeout(() => {
+            bodyTimedOut = true;
+            // cancel() rejects any in-flight read() — caught inside
+            // the loop so we exit cleanly with whatever bytes arrived.
+            try { reader.cancel(); } catch {}
+          }, BODY_READ_TIMEOUT_MS);
+          try {
+            while (total < BODY_BYTE_CAP) {
+              try {
+                const { value, done } = await reader.read();
+                if (done) break;
+                chunks.push(value);
+                total += value.byteLength;
+              } catch {
+                // Most commonly: our cancel() above. Stop reading;
+                // the bodyTimedOut flag is checked below.
+                break;
+              }
+            }
+          } finally {
+            clearTimeout(bodyTimer);
+            // Release the connection so the upstream can stop sending.
+            try { await reader.cancel(); } catch {}
+          }
+          let prefix = '';
+          if (total > 0) {
+            const merged = Buffer.concat(
+              chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)),
+            );
+            prefix = merged
+              .subarray(0, BODY_BYTE_CAP)
+              .toString('utf8')
+              .trim()
+              .slice(0, BODY_CHAR_CAP);
+          }
+          if (bodyTimedOut) {
+            bodyDetail = prefix
+              ? `: (body read timed out after ${BODY_READ_TIMEOUT_MS}ms; partial: ${prefix})`
+              : `: (body read timed out after ${BODY_READ_TIMEOUT_MS}ms; no bytes received)`;
+          } else if (prefix) {
+            bodyDetail = `: ${prefix}`;
+          }
+        }
+      } catch {
+        // ignore — body read failure shouldn't mask the status code
+      }
+      const friendly =
+        `HTTP ${upstream.status}${upstream.statusText ? ' ' + upstream.statusText : ''}` +
+        bodyDetail +
+        ` — url=${site.url}/api/backup/download`;
+      logError('hub.backupPull', new Error(friendly), {
+        site_name: site.name,
+        site_id: site.id,
+        site_url: site.url,
+        http_status: upstream.status,
+        friendly,
+      });
       try {
         db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
-          .run(site.id, '(download failed)', `pull_failed: ${msg}`);
+          .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
       } catch {}
-      return { ok: false, error: msg };
+      return { ok: false, error: friendly };
     }
     const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
     mkdirSync(dir, { recursive: true });
