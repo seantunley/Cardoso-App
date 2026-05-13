@@ -347,11 +347,18 @@ function GroupRow({
                   />
                 );
               })}
-              {/* Orphan rows (sites that sent archives but aren't in HUB_SITES) */}
+              {/* Orphan rows (sites that sent archives but aren't in HUB_SITES).
+                  Prefer the LEFT-JOIN'd site_name on the archive row over the
+                  raw UUID — hub_sites still has a row for the site even after
+                  it drops out of HUB_SITES (in_env=0), so the join keeps
+                  yielding a friendly name for as long as the registry row
+                  survives. Reviewer-flagged: the merge that landed PR #312
+                  on top of PR #319 dropped this fallback at line 354 and
+                  left orphans rendering with their UUID. */}
               {group.received.filter((a) => !expectedById.has(a.site_id)).map((a) => (
                 <SiteRow
                   key={a.id}
-                  site={{ id: a.site_id, name: a.site_id }}
+                  site={{ id: a.site_id, name: a.site_name || a.site_id }}
                   archive={a}
                   isOrphan={true}
                   onDownload={onDownloadOne}
