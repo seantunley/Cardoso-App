@@ -1,8 +1,9 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Search, ExternalLink, Save, RotateCcw } from 'lucide-react';
+import { Search, ExternalLink, Save, RotateCcw, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { humanizeApiError } from '@/lib/humanizeApiError';
+import ReconResetModal from './ReconResetModal';
 
 const COLUMN_TIPS = {
   idx: 'Row number within this filter/tab',
@@ -217,10 +218,11 @@ function ManualInvoiceInput({ extraction, onSaved }) {
   );
 }
 
-export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate }) {
+export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate, reconLabel }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
+  const [resetModalOpen, setResetModalOpen] = useState(false);
   const tableContainerRef = useRef(null);
   // Holds the "Retry Not Found" status-poll interval so we can kill it on
   // unmount or when the user navigates to a different recon. Without this,
@@ -397,8 +399,48 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
               <TooltipContent>Re-run OCR on every invoice that wasn't found, using Google Vision as a fallback engine.</TooltipContent>
             </Tooltip>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => setResetModalOpen(true)}
+                className="inline-flex items-center gap-1.5 border px-2.5 py-1 transition-colors"
+                style={{
+                  borderColor: 'hsl(var(--border))',
+                  color: 'hsl(var(--muted-foreground))',
+                  borderRadius: '12px',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.borderColor = 'var(--phosphor)';
+                  e.currentTarget.style.color = 'var(--phosphor)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.borderColor = 'hsl(var(--border))';
+                  e.currentTarget.style.color = 'hsl(var(--muted-foreground))';
+                }}
+              >
+                <RefreshCw className="h-3 w-3" />
+                Reset…
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Reset extractions back to pending — choose ALL, only failed/not_found, or only duplicates.</TooltipContent>
+          </Tooltip>
         </div>
       </div>
+      <ReconResetModal
+        open={resetModalOpen}
+        onOpenChange={setResetModalOpen}
+        reconciliationId={reconciliationId}
+        reconLabel={reconLabel}
+        onResetComplete={async () => {
+          // Refresh the recon row counts after reset so the operator sees
+          // the new pending counts immediately. Same fetch the retry path
+          // uses on completion.
+          try {
+            const reconRes = await fetch(`/api/bat/reconciliation/${reconciliationId}`, { credentials: 'include' });
+            if (reconRes.ok) onReconciliationUpdate(await reconRes.json());
+          } catch {}
+        }}
+      />
 
       {/* Category Tabs */}
       <div className="flex gap-px overflow-hidden bg-border border border-border" style={{ borderRadius: '12px' }}>

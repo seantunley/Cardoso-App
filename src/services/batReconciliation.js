@@ -989,6 +989,22 @@ export function storeSageCreditNotes(reconId, creditNotes) {
   `).run(sageTotals['DELIVERY FEE'], sageTotals['DISCOUNT FEE'], sageTotals['PRICING ADJ'], sageTotal, reconId);
 }
 
+// Lightweight existence + week/year lookup for endpoints that don't need
+// the full extraction/credit-note payload that getReconciliation builds.
+// getReconciliation eagerly loads every row in bat_invoice_extractions,
+// every bat_sage_credit_notes row, AND computes cross-recon duplicate
+// stats — heavy work that the per-recon reset endpoints (which only
+// need to verify the recon exists and assemble an audit-log label)
+// previously paid on every modal open and every Reset click. On larger
+// backlogs that adds noticeable latency to a frequently-invoked UI
+// action. Returns null when the row doesn't exist; never throws.
+export function getReconciliationMeta(id) {
+  if (!Number.isFinite(id) || id <= 0) return null;
+  return db.prepare(
+    'SELECT id, week_number, year FROM bat_reconciliations WHERE id = ?'
+  ).get(id) || null;
+}
+
 export function getReconciliation(id) {
   const recon = db.prepare('SELECT * FROM bat_reconciliations WHERE id = ?').get(id);
   if (!recon) return null;
@@ -1393,11 +1409,20 @@ export async function runInvoiceExtraction(reconId) {
 // re-OCR everything that hasn't yet been matched without re-doing successful
 // extractions.
 export function resetUnsuccessfulExtractions() {
+  // extracted_invoice + manual_override are wiped here too for the same
+  // reason as resetUnsuccessfulExtractionsForRecon below — see that
+  // comment for the full rationale. Briefly: matchCardosoToSupplier
+  // filters by `extracted_invoice IS NOT NULL` rather than by status, so
+  // a stale value carried by a not_found/failed row would still match
+  // after this "reset" otherwise; manual_override left at 1 would opt
+  // the row out of fuzzy auto-correction on the next OCR pass.
   const info = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extraction_status = 'pending',
+        extracted_invoice = NULL,
         extraction_error = NULL,
-        extraction_attempts = 0
+        extraction_attempts = 0,
+        manual_override = 0
     WHERE extraction_status IN ('not_found', 'failed')
   `).run();
   return { reset: info.changes };
@@ -1410,6 +1435,161 @@ export function countUnsuccessfulExtractions() {
     WHERE extraction_status IN ('not_found', 'failed')
   `).get();
   return row?.c || 0;
+}
+
+// ── Per-recon reset (Settings + recon page Reset buttons) ────────────────────
+//
+// Three scopes, each with its own UI button. All share the same row-shape
+// after the reset (extraction_status='pending', extracted_invoice=NULL,
+// extraction_error=NULL, extraction_attempts=0). After a reset the recon
+// is re-extracted via the existing OCR queue — the operator clicks Extract
+// (or the worker picks it up on next start).
+//
+// Why three scopes:
+//   - 'all'           — wipe every row, including 'found' and any manual
+//                       edits. Use when a regression / engine swap
+//                       (e.g. PDFium round 6) means the existing data is
+//                       likely wrong even where it looks right.
+//   - 'unsuccessful'  — only not_found + failed. The cheapest re-OCR; keeps
+//                       successful rows alone. Same scope as the existing
+//                       /api/bat/reset-pending GLOBAL action, just narrowed
+//                       to one recon.
+//   - 'duplicates'    — only rows whose extracted_invoice value appears on
+//                       N+ found rows in the same recon. The poison-detection
+//                       criterion (PR #316) used as a reset criterion. Aimed
+//                       at cleaning up the recurring-letterhead artefact
+//                       case where the same wrong number lands on multiple
+//                       PODs in one recon.
+//
+// Audit-action shapes are bat_reset_recon_<scope> so the audit table can
+// colour them distinctly.
+
+// Note on manual_override: rows whose invoice was manually entered by an
+// operator carry manual_override=1, which makes matchCardosoToSupplier
+// skip fuzzy auto-correction for that row (see src/services/bat/matching.js
+// — `if (!cardoso && !ext.manual_override)`). When we reset and re-OCR,
+// we MUST clear that flag too: otherwise the re-extracted invoice number
+// is treated as if a human had set it, the fuzzy matcher refuses to
+// correct it, and we keep a wrong number that the new pipeline could
+// have fixed. Reviewer-flagged on PR #320: "defeats the full wipe and
+// reprocess intent and can leave avoidable mismatches." All three reset
+// scopes that wipe invoices clear manual_override too. The
+// 'unsuccessful' scope clears it as well — defensive, since a row in
+// not_found/failed shouldn't really have manual_override=1, but if a
+// past edit got into a strange state we don't want to preserve it.
+
+export function resetAllExtractionsForRecon(reconId) {
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extracted_invoice = NULL,
+        extraction_error = NULL,
+        extraction_attempts = 0,
+        manual_override = 0
+    WHERE reconciliation_id = ?
+  `).run(reconId);
+  return { reset: info.changes };
+}
+
+// extracted_invoice is wiped too even though not_found/failed rows
+// "shouldn't" carry a value — reviewer-flagged: matchCardosoToSupplier
+// filters by `extracted_invoice IS NOT NULL` rather than by status, so a
+// stale value from a legacy migration or a past manual entry that later
+// got re-marked failed would still participate in matching after this
+// "reset" runs. The modal copy promises the reset wipes invoice values;
+// honour that promise on every scope, not just 'all' and 'duplicates'.
+export function resetUnsuccessfulExtractionsForRecon(reconId) {
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extracted_invoice = NULL,
+        extraction_error = NULL,
+        extraction_attempts = 0,
+        manual_override = 0
+    WHERE reconciliation_id = ?
+      AND extraction_status IN ('not_found', 'failed')
+  `).run(reconId);
+  return { reset: info.changes };
+}
+
+// Reset rows whose extracted_invoice appears on `threshold` or more rows
+// in the same recon. Default threshold=2 (any in-recon dup is suspect for
+// a manual re-pass; the PR-#316 dynamic poison detection used 5 because
+// it was making an autonomous call mid-extraction — here the operator is
+// triggering deliberately so we err on the side of catching more).
+//
+// Returns { reset, duplicateInvoices } so the toast can say
+// "4 duplicate numbers spread across 12 rows".
+//
+// manual_override is cleared along with the invoice value (see comment
+// above this block) — if a manually-edited row's invoice happens to be
+// part of a duplicate cluster, the re-OCR'd replacement should NOT
+// inherit the manual-override sacred-edit treatment.
+//
+// SCOPE NOTE (reviewer-flagged): the duplicate KEYS are computed from
+// status='found' rows only — that's what the modal preview counts and
+// shows the operator. The UPDATE must narrow to the same scope; without
+// `extraction_status = 'found'` on the UPDATE, a stale not_found/failed
+// row that happened to carry one of those invoice values would also be
+// wiped, even though it wasn't in the count the operator approved. The
+// duplicates scope is supposed to be "wipe the over-replicated SUCCESS
+// rows so re-OCR splits them into distinct invoices" — out-of-scope
+// rows belong to one of the OTHER reset buttons.
+export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
+  const dups = db.prepare(`
+    SELECT extracted_invoice
+      FROM bat_invoice_extractions
+     WHERE reconciliation_id = ?
+       AND extraction_status = 'found'
+       AND extracted_invoice IS NOT NULL
+     GROUP BY extracted_invoice
+    HAVING COUNT(*) >= ?
+  `).all(reconId, threshold).map(r => r.extracted_invoice);
+  if (dups.length === 0) return { reset: 0, duplicateInvoices: 0 };
+  const placeholders = dups.map(() => '?').join(',');
+  const info = db.prepare(`
+    UPDATE bat_invoice_extractions
+    SET extraction_status = 'pending',
+        extracted_invoice = NULL,
+        extraction_error = NULL,
+        extraction_attempts = 0,
+        manual_override = 0
+    WHERE reconciliation_id = ?
+      AND extraction_status = 'found'
+      AND extracted_invoice IN (${placeholders})
+  `).run(reconId, ...dups);
+  return { reset: info.changes, duplicateInvoices: dups.length };
+}
+
+// Counts that drive the per-button confirmation dialogs. Single round-trip
+// — the UI renders all three button counts from one call.
+export function countExtractionsForRecon(reconId) {
+  const row = db.prepare(`
+    SELECT
+      SUM(CASE WHEN extraction_status = 'found'                    THEN 1 ELSE 0 END) AS found,
+      SUM(CASE WHEN extraction_status IN ('not_found', 'failed')   THEN 1 ELSE 0 END) AS unsuccessful,
+      SUM(CASE WHEN extraction_status = 'pending'                  THEN 1 ELSE 0 END) AS pending,
+      COUNT(*) AS total
+    FROM bat_invoice_extractions
+    WHERE reconciliation_id = ?
+  `).get(reconId);
+  const dupAgg = db.prepare(`
+    SELECT extracted_invoice, COUNT(*) AS c
+      FROM bat_invoice_extractions
+     WHERE reconciliation_id = ?
+       AND extraction_status = 'found'
+       AND extracted_invoice IS NOT NULL
+     GROUP BY extracted_invoice
+    HAVING COUNT(*) >= 2
+  `).all(reconId);
+  const dupRowCount = dupAgg.reduce((s, r) => s + r.c, 0);
+  return {
+    total:        row?.total || 0,
+    found:        row?.found || 0,
+    unsuccessful: row?.unsuccessful || 0,
+    pending:      row?.pending || 0,
+    duplicates:   { invoices: dupAgg.length, rows: dupRowCount },
+  };
 }
 
 export function retryNotFound(reconId) {
