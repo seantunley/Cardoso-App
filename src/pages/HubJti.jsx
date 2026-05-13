@@ -20,7 +20,14 @@ export default function HubJti() {
   // site would shrink the response to 1 site_id, the chips would
   // hide, and there would be no in-page way back to "All sites".
   // Filter chips render from this; the table renders from `archives`.
-  const [allSiteIds, setAllSiteIds] = useState([]);
+  //
+  // Stored as { id, label } pairs so the chips and table cells can
+  // show the human-readable site name (joined from hub_sites on the
+  // server) while the filter still keys off the canonical site_id.
+  // Falls back to the site_id when the row's hub_sites name is
+  // missing (orphan archive whose registry entry was removed).
+  const [allSites, setAllSites] = useState([]);
+  const siteLabel = (id) => allSites.find(s => s.id === id)?.label || id;
 
   useEffect(() => {
     let cancelled = false;
@@ -47,10 +54,21 @@ export default function HubJti() {
       // new site appearing in a later unfiltered fetch is captured)
       // and only replace, never narrow.
       if (!siteFilter) {
-        const seen = Array.from(new Set(fetched.map(a => a.site_id))).sort();
-        setAllSiteIds(prev => {
-          const merged = new Set([...prev, ...seen]);
-          return Array.from(merged).sort();
+        // First-seen-wins for the label (site_name), so an orphan
+        // archive without a join match doesn't overwrite a real
+        // name we already learned for the same id.
+        const labelById = new Map();
+        for (const a of fetched) {
+          const label = (a.site_name || '').trim() || a.site_id;
+          if (!labelById.has(a.site_id)) labelById.set(a.site_id, label);
+        }
+        setAllSites(prev => {
+          const merged = new Map(prev.map(s => [s.id, s.label]));
+          for (const [id, label] of labelById) {
+            if (!merged.has(id) || merged.get(id) === id) merged.set(id, label);
+          }
+          return Array.from(merged, ([id, label]) => ({ id, label }))
+            .sort((a, b) => a.label.localeCompare(b.label));
         });
       }
       setError('');
@@ -83,11 +101,11 @@ export default function HubJti() {
     }
   };
 
-  // Filter chips use the stable master list (allSiteIds), NOT the
+  // Filter chips use the stable master list (allSites), NOT the
   // currently-filtered archives — otherwise selecting a single site
   // would shrink the chip list to just that site and leave no way
   // back to "All sites" without a page reload.
-  const siteIds = allSiteIds;
+  const sites = allSites;
 
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -137,7 +155,7 @@ export default function HubJti() {
           </div>
 
           {/* Site filter chips */}
-          {siteIds.length > 1 && (
+          {sites.length > 1 && (
             <div className="flex flex-wrap gap-2 mb-4">
               <button
                 onClick={() => setSiteFilter('')}
@@ -151,10 +169,11 @@ export default function HubJti() {
               >
                 All sites
               </button>
-              {siteIds.map(id => (
+              {sites.map(({ id, label }) => (
                 <button
                   key={id}
                   onClick={() => setSiteFilter(id)}
+                  title={id}
                   className="px-3 py-1.5 border font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
                   style={{
                     borderRadius: '8px',
@@ -163,7 +182,7 @@ export default function HubJti() {
                     background: siteFilter === id ? 'hsla(33,95%,55%,0.08)' : 'transparent',
                   }}
                 >
-                  {id}
+                  {label}
                 </button>
               ))}
             </div>
@@ -181,7 +200,7 @@ export default function HubJti() {
               </p>
               <p className="text-xs text-muted-foreground/70 mt-1">
                 {siteFilter
-                  ? `No archives received from "${siteFilter}".`
+                  ? `No archives received from "${siteLabel(siteFilter)}".`
                   : 'No site has pushed an archive yet, and the nightly pull-fallback hasn\'t run.'}
               </p>
             </div>
@@ -203,7 +222,9 @@ export default function HubJti() {
                 <tbody>
                   {archives.map(a => (
                     <tr key={a.id} className="border-b border-border/40 last:border-b-0">
-                      <td className="py-2.5 pr-4 font-mono text-xs text-foreground">{a.site_id}</td>
+                      <td className="py-2.5 pr-4 font-mono text-xs text-foreground" title={a.site_id}>
+                        {(a.site_name || '').trim() || siteLabel(a.site_id)}
+                      </td>
                       <td className="py-2.5 pr-4 font-mono text-xs text-foreground">
                         {a.period_year}-{String(a.period_month).padStart(2, '0')}
                       </td>

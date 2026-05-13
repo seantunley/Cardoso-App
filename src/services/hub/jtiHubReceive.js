@@ -158,19 +158,33 @@ export function receiveJtiArchive({ db, archive, archiveRoot = HUB_ARCHIVE_ROOT 
 /**
  * List hub_jti_archive rows. Defaults to latest-period-first across
  * all sites; pass `siteId` to filter to one site.
+ *
+ * LEFT JOINs hub_sites so the row carries site_name + site_slug
+ * alongside the archive's own site_id. The hub UI uses site_name
+ * for the operator-facing labels (filter chips, table cells, empty-
+ * state messages); a UUID-shaped site_id is meaningless to read.
+ * Falls back to site_id on the client if the join misses (orphan
+ * archive whose hub_sites row was removed).
  */
 export function listHubJtiArchives({ db, siteId = null, limit = 60 }) {
+  const baseSelect = `
+    SELECT a.*,
+           s.name AS site_name,
+           s.slug AS site_slug
+      FROM hub_jti_archive a
+      LEFT JOIN hub_sites s ON s.id = a.site_id
+  `;
   if (siteId) {
     return db.prepare(`
-      SELECT * FROM hub_jti_archive
-      WHERE site_id = ?
-      ORDER BY period_year DESC, period_month DESC, received_at DESC
+      ${baseSelect}
+      WHERE a.site_id = ?
+      ORDER BY a.period_year DESC, a.period_month DESC, a.received_at DESC
       LIMIT ?
     `).all(siteId, limit);
   }
   return db.prepare(`
-    SELECT * FROM hub_jti_archive
-    ORDER BY period_year DESC, period_month DESC, received_at DESC
+    ${baseSelect}
+    ORDER BY a.period_year DESC, a.period_month DESC, a.received_at DESC
     LIMIT ?
   `).all(limit);
 }
