@@ -1438,13 +1438,28 @@ export function countUnsuccessfulExtractions() {
 // Audit-action shapes are bat_reset_recon_<scope> so the audit table can
 // colour them distinctly.
 
+// Note on manual_override: rows whose invoice was manually entered by an
+// operator carry manual_override=1, which makes matchCardosoToSupplier
+// skip fuzzy auto-correction for that row (see src/services/bat/matching.js
+// — `if (!cardoso && !ext.manual_override)`). When we reset and re-OCR,
+// we MUST clear that flag too: otherwise the re-extracted invoice number
+// is treated as if a human had set it, the fuzzy matcher refuses to
+// correct it, and we keep a wrong number that the new pipeline could
+// have fixed. Reviewer-flagged on PR #320: "defeats the full wipe and
+// reprocess intent and can leave avoidable mismatches." All three reset
+// scopes that wipe invoices clear manual_override too. The
+// 'unsuccessful' scope clears it as well — defensive, since a row in
+// not_found/failed shouldn't really have manual_override=1, but if a
+// past edit got into a strange state we don't want to preserve it.
+
 export function resetAllExtractionsForRecon(reconId) {
   const info = db.prepare(`
     UPDATE bat_invoice_extractions
     SET extraction_status = 'pending',
         extracted_invoice = NULL,
         extraction_error = NULL,
-        extraction_attempts = 0
+        extraction_attempts = 0,
+        manual_override = 0
     WHERE reconciliation_id = ?
   `).run(reconId);
   return { reset: info.changes };
@@ -1455,7 +1470,8 @@ export function resetUnsuccessfulExtractionsForRecon(reconId) {
     UPDATE bat_invoice_extractions
     SET extraction_status = 'pending',
         extraction_error = NULL,
-        extraction_attempts = 0
+        extraction_attempts = 0,
+        manual_override = 0
     WHERE reconciliation_id = ?
       AND extraction_status IN ('not_found', 'failed')
   `).run(reconId);
@@ -1470,6 +1486,11 @@ export function resetUnsuccessfulExtractionsForRecon(reconId) {
 //
 // Returns { reset, duplicateInvoices } so the toast can say
 // "4 duplicate numbers spread across 12 rows".
+//
+// manual_override is cleared along with the invoice value (see comment
+// above this block) — if a manually-edited row's invoice happens to be
+// part of a duplicate cluster, the re-OCR'd replacement should NOT
+// inherit the manual-override sacred-edit treatment.
 export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
   const dups = db.prepare(`
     SELECT extracted_invoice
@@ -1487,7 +1508,8 @@ export function resetDuplicateExtractionsForRecon(reconId, threshold = 2) {
     SET extraction_status = 'pending',
         extracted_invoice = NULL,
         extraction_error = NULL,
-        extraction_attempts = 0
+        extraction_attempts = 0,
+        manual_override = 0
     WHERE reconciliation_id = ?
       AND extracted_invoice IN (${placeholders})
   `).run(reconId, ...dups);
