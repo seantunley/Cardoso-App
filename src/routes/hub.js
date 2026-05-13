@@ -25,6 +25,10 @@ import {
   listHubJtiArchives,
   getHubJtiArchive,
 } from '../services/hub/jtiHubReceive.js';
+import {
+  listArchiveGroups,
+  streamArchiveBundle,
+} from '../services/hub/jtiHubBundle.js';
 import fs from 'fs';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -1767,6 +1771,93 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     res.setHeader('X-Hub-JTI-Archive-Id', String(id));
     res.setHeader('X-JTI-Archive-Sha256', row.sha256);
     res.end(buffer);
+  });
+
+  // GET /api/hub/jti/archive-groups
+  // Group hub_jti_archive rows by (period_year, period_month) with a
+  // completeness check against HUB_SITES. The UI uses this to render
+  // the "X/N sites reported — missing A, B, C" header per period and
+  // unlock the bundle download when complete.
+  router.get('/api/hub/jti/archive-groups', requireAuth, requirePermission('can_access_jti'), (req, res) => {
+    try {
+      const limitRaw = Number(req.query?.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 240 ? limitRaw : 60;
+      const groups = listArchiveGroups({ db, sites: HUB_SITES, limit });
+      // Surface the expected-sites list too so the UI can render
+      // friendly names (id → name) without a second roundtrip.
+      const expected_sites = (HUB_SITES || []).map((s) => ({
+        id: s.id, name: s.name || s.slug || s.id,
+      }));
+      res.json({ ok: true, groups, expected_sites, limit });
+    } catch (err) {
+      console.error('[hub-jti] groups failed:', err.message);
+      res.status(500).json({ error: `Failed to list hub JTI archive groups: ${err.message}` });
+    }
+  });
+
+  // GET /api/hub/jti/archive-groups/:year/:month/download
+  // Stream a ZIP containing every expected site's archive for the
+  // period. 409 if not all sites have reported yet (with the missing
+  // list embedded in the response so the operator can chase them).
+  // 410 if a recorded archive's file is missing on disk.
+  router.get('/api/hub/jti/archive-groups/:year/:month/download', requireAuth, requirePermission('can_access_jti'), (req, res) => {
+    const year = Number(req.params?.year);
+    const month = Number(req.params?.month);
+    if (!Number.isInteger(year) || !Number.isInteger(month)) {
+      return res.status(400).json({ error: 'Invalid year/month — must be integers' });
+    }
+
+    const outcome = streamArchiveBundle({
+      db, sites: HUB_SITES,
+      periodYear: year, periodMonth: month,
+      res,
+      onError: (err) => {
+        try { logError('hub.jti_bundle', err, { period_year: year, period_month: month }); } catch {}
+        try {
+          logAudit({
+            req, action: 'hub_jti_bundle_download', resourceType: 'system',
+            resourceName: `JTI bundle ${year}-${String(month).padStart(2, '0')}`,
+            details: `Bundle stream failed: ${err.message}`, status: 'failure',
+          });
+        } catch {}
+      },
+    });
+
+    if (outcome.ok) {
+      // Headers + stream were started by streamArchiveBundle; only the
+      // audit is ours to write here.
+      try {
+        logAudit({
+          req, action: 'hub_jti_bundle_download', resourceType: 'system',
+          resourceName: outcome.filename,
+          details: `Downloaded JTI bundle for ${year}-${String(month).padStart(2, '0')} — ${outcome.archives.length} sites: ${outcome.archives.map((a) => a.site_id).join(', ')}`,
+        });
+      } catch {}
+      return; // response is streaming; do not write further status/body
+    }
+
+    const statusCode =
+      outcome.code === 'BAD_PERIOD'   ? 400 :
+      outcome.code === 'FILE_MISSING' ? 410 :
+      outcome.code === 'PERIOD_EMPTY' ? 404 :
+      outcome.code === 'INCOMPLETE'   ? 409 :
+      500;
+    try {
+      logAudit({
+        req, action: 'hub_jti_bundle_download', resourceType: 'system',
+        resourceName: `JTI bundle ${year}-${String(month).padStart(2, '0')}`,
+        details: `Bundle refused (${outcome.code}): ${outcome.message}`,
+        status: 'failure',
+      });
+    } catch {}
+    res.status(statusCode).json({
+      ok: false,
+      code: outcome.code,
+      error: outcome.message,
+      ...(outcome.missing_site_ids != null ? { missing_site_ids: outcome.missing_site_ids } : {}),
+      ...(outcome.received_count   != null ? { received_count:   outcome.received_count   } : {}),
+      ...(outcome.expected_count   != null ? { expected_count:   outcome.expected_count   } : {}),
+    });
   });
 
   // ========================================================================
