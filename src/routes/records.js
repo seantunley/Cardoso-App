@@ -3,6 +3,7 @@ import { sanitizeForSqlite, parseJsonSafely, stringifyJsonSafely, expandDataReco
 import { applyAutoFlagRulesToRecord } from '../services/autoFlag.js';
 import { encryptPassword, getEncryptionKey } from '../services/encryption.js';
 import { runCustomerSqlQuery } from '../services/customerSqlPool.js';
+import sql from 'mssql';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 import { describeSqlError } from '../lib/errorDescribe.js';
@@ -399,14 +400,22 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
       // date, customer). Join ARCUS for name + current balance + national-
       // account roll-up. Search is unbounded by row count — no 5-invoice cap
       // like the sync engine has — but bounded by date for query speed.
+      // Explicit VarChar types. Sage 300's AROBL.IDINVC is VARCHAR
+      // (non-Unicode); the default mssql string inference would bind
+      // these as NVarChar, forcing a NVARCHAR↔VARCHAR conversion on
+      // the LIKE predicate that wraps either the column or the param
+      // and prevents the IDINVC index from being used. Explicit
+      // VarChar matches the column type and keeps the plan-cache-
+      // reuse + index-seek properties we wanted from parameterising
+      // these queries in the first place.
       const params = {
         cutoff: cutoffInt,
-        rawPattern: `%${raw}%`,
+        rawPattern: { value: `%${raw}%`, type: sql.VarChar(50) },
       };
       let digitsClause = '';
       if (digitsOnly && digitsOnly.length >= 3) {
         digitsClause = 'OR LTRIM(RTRIM(IDINVC)) LIKE @digitsPattern';
-        params.digitsPattern = `%${digitsOnly}`;
+        params.digitsPattern = { value: `%${digitsOnly}`, type: sql.VarChar(50) };
       }
       const result = await runCustomerSqlQuery(`
         WITH agg AS (
