@@ -704,7 +704,16 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     const previewJpeg = await sharp(imageBuffer).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
     const filename = `${extractionId}.jpg`;
     const fullPath = path.join(previewDir, filename);
-    await fsp.writeFile(fullPath, previewJpeg);
+    // Atomic write: a re-extraction of the same row would otherwise truncate
+    // the existing inode in-place, silently mutating any hardlink snapshots
+    // (the daily local backup at scheduler.runLocalBackup hardlinks each
+    // preview into <db>.previews/, and only stays a valid point-in-time
+    // snapshot if the source inode is never modified after creation). Write
+    // to a sibling .tmp, then rename — rename creates a new inode and unlinks
+    // the old one; existing hardlinks keep pointing at the original bytes.
+    const tmpPath = `${fullPath}.tmp`;
+    await fsp.writeFile(tmpPath, previewJpeg);
+    await fsp.rename(tmpPath, fullPath);
     previewPath = `/api/bat/preview/${filename}`;
   } catch (err) {
     try {

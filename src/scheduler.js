@@ -1,6 +1,6 @@
 import cron from 'node-cron';
 import path from 'path';
-import { mkdirSync, linkSync, readdirSync as readdirSyncTop, rmSync } from 'fs';
+import { mkdirSync, linkSync, readdirSync as readdirSyncTop, rmSync, copyFileSync } from 'fs';
 import Database from 'better-sqlite3';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
@@ -194,16 +194,21 @@ export async function runLocalBackup() {
             // *something* rather than silently skipping.
             if (linkErr.code === 'EXDEV') {
               try {
-                const { copyFileSync } = await import('fs');
                 copyFileSync(path.join(previewSrc, f), path.join(snapshotDir, f));
                 linkedCount += 1;
               } catch (copyErr) {
                 skippedCount += 1;
-                try { logError('backup.preview_snapshot_copy', copyErr, { file: f }); } catch {}
+                try { logError('backup.preview_snapshot_copy', copyErr, { file: f }); }
+                catch (logErr) { console.error('[backup] logError failed (preview_snapshot_copy):', logErr.message, '— original:', copyErr.message); }
               }
+            } else if (linkErr.code === 'ENOENT') {
+              // OCR worker deleted the file between readdir and linkSync —
+              // benign race, the next backup will pick it up.
+              skippedCount += 1;
             } else {
               skippedCount += 1;
-              try { logError('backup.preview_snapshot_link', linkErr, { file: f }); } catch {}
+              try { logError('backup.preview_snapshot_link', linkErr, { file: f }); }
+              catch (logErr) { console.error('[backup] logError failed (preview_snapshot_link):', logErr.message, '— original:', linkErr.message); }
             }
           }
         }
@@ -215,7 +220,8 @@ export async function runLocalBackup() {
       // ENOENT is normal on a fresh install with no OCR runs yet.
       if (previewErr.code !== 'ENOENT') {
         console.error(`[backup] Preview snapshot failed: ${previewErr.message}`);
-        try { logError('backup.preview_snapshot', previewErr, { src: previewSrc, dest: snapshotDir }); } catch {}
+        try { logError('backup.preview_snapshot', previewErr, { src: previewSrc, dest: snapshotDir }); }
+        catch (logErr) { console.error('[backup] logError failed (preview_snapshot):', logErr.message); }
       }
     }
 
@@ -229,16 +235,25 @@ export async function runLocalBackup() {
     // needs enough to recover from "yesterday looked weird, restore last
     // week's snapshot" scenarios.
     //
-    // NaN-guard: parseInt('abc', 10) returns NaN; default if so. Floor of
-    // 1 because keeping zero backups defeats the purpose.
+    // NaN-guard: parseInt('abc', 10) returns NaN; default if so. 0 is
+    // honored (= prune all, including the just-created backup) so an
+    // operator who explicitly sets 0 doesn't get a silent fallback to 6.
+    // Negative values are nonsensical and fall back to default.
+    //
+    // Filter: ONLY canonical backup filenames `cardoso-<id>-YYYY-MM-DD-HH-MM-SS.db`
+    // get pruned. A forensic file like `cardoso.db.corrupt.db` (manually
+    // saved off when investigating a bad live DB) ALSO ends in `.db` and
+    // would otherwise be silently deleted by retention. The regex matches
+    // the timestamp suffix this code itself writes at line 156.
     const { readdirSync, statSync, unlinkSync } = await import('fs');
+    const CANONICAL_BACKUP_RE = /^cardoso-.+-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.db$/;
     const files = readdirSync(backupDir)
-      .filter((f) => f.endsWith('.db'))
+      .filter((f) => CANONICAL_BACKUP_RE.test(f))
       .map((f) => ({ name: f, mtime: statSync(path.join(backupDir, f)).mtimeMs }))
       .sort((a, b) => b.mtime - a.mtime);
 
     const parsedKeep = parseInt(process.env.BACKUP_KEEP_COUNT, 10);
-    const keep = Number.isFinite(parsedKeep) && parsedKeep >= 1 ? parsedKeep : 6;
+    const keep = Number.isFinite(parsedKeep) && parsedKeep >= 0 ? parsedKeep : 6;
     files.slice(keep).forEach((f) => {
       try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
       // Also drop the sibling .previews/ snapshot directory if present.
