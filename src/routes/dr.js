@@ -80,7 +80,7 @@ function isInstallEmpty() {
 
     // Bail at the first non-empty table; cheaper than COUNT(*) on a
     // large datarecord table when the gate is trivially false anyway.
-    const tablesToCheck = ['datarecord', 'bat_reconciliations', 'audit_log'];
+    const tablesToCheck = ['datarecord', 'bat_reconciliations', 'auditlog'];
     for (const t of tablesToCheck) {
       try {
         const exists = db.prepare(`SELECT 1 FROM "${t}" LIMIT 1`).get();

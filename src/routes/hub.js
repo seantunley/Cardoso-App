@@ -2345,10 +2345,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           customers: safeCount('SELECT COUNT(*) AS c FROM datarecord'),
           reconciliations: safeCount('SELECT COUNT(*) AS c FROM bat_reconciliations'),
           extractions: safeCount('SELECT COUNT(*) AS c FROM bat_invoice_extractions'),
-          audit_entries: safeCount('SELECT COUNT(*) AS c FROM audit_log'),
+          audit_entries: safeCount('SELECT COUNT(*) AS c FROM auditlog'),
         },
         last_activity: {
-          audit: safeMax('SELECT MAX(created_at) AS m FROM audit_log'),
+          audit: safeMax('SELECT MAX(created_at) AS m FROM auditlog'),
           reconciliation: safeMax('SELECT MAX(created_at) AS m FROM bat_reconciliations'),
           extraction: safeMax('SELECT MAX(created_at) AS m FROM bat_invoice_extractions'),
         },
