@@ -90,6 +90,46 @@ describe('renderPdfInChild — happy path (stub child)', () => {
     expect(params.maxHeight).toBe(4000); // default
   });
 
+  it('does NOT include jpegQuality in params when caller omits it (child default applies)', async () => {
+    // Regression guard for a Phase-2 bug: the parent used to default
+    // jpegQuality to 0.85 and serialise it unconditionally, shadowing
+    // the child's bumped 0.95 default. Result was every render came
+    // out at the lower quality even though the migration's reasoning
+    // about digit-edge bleed assumed 0.95. The fix: don't default in
+    // the parent; only include the field in paramsJson when the caller
+    // explicitly asked for one. The child's default then wins.
+    writeStub(`
+      process.stdin.on('data', () => {});
+      process.stdin.on('end', () => {
+        process.stdout.write(Buffer.from(process.argv[2], 'utf8'));
+        process.exit(0);
+      });
+    `);
+    const out = await renderPdfInChild(PDF_STUB, {
+      childScriptPath: scriptPath,
+      timeoutMs: 5000,
+    });
+    const params = JSON.parse(out.toString('utf8'));
+    expect(params).not.toHaveProperty('jpegQuality');
+  });
+
+  it('passes jpegQuality through unchanged when caller does provide it', async () => {
+    writeStub(`
+      process.stdin.on('data', () => {});
+      process.stdin.on('end', () => {
+        process.stdout.write(Buffer.from(process.argv[2], 'utf8'));
+        process.exit(0);
+      });
+    `);
+    const out = await renderPdfInChild(PDF_STUB, {
+      childScriptPath: scriptPath,
+      jpegQuality: 0.7,
+      timeoutMs: 5000,
+    });
+    const params = JSON.parse(out.toString('utf8'));
+    expect(params.jpegQuality).toBe(0.7);
+  });
+
   it('forwards the PDF buffer to the child stdin (round-trip)', async () => {
     // The stub echoes whatever it received on stdin straight to stdout.
     writeStub(`
@@ -231,36 +271,47 @@ describe('renderPdfInChild — stdio drain safety', () => {
   // time could return a truncated buffer; downstream sharp / OCR
   // engines would fail with confusing decode errors that looked
   // unrelated to the renderer. Switching to 'close' (which fires AFTER
-  // all stdio flushes) closes the race.
+  // all stdio flushes) closes the race we care about.
   //
-  // We force the race by writing a payload several times the OS pipe
-  // buffer size and exiting the child immediately after the write. If
-  // the wrapper resolves before drain, the returned buffer would be
-  // shorter than what we wrote.
+  // We exercise the race by writing a payload several times the OS
+  // pipe buffer size, then closing the child's stdout cleanly. The
+  // pipe is still buffered in the kernel; the parent must keep reading
+  // after the child has exited until it sees EOF. If the wrapper
+  // resolved on 'exit' instead of 'close', the returned buffer would
+  // be shorter than what we wrote.
+  //
+  // Earlier rev of this test had the child do
+  //   process.stdout.write(buf);
+  //   process.exit(0);
+  // which loses data before the parent ever sees it: process.exit is
+  // synchronous and does NOT wait for Node's writable buffer to flush
+  // to the kernel pipe. That made the test flaky in CI even when the
+  // wrapper was perfectly correct — the failure was the STUB losing
+  // bytes, not the wrapper truncating them. Switched to write+callback
+  // so the exit only fires after the kernel has acknowledged the bytes.
+  // The race we're testing — parent reading after child close — is
+  // unchanged.
 
   it('returns the FULL stdout buffer on a large-payload, fast-exit child (no truncation)', async () => {
     // 4 MB payload — well above the Windows / Linux default pipe buffer
     // (8 KB – 64 KB typically) so the child must write in chunks.
     // Pattern is deterministic so the assertion catches truncation
     // wherever it might happen.
-    //
-    // Use `process.stdout.end(buf, callback)` — NOT raw write() then
-    // immediate process.exit(0). On Windows (and any pipe-buffer-tight
-    // platform) write() can return before the OS has flushed the
-    // buffer; a same-tick process.exit then truncates the in-flight
-    // bytes. end() signals EOF and the parent's 'close' event fires
-    // ONLY after stdio actually drains — which is the exact behaviour
-    // we want the test to exercise. The test still validates the
-    // parent-side fix (resolve on 'close', not 'exit') because if
-    // the parent were back to listening on 'exit', it would resolve
-    // before drain even though the child queues the write correctly.
     writeStub(`
       process.stdin.on('data', () => {});
       process.stdin.on('end', () => {
         const SIZE = 4 * 1024 * 1024;
         const buf = Buffer.alloc(SIZE);
         for (let i = 0; i < SIZE; i++) buf[i] = i & 0xFF;
-        process.stdout.end(buf);
+        // Callback-after-flush is the safest "as fast as possible
+        // without losing bytes" pattern: Node fires the cb only once
+        // the underlying stdio handle has accepted the write. Then we
+        // exit. Equivalent to process.stdout.end(buf) + natural exit
+        // but a touch more explicit about intent.
+        process.stdout.write(buf, (err) => {
+          if (err) { process.exit(1); }
+          process.exit(0);
+        });
       });
     `);
     const out = await renderPdfInChild(PDF_STUB, { childScriptPath: scriptPath, timeoutMs: 15000 });
@@ -296,16 +347,108 @@ describe('renderPdfInChild — concurrency', () => {
   });
 });
 
-// End-to-end test against the REAL renderPdfChild.js intentionally
-// omitted from this PR. The earlier version was permanently skipped
-// (require.resolve bug in ESM), and the hand-rolled minimal PDF used
-// inside it doesn't parse reliably under real pdfjs — it would have
-// failed if it had ever run. The 13 stub-driven contract tests above
-// cover the wrapper's actual responsibilities (timeout, error
-// transport, drain, concurrency, spawn-failure). A real fixture-PDF
-// regression suite belongs in the Phase 2 PR alongside the engine
-// swap, where we'll have a check-in tests/fixtures/blank.pdf and a
-// reference set with hash-based equivalence checks.
+describe('renderPdfInChild — end-to-end with the real child script', () => {
+  // Uses the production renderPdfChild.js + a minimal valid PDF.
+  // PDFium (@hyzyla/pdfium) and sharp are hard deps after the Phase 2
+  // engine swap — both ship pre-built binaries (PDFium is WASM, sharp
+  // is libvips), no native build toolchain required, so this test is
+  // unconditional. If init fails in CI we want to SEE the failure, not
+  // silently skip past it.
+  //
+  // Earlier rev guarded with a `canRunRealChild` helper that called
+  // `require.resolve` from this ESM file — `require` is undefined in
+  // ESM, the helper threw a ReferenceError every time, was caught, and
+  // the test was masked. Removed entirely; if the renderer ever does
+  // need an environment guard, use `await import.meta.resolve(...)` /
+  // `createRequire(import.meta.url)` rather than bare `require`.
+
+  // Smallest legal PDF that PDFium will accept. Built by hand from the
+  // PDF 1.4 spec: catalog + pages + one empty page. 0x0a separators
+  // are critical — both PDFium and pdfjs validate the xref offsets.
+  const MINIMAL_PDF = makeMinimalPdf();
+
+  it(
+    'renders a minimal valid PDF to a JPEG buffer',
+    async () => {
+      const out = await renderPdfInChild(MINIMAL_PDF, { timeoutMs: 20_000 });
+      expect(Buffer.isBuffer(out)).toBe(true);
+      expect(out.length).toBeGreaterThan(64);
+      // JPEG SOI marker
+      expect(out[0]).toBe(0xFF);
+      expect(out[1]).toBe(0xD8);
+    },
+    25_000,
+  );
+
+  it(
+    'surfaces the structured PAGE_OUT_OF_RANGE code from the real child (no CHILD_FAILED fallback)',
+    async () => {
+      // Regression guard for failStructured's exit-before-flush race: if
+      // the child writes its JSON error line to stderr and immediately
+      // exits, the line can be lost in the pipe buffer and the parent
+      // falls back to the generic CHILD_FAILED code, dropping the
+      // diagnostic operators rely on. The fix uses a write-callback so
+      // the exit only fires after the kernel has acknowledged the
+      // bytes; this test catches a regression by asking the real
+      // renderPdfChild.js for a page that doesn't exist (1-page PDF,
+      // pageNum=99) and asserting the structured code makes it back
+      // through.
+      let caught;
+      try {
+        await renderPdfInChild(MINIMAL_PDF, { pageNum: 99, timeoutMs: 20_000 });
+      } catch (err) {
+        caught = err;
+      }
+      expect(caught).toBeDefined();
+      expect(caught.code).toBe('PAGE_OUT_OF_RANGE');
+      expect(String(caught.message || '')).toMatch(/pageNum 99/);
+    },
+    25_000,
+  );
+});
 
 // ── helpers ───────────────────────────────────────────────────────────
 
+function makeMinimalPdf() {
+  // Hand-built PDF 1.4 with one empty 612×792 page.
+  //
+  // The cross-reference offsets and the startxref pointer are computed
+  // from the actual byte positions of each object as we assemble the
+  // body — NOT hardcoded. The earlier rev had hardcoded offsets that
+  // didn't match the real bytes (e.g. object 3 was listed at 108 but
+  // actually started at 115); PDFium's parser-repair sometimes papered
+  // over the mismatch and sometimes didn't, which made the
+  // end-to-end-with-real-child tests flake for fixture reasons rather
+  // than renderer reasons. Building the offsets from byteLength keeps
+  // the fixture deterministic regardless of how the lines change.
+  const NL = '\n';
+  const objects = [
+    '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
+    '2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj',
+    '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources <<>> >> endobj',
+  ];
+
+  let body = '%PDF-1.4' + NL;
+  const objectOffsets = []; // byte offset where each object begins
+  for (const obj of objects) {
+    objectOffsets.push(Buffer.byteLength(body, 'utf8'));
+    body += obj + NL;
+  }
+
+  const xrefOffset = Buffer.byteLength(body, 'utf8');
+  body += 'xref' + NL;
+  body += `0 ${objects.length + 1}` + NL;
+  // Object 0 is the always-present free-list head.
+  body += '0000000000 65535 f \n';
+  // Each in-use entry is 20 bytes per the PDF spec:
+  //   NNNNNNNNNN GGGGG n \n   (10 + 1 + 5 + 1 + 1 + 1 + 1)
+  for (const off of objectOffsets) {
+    body += `${String(off).padStart(10, '0')} 00000 n \n`;
+  }
+  body += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>` + NL;
+  body += 'startxref' + NL;
+  body += String(xrefOffset) + NL;
+  body += '%%EOF' + NL;
+
+  return Buffer.from(body, 'utf8');
+}

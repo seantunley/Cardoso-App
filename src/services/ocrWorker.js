@@ -181,22 +181,14 @@ async function getPdfjs() {
 
 // ── PDF render ───────────────────────────────────────────────────────────────
 
-// pdfjs-dist is PINNED to 4.8.69 in package.json. DO NOT BUMP without
-// migrating off node-canvas first.
-//
-// pdfjs 4.10+ switched its image pipeline to browser-only APIs
-// (createImageBitmap, OffscreenCanvas.transferToImageBitmap). When pdfjs
-// then calls ctx.drawImage(imgData.bitmap, 0, 0), node-canvas rejects the
-// ImageBitmap with "Image or Canvas expected" — node-canvas only accepts
-// its own Image / Canvas types. The result is every PDF that needs image
-// rendering fails to OCR.
-//
-// 4.8.69 is the last pdfjs version that uses node-canvas-compatible
-// image objects. It works reliably with this code path.
-//
-// Long-term plan: migrate to a Node-native PDF engine (pdfium-binary or
-// poppler) that doesn't depend on browser APIs. See docs/plans/pdf-engine-migration.md
-// for scope. Until that lands, this pin is load-bearing.
+// Rendering now runs inside a SHORT-LIVED CHILD PROCESS via
+// renderPdfInChild → renderPdfChild.js, which uses PDFium
+// (@hyzyla/pdfium, WASM) instead of pdfjs+node-canvas. node-canvas
+// is no longer a dependency; pdfjs stays here ONLY for the
+// text-layer fast-path (getTextContent), which has no canvas
+// involvement and was never affected by the wedge / ImageBitmap
+// issues that drove Phase 1 + 2 of the migration. See
+// docs/plans/pdf-engine-migration.md for the full story.
 // Cap the rendered raster width so a single PDF page can't consume
 // hundreds of MB of native memory. Buffer size is width × height × 4
 // bytes (RGBA); at 6000×8000 that's 192MB *uncompressed*, and
@@ -697,7 +689,16 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   emitProgress(msgId, 'render');
   let imageBuffer;
   try {
-    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 1.5 : 2.0);
+    // Bumped from 1.5/2.0 → 2.0/3.0 alongside Phase 2's PDFium swap.
+    // Round-2 of OCR regression testing on real PODs showed digit-level
+    // misreads (the cascade engine was confidently picking the wrong
+    // digit on borderline-resolution renders). More pixels per page =
+    // more signal for digit recognition. The per-page caps in
+    // renderPdfChild (maxWidth / maxHeight / maxPixels) clamp this back
+    // down for banner-format / multi-page-merged PDFs, so the bump is
+    // additive only — pages that were already against the cap don't
+    // get any larger.
+    imageBuffer = await pdfPageToImage(buffer, 1, isLarge ? 2.0 : 3.0);
   } catch (err) {
     // The child-process wrapper rejects with structured codes:
     //   - 'RENDER_TIMEOUT'      → wall-clock kill fired (SIGKILL after grace).

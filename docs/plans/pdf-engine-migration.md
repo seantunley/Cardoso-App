@@ -1,5 +1,13 @@
 # PDF Engine Migration
 
+**Status: Phase 1 + Phase 2 SHIPPED.** Renderer is now PDFium
+(@hyzyla/pdfium), node-canvas removed, pdfjs unpinned (still in use
+for the text-layer fast-path only). The CI guard that enforced the
+4.8.69 pin has been deleted. The narrative below is preserved as the
+record of what motivated the work and the staging that got it done.
+
+---
+
 ## Why this exists
 
 Two problems point at the same architectural choice:
