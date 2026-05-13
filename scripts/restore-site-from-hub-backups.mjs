@@ -84,9 +84,11 @@ function extractTimestamp(filename) {
 }
 
 async function unzipInto(zipPath, destDir, dryRun) {
-  // Use yauzl if available (already in tree), fall back to PowerShell
-  // Expand-Archive on Windows for the standalone case where node_modules
-  // might not be installed yet.
+  // Try yauzl if it happens to be installed; otherwise fall back to
+  // PowerShell Expand-Archive on Windows (the documented platform).
+  // yauzl is NOT a declared dependency of this app — the require() is
+  // wrapped in try/catch so the script still works on a fresh Windows
+  // install where the operator hasn't run npm install yet.
   if (dryRun) {
     console.log(`  [dry-run] would unzip ${zipPath} → ${destDir}`);
     return;
