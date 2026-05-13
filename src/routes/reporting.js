@@ -508,21 +508,33 @@ export function createReportingRouter({ requireAuth }) {
 
       // Build distinct sales-rep list for the filter dropdown. Always derive from
       // the full record set (not the paginated page) so every rep is selectable.
-      let repSource;
+      //
+      // When in-memory filters are active we already paid the cost of fetching +
+      // hydrating `allRecords` — reuse it. Otherwise, use a lightweight
+      // `SELECT DISTINCT sales_rep` against the column. The legacy
+      // `SELECT sales_rep, data, local_fields` + per-row hydrate was scanning
+      // up to 5000 rows + 5000 JSON.parse calls just to populate a dropdown.
+      // A rep whose `sales_rep` column is blank but exists in `data` JSON
+      // (legacy-sync edge case) won't appear in the dropdown — that's fine,
+      // the row is still visible in the main table; the dropdown's role is to
+      // narrow the view, not enumerate every variant.
+      let salesReps;
       if (needsInMemoryFilter) {
-        repSource = allRecords;
+        salesReps = Array.from(new Set(allRecords.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
       } else {
-        // Lightweight separate fetch — only needs the columns required to
-        // hydrate sales_rep from JSON blobs.
-        repSource = isHub
+        const distinctRows = isHub
           ? prep(
-              `SELECT r.sales_rep FROM hub_records r WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ?`
+              `SELECT DISTINCT TRIM(r.sales_rep) AS sales_rep FROM hub_records r
+               WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > ?
+                 AND r.sales_rep IS NOT NULL AND TRIM(r.sales_rep) != ''`
             ).all(balanceAmountGt)
           : prep(
-              `SELECT sales_rep, data, local_fields FROM datarecord WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?`
-            ).all(balanceAmountGt).map(hydrateSalesRepAndAccountType);
+              `SELECT DISTINCT TRIM(sales_rep) AS sales_rep FROM datarecord
+               WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > ?
+                 AND sales_rep IS NOT NULL AND TRIM(sales_rep) != ''`
+            ).all(balanceAmountGt);
+        salesReps = distinctRows.map(r => r.sales_rep).filter(Boolean).sort((a, b) => a.localeCompare(b));
       }
-      const salesReps = Array.from(new Set(repSource.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
 
       res.json({
         records: recordsForPage,
@@ -545,6 +557,14 @@ export function createReportingRouter({ requireAuth }) {
 
   // GET /api/reports/aged-debtors — full (unpaginated) aged debtors report
   // with computed aging buckets and summary totals.
+  //
+  // The bucket calculation only needs `unpaid_invoices`; `receipts` used
+  // to be SELECTed-and-piped-through-expandDataRecord on every row of
+  // up to 5000 without ever being read. Dropped from the projection.
+  // expandDataRecord stays in place — the UI relies on the flat
+  // last_unpaid_invoice_N keys it synthesises from the JSON; with
+  // `receipts` not selected, the helper's receipts-spread step
+  // short-circuits on `undefined` and contributes no work.
   router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
@@ -569,7 +589,7 @@ export function createReportingRouter({ requireAuth }) {
         ).all(minBalance).map(r => r.site_name).filter(Boolean);
         records = prep(
           `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type, r.terms,
-                  r.outstanding_balance, r.unpaid_invoices, r.receipts,
+                  r.outstanding_balance, r.unpaid_invoices,
                   r.flag_color, r.flag_reason, r.auto_flagged,
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
@@ -584,7 +604,7 @@ export function createReportingRouter({ requireAuth }) {
         sites = [SITE_NAME];
         records = prep(
           `SELECT customer_number, customer_name, sales_rep, account_type, terms,
-                  outstanding_balance, unpaid_invoices, receipts,
+                  outstanding_balance, unpaid_invoices,
                   flag_color, flag_reason, auto_flagged,
                   data, local_fields,
                   ? AS site_name
@@ -698,6 +718,17 @@ export function createReportingRouter({ requireAuth }) {
 
   // GET /api/reports/rep-exposure — total outstanding & flag mix per sales rep,
   // with the top customers per rep for the printable detail rows.
+  //
+  // The body only reads: customer_number, customer_name, sales_rep,
+  // account_type, outstanding_balance, flag_color. We don't SELECT
+  // unpaid_invoices (used to be in the projection but never read), and we
+  // skip expandDataRecord entirely — its job is to inflate JSON arrays
+  // (unpaid_invoices / receipts) into flat per-index columns, none of
+  // which this aggregation cares about. Site mode still pays for
+  // hydrateSalesRepAndAccountType because some legacy rows have
+  // sales_rep only inside `data`/`local_fields`; that helper early-
+  // returns when both columns are populated, so the cost is "free for
+  // healthy rows + one JSON.parse pair for the laggards".
   router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
@@ -706,24 +737,24 @@ export function createReportingRouter({ requireAuth }) {
       if (isHub) {
         records = prep(
           `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type,
-                  r.outstanding_balance, r.flag_color, r.unpaid_invoices,
+                  r.outstanding_balance, r.flag_color,
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
            WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
              AND r.outstanding_balance != '0'
              AND r.outstanding_balance_num > ?`
-        ).all(minBalance).map(expandDataRecord);
+        ).all(minBalance);
       } else {
         records = prep(
           `SELECT customer_number, customer_name, sales_rep, account_type,
-                  outstanding_balance, flag_color, unpaid_invoices,
+                  outstanding_balance, flag_color,
                   data, local_fields,
                   ? AS site_name
            FROM datarecord
            WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
              AND outstanding_balance != '0'
              AND outstanding_balance_num > ?`
-        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
+        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType);
       }
       const repMap = new Map();
       for (const r of records) {
