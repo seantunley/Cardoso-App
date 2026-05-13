@@ -410,25 +410,45 @@ describe('renderPdfInChild — end-to-end with the real child script', () => {
 // ── helpers ───────────────────────────────────────────────────────────
 
 function makeMinimalPdf() {
-  // Hand-built PDF 1.4 with one empty 612×792 page. Verified parseable
-  // by pdfjs 4.8.x in a quick local check; if pdfjs ever tightens its
-  // parser we'd swap this for a tests/fixtures/blank.pdf check-in.
-  const lines = [
-    '%PDF-1.4',
+  // Hand-built PDF 1.4 with one empty 612×792 page.
+  //
+  // The cross-reference offsets and the startxref pointer are computed
+  // from the actual byte positions of each object as we assemble the
+  // body — NOT hardcoded. The earlier rev had hardcoded offsets that
+  // didn't match the real bytes (e.g. object 3 was listed at 108 but
+  // actually started at 115); PDFium's parser-repair sometimes papered
+  // over the mismatch and sometimes didn't, which made the
+  // end-to-end-with-real-child tests flake for fixture reasons rather
+  // than renderer reasons. Building the offsets from byteLength keeps
+  // the fixture deterministic regardless of how the lines change.
+  const NL = '\n';
+  const objects = [
     '1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj',
     '2 0 obj << /Type /Pages /Count 1 /Kids [3 0 R] >> endobj',
     '3 0 obj << /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources <<>> >> endobj',
-    'xref',
-    '0 4',
-    '0000000000 65535 f ',
-    '0000000009 00000 n ',
-    '0000000058 00000 n ',
-    '0000000108 00000 n ',
-    'trailer << /Size 4 /Root 1 0 R >>',
-    'startxref',
-    '180',
-    '%%EOF',
-    '',
   ];
-  return Buffer.from(lines.join('\n'), 'utf8');
+
+  let body = '%PDF-1.4' + NL;
+  const objectOffsets = []; // byte offset where each object begins
+  for (const obj of objects) {
+    objectOffsets.push(Buffer.byteLength(body, 'utf8'));
+    body += obj + NL;
+  }
+
+  const xrefOffset = Buffer.byteLength(body, 'utf8');
+  body += 'xref' + NL;
+  body += `0 ${objects.length + 1}` + NL;
+  // Object 0 is the always-present free-list head.
+  body += '0000000000 65535 f \n';
+  // Each in-use entry is 20 bytes per the PDF spec:
+  //   NNNNNNNNNN GGGGG n \n   (10 + 1 + 5 + 1 + 1 + 1 + 1)
+  for (const off of objectOffsets) {
+    body += `${String(off).padStart(10, '0')} 00000 n \n`;
+  }
+  body += `trailer << /Size ${objects.length + 1} /Root 1 0 R >>` + NL;
+  body += 'startxref' + NL;
+  body += String(xrefOffset) + NL;
+  body += '%%EOF' + NL;
+
+  return Buffer.from(body, 'utf8');
 }
