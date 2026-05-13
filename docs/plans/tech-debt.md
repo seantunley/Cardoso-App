@@ -170,22 +170,13 @@ items that were considered and rejected:
 
 ## Permanent pins (not deferrals — pointers)
 
-- `pdfjs-dist` is pinned at `4.8.69`. See `docs/plans/pdf-engine-migration.md`
-  for the full story. The 5.x line was tested 2026-05-05 — no longer
-  crashes on node-canvas, but renders blank pages, which is worse. Pin
-  stays until we migrate to a Node-native PDF engine.
-
-  Production hit a worse failure mode in 2026.5.3: `page.render()` blocks
-  the worker thread synchronously inside node-canvas's native code on
-  certain large/banner PDFs. The in-worker 30s timeout cannot fire
-  because JS isn't running; only the parent-side 120s `PDF_TIMEOUT`
-  recovers via `worker.terminate()`. PR #237 added five mitigations
-  (megapixel/height caps, preflight reject, per-URL skip after a
-  render-stage wedge, lower recycle threshold, hard `process.exit()`
-  at 3 GB RSS) that bound the blast radius to a single row plus a
-  bounded RSS window — but the underlying wedge can't be fixed in JS.
-  The pdf-engine-migration is now load-bearing; promote it from
-  Tier-3 to active when bandwidth allows.
+- _(Empty — the previous `pdfjs-dist` 4.8.69 entry resolved with the
+  PDF-engine migration. Phase 1 isolated rendering in a child process
+  to bound the node-canvas wedge blast radius; Phase 2 swapped the
+  renderer to PDFium (`@hyzyla/pdfium`, WASM) and removed node-canvas;
+  Phase 3 swapped the text-layer fast-path to PDFium and removed
+  pdfjs-dist. See `docs/plans/pdf-engine-migration.md` for the
+  history; no remaining permanent pins in this category.)_
 
 ---
 

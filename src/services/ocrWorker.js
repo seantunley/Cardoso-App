@@ -116,10 +116,12 @@ function isRateLimitError(err) {
 
 let _tesseract = null;
 let _sharp = null;
-let _pdfjs = null;
-// _canvas removed: rendering moved out-of-process to renderPdfChild.js.
-// pdfjs is still loaded HERE for the text-layer fast-path (page.getTextContent),
-// which doesn't wedge in native code the way page.render() does.
+let _pdfium = null;
+// _canvas + _pdfjs removed (Phase 2 + Phase 3 of the engine migration —
+// see docs/plans/pdf-engine-migration.md). Rendering runs out-of-process
+// via renderPdfChild.js + PDFium; the text-layer fast-path below also
+// uses PDFium (in-process — WASM, no native wedge concern unlike pdfjs +
+// node-canvas).
 
 // Trained data ships with the app under vendor/tessdata/. We point
 // tesseract.js at that directory instead of letting it download from
@@ -173,22 +175,32 @@ async function getSharp() {
   return _sharp;
 }
 
-async function getPdfjs() {
-  if (_pdfjs) return _pdfjs;
-  _pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  return _pdfjs;
+// PDFium library handle, kept alive across calls in this worker process.
+// Init is ~200ms (WASM cold start) so we DON'T destroy + re-init per call.
+// The lane recycle in batReconciliation.js (every N rows) creates a fresh
+// worker process, which inherits a fresh PDFium init — that's the natural
+// cleanup boundary; there's nothing to manually free for memory hygiene
+// inside one worker's lifetime.
+async function getPdfium() {
+  if (_pdfium) return _pdfium;
+  // PDFium is CJS-only; createRequire reaches into it cleanly from this
+  // ESM module, same pattern as renderPdfChild.js uses.
+  const { createRequire } = await import('node:module');
+  const requireCjs = createRequire(import.meta.url);
+  const { PDFiumLibrary } = requireCjs('@hyzyla/pdfium');
+  _pdfium = await PDFiumLibrary.init();
+  return _pdfium;
 }
 
 // ── PDF render ───────────────────────────────────────────────────────────────
 
-// Rendering now runs inside a SHORT-LIVED CHILD PROCESS via
+// Rendering runs inside a SHORT-LIVED CHILD PROCESS via
 // renderPdfInChild → renderPdfChild.js, which uses PDFium
-// (@hyzyla/pdfium, WASM) instead of pdfjs+node-canvas. node-canvas
-// is no longer a dependency; pdfjs stays here ONLY for the
-// text-layer fast-path (getTextContent), which has no canvas
-// involvement and was never affected by the wedge / ImageBitmap
-// issues that drove Phase 1 + 2 of the migration. See
-// docs/plans/pdf-engine-migration.md for the full story.
+// (@hyzyla/pdfium, WASM). The text-layer fast-path above also runs
+// on PDFium (in-process — see getPdfium). pdfjs-dist + node-canvas
+// are gone from package.json; the long-form pin comments and the
+// CI guard that enforced the 4.8.69 pin have been removed.
+// See docs/plans/pdf-engine-migration.md for the full story.
 // Cap the rendered raster width so a single PDF page can't consume
 // hundreds of MB of native memory. Buffer size is width × height × 4
 // bytes (RGBA); at 6000×8000 that's 192MB *uncompressed*, and
@@ -625,22 +637,32 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
 
   const isLarge = buffer.length > 2 * 1024 * 1024;
 
-  // Step 1: pdfjs text layer (no OCR needed). 20s hard cap — corrupt /
-  // encrypted PDFs can hang in pdfjs.getDocument(). On error we forward
-  // the message to the parent so the operator sees `bat.ocr.pdf_text_failed`
+  // Step 1: PDFium text layer (no OCR needed). 20s hard cap — corrupt /
+  // encrypted PDFs can hang loadDocument(). On error we forward the
+  // message to the parent so the operator sees `bat.ocr.pdf_text_failed`
   // rather than a silent fall-through to image render.
+  //
+  // PDFium is WASM. Unlike the rendering path (which spawns a child
+  // process because pdfjs+canvas could wedge native code uninterruptibly),
+  // text extraction has no canvas dependency and no realistic wedge
+  // mode — running it in the worker thread is fine.
+  //
+  // PDFium API gotchas (vs the previous pdfjs implementation):
+  //   - getPageCount() instead of numPages.
+  //   - 0-based page indices instead of 1-based.
+  //   - getText() returns the page text directly as a string; no
+  //     textContent.items[].str flattening needed. Wrap in String() in
+  //     case the binding ever returns null/undefined for empty pages.
   emitProgress(msgId, 'pdf_text');
   try {
     const result = await withTimeout((async () => {
-      const pdfjsLib = await getPdfjs();
-      const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-      loadingTask.onUnsupportedFeature = () => {};
-      const pdfDoc = await loadingTask.promise;
+      const lib = await getPdfium();
+      const doc = await lib.loadDocument(buffer);
       try {
-        for (let p = 1; p <= Math.min(pdfDoc.numPages, 3); p++) {
-          const page = await pdfDoc.getPage(p);
-          const textContent = await page.getTextContent();
-          const pageText = textContent.items.map(item => item.str).join(' ');
+        const pages = Math.min(doc.getPageCount(), 3);
+        for (let p = 0; p < pages; p++) {
+          const page = doc.getPage(p);
+          const pageText = String(await page.getText() || '');
           if (pageText.trim()) {
             const invoice = findInvoiceNumber(pageText, inDigitLength);
             if (invoice) return { invoice };
@@ -648,7 +670,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         }
         return null;
       } finally {
-        try { await pdfDoc.destroy(); } catch {}
+        try { doc.destroy(); } catch {}
       }
     })(), 20_000, 'pdf_text');
     if (result?.invoice) {
@@ -657,7 +679,12 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
       // text-layer matches from OCR-cascade matches — the former is
       // ~free and ~always correct; the latter is OCR'd text and worth
       // a human glance.
-      return { invoice: result.invoice, previewPath: null, source: 'pdf_text', engine: 'pdfjs', angle: 0 };
+      // engine='pdfium' reflects the actual library used for the text
+      // extraction (Phase 3). Operators previously saw 'pdfjs' here for
+      // the text-layer hit; the rename is a one-time audit-trail shift,
+      // not a behaviour change. source='pdf_text' is unchanged so any
+      // dashboard / log-filter keyed on that string keeps working.
+      return { invoice: result.invoice, previewPath: null, source: 'pdf_text', engine: 'pdfium', angle: 0 };
     }
   } catch (err) {
     // Forward to parent — visible in System Log, doesn't abort the row
