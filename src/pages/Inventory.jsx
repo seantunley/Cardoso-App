@@ -27,9 +27,24 @@ function useInvColumnWidths(containerRef) {
     } catch { return INV_COLUMN_DEFAULTS; }
   });
   const widthsRef = useRef(widths);
+  // Debounce-flushed localStorage write — see comment in
+  // src/lib/useColumnWidths.js. Avoids JSON.stringify + sync
+  // localStorage.setItem at 60Hz during a column drag.
+  const writeTimerRef = useRef(null);
   useEffect(() => {
     widthsRef.current = widths;
-    try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      writeTimerRef.current = null;
+    }, 200);
+    return () => {
+      if (writeTimerRef.current) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+        try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      }
+    };
   }, [widths]);
 
   const MIN_COL = 40;
@@ -207,6 +222,15 @@ export default function Inventory() {
   const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
   const EXCLUDED_COMMODITIES = new Set(['10']);
   const allRows = data?.records ?? [];
+  // The hub-side endpoint paginates and silently caps at 1000 rows
+  // when no limit/offset is sent (which is our case — we don't send
+  // them today). Without a "showing N of M" indicator the operator
+  // has no way to know they're seeing a truncated view of an inventory
+  // larger than the cap. data.total is the total matching rows, count
+  // is what was returned in this page; surface the gap when they differ.
+  const totalAvailable = data?.total ?? null;
+  const returnedCount = data?.count ?? allRows.length;
+  const isTruncated = Number.isFinite(totalAvailable) && totalAvailable > returnedCount;
   const priceLists = useMemo(() => {
     const seen = new Set();
     for (const r of allRows) { if (r.price_list) seen.add(r.price_list); }
@@ -547,6 +571,17 @@ export default function Inventory() {
             sortDir={sortDir}
             onSort={handleSort}
           />
+        )}
+
+        {/* Truncation banner — when the hub-side endpoint capped the
+            response and there are more rows than we received. Without
+            this the operator has no way to know they're seeing a
+            partial view. */}
+        {!isLoading && !isError && isTruncated && (
+          <div className="mt-3 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-800 rounded px-3 py-2">
+            Showing <strong>{returnedCount.toLocaleString()}</strong> of <strong>{totalAvailable.toLocaleString()}</strong> items.
+            The server caps results to keep the page snappy; refine your search to see the rest.
+          </div>
         )}
       </div>
     </div>

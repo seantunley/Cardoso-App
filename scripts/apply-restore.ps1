@@ -21,6 +21,9 @@ param(
   [Parameter(Mandatory=$true)][string]$StagingDir,
   [Parameter(Mandatory=$true)][string]$SnapshotDbPath,
   [Parameter(Mandatory=$false)][string]$SnapshotPreviewsZipPath = "",
+  [Parameter(Mandatory=$false)][string]$SnapshotJtiArchiveZipPath = "",
+  [Parameter(Mandatory=$false)][string]$SnapshotBatArchiveZipPath = "",
+  [Parameter(Mandatory=$false)][string]$SnapshotEnvPath = "",
   [Parameter(Mandatory=$false)][string]$AppDir = "C:\Cardoso Customer App",
   [Parameter(Mandatory=$false)][string]$ServiceName = "CardosoCigarettes",
   [Parameter(Mandatory=$false)][string]$RestoreId = ""
@@ -81,12 +84,18 @@ function Move-WithRetry($src, $dst, $maxAttempts = 6) {
 
 $dbBackupPath = $null
 $previewsBackupPath = $null
+$jtiArchiveBackupPath = $null
+$batArchiveBackupPath = $null
+$envBackupPath = $null
 
 try {
   Log "=== Restore starting (RestoreId=$RestoreId) ==="
   Log "StagingDir: $StagingDir"
   Log "SnapshotDbPath: $SnapshotDbPath"
-  if ($SnapshotPreviewsZipPath) { Log "SnapshotPreviewsZipPath: $SnapshotPreviewsZipPath" }
+  if ($SnapshotPreviewsZipPath)   { Log "SnapshotPreviewsZipPath: $SnapshotPreviewsZipPath" }
+  if ($SnapshotJtiArchiveZipPath) { Log "SnapshotJtiArchiveZipPath: $SnapshotJtiArchiveZipPath" }
+  if ($SnapshotBatArchiveZipPath) { Log "SnapshotBatArchiveZipPath: $SnapshotBatArchiveZipPath" }
+  if ($SnapshotEnvPath)           { Log "SnapshotEnvPath: $SnapshotEnvPath" }
 
   if (-not (Test-Path $SnapshotDbPath)) {
     throw "Snapshot DB not found at $SnapshotDbPath"
@@ -168,6 +177,69 @@ process.exit(ok ? 0 : 1);
     Log "No previews zip provided OR file missing — leaving uploads/bat-previews/ as-is"
   }
 
+  # ── JTI archive swap (optional) ───────────────────────────────
+  # Source-of-truth: each .xlsx in uploads/jti-archive/ is the
+  # canonical monthly export, generated once and never regenerated.
+  # Losing this dir loses the operator's audit trail of historical
+  # JTI exports — so a full restore must include it.
+  $jtiArchiveDir = Join-Path $AppDir "uploads\jti-archive"
+  if ($SnapshotJtiArchiveZipPath -and (Test-Path $SnapshotJtiArchiveZipPath)) {
+    Log "Restoring JTI archive from $SnapshotJtiArchiveZipPath..."
+    if (Test-Path $jtiArchiveDir) {
+      $jtiArchiveBackupPath = "$jtiArchiveDir.before-restore-$ts"
+      Log "Backing up current JTI archive dir: $jtiArchiveDir -> $jtiArchiveBackupPath"
+      Move-WithRetry $jtiArchiveDir $jtiArchiveBackupPath
+    }
+    New-Item -ItemType Directory -Force -Path $jtiArchiveDir | Out-Null
+    Expand-Archive -Path $SnapshotJtiArchiveZipPath -DestinationPath $jtiArchiveDir -Force
+    $jtiCount = (Get-ChildItem $jtiArchiveDir -Recurse -Filter "*.xlsx" -ErrorAction SilentlyContinue | Measure-Object).Count
+    Log "Restored $jtiCount JTI export file(s)"
+  } else {
+    Log "No JTI archive zip provided OR file missing — leaving uploads/jti-archive/ as-is"
+  }
+
+  # ── BAT archive swap (optional) ───────────────────────────────
+  # Source-of-truth: original supplier .xlsx files uploaded for each
+  # BAT recon. Dispute resolution replays against these bytes; they
+  # cannot be reconstructed from the DB.
+  $batArchiveDir = Join-Path $AppDir "uploads\bat-archive"
+  if ($SnapshotBatArchiveZipPath -and (Test-Path $SnapshotBatArchiveZipPath)) {
+    Log "Restoring BAT supplier archive from $SnapshotBatArchiveZipPath..."
+    if (Test-Path $batArchiveDir) {
+      $batArchiveBackupPath = "$batArchiveDir.before-restore-$ts"
+      Log "Backing up current BAT archive dir: $batArchiveDir -> $batArchiveBackupPath"
+      Move-WithRetry $batArchiveDir $batArchiveBackupPath
+    }
+    New-Item -ItemType Directory -Force -Path $batArchiveDir | Out-Null
+    Expand-Archive -Path $SnapshotBatArchiveZipPath -DestinationPath $batArchiveDir -Force
+    $batCount = (Get-ChildItem $batArchiveDir -Recurse -Filter "*.xlsx" -ErrorAction SilentlyContinue | Measure-Object).Count
+    Log "Restored $batCount BAT supplier file(s)"
+  } else {
+    Log "No BAT archive zip provided OR file missing — leaving uploads/bat-archive/ as-is"
+  }
+
+  # ── .env config swap (optional) ───────────────────────────────
+  # Contains ENCRYPTION_KEY, JWT_SECRET, SITE_ID, REPORTING_TOKEN,
+  # HUB_URL, etc. Without these the restored DB is unreadable
+  # (encrypted_password rows can't decrypt) and sessions can't
+  # validate. The PUSH path is full-fidelity by default (the hub
+  # respects BACKUP_CONFIG_EXPORT_MODE on the SITE — see
+  # /api/backup/config). Operator pushing a restore is acknowledging
+  # they want the .env contents too.
+  $liveEnvPath = Join-Path $AppDir ".env"
+  if ($SnapshotEnvPath -and (Test-Path $SnapshotEnvPath)) {
+    Log "Restoring .env from $SnapshotEnvPath..."
+    if (Test-Path $liveEnvPath) {
+      $envBackupPath = "$liveEnvPath.before-restore-$ts"
+      Log "Backing up current .env: $liveEnvPath -> $envBackupPath"
+      Move-WithRetry $liveEnvPath $envBackupPath
+    }
+    Copy-Item -Path $SnapshotEnvPath -Destination $liveEnvPath -Force
+    Log ".env restored"
+  } else {
+    Log "No .env provided OR file missing — leaving live .env as-is"
+  }
+
   # Post-restore integrity check on the freshly-applied live DB.
   if (Test-Path $nodeExe) {
     Log "Running post-restore PRAGMA integrity_check on live DB..."
@@ -214,22 +286,27 @@ process.exit(ok ? 0 : 1);
 
   Log "=== Restore complete ==="
   WriteStatus 'ok' $null @{
-    db_backup_path       = $dbBackupPath
-    previews_backup_path = $previewsBackupPath
+    db_backup_path           = $dbBackupPath
+    previews_backup_path     = $previewsBackupPath
+    jti_archive_backup_path  = $jtiArchiveBackupPath
+    bat_archive_backup_path  = $batArchiveBackupPath
+    env_backup_path          = $envBackupPath
   }
   exit 0
 } catch {
   $primaryError = "$_"
   Log "ERROR: $primaryError"
 
-  # Roll back. Move the just-saved backup files BACK on top of the
-  # restored copies. If the rollback also fails (rare — would need a
-  # second file-lock window) the .before-restore-* files stay in
-  # place for manual recovery.
+  # Roll back. Each artifact in its own try/catch so a single failure
+  # (e.g. a leftover file lock on previews) doesn't abort the rollback
+  # of the OTHER artifacts. The .before-restore-* files stay on disk for
+  # manual recovery if any individual rollback throws — operator can
+  # see the full state in the WriteStatus payload below.
   $rollbackOk = $true
-  $rollbackError = $null
-  try {
-    if ($dbBackupPath -and (Test-Path $dbBackupPath)) {
+  $rollbackErrors = @()
+
+  if ($dbBackupPath -and (Test-Path $dbBackupPath)) {
+    try {
       Log "Rolling back live DB from $dbBackupPath..."
       $liveDbPath = Join-Path $AppDir "database\cardoso.db"
       if (Test-Path $liveDbPath) { Remove-Item -Force $liveDbPath -ErrorAction SilentlyContinue }
@@ -237,19 +314,70 @@ process.exit(ok ? 0 : 1);
       Remove-Item -Force "$liveDbPath-wal" -ErrorAction SilentlyContinue
       Remove-Item -Force "$liveDbPath-shm" -ErrorAction SilentlyContinue
       Log "Live DB rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "db: $_"
+      Log "Rollback FAILED for live DB: $_. Backup at $dbBackupPath for manual recovery."
     }
-    if ($previewsBackupPath -and (Test-Path $previewsBackupPath)) {
+  }
+
+  if ($previewsBackupPath -and (Test-Path $previewsBackupPath)) {
+    try {
       Log "Rolling back previews dir from $previewsBackupPath..."
       $previewsDir = Join-Path $AppDir "uploads\bat-previews"
       if (Test-Path $previewsDir) { Remove-Item -Recurse -Force $previewsDir -ErrorAction SilentlyContinue }
       Move-Item -Path $previewsBackupPath -Destination $previewsDir -Force
       Log "Previews dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "previews: $_"
+      Log "Rollback FAILED for previews: $_. Backup at $previewsBackupPath for manual recovery."
     }
-  } catch {
-    $rollbackOk = $false
-    $rollbackError = "$_"
-    Log "Rollback ALSO failed: $rollbackError. Backup files at $dbBackupPath / $previewsBackupPath for manual recovery."
   }
+
+  if ($jtiArchiveBackupPath -and (Test-Path $jtiArchiveBackupPath)) {
+    try {
+      Log "Rolling back JTI archive dir from $jtiArchiveBackupPath..."
+      $jtiArchiveDir = Join-Path $AppDir "uploads\jti-archive"
+      if (Test-Path $jtiArchiveDir) { Remove-Item -Recurse -Force $jtiArchiveDir -ErrorAction SilentlyContinue }
+      Move-Item -Path $jtiArchiveBackupPath -Destination $jtiArchiveDir -Force
+      Log "JTI archive dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "jti_archive: $_"
+      Log "Rollback FAILED for JTI archive: $_. Backup at $jtiArchiveBackupPath for manual recovery."
+    }
+  }
+
+  if ($batArchiveBackupPath -and (Test-Path $batArchiveBackupPath)) {
+    try {
+      Log "Rolling back BAT archive dir from $batArchiveBackupPath..."
+      $batArchiveDir = Join-Path $AppDir "uploads\bat-archive"
+      if (Test-Path $batArchiveDir) { Remove-Item -Recurse -Force $batArchiveDir -ErrorAction SilentlyContinue }
+      Move-Item -Path $batArchiveBackupPath -Destination $batArchiveDir -Force
+      Log "BAT archive dir rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "bat_archive: $_"
+      Log "Rollback FAILED for BAT archive: $_. Backup at $batArchiveBackupPath for manual recovery."
+    }
+  }
+
+  if ($envBackupPath -and (Test-Path $envBackupPath)) {
+    try {
+      Log "Rolling back .env from $envBackupPath..."
+      $liveEnvPath = Join-Path $AppDir ".env"
+      if (Test-Path $liveEnvPath) { Remove-Item -Force $liveEnvPath -ErrorAction SilentlyContinue }
+      Move-Item -Path $envBackupPath -Destination $liveEnvPath -Force
+      Log ".env rolled back."
+    } catch {
+      $rollbackOk = $false
+      $rollbackErrors += "env: $_"
+      Log "Rollback FAILED for .env: $_. Backup at $envBackupPath for manual recovery."
+    }
+  }
+
+  $rollbackError = if ($rollbackErrors.Count -gt 0) { $rollbackErrors -join '; ' } else { $null }
 
   # Best-effort restart so the service comes back even on failure.
   Log "Attempting to restart service..."
@@ -264,13 +392,19 @@ process.exit(ok ? 0 : 1);
 
   if ($rollbackOk) {
     WriteStatus 'rolled_back' $primaryError @{
-      db_backup_path       = $dbBackupPath
-      previews_backup_path = $previewsBackupPath
+      db_backup_path           = $dbBackupPath
+      previews_backup_path     = $previewsBackupPath
+      jti_archive_backup_path  = $jtiArchiveBackupPath
+      bat_archive_backup_path  = $batArchiveBackupPath
+      env_backup_path          = $envBackupPath
     }
   } else {
     WriteStatus 'failed' "$primaryError | rollback: $rollbackError" @{
-      db_backup_path       = $dbBackupPath
-      previews_backup_path = $previewsBackupPath
+      db_backup_path           = $dbBackupPath
+      previews_backup_path     = $previewsBackupPath
+      jti_archive_backup_path  = $jtiArchiveBackupPath
+      bat_archive_backup_path  = $batArchiveBackupPath
+      env_backup_path          = $envBackupPath
     }
   }
   exit 1

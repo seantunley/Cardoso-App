@@ -32,6 +32,12 @@ jobs:
         run: npm run lint
         shell: powershell
 
+      - name: Check migration version contiguity
+        # Mirrors the same check in ci.yml — see that workflow for the
+        # 2026-05-11 missing-v62 incident this guards against.
+        run: npm run check:migrations
+        shell: powershell
+
       - name: Build frontend
         run: npm run build
         shell: powershell

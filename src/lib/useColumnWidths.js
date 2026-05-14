@@ -60,9 +60,28 @@ export function useColumnWidths(defaults, storageKey, containerRef) {
   // useRef so resize handlers always read the current widths without
   // reattaching listeners every render.
   const widthsRef = useRef(widths);
+  // Debounce-flushed localStorage write. setWidths fires at 60Hz during
+  // a column drag — sync JSON.stringify + localStorage.setItem on every
+  // mousemove was burning a measurable slice of the drag's frame budget
+  // and the only state worth persisting is the one the operator stops
+  // at. Schedule 200ms after the last change; on unmount/dep-change
+  // flush whatever's pending so persistence isn't lost on navigate-away.
+  /** @type {import('react').MutableRefObject<ReturnType<typeof setTimeout> | null>} */
+  const writeTimerRef = useRef(null);
   useEffect(() => {
     widthsRef.current = widths;
-    try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+      writeTimerRef.current = null;
+    }, 200);
+    return () => {
+      if (writeTimerRef.current) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+        try { localStorage.setItem(storageKey, JSON.stringify(widths)); } catch {}
+      }
+    };
   }, [widths, storageKey]);
 
   /** @type {StartResize} */

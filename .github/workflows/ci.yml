@@ -49,6 +49,15 @@ jobs:
         run: npm run lint
         shell: powershell
 
+      - name: Check migration version contiguity
+        # Asserts every migration in src/db/migrations.js has a unique,
+        # contiguous version (no gaps from 1..N). Catches the "two PRs
+        # each added migration N, conflict resolution dropped one"
+        # class of bug — see scripts/check-migration-versions.mjs for
+        # the 2026-05-11 missing-v62 incident this guards against.
+        run: npm run check:migrations
+        shell: powershell
+
       - name: Typecheck
         run: npm run typecheck
         shell: powershell

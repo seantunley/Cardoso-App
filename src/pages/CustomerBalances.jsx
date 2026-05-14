@@ -28,9 +28,24 @@ function useColumnWidths(containerRef) {
     }
   });
   const widthsRef = useRef(widths);
+  // Debounce-flushed localStorage write — see comment in
+  // src/lib/useColumnWidths.js. Avoids JSON.stringify + sync
+  // localStorage.setItem at 60Hz during a column drag.
+  const writeTimerRef = useRef(null);
   useEffect(() => {
     widthsRef.current = widths;
-    try { localStorage.setItem(CB_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+    if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
+    writeTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem(CB_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      writeTimerRef.current = null;
+    }, 200);
+    return () => {
+      if (writeTimerRef.current) {
+        clearTimeout(writeTimerRef.current);
+        writeTimerRef.current = null;
+        try { localStorage.setItem(CB_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      }
+    };
   }, [widths]);
 
   const MIN_COL = 40;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle, AlertCircle, AlertTriangle, Clock, CloudOff } from 'lucide-react';
+import { CheckCircle, AlertCircle, AlertTriangle, Clock, CloudOff, MinusCircle } from 'lucide-react';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { getLedgerFortune } from '@/lib/fun';
 
@@ -11,7 +11,7 @@ function statusMeta(status) {
 
 const fmt = (v) => `${Number(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-export default function WeekSelector({ reconciliations, onSelect }) {
+export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }) {
   if (!reconciliations?.length) {
     return (
       <div
@@ -37,8 +37,22 @@ export default function WeekSelector({ reconciliations, onSelect }) {
         // Don't show "Complete" (green) if there's no Sage payment yet — that's
         // misleading. Awaiting Sage takes precedence over the extraction status.
         const awaitingSage = !sageHasData && (r.supplier_total || 0) > 0;
+        const isMarkedZero = !!r.marked_zero;
         let badge;
-        if (isMatched) {
+        if (isMarkedZero) {
+          // Marked-zero overrides every other status. The recon is synthetic
+          // (no PODs, no extractions) so OCR/match badges are meaningless.
+          const tipParts = [`Marked as zero${r.marked_zero_by ? ` by ${r.marked_zero_by}` : ''}`];
+          if (r.marked_zero_at) tipParts.push(`on ${new Date(r.marked_zero_at).toLocaleString('en-ZA')}`);
+          if (r.marked_zero_note) tipParts.push(`— ${r.marked_zero_note}`);
+          badge = {
+            color: 'hsl(145 55% 45%)',
+            glow: 'hsla(145, 55%, 45%, 0.4)',
+            Icon: MinusCircle,
+            label: 'Zero',
+            tip: tipParts.join(' '),
+          };
+        } else if (isMatched) {
           badge = { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.4)', Icon: CheckCircle, label: 'Matched', tip: 'BAT supplier total and Sage credit-note total agree to within R 0.01.' };
         } else if (isMismatched) {
           badge = { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.4)', Icon: AlertTriangle, label: 'Mismatch', tip: `BAT and Sage totals differ by R ${variance.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Investigate fee-line differences.` };
@@ -48,13 +62,16 @@ export default function WeekSelector({ reconciliations, onSelect }) {
           badge = statusMeta(r.status);
         }
         const { color, glow, Icon, label, tip } = badge;
-        const borderColor = isMatched || isMismatched ? badge.color : 'hsl(var(--border))';
-        const borderGlow = isMatched || isMismatched ? `0 0 10px ${badge.glow}` : 'none';
+        const borderColor = isMatched || isMismatched || isMarkedZero ? badge.color : 'hsl(var(--border))';
+        const borderGlow = isMatched || isMismatched || isMarkedZero ? `0 0 10px ${badge.glow}` : 'none';
         return (
-          <button
+          <div
             key={r.id}
+            role="button"
+            tabIndex={0}
             onClick={() => onSelect(r.id)}
-            className="relative overflow-hidden bg-card p-4 text-left transition-colors hover:bg-muted/30 group"
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(r.id); } }}
+            className="relative overflow-hidden bg-card p-4 text-left transition-colors hover:bg-muted/30 group cursor-pointer"
             style={{
               border: `1px solid ${borderColor}`,
               boxShadow: borderGlow,
@@ -82,22 +99,47 @@ export default function WeekSelector({ reconciliations, onSelect }) {
                 </Tooltip>
               </div>
 
-              <div className="space-y-1">
-                <DataRow label="BAT" value={fmt(r.supplier_total)} />
-                <DataRow label="Credit Notes" value={r.sage_present ? fmt(r.sage_total) : '—'} muted />
-              </div>
+              {isMarkedZero ? (
+                <>
+                  {r.marked_zero_note && (
+                    <div className="text-xs text-muted-foreground italic line-clamp-2" title={r.marked_zero_note}>
+                      {r.marked_zero_note}
+                    </div>
+                  )}
+                  <div className="pt-2 border-t border-border flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                    <span>By {r.marked_zero_by || 'unknown'}</span>
+                    {onUnmarkZero && (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); onUnmarkZero(r); }}
+                        className="text-muted-foreground hover:text-destructive transition-colors underline-offset-2 hover:underline cursor-pointer"
+                        title="Reverse the mark-zero on this week"
+                      >
+                        Unmark
+                      </button>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-1">
+                    <DataRow label="BAT" value={fmt(r.supplier_total)} />
+                    <DataRow label="Credit Notes" value={r.sage_present ? fmt(r.sage_total) : '—'} muted />
+                  </div>
 
-              <div className="pt-2 border-t border-border">
-                <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
-                  <span>OCR</span>
-                  <span className="tabular-nums">
-                    {r.found_count || 0}<span className="text-muted-foreground/50">/{r.pod_count || 0}</span>
-                    <span className="text-accent ml-2">{ocrPct}%</span>
-                  </span>
-                </div>
-              </div>
+                  <div className="pt-2 border-t border-border">
+                    <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
+                      <span>OCR</span>
+                      <span className="tabular-nums">
+                        {r.found_count || 0}<span className="text-muted-foreground/50">/{r.pod_count || 0}</span>
+                        <span className="text-accent ml-2">{ocrPct}%</span>
+                      </span>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
-          </button>
+          </div>
         );
       })}
     </div>

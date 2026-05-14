@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,19 @@ export default function Records() {
   const [flagFilter, setFlagFilter] = useState("all");
   const [editingRecord, setEditingRecord] = useState(null);
   const [selectedRecords, setSelectedRecords] = useState(new Set());
+  // Toggle a row's id in/out of the selection. Functional setState so we
+  // don't capture a stale `selectedRecords` if React batches multiple
+  // clicks; useCallback so the per-row inline arrow that wraps it
+  // doesn't trigger useless re-renders if RecordCard ever moves to
+  // React.memo. Previous form was inline `new Set(selectedRecords)` per
+  // click, which read the closure copy of state.
+  const toggleSelectedRecord = useCallback((id) => {
+    setSelectedRecords((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }, []);
   const [page, setPage] = useState(0);
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
 
@@ -245,15 +258,7 @@ export default function Records() {
             {records.map((record) => (
               <div
                 key={record.id}
-                onClick={() => {
-                  const newSelected = new Set(selectedRecords);
-                  if (newSelected.has(record.id)) {
-                    newSelected.delete(record.id);
-                  } else {
-                    newSelected.add(record.id);
-                  }
-                  setSelectedRecords(newSelected);
-                }}
+                onClick={() => toggleSelectedRecord(record.id)}
                 className="cursor-pointer"
               >
                 <RecordCard

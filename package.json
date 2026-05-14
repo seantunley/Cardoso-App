@@ -1,7 +1,7 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.5.5",
+  "version": "2026.5.6",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
@@ -17,7 +17,8 @@
     "typecheck:legacy": "tsc -p ./jsconfig.json",
     "preview": "vite preview",
     "hub:postgres:bootstrap": "node scripts/hub-postgres-bootstrap.mjs",
-    "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs"
+    "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs",
+    "check:migrations": "node scripts/check-migration-versions.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
