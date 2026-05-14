@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
-import { readdirSync, statSync, createReadStream, existsSync } from 'fs';
+import { readdirSync, statSync, fstatSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
@@ -19,6 +19,7 @@ import { logAudit } from '../lib/audit.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
 import { getSqlBackupHealth, getMachineHealthSummary } from '../services/hub/hubHealth.js';
 import { pagination, clampInt } from '../lib/httpParams.js';
+import { backupHeavyRateLimiter } from '../middleware/rateLimit.js';
 import multer from 'multer';
 import {
   receiveJtiArchive,
@@ -1954,15 +1955,18 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     return true;
   }
 
-  // Reject siteIds that could escape hub-backups/. Site IDs in the wild
-  // are UUIDs and short slugs; this whitelist is conservative but covers
-  // every legitimate format we've seen. The earlier code passed siteId
-  // straight from `req.params` into `path.join`, which on Express
-  // versions that decode `%2F` could be exploited to read sibling
-  // directories under `database/`.
+  // Reject siteIds that could escape hub-backups/. Without this, raw
+  // req.params.siteId interpolates into path.join — on Express versions
+  // that decode %2F a crafted siteId could read sibling directories.
   function isSafeSiteId(name) {
     if (typeof name !== 'string' || !name) return false;
     return /^[a-zA-Z0-9_-]{1,64}$/.test(name);
+  }
+
+  // Strip control characters and cap length. Used on every user-supplied
+  // value before it lands in a log row.
+  function sanitizeForLog(value, max = 200) {
+    return String(value ?? '').replace(/[\x00-\x1f\x7f]/g, '').slice(0, max);
   }
 
   // GET /api/hub/sites/:siteId/snapshots
@@ -2240,6 +2244,323 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // POST /api/hub/receive-users is registered on ALL installs (hub + site).
   // See createReceiveUsersRouter() below — mounted separately in server.js.
+
+  // ──────────────────────────────────────────────────────────────────
+  // Disaster recovery — self-service "restore a lost site from Hub"
+  //
+  // Endpoints under /api/hub/dr/* exist so a fresh-install site (no
+  // session, no REPORTING_TOKEN paired with the Hub yet) can pull
+  // backups using only Hub admin credentials supplied in the request
+  // body. The wizard on the new site posts the operator's Hub email +
+  // password directly. This is the deliberate auth model — a fresh
+  // install has no other way to authenticate to the Hub.
+  //
+  // Permission gate: same as the Hub-UI restore button — admin role
+  // plus can_access_hub_backups. Audit-logged on every attempt
+  // (success and failure) so credential-stuffing shows up in the
+  // System Log immediately.
+  // ──────────────────────────────────────────────────────────────────
+
+  // Shared bcrypt-validate helper. Returns the user row on success,
+  // null on failure. Logs failures to error_log.
+  async function validateHubAdminCreds(email, password, req) {
+    if (typeof email !== 'string' || typeof password !== 'string' || !email || !password) {
+      return null;
+    }
+    const user = db.prepare('SELECT * FROM "user" WHERE email = ? AND is_active = 1').get(email);
+    if (!user || !user.password_hash) {
+      try {
+        logError('hub.dr.auth_failed', new Error(`Unknown or inactive Hub user '${email}'`), {
+          email_attempted: sanitizeForLog(email),
+          ip: sanitizeForLog(req?.ip, 64),
+        }, 'warn');
+      } catch {}
+      return null;
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      try {
+        logError('hub.dr.auth_failed', new Error(`Bad password for Hub user '${email}'`), {
+          email_attempted: sanitizeForLog(email),
+          ip: sanitizeForLog(req?.ip, 64),
+        }, 'warn');
+      } catch {}
+      return null;
+    }
+    if (user.role !== 'admin') return null;
+    if (!boolFromRow(user.can_access_hub_backups, false)) return null;
+    return user;
+  }
+
+  // POST /api/hub/dr/list-sites
+  // Body: { email, password }
+  // Returns: { sites: [{ id, slug, name, snapshots: [...same shape as
+  //   /api/hub/sites/:siteId/snapshots...] }] }
+  //
+  // Powers the wizard's "pick a site" + "pick a snapshot" steps in
+  // one call so the operator doesn't see a flicker of empty state.
+  router.post('/api/hub/dr/list-sites', backupHeavyRateLimiter, async (req, res) => {
+    const { email, password } = req.body || {};
+    const user = await validateHubAdminCreds(email, password, req);
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid Hub credentials or user lacks can_access_hub_backups.' });
+    }
+
+    const sites = db.prepare(`SELECT id, slug, name, url FROM hub_sites ORDER BY name`).all();
+    const result = sites.map((site) => {
+      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+      if (!existsSync(dir)) return { ...site, snapshots: [] };
+
+      let allFiles = [];
+      try { allFiles = readdirSync(dir); } catch { return { ...site, snapshots: [] }; }
+
+      const dbFiles = allFiles.filter((f) => f.endsWith('.db'));
+      const previewZips = allFiles.filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'));
+      const jtiArchiveZips = allFiles.filter((f) => f.startsWith('jti-archive-') && f.endsWith('.zip'));
+      const batArchiveZips = allFiles.filter((f) => f.startsWith('bat-archive-') && f.endsWith('.zip'));
+      const envFiles = allFiles.filter((f) => f.startsWith('config-') && f.endsWith('.env'));
+
+      const snapshots = dbFiles.map((dbFile) => {
+        const fullDb = path.join(dir, dbFile);
+        let dbStat = null;
+        try { dbStat = statSync(fullDb); } catch {}
+        const tsMatch = dbFile.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
+        const ts = tsMatch ? tsMatch[1] : null;
+        const findCompanion = (list) => (ts ? list.find((f) => f.includes(ts)) : null) || null;
+        const sizeOf = (f) => {
+          if (!f) return null;
+          try { return statSync(path.join(dir, f)).size; } catch { return null; }
+        };
+        return {
+          filename: dbFile,
+          size_bytes: dbStat?.size ?? null,
+          mtime: dbStat ? new Date(dbStat.mtimeMs).toISOString() : null,
+          previews_filename: findCompanion(previewZips),
+          previews_size_bytes: sizeOf(findCompanion(previewZips)),
+          jti_archive_filename: findCompanion(jtiArchiveZips),
+          jti_archive_size_bytes: sizeOf(findCompanion(jtiArchiveZips)),
+          bat_archive_filename: findCompanion(batArchiveZips),
+          bat_archive_size_bytes: sizeOf(findCompanion(batArchiveZips)),
+          env_filename: findCompanion(envFiles),
+          env_size_bytes: sizeOf(findCompanion(envFiles)),
+        };
+      }).sort((a, b) => (b.mtime || '').localeCompare(a.mtime || ''));
+
+      return { ...site, snapshots };
+    });
+
+    try {
+      logAudit({
+        req,
+        action: 'hub_dr_list_sites',
+        resourceType: 'system',
+        resourceId: 'hub',
+        resourceName: 'disaster-recovery',
+        details: `Listed ${result.length} site(s) with ${result.reduce((n, s) => n + s.snapshots.length, 0)} total snapshots`,
+        status: 'success',
+        userOverride: { email: user.email, full_name: user.full_name },
+      });
+    } catch {}
+
+    res.json({ sites: result });
+  });
+
+  // POST /api/hub/dr/snapshot-meta/:siteId/:filename
+  // Body: { email, password }
+  // Returns metadata pulled from inside the snapshot DB itself —
+  // counts of customers / reconciliations / users / audit entries +
+  // last activity timestamp + integrity verdict. Helps the operator
+  // confirm they've picked the right snapshot before kicking off a
+  // multi-GB download.
+  router.post('/api/hub/dr/snapshot-meta/:siteId/:filename', backupHeavyRateLimiter, async (req, res) => {
+    const { email, password } = req.body || {};
+    const user = await validateHubAdminCreds(email, password, req);
+    if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
+
+    const { siteId, filename } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
+    if (!isSafeBackupFilename(filename) || !filename.endsWith('.db')) {
+      return res.status(400).json({ error: 'Invalid filename.' });
+    }
+    const snapPath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    if (!existsSync(snapPath)) {
+      return res.status(404).json({ error: 'Snapshot not found on hub.' });
+    }
+
+    let Database;
+    try {
+      Database = (await import('better-sqlite3')).default;
+    } catch (err) {
+      return res.status(500).json({ error: `better-sqlite3 not available: ${err.message}` });
+    }
+
+    let snap;
+    try {
+      snap = new Database(snapPath, { readonly: true, fileMustExist: true });
+    } catch (err) {
+      return res.status(500).json({ error: `Cannot open snapshot: ${err.message}` });
+    }
+
+    try {
+      // Per-table counts wrapped individually — a missing table on a
+      // particularly old snapshot returns null rather than 500-ing the
+      // whole metadata fetch.
+      const safeCount = (sql) => {
+        try { return snap.prepare(sql).get()?.c ?? null; } catch { return null; }
+      };
+      const safeMax = (sql) => {
+        try { return snap.prepare(sql).get()?.m ?? null; } catch { return null; }
+      };
+
+      // Integrity verdict comes from the cached hub_backup_integrity
+      // row written by the daily backup pull — NOT from running
+      // PRAGMA integrity_check inline. better-sqlite3 is synchronous;
+      // PRAGMA integrity_check on a multi-GB snapshot blocks the Hub's
+      // event loop for minutes, freezing every other request and any
+      // scheduled cron during that window. The cached verdict is
+      // typically <24h old (the Hub re-checks on every pull) which is
+      // fine for "should the operator pick this snapshot" decision.
+      let integrity = 'unknown';
+      try {
+        const cached = db.prepare(`
+          SELECT result FROM hub_backup_integrity
+          WHERE site_id = ? AND filename = ?
+          ORDER BY created_at DESC LIMIT 1
+        `).get(siteId, filename);
+        if (cached?.result === 'ok') integrity = 'ok';
+        else if (cached?.result) integrity = 'corrupt';
+      } catch { /* fall through with 'unknown' */ }
+
+      res.json({
+        filename,
+        integrity,
+        counts: {
+          users: safeCount('SELECT COUNT(*) AS c FROM "user"'),
+          admins: safeCount(`SELECT COUNT(*) AS c FROM "user" WHERE role = 'admin'`),
+          customers: safeCount('SELECT COUNT(*) AS c FROM datarecord'),
+          reconciliations: safeCount('SELECT COUNT(*) AS c FROM bat_reconciliations'),
+          extractions: safeCount('SELECT COUNT(*) AS c FROM bat_invoice_extractions'),
+          audit_entries: safeCount('SELECT COUNT(*) AS c FROM auditlog'),
+        },
+        last_activity: {
+          audit: safeMax('SELECT MAX(created_at) AS m FROM auditlog'),
+          reconciliation: safeMax('SELECT MAX(created_at) AS m FROM bat_reconciliations'),
+          extraction: safeMax('SELECT MAX(created_at) AS m FROM bat_invoice_extractions'),
+        },
+      });
+    } finally {
+      try { snap.close(); } catch {}
+    }
+  });
+
+  // POST /api/hub/dr/fetch/:siteId/:filename
+  // Body: { email, password }
+  // Streams the requested artifact (.db / .env / .zip) from the hub's
+  // hub-backups/<siteId>/ directory. Same path-safety + audit + size
+  // accounting as the existing /api/hub/restore-fetch but auth is
+  // creds-in-body rather than one-shot token (since the calling site
+  // has no token yet). Each fetch is its own audit row.
+  router.post('/api/hub/dr/fetch/:siteId/:filename', backupHeavyRateLimiter, async (req, res) => {
+    const { email, password } = req.body || {};
+    const user = await validateHubAdminCreds(email, password, req);
+    if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
+
+    const { siteId, filename } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
+    if (!isSafeBackupFilename(filename)) {
+      return res.status(400).json({ error: 'Invalid filename.' });
+    }
+    const filePath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    if (!existsSync(filePath)) {
+      return res.status(404).json({ error: 'File not found on hub.' });
+    }
+
+    let bytesStreamed = 0;
+    let auditWritten = false;
+    const writeAudit = (status, extra = {}) => {
+      if (auditWritten) return; auditWritten = true;
+      try {
+        logAudit({
+          req,
+          action: 'hub_dr_fetch',
+          resourceType: 'system',
+          resourceId: siteId,
+          resourceName: filename,
+          details: `bytes=${bytesStreamed}` + (extra.error ? `, error=${sanitizeForLog(extra.error)}` : ''),
+          status,
+          userOverride: { email: user.email, full_name: user.full_name },
+        });
+      } catch {}
+    };
+    res.on('finish', () => writeAudit('success'));
+    res.on('close', () => { if (!res.writableFinished) writeAudit('failure'); });
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.setHeader('Cache-Control', 'no-store');
+
+    // Open the read stream FIRST, then derive Content-Length from
+    // fstat(stream.fd). Doing statSync(filePath) before opening leaves
+    // a window where a concurrent backup-pull cycle could rotate the
+    // file underneath us — Content-Length would advertise the old size
+    // while the bytes streamed reflect the new file. fstat on the
+    // already-open FD pins to the file we're actually streaming.
+    const stream = createReadStream(filePath);
+    stream.on('open', (fd) => {
+      try {
+        const size = fstatSync(fd).size;
+        if (!res.headersSent) res.setHeader('Content-Length', String(size));
+      } catch { /* fall through; client gets chunked transfer */ }
+    });
+    stream.on('data', (chunk) => { bytesStreamed += chunk.length; });
+    stream.on('error', (err) => {
+      console.error('[hub.dr.fetch] stream error:', err.message);
+      try { logError('hub.dr.fetch', err, { siteId, filename }); } catch {}
+      writeAudit('failure', { error: err.message });
+      try { res.destroy(err); } catch {}
+    });
+    stream.pipe(res);
+  });
+
+  // PATCH /api/hub/dr/site-url/:siteId
+  // Body: { email, password, new_url }
+  // Updates hub_sites.url for the given site. Called by the wizard on
+  // the new machine after a successful restore so the Hub knows where
+  // to push future restores / backup-pull requests. Same auth as the
+  // other DR endpoints. Validates new_url is a non-empty http(s) URL.
+  router.patch('/api/hub/dr/site-url/:siteId', backupHeavyRateLimiter, async (req, res) => {
+    const { email, password, new_url } = req.body || {};
+    const user = await validateHubAdminCreds(email, password, req);
+    if (!user) return res.status(401).json({ error: 'Invalid Hub credentials.' });
+
+    const { siteId } = req.params;
+    if (!isSafeSiteId(siteId)) return res.status(400).json({ error: 'Invalid siteId.' });
+    if (typeof new_url !== 'string' || !/^https?:\/\/.+/i.test(new_url)) {
+      return res.status(400).json({ error: 'new_url must be an http(s):// URL.' });
+    }
+
+    const site = db.prepare(`SELECT id, name, url FROM hub_sites WHERE id = ?`).get(siteId);
+    if (!site) return res.status(404).json({ error: 'Site not found on hub.' });
+
+    const oldUrl = site.url || null;
+    db.prepare(`UPDATE hub_sites SET url = ? WHERE id = ?`).run(new_url, siteId);
+
+    try {
+      logAudit({
+        req,
+        action: 'hub_dr_site_url_updated',
+        resourceType: 'site',
+        resourceId: site.id,
+        resourceName: site.name,
+        details: `Site URL updated by DR wizard: ${oldUrl || '(unset)'} → ${new_url}`,
+        changes: { old_url: oldUrl, new_url },
+        status: 'success',
+        userOverride: { email: user.email, full_name: user.full_name },
+      });
+    } catch {}
+
+    res.json({ ok: true, site_id: site.id, old_url: oldUrl, new_url });
+  });
 
   console.log('[HUB] Hub ETL initialized. Sites:', HUB_SITES.map(s => s.slug).join(', ') || 'none configured');
 
@@ -2713,6 +3034,7 @@ export function createReceiveUsersRouter() {
       env_filename: env?.filename || null,
     });
   });
+
 
   return router;
 }
