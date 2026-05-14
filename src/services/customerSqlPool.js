@@ -86,14 +86,49 @@ async function getCustomerSqlPool() {
 }
 
 // Run a query with one auto-retry if the cached pool turns out to be dead.
-export async function runCustomerSqlQuery(sqlText) {
+//
+// `params` is an optional `{ name: value }` map of named parameters to
+// bind via mssql's request().input(name, value). Use named-parameter
+// bindings (@name in the SQL) instead of string interpolation:
+//   - Defence in depth against SQL injection. Existing callsites
+//     escape via `replace(/'/g, "''")` which works but is fragile;
+//     parameterised binds remove the class of mistake entirely.
+//   - Plan-cache reuse on Sage's MSSQL. Inline-interpolated SQL
+//     produces a fresh plan per call (different SQL text); a
+//     parameterised query reuses the cached plan across calls,
+//     materially cheaper on the Sage box.
+//
+// Type inference: passing the value directly lets mssql pick a sensible
+// SQL type (string → NVarChar, number → Int / BigInt, etc.). Pass an
+// `{ value, type }` object if a specific type matters (e.g. Decimal for
+// money-bound LIKE patterns — we don't need that today). Keep it simple
+// for now.
+export async function runCustomerSqlQuery(sqlText, params = null) {
   let p = await getCustomerSqlPool();
   // First 80 chars of the SQL — enough to identify the query in logs
   // without dumping a multi-line SELECT into error_log.context. Helps
   // triage "which query failed" without grep'ing the codebase.
   const sqlPreview = String(sqlText || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+
+  const buildRequest = () => {
+    const req = p.request();
+    if (params && typeof params === 'object' && !Array.isArray(params)) {
+      for (const [name, value] of Object.entries(params)) {
+        // Named-parameter bind. mssql validates the name (must be a
+        // simple identifier) and rejects @-prefixed names — the caller
+        // writes `@name` in the SQL but passes a bare key here.
+        if (value && typeof value === 'object' && 'value' in value && 'type' in value) {
+          req.input(name, value.type, value.value);
+        } else {
+          req.input(name, value);
+        }
+      }
+    }
+    return req;
+  };
+
   try {
-    return await p.request().query(sqlText);
+    return await buildRequest().query(sqlText);
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[customer-sql] Pool dropped, reopening and retrying once');
@@ -101,7 +136,7 @@ export async function runCustomerSqlQuery(sqlText) {
       try { await p.close(); } catch {}
       pool = null;
       p = await getCustomerSqlPool();
-      return await p.request().query(sqlText);
+      return await buildRequest().query(sqlText);
     }
     try { logError('customer.sql.query', err, { sql_preview: sqlPreview, role: 'customer_lookup', sql_code: err.code }); } catch {}
     throw err;
