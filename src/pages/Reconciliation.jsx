@@ -1335,7 +1335,7 @@ export default function Reconciliation() {
                       {filtered.length} of {yearFiltered.length} week{yearFiltered.length !== 1 ? 's' : ''}
                     </span>
                   </div>
-                  <WeekSelector reconciliations={filtered} onSelect={loadReconciliation} />
+                  <WeekSelector reconciliations={filtered} onSelect={loadReconciliation} onUnmarkZero={handleUnmarkZero} />
                 </section>
               );
             })()}
