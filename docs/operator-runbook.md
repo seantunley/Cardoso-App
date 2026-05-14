@@ -584,13 +584,21 @@ Permissions are checked in two places: middleware on the API route (returns 403 
 
 Three backup mechanisms, three different purposes.
 
-**Local backup** runs on every site once a day at 03:00 (cron schedule fixed). Path: `backups/cardoso-YYYY-MM-DD.sqlite.gz`. Keeps the last 14 days; older files deleted in the same run. Implemented in [src/services/backupRunner.js](src/services/backupRunner.js).
+**Local backup** runs on every site once a day at 02:00 (cron in [src/scheduler.js](src/scheduler.js) — `runLocalBackup`). Path: `database/backups/cardoso-<SITE_ID>-YYYY-MM-DD-HH-MM-SS.db` (full SQLite snapshot via `db.backup()`, not gzipped). Keeps the last `BACKUP_KEEP_COUNT` backups (default 6); older files deleted in the same run. Pre-`SITE_ID` installs land under `cardoso-site-...db` from the literal-string fallback.
+
+Alongside each `.db` is a sibling directory `cardoso-<SITE_ID>-<TS>.previews/` containing **hardlinks** to every JPEG in `uploads/bat-previews/`. Hardlinks share the underlying inode, so disk cost is one copy total no matter how many snapshots are kept — previews are written atomically by `ocrWorker.js` (write-temp + rename) so the snapshot's bytes don't drift even if a row is re-extracted later. Cross-volume installs fall back to a file copy.
 
 **Backup integrity check** (`backup-verify` job, daily 03:30) opens the most recent backup, runs `PRAGMA integrity_check`, counts a few key tables, and confirms record counts are sane. If any check fails the run is logged with `status='failed'` and the alert engine fires `backup-verify-failed` (see Alerts engine). PR #178 introduced this — the success-check pattern means the job is "soft-failable" without crashing.
 
-**Hub backup pull** — the hub once an hour pulls each site's most-recent backup file via `/api/hub/site-backup-download` and stores it under `backups/sites/<slug>/`. Why: head office wants every site's data even if a branch's hardware dies. The Hub Backups page (hub mode only) lists the most-recent pull per site, file size, age. A red age column ≥ 24h means the pull is stuck — check Hub Sync Log for the error.
+**Hub backup pull** — the hub pulls each site's most-recent backup hourly (cadence in [src/scheduler.js](src/scheduler.js) `startHubSchedulers` / [src/services/hubEtl.js](src/services/hubEtl.js) `runHubBackupPull`) and stores it under `database/hub-backups/<SITE_ID>/cardoso-<SITE_ID>-<TS>.db`. The Hub Backups page (hub mode only) lists the most-recent pull per site, file size, age. A red age column ≥ 24h means the pull is stuck — check Hub Sync Log for the error.
 
-**To restore:** stop the service, replace `data/cardoso.sqlite` with the unzipped backup, restart. There is no in-app restore button — restore is a deliberate, manual operation.
+**To restore from a local snapshot** (e.g. yesterday's DB looked weird, roll back):
+1. Stop the Cardoso service.
+2. Replace `database/cardoso.db` with `database/backups/cardoso-<SITE_ID>-<TS>.db` (delete `cardoso.db-wal` and `cardoso.db-shm` first — stale journal files corrupt-look the swapped DB).
+3. If you also want the matching preview JPEGs back, copy `database/backups/cardoso-<SITE_ID>-<TS>.previews/*.jpg` into `uploads/bat-previews/` (the existing files share inodes with the snapshot, so this is safe to do in either direction).
+4. Restart the service.
+
+**To restore from Hub backups** (lost the site machine entirely): see [docs/ops/disaster-recovery.md](docs/ops/disaster-recovery.md) once PR #338 is merged. Until then, copy the Hub-side `database/hub-backups/<SITE_ID>/` folder to the new machine and follow the local-restore steps above.
 
 ---
 
