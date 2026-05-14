@@ -707,17 +707,35 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/inventory — paginated. Default 1000 / max 5000 to match the
+  // shape of the Inventory page (operator typically loads a single site
+  // at a time; full-table scans were shipping 80K+ rows on 8-site hubs
+  // and JSON-parsing every one through expandDataRecord).
   router.get('/api/hub/inventory', requireAuth, (req, res) => {
     const { site_id, search, commodity } = req.query;
-    let query = 'SELECT hi.*, COALESCE(s.name, hi.site_id) AS site_name FROM hub_inventory hi LEFT JOIN hub_sites s ON s.id = hi.site_id WHERE 1=1';
+    const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
+    let whereClause = 'WHERE 1=1';
     const params = [];
-    if (site_id) { query += ' AND hi.site_id=?'; params.push(site_id); }
-    if (search) { query += ' AND (hi.item_number LIKE ? OR hi.item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
-    if (commodity) { query += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
-    query += ' ORDER BY hi.item_number ASC';
+    if (site_id) { whereClause += ' AND hi.site_id=?'; params.push(site_id); }
+    if (search) { whereClause += ' AND (hi.item_number LIKE ? OR hi.item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    if (commodity) { whereClause += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
     try {
-      const rows = db.prepare(query).all(...params);
-      res.json({ count: rows.length, records: rows.map(expandDataRecord) });
+      const countRow = db.prepare(`SELECT COUNT(*) AS total FROM hub_inventory hi ${whereClause}`).get(...params);
+      const rows = db.prepare(`
+        SELECT hi.*, COALESCE(s.name, hi.site_id) AS site_name
+        FROM hub_inventory hi
+        LEFT JOIN hub_sites s ON s.id = hi.site_id
+        ${whereClause}
+        ORDER BY hi.item_number ASC
+        LIMIT ? OFFSET ?
+      `).all(...params, limit, offset);
+      res.json({
+        total: countRow?.total || 0,
+        count: rows.length,
+        limit,
+        offset,
+        records: rows.map(expandDataRecord),
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
