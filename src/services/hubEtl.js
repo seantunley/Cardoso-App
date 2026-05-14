@@ -791,6 +791,7 @@ async function pullBackupForSite(site) {
     // previews to restore — better than the .db pull silently failing
     // because of a previews issue.
     let previewsResult = { ok: false, count: 0 };
+    const previewFile = path.join(dir, `bat-previews-${site.id}-${ts}.zip`);
     try {
       const prevCtrl = new AbortController();
       const prevTimeout = setTimeout(() => prevCtrl.abort(), 5 * 60 * 1000);
@@ -801,17 +802,103 @@ async function pullBackupForSite(site) {
       clearTimeout(prevTimeout);
       if (prevRes.ok) {
         const previewCount = parseInt(prevRes.headers.get('x-backup-preview-count') || '0', 10);
-        const previewFile = path.join(dir, `bat-previews-${site.id}-${ts}.zip`);
+        const expectedSize = parseInt(prevRes.headers.get('content-length') || '', 10);
         await pipeline(Readable.fromWeb(prevRes.body), createWriteStream(previewFile));
-        const { statSync } = await import('fs');
+        const { statSync, unlinkSync } = await import('fs');
         const previewSize = statSync(previewFile).size;
-        console.log(`[HUB BACKUP] ${site.name}: BAT previews saved (${previewCount} files, ${(previewSize / 1024 / 1024).toFixed(1)} MB)`);
-        previewsResult = { ok: true, count: previewCount, size: previewSize, file: previewFile };
+        // Empty store-mode zip is 22 bytes (EOCD only). Anything smaller
+        // is a truncated/aborted download that would silently look like
+        // a valid 0-file snapshot to a future restore.
+        const MIN_ZIP_BYTES = 22;
+        if (previewSize < MIN_ZIP_BYTES) {
+          try { unlinkSync(previewFile); } catch {}
+          console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch returned ${previewSize} bytes — too small to be a valid zip; deleted.`);
+          previewsResult = { ok: false, error: `zip too small: ${previewSize} bytes` };
+        } else if (Number.isFinite(expectedSize) && expectedSize > 0 && previewSize !== expectedSize) {
+          try { unlinkSync(previewFile); } catch {}
+          console.warn(`[HUB BACKUP] ${site.name}: BAT previews truncated download (${previewSize} of ${expectedSize} bytes) — deleted.`);
+          previewsResult = { ok: false, error: `truncated: ${previewSize}/${expectedSize}` };
+        } else {
+          console.log(`[HUB BACKUP] ${site.name}: BAT previews saved (${previewCount} files, ${(previewSize / 1024 / 1024).toFixed(1)} MB)`);
+          previewsResult = { ok: true, count: previewCount, size: previewSize, file: previewFile };
+        }
       } else {
         console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch HTTP ${prevRes.status} — skipping (existing previews on hub remain)`);
       }
     } catch (prevErr) {
+      // Mid-stream failure leaves a partial file — clean it up.
+      try {
+        const { unlinkSync, existsSync } = await import('fs');
+        if (existsSync(previewFile)) unlinkSync(previewFile);
+      } catch {}
       console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
+    }
+
+    // Source-of-truth archives: JTI monthly exports + BAT supplier
+    // uploads. Neither can be regenerated from the .db alone — JTI
+    // archive rows reference files on disk; BAT supplier dispute
+    // workflows replay against the original uploaded bytes. Same
+    // best-effort pattern as bat-previews: a failure here doesn't
+    // fail the whole backup.
+    const archiveTargets = [
+      { name: 'jti-archive', label: 'JTI archive' },
+      { name: 'bat-archive', label: 'BAT archive' },
+    ];
+    const archiveResults = {};
+    // Empty store-mode zip is 22 bytes (just the End-of-Central-Directory
+    // record). Anything smaller can't be a valid zip; treat as a failed
+    // download (truncation, proxy interrupt, archiver finalize race) and
+    // delete so a future restore doesn't pick a 0-byte file as a
+    // "snapshot".
+    const MIN_ZIP_BYTES = 22;
+    for (const { name, label } of archiveTargets) {
+      const file = path.join(dir, `${name}-${site.id}-${ts}.zip`);
+      try {
+        const ctrl = new AbortController();
+        const timeout = setTimeout(() => ctrl.abort(), 5 * 60 * 1000);
+        const res = await fetch(`${site.url}/api/backup/${name}`, {
+          headers: { 'x-reporting-token': site.token || '' },
+          signal: ctrl.signal,
+        });
+        clearTimeout(timeout);
+        if (res.ok) {
+          // Capture Content-Length BEFORE streaming — used after pipeline
+          // to detect truncation. The site's nestedArchiveEndpoint streams
+          // and only sets Content-Length if it can know the total ahead
+          // of time (it can't — archiver writes incrementally), so this
+          // header may be absent. When absent we accept any size > MIN.
+          const expectedSize = parseInt(res.headers.get('content-length') || '', 10);
+          await pipeline(Readable.fromWeb(res.body), createWriteStream(file));
+          const { statSync, unlinkSync } = await import('fs');
+          const size = statSync(file).size;
+          if (size < MIN_ZIP_BYTES) {
+            try { unlinkSync(file); } catch {}
+            console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch returned ${size} bytes — too small to be a valid zip; deleted.`);
+            archiveResults[name] = { ok: false, error: `zip too small: ${size} bytes` };
+            continue;
+          }
+          if (Number.isFinite(expectedSize) && expectedSize > 0 && size !== expectedSize) {
+            try { unlinkSync(file); } catch {}
+            console.warn(`[HUB BACKUP] ${site.name}: ${label} truncated download (${size} of ${expectedSize} bytes) — deleted.`);
+            archiveResults[name] = { ok: false, error: `truncated: ${size}/${expectedSize}` };
+            continue;
+          }
+          console.log(`[HUB BACKUP] ${site.name}: ${label} saved (${(size / 1024 / 1024).toFixed(1)} MB)`);
+          archiveResults[name] = { ok: true, size, file };
+        } else {
+          console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch HTTP ${res.status} — skipping (existing on hub remains)`);
+          archiveResults[name] = { ok: false, status: res.status };
+        }
+      } catch (err) {
+        // Clean up partial file from a mid-stream failure so a future
+        // restore doesn't pick it up.
+        try {
+          const { unlinkSync, existsSync } = await import('fs');
+          if (existsSync(file)) unlinkSync(file);
+        } catch {}
+        console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch failed — ${describeFetchError(err, `${site.url}/api/backup/${name}`)}`);
+        archiveResults[name] = { ok: false, error: err.message };
+      }
     }
 
     // Prune older per-site backups so the hub doesn't accumulate
@@ -843,18 +930,32 @@ async function pullBackupForSite(site) {
         console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
       }
 
-      const previewZips = readdirSync(dir)
-        .filter((f) => f.startsWith('bat-previews-') && f.endsWith('.zip'))
-        .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
-        .sort((a, b) => b.mtime - a.mtime);
-      const parsedPrevKeep = parseInt(process.env.HUB_BAT_PREVIEWS_KEEP, 10);
-      const prevKeep = Number.isFinite(parsedPrevKeep) && parsedPrevKeep >= 1 ? parsedPrevKeep : 3;
-      const prevToDelete = previewZips.slice(prevKeep);
-      for (const f of prevToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
-      }
-      if (prevToDelete.length > 0) {
-        console.log(`[HUB BACKUP] ${site.name}: pruned ${prevToDelete.length} old preview zip(s), keeping ${prevKeep}`);
+      // Append-only zip prunes. bat-previews, jti-archive, bat-archive
+      // all share the same property — the LATEST zip already contains
+      // all historical entries (previews are written-once by extractionId,
+      // jti exports are written-once per period, bat archives are
+      // written-once per recon), so keeping a long tail of zips is
+      // pure disk waste. Defaults are deliberately small; operators can
+      // raise via env if they want belt-and-braces.
+      const appendOnlyZipPrunes = [
+        { prefix: 'bat-previews-',  envVar: 'HUB_BAT_PREVIEWS_KEEP',  defaultKeep: 3, label: 'preview zip' },
+        { prefix: 'jti-archive-',   envVar: 'HUB_JTI_ARCHIVE_KEEP',   defaultKeep: 3, label: 'JTI archive zip' },
+        { prefix: 'bat-archive-',   envVar: 'HUB_BAT_ARCHIVE_KEEP',   defaultKeep: 3, label: 'BAT archive zip' },
+      ];
+      for (const { prefix, envVar, defaultKeep, label } of appendOnlyZipPrunes) {
+        const zips = readdirSync(dir)
+          .filter((f) => f.startsWith(prefix) && f.endsWith('.zip'))
+          .map((f) => ({ name: f, mtime: statSync(path.join(dir, f)).mtimeMs }))
+          .sort((a, b) => b.mtime - a.mtime);
+        const parsed = parseInt(process.env[envVar], 10);
+        const keepN = Number.isFinite(parsed) && parsed >= 1 ? parsed : defaultKeep;
+        const toDelete = zips.slice(keepN);
+        for (const f of toDelete) {
+          try { unlinkSync(path.join(dir, f.name)); } catch {}
+        }
+        if (toDelete.length > 0) {
+          console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old ${label}(s), keeping ${keepN}`);
+        }
       }
     } catch (pruneErr) {
       console.warn(`[HUB BACKUP] ${site.name}: prune failed (non-fatal): ${pruneErr.message}`);
@@ -865,6 +966,7 @@ async function pullBackupForSite(site) {
       file: integrity.finalPath,
       integrity: integrity.integrity,
       previews: previewsResult,
+      archives: archiveResults,
     };
   } catch (err) {
     const friendly = describeFetchError(err, `${site.url}/api/backup/download`);
