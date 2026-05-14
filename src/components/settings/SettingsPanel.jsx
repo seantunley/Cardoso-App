@@ -8,8 +8,6 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { cn } from "@/lib/utils";
 import { hasPermission } from "@/lib/permissions";
-import { humanizeApiError } from "@/lib/humanizeApiError";
-import { cleanImportToastMessage, resetCleanSyncStreak } from "@/lib/fun";
 import DisasterRecoveryWizard from "@/components/settings/DisasterRecoveryWizard";
 
 // UI
