@@ -176,6 +176,11 @@ function initSchema(db) {
     `CREATE INDEX IF NOT EXISTS idx_datarecord_flag_source ON datarecord (flag_source)`,
     `CREATE INDEX IF NOT EXISTS idx_datarecord_auto_flagged ON datarecord (auto_flagged)`,
     `CREATE INDEX IF NOT EXISTS idx_datarecord_terms ON datarecord (terms)`,
+    // Partial index for the /api/reports/top-balances DISTINCT TRIM
+    // query and the /api/reports/rep-exposure GROUP BY. Without it the
+    // query plans to a full table scan + hash distinct; with it we
+    // get an index seek over the non-empty rep set.
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_sales_rep ON datarecord (sales_rep) WHERE sales_rep IS NOT NULL AND sales_rep != ''`,
   ];
   for (const sql of optionalIndexes) {
     try { db.exec(sql); } catch { /* column not yet added — migration will handle it */ }
@@ -333,6 +338,7 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number);
       CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color);
       CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_sales_rep ON hub_records(sales_rep) WHERE sales_rep IS NOT NULL AND sales_rep != '';
       CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_sync_log_site_id ON hub_sync_log(site_id);
