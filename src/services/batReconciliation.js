@@ -1335,6 +1335,14 @@ export function getOcrCounters({ windowHours = 1 } = {}) {
 
 // Recent reconciliations (any status) with row-count breakdown. Powers the
 // "recent runs" table in the OCR tab. NOT scoped by user — admin-only view.
+//
+// rows_duplicates / duplicate_invoices follow the same definition the
+// per-recon reset modal uses (PR #320): a "duplicate" is any row whose
+// extracted_invoice value appears on 2+ found rows in the SAME recon.
+// rows_duplicates is the total row-count across all such clusters
+// (i.e. it includes EVERY row in a cluster of size N, not N-1). The
+// inner subquery's HAVING + the outer SUM(c) folds that two-step
+// aggregation into one column for the table.
 export function getRecentBatReconciliations(limit = 20) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   try {
@@ -1346,7 +1354,32 @@ export function getRecentBatReconciliations(limit = 20) {
         (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'found') AS rows_found,
         (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'pending') AS rows_pending,
         (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'not_found') AS rows_not_found,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'failed') AS rows_failed
+        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'failed') AS rows_failed,
+        -- Filter matches services/bat/duplicates.js — extracted_invoice
+        -- must be NOT NULL AND non-empty after trimming. Without the
+        -- TRIM check, empty-string clusters (which shouldn't happen but
+        -- have been seen in the wild after some pipeline failures) get
+        -- counted as a single mega-cluster of "duplicates".
+        (SELECT COALESCE(SUM(c), 0) FROM (
+          SELECT COUNT(*) AS c
+          FROM bat_invoice_extractions
+          WHERE reconciliation_id = r.id
+            AND extraction_status = 'found'
+            AND extracted_invoice IS NOT NULL
+            AND TRIM(extracted_invoice) != ''
+          GROUP BY extracted_invoice
+          HAVING COUNT(*) >= 2
+        )) AS rows_duplicates,
+        (SELECT COUNT(*) FROM (
+          SELECT extracted_invoice
+          FROM bat_invoice_extractions
+          WHERE reconciliation_id = r.id
+            AND extraction_status = 'found'
+            AND extracted_invoice IS NOT NULL
+            AND TRIM(extracted_invoice) != ''
+          GROUP BY extracted_invoice
+          HAVING COUNT(*) >= 2
+        )) AS duplicate_invoices
       FROM bat_reconciliations r
       ORDER BY r.id DESC
       LIMIT ?
