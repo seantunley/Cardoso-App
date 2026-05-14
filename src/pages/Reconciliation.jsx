@@ -882,7 +882,7 @@ export default function Reconciliation() {
                             <button
                               key={w}
                               type="button"
-                              onClick={() => { setMarkZeroTarget({ week_number: w, year: isoYear() }); setMarkZeroNote(''); }}
+                              onClick={() => { setMarkZeroTarget({ week_number: w, year: isoYear(new Date()) }); setMarkZeroNote(''); }}
                               title={`Mark W${String(w).padStart(2, '0')} as a zero week`}
                               className="font-mono text-[10px] tabular-nums px-2 py-0.5 rounded border border-destructive/40 text-destructive hover:bg-destructive/10 transition-colors cursor-pointer"
                             >
