@@ -161,6 +161,11 @@ export default function Reconciliation() {
   const [markZeroTarget, setMarkZeroTarget] = useState(null);
   const [markZeroNote, setMarkZeroNote] = useState('');
   const [markZeroBusy, setMarkZeroBusy] = useState(false);
+  // Unmark-zero confirmation dialog. `unmarkZeroTarget` is the recon row
+  // (carrying id/recon_id, week_number, year, marked_zero_by, etc) when
+  // open, null otherwise.
+  const [unmarkZeroTarget, setUnmarkZeroTarget] = useState(null);
+  const [unmarkZeroBusy, setUnmarkZeroBusy] = useState(false);
   // Page-level viewing year — drives which reconciliations show up in the
   // archive list, the per-week comparison, and (eventually) the dashboard
   // summary tiles. Persisted in localStorage so a page reload doesn't reset
@@ -582,12 +587,21 @@ export default function Reconciliation() {
     }
   };
 
-  const handleUnmarkZero = async (row) => {
-    // weekComparison rows alias id as recon_id (to avoid clobbering
-    // other fields named id); list-reconciliations rows have plain id.
-    const id = row?.recon_id ?? row?.id;
-    if (!id) return;
-    if (!window.confirm(`Unmark week ${row.week_number}/${row.year} (was zero-marked by ${row.marked_zero_by || 'unknown'})?`)) return;
+  // Open the styled in-app confirm dialog. The actual API call lives in
+  // submitUnmarkZero (called from the dialog's confirm button). We keep
+  // these split so the dialog can manage its own busy state and the row
+  // is closure-captured at open-time, not called-time.
+  const handleUnmarkZero = (row) => {
+    if (!row) return;
+    if (!(row.recon_id ?? row.id)) return;
+    setUnmarkZeroTarget(row);
+  };
+
+  const submitUnmarkZero = async () => {
+    if (!unmarkZeroTarget || unmarkZeroBusy) return;
+    const row = unmarkZeroTarget;
+    const id = row.recon_id ?? row.id;
+    setUnmarkZeroBusy(true);
     try {
       const r = await fetch(`/api/bat/reconciliations/${id}/unmark-zero`, {
         method: 'POST', credentials: 'include',
@@ -595,9 +609,12 @@ export default function Reconciliation() {
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       toast.success(`Week ${row.week_number}/${row.year} unmarked`);
+      setUnmarkZeroTarget(null);
       loadDashboard();
     } catch (err) {
       toast.error(humanizeApiError(err, 'unmark zero week'));
+    } finally {
+      setUnmarkZeroBusy(false);
     }
   };
 
@@ -1855,6 +1872,60 @@ export default function Reconciliation() {
                 style={{ borderRadius: '8px' }}
               >
                 {markZeroBusy ? 'Marking…' : 'Mark as zero'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Unmark week zero — confirmation dialog (replaces window.confirm). */}
+      <Dialog open={!!unmarkZeroTarget} onOpenChange={(v) => { if (!v && !unmarkZeroBusy) setUnmarkZeroTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="font-display text-2xl text-foreground">
+              Unmark week
+            </DialogTitle>
+            <DialogDescription className="font-mono text-[10px] uppercase tracking-[0.2em]">
+              {unmarkZeroTarget && `W${String(unmarkZeroTarget.week_number).padStart(2, '0')} of ${unmarkZeroTarget.year}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              This week will be removed from the recon list and{' '}
+              <strong>reappear in the missing credit notes list</strong>. Use this if the
+              week was marked zero by mistake or if charges later turned up.
+            </p>
+            {unmarkZeroTarget && (unmarkZeroTarget.marked_zero_by || unmarkZeroTarget.marked_zero_at || unmarkZeroTarget.marked_zero_note) && (
+              <div className="border border-border rounded-md p-3 bg-muted/20 space-y-1.5">
+                <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground">Marked zero</div>
+                {unmarkZeroTarget.marked_zero_by && (
+                  <div className="text-sm"><span className="text-muted-foreground">By:</span> <strong>{unmarkZeroTarget.marked_zero_by}</strong></div>
+                )}
+                {unmarkZeroTarget.marked_zero_at && (
+                  <div className="text-sm"><span className="text-muted-foreground">When:</span> {new Date(unmarkZeroTarget.marked_zero_at).toLocaleString('en-ZA')}</div>
+                )}
+                {unmarkZeroTarget.marked_zero_note && (
+                  <div className="text-sm"><span className="text-muted-foreground">Note:</span> <em>{unmarkZeroTarget.marked_zero_note}</em></div>
+                )}
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setUnmarkZeroTarget(null)}
+                disabled={unmarkZeroBusy}
+                className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground transition-colors px-3 py-1.5 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={submitUnmarkZero}
+                disabled={unmarkZeroBusy}
+                className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive hover:text-foreground transition-colors border border-destructive bg-destructive/10 px-3 py-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ borderRadius: '8px' }}
+              >
+                {unmarkZeroBusy ? 'Unmarking…' : 'Unmark'}
               </button>
             </div>
           </div>
