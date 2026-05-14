@@ -583,10 +583,13 @@ export default function Reconciliation() {
   };
 
   const handleUnmarkZero = async (row) => {
-    if (!row?.recon_id) return;
+    // weekComparison rows alias id as recon_id (to avoid clobbering
+    // other fields named id); list-reconciliations rows have plain id.
+    const id = row?.recon_id ?? row?.id;
+    if (!id) return;
     if (!window.confirm(`Unmark week ${row.week_number}/${row.year} (was zero-marked by ${row.marked_zero_by || 'unknown'})?`)) return;
     try {
-      const r = await fetch(`/api/bat/reconciliations/${row.recon_id}/unmark-zero`, {
+      const r = await fetch(`/api/bat/reconciliations/${id}/unmark-zero`, {
         method: 'POST', credentials: 'include',
       });
       const data = await r.json().catch(() => ({}));
