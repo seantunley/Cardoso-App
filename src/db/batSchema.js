@@ -148,6 +148,15 @@ export function initBatSchema(db) {
   if (!reconHas('last_error'))    db.exec("ALTER TABLE bat_reconciliations ADD COLUMN last_error TEXT");
   if (!reconHas('last_error_at')) db.exec("ALTER TABLE bat_reconciliations ADD COLUMN last_error_at TEXT");
   if (!reconHas('sage_error'))    db.exec("ALTER TABLE bat_reconciliations ADD COLUMN sage_error TEXT");
+  // Mark-week-zero: synthetic recon row for genuinely empty weeks (no
+  // deliveries, no charges) that the upload flow rejects because the
+  // Delivery POD sheet is empty. A row with marked_zero = 1 has all
+  // supplier totals = 0 and counts as "covered" in missing-weeks
+  // calculations. Reversible.
+  if (!reconHas('marked_zero'))      db.exec("ALTER TABLE bat_reconciliations ADD COLUMN marked_zero INTEGER DEFAULT 0");
+  if (!reconHas('marked_zero_by'))   db.exec("ALTER TABLE bat_reconciliations ADD COLUMN marked_zero_by TEXT");
+  if (!reconHas('marked_zero_at'))   db.exec("ALTER TABLE bat_reconciliations ADD COLUMN marked_zero_at TEXT");
+  if (!reconHas('marked_zero_note')) db.exec("ALTER TABLE bat_reconciliations ADD COLUMN marked_zero_note TEXT");
 
   // Migration: replace UNIQUE(pdf_url) with UNIQUE(reconciliation_id, pdf_url).
   // Old constraint silently re-pointed any re-uploaded POD URL at the new recon

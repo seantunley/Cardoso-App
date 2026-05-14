@@ -57,6 +57,8 @@ import {
   getOcrCounters,
   getRecentBatReconciliations,
   clearOcrHalt,
+  markWeekZero,
+  unmarkWeekZero,
 } from '../services/batReconciliation.js';
 import { processSupplierUpload } from '../services/bat/uploadProcessor.js';
 
@@ -640,17 +642,30 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     // /api/reporting/bat-summary mirrors this exact logic so the
     // operator sees the same week list whether they're on the site UI
     // or the hub per-site tile.
+    //
+    // Coverage = paid by Sage OR marked zero by an operator. A
+    // genuinely-zero week (no deliveries, no fees) has no Sage credit
+    // notes by definition, so without the marked-zero union it would
+    // sit in missing-weeks forever. The marked_zero recon row is
+    // synthetic — see services/batReconciliation.markWeekZero.
     const currentYear = isoYear;
     const paidThisYear = new Set(sageWeekTotals.filter(w => w.year === currentYear).map(w => w.week_number));
+    const markedZeroThisYear = new Set(
+      db.prepare(
+        `SELECT week_number FROM bat_reconciliations WHERE year = ? AND marked_zero = 1`
+      ).all(currentYear).map(r => r.week_number)
+    );
+    const coveredThisYear = new Set([...paidThisYear, ...markedZeroThisYear]);
     const missingCutoff = Math.max(0, currentWeek - 1);
     const missingWeeks = [];
     for (let w = 1; w <= missingCutoff; w++) {
-      if (!paidThisYear.has(w)) missingWeeks.push(w);
+      if (!coveredThisYear.has(w)) missingWeeks.push(w);
     }
 
     // Supplier per-week totals (from already-uploaded reconciliations)
     const supplierRows = db.prepare(`
-      SELECT year, week_number, supplier_delivery, supplier_discount, supplier_pricing
+      SELECT id, year, week_number, supplier_delivery, supplier_discount, supplier_pricing,
+             marked_zero, marked_zero_by, marked_zero_at, marked_zero_note
       FROM bat_reconciliations
     `).all();
 
@@ -659,6 +674,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const keyOf = (y, w) => `${y}/${w}`;
     for (const s of supplierRows) {
       merged.set(keyOf(s.year, s.week_number), {
+        recon_id: s.id,
         year: s.year,
         week_number: s.week_number,
         supplier_delivery: s.supplier_delivery || 0,
@@ -666,6 +682,10 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
         supplier_pricing:  s.supplier_pricing  || 0,
         sage_delivery: 0, sage_discount: 0, sage_pricing: 0, sage_total: 0, batch_count: 0,
         sage_present: false,
+        marked_zero: !!s.marked_zero,
+        marked_zero_by: s.marked_zero_by || null,
+        marked_zero_at: s.marked_zero_at || null,
+        marked_zero_note: s.marked_zero_note || null,
       });
     }
     for (const t of sageWeekTotals) {
@@ -770,6 +790,76 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       res.json(countExtractionsForRecon(id));
     } catch (err) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Mark-week-zero ─────────────────────────────────────────────
+  //
+  // For weeks that genuinely had no deliveries / no charges / no
+  // fees: the supplier's recon spreadsheet has an empty Delivery POD
+  // sheet, which the upload parser rejects (correctly — an empty POD
+  // sheet is usually an upload mistake, not a real zero week). Without
+  // a way to record "this week was actually zero" the missing-credit-
+  // notes list shows the week forever even though Sage has nothing to
+  // pay (no credit notes are produced for a zero week).
+  //
+  // POST /api/bat/reconciliations/mark-zero { year, week_number, note? }
+  // → creates a synthetic recon row with all supplier totals = 0 and
+  //   marked_zero = 1. The week then counts as "covered" in the
+  //   missing-weeks calculation. Reversible via the unmark endpoint.
+  router.post('/api/bat/reconciliations/mark-zero', ...gate, (req, res) => {
+    const weekNumber = Number.parseInt(req.body?.week_number, 10);
+    const year = Number.parseInt(req.body?.year, 10);
+    const note = typeof req.body?.note === 'string' ? req.body.note : null;
+    if (!Number.isFinite(weekNumber) || weekNumber < 1 || weekNumber > 53) {
+      return res.status(400).json({ error: 'week_number must be 1..53' });
+    }
+    if (!Number.isFinite(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ error: 'year must be a 4-digit year' });
+    }
+    try {
+      const id = markWeekZero({
+        weekNumber, year, note,
+        userEmail: req.currentUser?.email || 'unknown',
+      });
+      logAudit({
+        req,
+        action: 'bat_recon_marked_zero',
+        resourceType: 'reconciliation',
+        resourceId: id,
+        resourceName: `W${weekNumber}/${year}`,
+        details: `Marked week ${weekNumber} of ${year} as zero${note ? ` — note: ${note.slice(0, 200)}` : ''}`,
+      });
+      res.json({ ok: true, id, week_number: weekNumber, year });
+    } catch (err) {
+      const status = err.code === 'EXISTS' ? 409 : 500;
+      res.status(status).json({ error: err.message, code: err.code });
+    }
+  });
+
+  router.post('/api/bat/reconciliations/:id/unmark-zero', ...gate, (req, res) => {
+    const id = Number.parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reconciliation id' });
+    }
+    try {
+      const { week_number, year } = unmarkWeekZero({
+        id, userEmail: req.currentUser?.email || 'unknown',
+      });
+      logAudit({
+        req,
+        action: 'bat_recon_unmarked_zero',
+        resourceType: 'reconciliation',
+        resourceId: id,
+        resourceName: `W${week_number}/${year}`,
+        details: `Unmarked week ${week_number} of ${year} (was previously marked zero)`,
+      });
+      res.json({ ok: true, week_number, year });
+    } catch (err) {
+      const status =
+        err.code === 'NOT_FOUND' ? 404 :
+        err.code === 'NOT_MARKED_ZERO' ? 409 : 500;
+      res.status(status).json({ error: err.message, code: err.code });
     }
   });
 
