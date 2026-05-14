@@ -1427,9 +1427,23 @@ export function createReportingRouter({ requireAuth }) {
           .all(summary_year)
           .map(r => r.week_number)
       );
+      // Exclude weeks the operator has explicitly marked as zero — there
+      // genuinely aren't credit notes for a zero week, so leaving them
+      // in the missing-list defeats the purpose of mark-zero. Mirrors
+      // the same union the site-side /api/bat/week-status applies in
+      // its own missingWeeks calculation. Without this the hub's
+      // per-site tile shows W## as missing forever even after the
+      // operator marked it zero on the site.
+      const markedZeroWeeksInYear = new Set(
+        prep(
+          `SELECT week_number FROM bat_reconciliations WHERE year = ? AND marked_zero = 1`
+        ).all(summary_year).map(r => r.week_number)
+      );
       const missingCreditNotesList = [];
       for (let w = 1; w <= missingCutoffYear; w++) {
-        if (!sageWeeksInYear.has(w)) missingCreditNotesList.push(w);
+        if (!sageWeeksInYear.has(w) && !markedZeroWeeksInYear.has(w)) {
+          missingCreditNotesList.push(w);
+        }
       }
 
       // Mismatch weeks (current-year scope): weeks where both BAT and Sage
