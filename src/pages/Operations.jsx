@@ -124,7 +124,7 @@ export default function Operations() {
             What the system is <em className="text-phosphor">doing</em>.
           </h1>
           <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3">
-            Background jobs · OCR worker · System errors · Deploy history{hubMode && " · Hub sync"}
+            Background jobs{!hubMode && " · OCR worker"} · System errors · Deploy history{hubMode && " · Hub sync"}
           </p>
         </div>
 
@@ -147,9 +147,15 @@ export default function Operations() {
             <TabsTrigger value="schedule" className="data-[state=active]:bg-background">
               <Calendar className="w-3.5 h-3.5 mr-1.5" /> Schedule
             </TabsTrigger>
-            <TabsTrigger value="ocr" className="data-[state=active]:bg-background">
-              <ScanLine className="w-3.5 h-3.5 mr-1.5" /> OCR
-            </TabsTrigger>
+            {/* OCR pipeline runs on sites only — the Hub aggregates
+                from sites' /api/reporting/* and never executes its own
+                OCR worker. Hide the tab + panel so a hub-mode operator
+                doesn't get an empty/confusing view. */}
+            {!hubMode && (
+              <TabsTrigger value="ocr" className="data-[state=active]:bg-background">
+                <ScanLine className="w-3.5 h-3.5 mr-1.5" /> OCR
+              </TabsTrigger>
+            )}
             <TabsTrigger value="system-log" className="data-[state=active]:bg-background">
               <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> System Log
             </TabsTrigger>
@@ -172,9 +178,11 @@ export default function Operations() {
           <TabsContent value="schedule" className="mt-0">
             <SchedulePanel />
           </TabsContent>
-          <TabsContent value="ocr" className="mt-0">
-            <OcrPanel />
-          </TabsContent>
+          {!hubMode && (
+            <TabsContent value="ocr" className="mt-0">
+              <OcrPanel />
+            </TabsContent>
+          )}
           <TabsContent
             value="system-log"
             className={`mt-0 ${
