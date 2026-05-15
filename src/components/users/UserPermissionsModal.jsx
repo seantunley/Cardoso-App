@@ -66,6 +66,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
     if (user) {
       const newState = {
         is_active: user.is_active !== false,
+        role: user.role === 'admin' ? 'admin' : 'user',
       };
 
       permissionGroups.forEach(group => {
@@ -178,7 +179,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
             <div className="border-b border-[var(--border-color)] pb-2">
               <h3 className="text-sm font-semibold text-[var(--text-primary)]">Account Status</h3>
               <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                Enable or disable the user account
+                Enable, disable, or change role
               </p>
             </div>
 
@@ -197,6 +198,39 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
                 onCheckedChange={() => togglePermission("is_active")}
                 className="mt-0.5"
               />
+            </div>
+
+            {/* Role select. Server-side guards prevent self-demotion AND
+                demoting the last remaining admin (would lock the system
+                out of user management). Toggle is rendered as a pair of
+                pill buttons rather than a Switch because the choice is
+                a fixed two-value enum, not boolean state. */}
+            <div className="flex items-start justify-between gap-3 p-2 hover:bg-[var(--bg-tertiary)] rounded-lg transition-colors">
+              <div className="flex-1 min-w-0">
+                <Label className="text-sm font-medium text-[var(--text-primary)] block">
+                  Role
+                </Label>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  Admins bypass per-permission gates. Demote to scope by the toggles below.
+                </p>
+              </div>
+              <div className="flex gap-1 mt-0.5">
+                {['admin', 'user'].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => setPermissionState(prev => ({ ...prev, role: r }))}
+                    className={
+                      "px-2.5 py-1 text-xs font-medium rounded-md border transition-colors " +
+                      (permissionState.role === r
+                        ? "border-[var(--phosphor)] bg-[var(--phosphor)]/15 text-[var(--phosphor)]"
+                        : "border-[var(--border-color)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]")
+                    }
+                  >
+                    {r === 'admin' ? 'Admin' : 'User'}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
 
