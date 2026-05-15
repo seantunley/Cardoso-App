@@ -328,12 +328,16 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       }
     }
 
-    // Narrow column list — UI listing only needs these fields
+    // Narrow column list — UI listing only needs these fields.
+    // Token-authed callers (hub-pull-backups.ps1) bypass user-scoping;
+    // session callers get filtered to their allowed sites.
+    const filter = authedByToken ? { sql: '', params: [] } : siteFilterSql(req, res, 'id');
     const rawSites = db.prepare(
       `SELECT id, slug, name, url, last_seen, status, last_kpis,
               in_env, removed_from_env_at
-       FROM hub_sites`
-    ).all();
+       FROM hub_sites
+       WHERE 1=1${filter.sql}`
+    ).all(...filter.params);
     const mapped = rawSites.map((s) => ({
       site_id: s.id,
       id: s.id,
@@ -359,33 +363,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const userEmail = req.currentUser?.email;
     if (!userEmail) return res.status(401).json({ error: 'Not authenticated' });
 
-    // Admins see all sites (unless they have explicit restrictions set)
-    const isAdmin = req.currentUser?.role === 'admin';
-
-    let allowedSlugs = null;
-    if (!isAdmin) {
-      // Check if this user has any explicit site restrictions
-      try {
-        const rows = db.prepare(`SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`).all(userEmail);
-        if (rows.length > 0) {
-          allowedSlugs = rows.map(r => r.site_slug);
-        }
-        // If no rows returned, allowedSlugs stays null → no restrictions (show all)
-      } catch { /* table may not exist */ }
-    }
-
     let sites;
     try {
-      // Narrow column list — UI listing only needs these fields
-      const allSites = db.prepare(
-        'SELECT id, slug, name, url, last_seen, status, last_kpis FROM hub_sites'
-      ).all();
-      if (allowedSlugs === null) {
-        // No restrictions — user sees all sites
-        sites = allSites;
-      } else {
-        sites = allSites.filter(s => allowedSlugs.includes(s.slug));
-      }
+      const filter = siteFilterSql(req, res, 'id');
+      sites = db.prepare(
+        `SELECT id, slug, name, url, last_seen, status, last_kpis
+         FROM hub_sites
+         WHERE 1=1${filter.sql}`
+      ).all(...filter.params);
     } catch {
       return res.status(500).json({ error: 'Failed to load sites' });
     }
@@ -405,7 +390,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   });
 
   // GET /api/hub/records
-  router.get('/api/hub/records', requireAuth, (req, res) => {
+  router.get('/api/hub/records', requireAuth, requireAllowedSite('site_id'), (req, res) => {
     const { site_id, flag_color, search } = req.query;
     const { limit, offset } = pagination(req, { defaultLimit: 100, maxLimit: 500 });
     let whereClause = 'WHERE 1=1';
@@ -413,6 +398,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (site_id) { whereClause += ' AND site_id=?'; params.push(site_id); }
     if (flag_color) { whereClause += ' AND flag_color=?'; params.push(flag_color); }
     if (search) { whereClause += ' AND (customer_name LIKE ? OR customer_number LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
+    // Apply user allow-list. Stacks with the explicit ?site_id filter
+    // when both are present; the middleware above already 403'd if the
+    // requested site is outside the allow-list.
+    const allowFilter = siteFilterSql(req, res, 'site_id');
+    whereClause += allowFilter.sql;
+    params.push(...allowFilter.params);
 
     const countRow = db.prepare(`SELECT COUNT(*) AS total FROM hub_records ${whereClause}`).get(...params);
     const rows = db.prepare(`
@@ -440,19 +431,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   router.get('/api/hub/kpis', requireAuth, (req, res) => {
     const since = typeof req.query.since === 'string' && req.query.since.trim() ? req.query.since.trim() : null;
 
-    // Filter sites by user permissions (same logic as /api/hub/my-sites)
-    const userEmail = req.currentUser?.email;
-    const isAdmin = req.currentUser?.role === 'admin';
-    let allowedSlugs = null;
-    if (!isAdmin && userEmail) {
-      try {
-        const rows = db.prepare(`SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`).all(userEmail);
-        if (rows.length > 0) {
-          allowedSlugs = rows.map(r => r.site_slug);
-        }
-      } catch {}
-    }
-
     let allSites = [];
     // Narrow column list — KPI aggregator only needs these fields,
     // plus the orphan flags so the dashboard tile can render the pill,
@@ -476,6 +454,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     // schema first via pragma_table_info, then build the SELECT we
     // can actually execute. The accpac fields default to null in
     // the per-site object below when absent from the row.
+    const sitesFilter = siteFilterSql(req, res, 'id');
     try {
       const cols = new Set(
         db.prepare(`SELECT name FROM pragma_table_info('hub_sites')`).all().map(r => r.name)
@@ -485,11 +464,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       allSites = db.prepare(`
         SELECT id, slug, name, status, last_seen, in_env, removed_from_env_at${accpacSelect}
         FROM hub_sites
-      `).all();
+        WHERE 1=1${sitesFilter.sql}
+      `).all(...sitesFilter.params);
     } catch {}
-    const sites = allowedSlugs === null
-      ? allSites
-      : allSites.filter(s => allowedSlugs.includes(s.slug));
+    const sites = allSites;
 
     // ── KPI rollup (one query, in-JS pivot) ─────────────────────────────
     // Previously did 1 + 3 + (sites × 2) = up to 19 queries on an 8-site
@@ -497,9 +475,16 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     // single GROUP BY (site_id, flag_color) and pivot in JS — the
     // dashboard fires this on every poll + every dateRange flip, so
     // shaving the per-call cost matters.
+    //
+    // Filter applied in SQL too — without it the headline totals
+    // (total_records, records_by_flag) would still aggregate every
+    // site's records before the per-site filter trimmed the visible
+    // set, leaking the all-sites total into a restricted user's
+    // dashboard headline.
+    const recordsFilter = siteFilterSql(req, res, 'site_id');
     const flagBreakdownRows = since
-      ? db.prepare('SELECT site_id, flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ? GROUP BY site_id, flag_color').all(since)
-      : db.prepare('SELECT site_id, flag_color, COUNT(*) as count FROM hub_records GROUP BY site_id, flag_color').all();
+      ? db.prepare(`SELECT site_id, flag_color, COUNT(*) as count FROM hub_records WHERE updated_date >= ?${recordsFilter.sql} GROUP BY site_id, flag_color`).all(since, ...recordsFilter.params)
+      : db.prepare(`SELECT site_id, flag_color, COUNT(*) as count FROM hub_records WHERE 1=1${recordsFilter.sql} GROUP BY site_id, flag_color`).all(...recordsFilter.params);
 
     const flagTotals = { none: 0, red: 0, orange: 0, green: 0 };
     let totalRecordsCount = 0;
@@ -577,6 +562,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       : "strftime('%Y-W%W', hr.updated_date)";
 
     try {
+      const filter = siteFilterSql(req, res, 'hr.site_id');
       const rows = db.prepare(`
         SELECT
           ${bucketExpr} AS period,
@@ -587,10 +573,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_records hr
         LEFT JOIN hub_sites hs ON hs.id = hr.site_id
         WHERE hr.updated_date >= ?
-          AND ${bucketExpr} IS NOT NULL
+          AND ${bucketExpr} IS NOT NULL${filter.sql}
         GROUP BY ${bucketExpr}, hr.site_id, hs.name
         ORDER BY ${bucketExpr} ASC, hr.site_id ASC
-      `).all(since);
+      `).all(since, ...filter.params);
 
       res.json({
         period,
@@ -617,6 +603,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // grand totals across the network.
   router.get('/api/hub/bat-summary', requireAuth, (req, res) => {
     try {
+      const filter = siteFilterSql(req, res, 's.id');
       const rows = db.prepare(`
         SELECT s.id AS site_id, s.name AS site_name, s.slug AS site_slug, s.url AS site_url, s.status AS site_status, s.last_seen,
                b.total_supplier, b.total_sage, b.total_variance,
@@ -629,8 +616,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
                b.last_upload_at, b.synced_at, b.last_error
         FROM hub_sites s
         LEFT JOIN hub_bat_summary b ON b.site_id = s.id
+        WHERE 1=1${filter.sql}
         ORDER BY s.name
-      `).all();
+      `).all(...filter.params);
 
       // Parse JSON-stored week-number arrays back to JS arrays for the
       // frontend. Stored as TEXT because SQLite has no native array type;
@@ -712,7 +700,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // shape of the Inventory page (operator typically loads a single site
   // at a time; full-table scans were shipping 80K+ rows on 8-site hubs
   // and JSON-parsing every one through expandDataRecord).
-  router.get('/api/hub/inventory', requireAuth, (req, res) => {
+  router.get('/api/hub/inventory', requireAuth, requireAllowedSite('site_id'), (req, res) => {
     const { site_id, search, commodity } = req.query;
     const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
     let whereClause = 'WHERE 1=1';
@@ -720,6 +708,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (site_id) { whereClause += ' AND hi.site_id=?'; params.push(site_id); }
     if (search) { whereClause += ' AND (hi.item_number LIKE ? OR hi.item_description LIKE ?)'; params.push(`%${search}%`, `%${search}%`); }
     if (commodity) { whereClause += ' AND CAST(commodity AS TEXT)=?'; params.push(commodity); }
+    const allowFilter = siteFilterSql(req, res, 'hi.site_id');
+    whereClause += allowFilter.sql;
+    params.push(...allowFilter.params);
     try {
       const countRow = db.prepare(`SELECT COUNT(*) AS total FROM hub_inventory hi ${whereClause}`).get(...params);
       const rows = db.prepare(`
@@ -743,7 +734,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   });
 
   // GET /api/hub/customer-lookup — returns main record + sub-accounts from hub_records
-  router.get('/api/hub/customer-lookup', requireAuth, (req, res) => {
+  router.get('/api/hub/customer-lookup', requireAuth, requireAllowedSite('site_id'), (req, res) => {
     const { query, site_id } = req.query;
     if (!query || !site_id) return res.status(400).json({ error: 'query and site_id are required' });
     try {
@@ -805,6 +796,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // why "the hub isn't syncing" went undiagnosed.
   router.get('/api/hub/sync-log', requireAuth, (req, res) => {
     const limit = clampInt(req.query.limit, { default: 50, min: 1, max: 200 });
+    const filter = siteFilterSql(req, res, 'l.site_id');
     const rows = db.prepare(`
       SELECT
         l.id,
@@ -819,9 +811,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         l.error AS error_message
       FROM hub_sync_log l
       LEFT JOIN hub_sites s ON s.id = l.site_id
+      WHERE 1=1${filter.sql}
       ORDER BY l.started_at DESC
       LIMIT ?
-    `).all(limit);
+    `).all(...filter.params, limit);
     res.json(rows);
   });
 
@@ -1048,13 +1041,15 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     try {
       let rows = [];
       try {
+        const filter = siteFilterSql(req, res, 'p.site_slug', 'slug');
         rows = db.prepare(`
           SELECT p.site_slug, p.online, p.latency_ms, p.timestamp
           FROM hub_site_ping p
           INNER JOIN (
             SELECT site_slug, MAX(id) AS max_id FROM hub_site_ping GROUP BY site_slug
           ) latest ON p.id = latest.max_id
-        `).all();
+          WHERE 1=1${filter.sql}
+        `).all(...filter.params);
       } catch (_) { /* table not yet created */ }
       res.json({ sites: rows });
     } catch (err) {
@@ -1064,7 +1059,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/machine-health — aggregated machine health per site
   router.get('/api/hub/machine-health', requireAuth, requirePermission('can_access_hub_metrics'), async (req, res) => {
-    const sites = db.prepare('SELECT id, slug, name, url, token FROM hub_sites').all();
+    const filter = siteFilterSql(req, res, 'id');
+    const sites = db.prepare(
+      `SELECT id, slug, name, url, token FROM hub_sites WHERE 1=1${filter.sql}`
+    ).all(...filter.params);
 
     const results = await Promise.all(sites.map(async (site) => {
       const base = {
@@ -1944,6 +1942,102 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       if (entry.expiresAt < now) restoreTokens.delete(tok);
     }
   }, 60_000).unref();
+
+  // ──────────────────────────────────────────────────────────────────
+  // Per-user site allow-list — central enforcement.
+  //
+  // hub_user_allowed_sites maps (email → site_slug). Semantics:
+  //   - admin role               → unrestricted (sees all sites)
+  //   - non-admin, no rows       → unrestricted (legacy default — preserved
+  //                                 for backward compat with existing users
+  //                                 that have empty allow-lists)
+  //   - non-admin, ≥1 row        → restricted to the listed site_slugs only
+  //
+  // Any handler that returns site-keyed data should call siteFilterSql()
+  // and append `${sql}` to its WHERE clause with the returned `params`.
+  // Per-site endpoints (`:siteId` in URL or `?site_id` in query) should
+  // wrap with requireAllowedSite('siteId') / requireAllowedSite('site_id').
+  //
+  // Result is cached in res.locals so repeated calls inside one handler
+  // don't re-query the allow-list / hub_sites.
+  // ──────────────────────────────────────────────────────────────────
+
+  function getAllowedSiteSlugs(req, res) {
+    if (res?.locals && 'allowedSiteSlugs' in res.locals) return res.locals.allowedSiteSlugs;
+
+    let result = null; // null = unrestricted; Set<slug> = explicit allow-list
+    const userEmail = req.currentUser?.email;
+    const isAdmin = req.currentUser?.role === 'admin';
+
+    if (!isAdmin && userEmail) {
+      try {
+        const slugs = db.prepare(
+          `SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`
+        ).all(userEmail).map((r) => r.site_slug);
+        if (slugs.length > 0) result = new Set(slugs);
+      } catch { /* table missing on fresh installs — treat as unrestricted */ }
+    }
+
+    if (res?.locals) res.locals.allowedSiteSlugs = result;
+    return result;
+  }
+
+  function getAllowedSiteIds(req, res) {
+    if (res?.locals && 'allowedSiteIds' in res.locals) return res.locals.allowedSiteIds;
+
+    let result = null;
+    const slugs = getAllowedSiteSlugs(req, res);
+    if (slugs !== null) {
+      // Translate slugs → ids. If a slug no longer matches any
+      // hub_sites row (operator removed the site), the user is
+      // legitimately denied — Set stays small/empty.
+      const slugList = [...slugs];
+      const placeholders = slugList.map(() => '?').join(',') || "''";
+      try {
+        const ids = db.prepare(
+          `SELECT id FROM hub_sites WHERE slug IN (${placeholders})`
+        ).all(...slugList).map((r) => r.id);
+        result = new Set(ids);
+      } catch { result = new Set(); }
+    }
+
+    if (res?.locals) res.locals.allowedSiteIds = result;
+    return result;
+  }
+
+  // SQL fragment for AND clauses. Returns { sql: '', params: [] } when
+  // unrestricted, ` AND <col> IN (?,?,...)` + params otherwise. Using
+  // `1=0` for zero-size set is intentional: a non-admin whose allowed
+  // slugs no longer match any hub_sites row should see nothing, not
+  // everything. `mode` selects whether <col> is a site_id (default) or
+  // a site_slug column.
+  function siteFilterSql(req, res, columnName = 'site_id', mode = 'id') {
+    const allowed = mode === 'slug'
+      ? getAllowedSiteSlugs(req, res)
+      : getAllowedSiteIds(req, res);
+    if (allowed === null) return { sql: '', params: [] };
+    if (allowed.size === 0) return { sql: ' AND 1=0', params: [] };
+    const list = [...allowed];
+    const placeholders = list.map(() => '?').join(',');
+    return { sql: ` AND ${columnName} IN (${placeholders})`, params: list };
+  }
+
+  // Middleware for endpoints with a single site_id in URL or query.
+  // 403s if the requested site isn't in the user's allow-list. Pass
+  // through if the request doesn't specify a site_id (let the handler
+  // do whatever it does — typically a list endpoint).
+  function requireAllowedSite(siteIdKey = 'siteId') {
+    return (req, res, next) => {
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed === null) return next();
+      const id = req.params?.[siteIdKey] ?? req.query?.[siteIdKey];
+      if (!id) return next();
+      if (!allowed.has(String(id))) {
+        return res.status(403).json({ error: 'You do not have access to this site.' });
+      }
+      next();
+    };
+  }
 
   // Reject filenames that try to escape the per-site backup dir.
   // hub-backups/<siteId>/<file> is the only legal shape; '..' or
