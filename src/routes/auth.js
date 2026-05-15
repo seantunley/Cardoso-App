@@ -445,6 +445,37 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         }
       }
 
+      // Role change — accepted alongside the boolean permission flags so
+      // the same modal can demote admin → user. Three safety guards:
+      //   1. Role must be 'admin' or 'user' (matches the CHECK constraint
+      //      on the user table).
+      //   2. Operator can't demote themselves (would lock them out of
+      //      this very endpoint immediately).
+      //   3. Can't demote the LAST remaining admin (system would have
+      //      no admins to manage users with).
+      if (typeof incoming.role === 'string' && incoming.role !== existing.role) {
+        const newRole = incoming.role.trim();
+        if (newRole !== 'admin' && newRole !== 'user') {
+          return res.status(400).json({ error: 'role must be "admin" or "user".' });
+        }
+        if (existing.role === 'admin' && newRole === 'user') {
+          if (req.currentUser?.id === existing.id) {
+            return res.status(400).json({
+              error: 'You cannot demote yourself. Ask another admin to do it.',
+            });
+          }
+          const adminCount = db.prepare(
+            `SELECT COUNT(*) AS c FROM "user" WHERE role = 'admin' AND is_active = 1`
+          ).get()?.c ?? 0;
+          if (adminCount <= 1) {
+            return res.status(400).json({
+              error: 'Cannot demote the last remaining admin — promote someone else to admin first.',
+            });
+          }
+        }
+        updates.role = newRole;
+      }
+
       if (Object.keys(updates).length === 0) {
         return res.status(400).json({ error: 'No valid permission updates provided' });
       }
