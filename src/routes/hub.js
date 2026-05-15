@@ -1947,11 +1947,19 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // Per-user site allow-list — central enforcement.
   //
   // hub_user_allowed_sites maps (email → site_slug). Semantics:
-  //   - admin role               → unrestricted (sees all sites)
-  //   - non-admin, no rows       → unrestricted (legacy default — preserved
-  //                                 for backward compat with existing users
-  //                                 that have empty allow-lists)
-  //   - non-admin, ≥1 row        → restricted to the listed site_slugs only
+  //   - no rows for this email   → unrestricted (legacy default — preserved
+  //                                 so existing users without a configured
+  //                                 allow-list keep their pre-PR-#344
+  //                                 behaviour, AND so a sysadmin doesn't
+  //                                 accidentally lock themselves out by
+  //                                 clearing their own list)
+  //   - ≥1 row for this email    → restricted to the listed site_slugs only
+  //
+  // Role does NOT short-circuit. An admin who explicitly sets an allow-list
+  // for themselves gets scoped to those sites. The previous design had an
+  // isAdmin → unrestricted bypass; that turned out to violate operator
+  // expectations (Sean set 4 sites for an admin user expecting it to
+  // gate; nothing changed).
   //
   // Any handler that returns site-keyed data should call siteFilterSql()
   // and append `${sql}` to its WHERE clause with the returned `params`.
@@ -1967,9 +1975,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     let result = null; // null = unrestricted; Set<slug> = explicit allow-list
     const userEmail = req.currentUser?.email;
-    const isAdmin = req.currentUser?.role === 'admin';
 
-    if (!isAdmin && userEmail) {
+    if (userEmail) {
       try {
         const slugs = db.prepare(
           `SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`
