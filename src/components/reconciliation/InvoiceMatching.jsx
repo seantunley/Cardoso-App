@@ -389,7 +389,16 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
 
   const filtered = useMemo(() => {
     return tabData.filter((e) => {
-      if (filterStatus !== 'all') {
+      // The extraction_status filter (not_found / pending) only makes
+      // sense for real OCR rows. Missing-POD synthetic rows have
+      // extraction_status=null because there is no extraction to have
+      // a status — applying the filter would hide every row on the
+      // Missing PODs tab whenever the operator left the dropdown on
+      // not_found or pending from a previous tab visit, and the empty
+      // table reads as "no missing PODs" even when the tab count is
+      // non-zero. Skip the status filter for missing-POD rows so the
+      // tab always shows its real population.
+      if (filterStatus !== 'all' && !e.is_missing_pod) {
         if (filterStatus === 'not_found' && e.extraction_status !== 'not_found') return false;
         if (filterStatus === 'pending' && e.extraction_status !== 'pending') return false;
       }

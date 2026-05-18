@@ -799,9 +799,17 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
       }
     }
 
-    // Self-heal supplier_total from the per-row data we just upserted.
-    // No-ops gracefully if amounts are still incomplete; see helper docs.
-    recomputeSupplierTotalSafe(existing.id);
+    // NOTE: Do NOT call recomputeSupplierTotalSafe here. supplier_total
+    // is the claim summary from the Overview-tab fees claim (set on the
+    // UPDATE above to fees.total.total). Re-deriving it from per-row
+    // extraction amounts contradicts the operator-confirmed rule "BAT
+    // TOTAL is the claim summary, never POD-derived". The bottom-up
+    // recompute also produces false-positive integrity drift on every
+    // recon with missing PODs (extracted sum < claim by the value of
+    // the missing PODs), red-banner-ing recons that are working as
+    // expected. Multi-branch upload handling — the original reason
+    // the helper existed — needs a different fix (parser-side per-fee
+    // accumulation across branch uploads, or operator consolidation).
     return existing.id;
   }
 
@@ -821,7 +829,9 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
 
   const reconId = result.lastInsertRowid;
   insertPodEntries(reconId, podUrls);
-  recomputeSupplierTotalSafe(reconId);
+  // NOTE: Don't recompute supplier_total — same reasoning as the
+  // UPDATE branch above. supplier_total IS the claim summary, set
+  // from fees.total.total on the INSERT above.
   return reconId;
 }
 
@@ -910,55 +920,21 @@ export function unmarkWeekZero({ id, userEmail }) {
   return { week_number: row.week_number, year: row.year };
 }
 
-// Self-healing supplier_total. Sets the recon's supplier_total to the
-// sum of non-exception order_amounts from its rows — the operator-
-// visible BAT TOTAL and the headline number on the recon page. Returns
-// true if updated, false if skipped (incomplete amounts).
-//
-// Why this exists: createReconciliation/insertPodEntries originally
-// stamped supplier_total = parsed.fees.total.total (the sum of the
-// supplier's three fee-section lines from the spreadsheet's Overview
-// tab). That worked when every week had ONE supplier spreadsheet, but
-// broke the moment two branch spreadsheets (Welkom + JHB, etc.) landed
-// on the same week — the second upload's smaller fees overwrote the
-// first's, and the recon's BAT TOTAL silently went wrong with no
-// operator-visible signal. The W11 incident on 2026-05-11 burned
-// several rounds of debugging, a one-shot SQL fix, a Maintenance-tab
-// healer (PR #275), AND a column-not-found warning at upload (PR #274)
-// before we got here.
-//
-// This helper closes the entire class: every successful upload now
-// recomputes the headline total from the per-row data that just
-// landed. Re-uploads naturally produce the right number; merges of
-// branch spreadsheets are summed correctly because order_amount is
-// per-row (preserved by the upsert's COALESCE pattern).
-//
-// Null-safety guard (WHERE NOT EXISTS): we ONLY overwrite when every
-// non-exception row has a populated order_amount. Otherwise the SUM
-// would treat nulls as zero and the derived total would be artificially
-// low — e.g. mid-week uploads where some PODs haven't had their amount
-// set yet (filled in later by backfillOrderAmounts when a subsequent
-// week's spreadsheet arrives). In that case the UPDATE silently no-ops
-// (info.changes === 0) and the existing fees-derived supplier_total
-// stays in place. Same guard the Maintenance-tab tool uses (PR #275).
-function recomputeSupplierTotalSafe(reconId) {
-  const info = db.prepare(`
-    UPDATE bat_reconciliations
-    SET supplier_total = (
-      SELECT COALESCE(SUM(CASE WHEN COALESCE(is_exception, 0) = 0 THEN COALESCE(order_amount, 0) ELSE 0 END), 0)
-      FROM bat_invoice_extractions
-      WHERE reconciliation_id = bat_reconciliations.id
-    )
-    WHERE id = ?
-      AND NOT EXISTS (
-        SELECT 1 FROM bat_invoice_extractions
-        WHERE reconciliation_id = bat_reconciliations.id
-          AND COALESCE(is_exception, 0) = 0
-          AND order_amount IS NULL
-      )
-  `).run(reconId);
-  return info.changes > 0;
-}
+// REMOVED: recomputeSupplierTotalSafe. The helper used to overwrite
+// supplier_total with the bottom-up sum of non-exception
+// order_amounts after every upload (and from backfillOrderAmounts /
+// manualSetInvoice / end-of-OCR-cascade in earlier PR #354 commits).
+// Per the operator-confirmed rule "BAT TOTAL is the claim summary,
+// never POD-derived" (memorised 2026-05-18), supplier_total is
+// always the claim summary set from fees.total.total at upload
+// time and must NOT be re-derived from per-row extractions. Re-
+// deriving made integrity invariant I1 (supplier_total ==
+// claim_per_fee) deterministically fail on every recon with missing
+// PODs, blocking-red-bannering recons that were working as expected.
+// The Maintenance-tab tool at /api/maintenance/recompute-recon-totals
+// uses a separate implementation in services/bat/reconTotals.js for
+// operator-triggered manual recovery only — it does NOT touch
+// supplier_total on normal upload paths.
 
 function insertPodEntries(reconId, podUrls) {
   const upsert = db.prepare(`
@@ -1005,13 +981,15 @@ function insertPodEntries(reconId, podUrls) {
 export function backfillOrderAmounts(orderAmounts) {
   if (!orderAmounts || orderAmounts.size === 0) return 0;
 
-  // Pull reconciliation_id alongside so we can recompute supplier_total
-  // on every recon we touched. Without this, backfilling amounts onto
-  // a prior week's rows would leave that week's headline BAT TOTAL
-  // stale (it'd still reflect the old fees-section snapshot from when
-  // the spreadsheet was uploaded — pre-backfill). Self-healing here
-  // keeps the headline total consistent with the per-row data without
-  // needing the operator to run the Maintenance-tab recompute.
+  // Fill NULL order_amount on existing extraction rows whose
+  // order_number appears in the newly-uploaded Overview pivot.
+  // NOTE: We no longer recompute supplier_total after backfill —
+  // supplier_total is the claim summary from the Overview-tab fees
+  // claim (set at upload time), not a bottom-up sum of per-row
+  // amounts. Per-row amounts inform the per-invoice audit trail,
+  // missing-POD detection, and dup detection; they don't redefine
+  // the recon's headline total. See PR #354 + operator-confirmed
+  // rule "BAT TOTAL is the claim summary".
   const rows = db.prepare(
     'SELECT id, order_number, reconciliation_id FROM bat_invoice_extractions WHERE order_amount IS NULL AND order_number IS NOT NULL'
   ).all();
@@ -1034,18 +1012,8 @@ export function backfillOrderAmounts(orderAmounts) {
   });
   tx();
 
-  // Recompute supplier_total for each touched recon. Safe-recompute
-  // helper no-ops if any non-exception row in that recon STILL has
-  // a null order_amount (the backfill may have filled some but not
-  // all rows). Per recon, not in one txn — better-sqlite3 is
-  // synchronous so the inner UPDATEs serialise naturally.
-  let recomputedRecons = 0;
-  for (const reconId of touchedRecons) {
-    if (recomputeSupplierTotalSafe(reconId)) recomputedRecons++;
-  }
-
   if (count > 0) {
-    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions; recomputed supplier_total on ${recomputedRecons}/${touchedRecons.size} affected recon(s)`);
+    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions across ${touchedRecons.size} recon(s)`);
   }
   return count;
 }

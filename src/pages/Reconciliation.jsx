@@ -135,6 +135,164 @@ function SageStatusPill() {
   );
 }
 
+// Dashboard-wide integrity panel. Fetches /api/bat/integrity-report on
+// mount (the endpoint runs every per-recon invariant in services/bat/
+// integrity.js across every reconciliation) and renders an at-a-glance
+// summary plus a collapsible table of failing recons. Operator uses
+// this to spot drift across the whole BAT pipeline without drilling
+// into each week — when negotiating with BAT, this is the page they
+// can point at.
+function IntegrityOverviewPanel({ onSelectRecon }) {
+  const [report, setReport] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoading(true);
+      try {
+        const r = await fetch('/api/bat/integrity-report', { credentials: 'include' });
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const data = await r.json();
+        if (!cancelled) { setReport(data); setErr(null); }
+      } catch (e) {
+        if (!cancelled) setErr(e.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="border border-border bg-card px-5 py-3 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground" style={{ borderRadius: '12px' }}>
+        Loading integrity report…
+      </div>
+    );
+  }
+  if (err) {
+    return (
+      <div className="border border-destructive bg-card px-5 py-3 font-mono text-xs text-destructive" style={{ borderRadius: '12px' }}>
+        Integrity report failed: {err}
+      </div>
+    );
+  }
+  if (!report) return null;
+
+  const { summary, recons } = report;
+  const failing = recons.filter(r => !r.passed);
+  const needsReupload = recons.filter(r => !r.marked_zero && r.overview_orders_stored === 0);
+  const allPassing = summary.failing === 0;
+
+  // Color theme follows status: green when all reconcile, red when any
+  // fail. The amber "needs re-upload" call-out is a secondary signal
+  // because pre-v72 recons skip Overview-dependent checks rather than
+  // fail them.
+  const accent = allPassing ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))';
+  const accentGlow = allPassing ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.25)';
+
+  return (
+    <div
+      className="relative overflow-hidden border bg-card"
+      style={{
+        borderRadius: '12px',
+        borderColor: allPassing ? 'hsl(var(--border))' : accent,
+        boxShadow: allPassing ? 'none' : `0 0 16px ${accentGlow}`,
+      }}
+    >
+      <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: accent, boxShadow: `0 0 10px ${accentGlow}` }} />
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center justify-between px-5 py-3 hover:bg-muted/20 transition-colors text-left"
+      >
+        <div className="pl-2 flex items-center gap-3 flex-wrap">
+          <span className="font-mono text-[10px] uppercase tracking-[0.25em]" style={{ color: accent }}>
+            {allPassing ? '● Integrity OK' : '▲ Integrity drift'}
+          </span>
+          <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+            {summary.passing}/{summary.total - summary.marked_zero} reconcile
+            {summary.marked_zero > 0 && <span className="ml-2">· {summary.marked_zero} zero</span>}
+            {summary.failing > 0 && <span className="ml-2 text-destructive">· {summary.failing} failing</span>}
+            {needsReupload.length > 0 && <span className="ml-2" style={{ color: 'hsl(33 70% 60%)' }}>· {needsReupload.length} need re-upload</span>}
+          </span>
+        </div>
+        <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground pr-1">
+          {expanded ? <ChevronDown className="h-3 w-3 inline" /> : <ChevronRight className="h-3 w-3 inline" />}
+          <span className="ml-1">{expanded ? 'Hide' : 'Details'}</span>
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="border-t border-border px-5 py-4 space-y-3">
+          {failing.length === 0 && needsReupload.length === 0 && (
+            <p className="font-mono text-xs text-muted-foreground">
+              Every reconciliation passes every invariant. PAID + NON-COMPLIANT balances to BAT TOTAL claim; EXCEPTIONS balances to BAT exception pivot; no orphan extractions; no duplicate order_numbers.
+            </p>
+          )}
+
+          {failing.length > 0 && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mb-2">
+                {failing.length} recon{failing.length === 1 ? '' : 's'} with integrity drift
+              </div>
+              <ul className="space-y-1.5">
+                {failing.map(r => (
+                  <li key={r.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelectRecon(r.id)}
+                      className="w-full flex items-baseline justify-between gap-3 px-3 py-2 hover:bg-muted/30 transition-colors text-left"
+                      style={{ borderRadius: '8px', border: '1px solid hsla(0, 72%, 50%, 0.3)', background: 'hsla(0, 72%, 50%, 0.04)' }}
+                    >
+                      <span className="font-mono text-xs tabular-nums text-foreground">
+                        W{String(r.week_number).padStart(2, '0')}/{r.year}
+                      </span>
+                      <span className="font-mono text-[10px] text-destructive truncate">
+                        {r.failed_check_ids.join(' · ')}
+                      </span>
+                      <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground">
+                        open →
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {needsReupload.length > 0 && (
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: 'hsl(33 70% 60%)' }}>
+                {needsReupload.length} recon{needsReupload.length === 1 ? '' : 's'} need re-upload to enable full integrity checks
+              </div>
+              <p className="font-mono text-[10px] text-muted-foreground mb-2">
+                Recons created before migration v72 have no stored Overview ODR list. Their Missing-PODs / Overview-sum invariants can't be verified until the supplier spreadsheet is re-uploaded.
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {needsReupload.map(r => (
+                  <button
+                    key={r.id}
+                    type="button"
+                    onClick={() => onSelectRecon(r.id)}
+                    className="font-mono text-[10px] tabular-nums px-2 py-1 hover:bg-muted/30 transition-colors"
+                    style={{ borderRadius: '6px', border: '1px solid hsla(33, 70%, 60%, 0.35)', color: 'hsl(33 70% 60%)' }}
+                  >
+                    W{String(r.week_number).padStart(2, '0')}/{r.year}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Reconciliation() {
   const colorScheme = useColorScheme();
   const [view, setView] = useState('dashboard'); // dashboard | detail
@@ -839,6 +997,14 @@ export default function Reconciliation() {
               </section>
             )}
 
+            {/* Integrity overview — runs all invariants across every
+                recon. Failing recons surface here so the operator can
+                see the dashboard-wide picture before drilling into a
+                week. Per-recon banner inside the detail view shows the
+                specifics. */}
+            <IntegrityOverviewPanel onSelectRecon={(id) => loadReconciliation(id)} />
+
+
             {/* Week status block */}
             {weekStatus && (
               <div className="grid gap-4 sm:grid-cols-3 stagger-in">
@@ -1263,7 +1429,18 @@ export default function Reconciliation() {
               const isWeekMatched = (r) => {
                 const sageHasData = !!r.sage_present;
                 if (!sageHasData) return false;
-                return Math.abs((r.supplier_total || 0) - (r.sage_total || 0)) < 0.01;
+                // Use the same per-fee baseline the WeekSelector card,
+                // the dashboard variance tile, and the per-week table
+                // all use (PR #354). Reading r.supplier_total /
+                // r.sage_total here would re-introduce the cached-vs-
+                // per-fee drift that the rest of the page was already
+                // fixed to avoid — manifests as cards labeled "Matched"
+                // that aren't hidden by "Hide matched" (or vice versa).
+                const claim = (r.claim_per_fee != null)
+                  ? r.claim_per_fee
+                  : (r.supplier_delivery || 0) + (r.supplier_discount || 0) + (r.supplier_pricing || 0);
+                const sagePerFee = (r.sage_delivery || 0) + (r.sage_discount || 0) + (r.sage_pricing || 0);
+                return Math.abs(claim - sagePerFee) < 0.01;
               };
               const matchedCount = yearFiltered.filter(isWeekMatched).length;
               const filtered = hideMatched ? yearFiltered.filter(r => !isWeekMatched(r)) : yearFiltered;

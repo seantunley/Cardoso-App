@@ -570,10 +570,21 @@ function extractOrderAmounts(rows) {
       if (!Array.isArray(row)) continue;
       const orderNumber = String(row[orderCol] || '').trim();
       if (!orderNumber.startsWith('ODR-')) continue;
+      // Capture every ODR in the Overview pivot, even when the
+      // amount cell is blank or non-numeric. The downstream
+      // bat_overview_orders persistence (uploadProcessor.js) uses
+      // this map to populate the Missing PODs detection table —
+      // skipping un-parseable rows would let those ODRs silently
+      // vanish from the audit trail, showing "no missing PODs"
+      // when the real answer is "we don't know the amount yet for
+      // these orders". amount stays null in that case so callers
+      // can distinguish "no amount yet" from "amount = R 0".
       const rawVal = row[amountCol];
-      if (rawVal === '' || rawVal == null) continue;
-      const val = parseFloat(String(rawVal).replace(/[^0-9.\-]/g, ''));
-      if (isNaN(val)) continue;
+      let val = null;
+      if (rawVal !== '' && rawVal != null) {
+        const parsed = parseFloat(String(rawVal).replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(parsed)) val = parsed;
+      }
       if (!amounts.has(orderNumber)) {
         amounts.set(orderNumber, {
           amount: val,

@@ -169,6 +169,15 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                       if ((r.pod_count || 0) === 0) return null;
                       const unverified = r.unverified_amount || 0;
                       const unverifiedCount = r.unverified_count || 0;
+                      // Rows with NULL order_amount get COALESCEd to 0 in
+                      // the unverified sum. Surface the unknown count
+                      // separately so the chip doesn't read "R 0.00 sits
+                      // on N rows" when the true value is "amount not
+                      // declared on these rows yet" — that understates
+                      // reconciliation risk. ocr_missing_amount_count
+                      // counts non-exception rows where order_amount is
+                      // NULL, regardless of extraction_status.
+                      const unknownAmountCount = r.ocr_missing_amount_count || 0;
                       const dupCount = r.duplicate_invoice_count || 0;
                       const dupInflation = r.duplicate_inflation || 0;
                       // Missing PODs reads from bat_overview_orders (the
@@ -196,12 +205,15 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'var(--phosphor)' }}
-                              title={`R ${fmt(unverified)} sits on ${unverifiedCount} POD row${unverifiedCount === 1 ? '' : 's'} OCR hasn't successfully matched yet (status: failed / not_found / pending). Run Retry or manually correct the invoice number. The BAT TOTAL above does not change as these get resolved — only the OCR coverage signals.`}
+                              title={`R ${fmt(unverified)} of declared per-row amount sits on ${unverifiedCount} POD row${unverifiedCount === 1 ? '' : 's'} OCR hasn't successfully matched yet (status: failed / not_found / pending).${unknownAmountCount > 0 ? ` ${unknownAmountCount} of those row${unknownAmountCount === 1 ? '' : 's'} also have NO declared amount yet — the R value above understates the true exposure by however much those undeclared amounts turn out to be.` : ''} Run Retry or manually correct the invoice number. The BAT TOTAL above does not change as these get resolved — only the OCR coverage signals.`}
                             >
                               <span>OCR pending</span>
                               <span className="tabular-nums">
                                 R {fmt(unverified)}
                                 <span className="text-muted-foreground/70 ml-2">{unverifiedCount} row{unverifiedCount === 1 ? '' : 's'}</span>
+                                {unknownAmountCount > 0 && (
+                                  <span style={{ color: 'hsl(33 70% 60%)' }} className="ml-2">· {unknownAmountCount} unknown</span>
+                                )}
                               </span>
                             </div>
                           )}

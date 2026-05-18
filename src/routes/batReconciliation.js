@@ -14,6 +14,7 @@ import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
 import { isoYear as toIsoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { parseSupplierSpreadsheet, parseCardosoSpreadsheet, SpreadsheetValidationError } from '../services/bat/parser.js';
+import { checkReconciliationIntegrity } from '../services/bat/integrity.js';
 import {
   querySageCreditNotes,
   querySagePaidWeeks,
@@ -545,6 +546,54 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     }
 
     res.json(recon);
+  });
+
+  // Dashboard-wide integrity report. Runs every per-recon invariant
+  // (see services/bat/integrity.js) across every non-marked-zero
+  // reconciliation and returns one row per recon plus an aggregate
+  // summary. Operator uses this when negotiating with BAT to point at
+  // exactly which week reconciles and which doesn't. Read-only, no
+  // writes — same checker the per-recon banner runs at load time.
+  router.get('/api/bat/integrity-report', ...gate, (req, res) => {
+    const __t0 = Date.now();
+    res.on('finish', () => console.log(`[bat-perf] /api/bat/integrity-report: ${Date.now() - __t0}ms`));
+    try {
+      // listReconciliations returns the per-week tile shape. We only
+      // need (id, week_number, year, marked_zero) for the integrity
+      // sweep — pull a minimal list to keep this cheap on installs
+      // with many recons.
+      const recons = db.prepare(
+        'SELECT id, week_number, year, marked_zero FROM bat_reconciliations ORDER BY year DESC, week_number DESC'
+      ).all();
+      const rows = recons.map(r => {
+        const integrity = checkReconciliationIntegrity({ db, reconId: r.id });
+        const failed = integrity.checks.filter(c => !c.passed && !c.skipped);
+        const skipped = integrity.checks.filter(c => c.skipped);
+        return {
+          id: r.id,
+          year: r.year,
+          week_number: r.week_number,
+          marked_zero: !!r.marked_zero,
+          passed: integrity.passed,
+          failed_count: failed.length,
+          skipped_count: skipped.length,
+          overview_orders_stored: integrity.overviewStored,
+          failed_check_ids: failed.map(c => c.id),
+          checks: integrity.checks,
+        };
+      });
+      const summary = {
+        total: rows.length,
+        passing: rows.filter(r => r.passed && !r.marked_zero).length,
+        failing: rows.filter(r => !r.passed).length,
+        marked_zero: rows.filter(r => r.marked_zero).length,
+        needs_reupload: rows.filter(r => !r.marked_zero && r.overview_orders_stored === 0).length,
+      };
+      res.json({ summary, recons: rows });
+    } catch (err) {
+      console.error('[bat] integrity-report failed:', err.message);
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // Clear the per-recon last_error AND reset status away from 'error'.
