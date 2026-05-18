@@ -414,7 +414,12 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
     });
   }, [tabData, filterStatus, search]);
 
-  if (!extractions?.length) return null;
+  // Don't bail just because there are zero extraction rows — a recon
+  // can legitimately have N missing-POD rows and zero extractions (BAT
+  // shipped Overview ODRs but no Delivery POD PDFs). Bailing here
+  // would hide the entire invoice register for exactly the scenario
+  // the Missing PODs tab is meant to surface.
+  if (!extractions?.length && !missingPodRows.length) return null;
 
   const tabTotal = (rows) => rows.reduce((s, e) => s + (e.order_amount || 0), 0);
   const fmtR = (v) => `R ${Math.abs(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

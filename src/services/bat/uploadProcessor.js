@@ -160,11 +160,21 @@ export async function processSupplierUpload({
       `);
       const tx = db.transaction(() => {
         for (const [orderNumber, info] of parsed.orderAmounts) {
+          // Preserve null for order_amount when the parser couldn't
+          // read a numeric value — distinguishes "BAT listed R 0"
+          // from "BAT hasn't declared an amount yet". The column was
+          // made nullable in migration v73 specifically for this.
+          // Per-fee components stay defaulted to 0 because their
+          // semantics is "no contribution to this fee bucket" rather
+          // than "unknown".
+          const amountVal = info.amount == null
+            ? null
+            : (Number.isFinite(Number(info.amount)) ? Number(info.amount) : null);
           insertOrder.run(
             reconId,
             orderNumber,
             info.isException ? 1 : 0,
-            Number(info.amount) || 0,
+            amountVal,
             info.discount    == null ? 0 : Number(info.discount),
             info.deliveryFee == null ? 0 : Number(info.deliveryFee),
             info.pricingAdj  == null ? 0 : Number(info.pricingAdj),
