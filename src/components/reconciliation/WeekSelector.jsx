@@ -31,12 +31,23 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
       {reconciliations.map((r) => {
         const ocrPct = r.pod_count > 0 ? Math.round(((r.found_count || 0) / r.pod_count) * 100) : 0;
         const sageHasData = !!r.sage_present;
-        const variance = Math.abs((r.supplier_total || 0) - (r.sage_total || 0));
+        // Single BAT/Sage baseline used by every signal on this card (BAT
+        // amount, Matched/Mismatch badge, awaiting-credit-notes detection,
+        // drift block). Mirrors the parity that PR #354's dashboard tile and
+        // per-week table established: both sides sum the same three fee
+        // columns (Overview-tab claim on BAT, Sage cache per-fee on Sage)
+        // rather than the supplier_total / sage.total cached columns, which
+        // can drift after recompute/refresh and used to produce contradictory
+        // readings — e.g. a "Matched" card on a week the dashboard variance
+        // was still flagging.
+        const claim = r.claim_per_fee || 0;
+        const sagePerFee = (r.sage_delivery || 0) + (r.sage_discount || 0) + (r.sage_pricing || 0);
+        const variance = Math.abs(claim - sagePerFee);
         const isMatched = sageHasData && variance < 0.01;
         const isMismatched = sageHasData && variance >= 0.01;
         // Don't show "Complete" (green) if there's no Sage payment yet — that's
         // misleading. Awaiting Sage takes precedence over the extraction status.
-        const awaitingSage = !sageHasData && (r.supplier_total || 0) > 0;
+        const awaitingSage = !sageHasData && claim > 0;
         const isMarkedZero = !!r.marked_zero;
         let badge;
         if (isMarkedZero) {
@@ -123,8 +134,8 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
               ) : (
                 <>
                   <div className="space-y-1">
-                    <DataRow label="BAT" value={fmt(r.supplier_total)} />
-                    <DataRow label="Credit Notes" value={r.sage_present ? fmt(r.sage_total) : '—'} muted />
+                    <DataRow label="BAT" value={fmt(claim)} />
+                    <DataRow label="Credit Notes" value={r.sage_present ? fmt(sagePerFee) : '—'} muted />
                   </div>
 
                   <div className="pt-2 border-t border-border space-y-1">
