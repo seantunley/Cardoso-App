@@ -1134,31 +1134,61 @@ export function getReconciliation(id) {
   // and one of the two rows came back unmatched.
   recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndexService({ db }));
 
-  // Integrity invariants — runs every load so any drift between the
-  // numbers operators see on the page and the underlying data shows
-  // up immediately as a red blocking banner. See
-  // src/services/bat/integrity.js for the full invariant list.
-  // Failures are silently swallowed at this layer because integrity
-  // is an observation tool, not a transactional concern — if the
-  // checker itself breaks we still want the recon page to load.
+  // Integrity invariants — runs every load so the red banner appears
+  // immediately if any check fails. The checker itself is pure read.
+  // Logging policy: we only emit a bat.integrity.drift System Log
+  // entry on STATE TRANSITION — not on every getReconciliation call.
+  // The detail view polls /api/bat/reconciliation/:id repeatedly, so
+  // logging unconditionally would write hundreds of identical rows
+  // per session and bury real operational errors. The nightly sweep
+  // (scheduler.js → runBatIntegritySweep) is the once-per-day
+  // authoritative log; this transition-only log is the immediate
+  // "something just broke" signal between sweeps.
   try {
     recon.integrity = checkReconciliationIntegrity({ db, reconId: id });
-    if (recon.integrity && recon.integrity.passed === false) {
+    if (recon.integrity) {
       const failed = recon.integrity.checks.filter(c => !c.passed && !c.skipped);
-      try {
-        logError(
-          'bat.integrity.drift',
-          new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) failed ${failed.length} integrity check(s): ${failed.map(c => c.id).join(', ')}`),
-          {
-            reconciliation_id: id,
-            week_number: recon.week_number,
-            year: recon.year,
-            failed_check_ids: failed.map(c => c.id),
-            failed_details: failed.map(c => ({ id: c.id, expected: c.expected, actual: c.actual, drift: c.drift })),
-          },
-          'warn',
-        );
-      } catch {}
+      const failedKey = recon.integrity.passed
+        ? null
+        : failed.map(c => c.id).sort().join(',');
+      const prevKey = _integrityLastState.get(id) ?? undefined;
+      if (failedKey !== prevKey) {
+        // State transition: passing→failing, failing→passing, or
+        // failing→failing-with-different-checks. All worth a log
+        // entry. passing→passing produces no log (the entry is
+        // marked OK in the map and no write happens).
+        _integrityLastState.set(id, failedKey);
+        if (failedKey !== null) {
+          try {
+            logError(
+              'bat.integrity.drift',
+              new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) failed ${failed.length} integrity check(s): ${failedKey}`),
+              {
+                reconciliation_id: id,
+                week_number: recon.week_number,
+                year: recon.year,
+                failed_check_ids: failed.map(c => c.id),
+                failed_details: failed.map(c => ({ id: c.id, expected: c.expected, actual: c.actual, drift: c.drift })),
+                source: 'state_transition',
+                previous_state: prevKey === undefined ? 'first_seen' : (prevKey === null ? 'passing' : prevKey),
+              },
+              'warn',
+            );
+          } catch {}
+        } else if (prevKey !== undefined && prevKey !== null) {
+          // Recovered from a known-failing state — leave an info
+          // breadcrumb so the operator can correlate "when did the
+          // banner clear" without scraping job_runs.
+          try {
+            logError(
+              'bat.integrity.recovered',
+              new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) integrity recovered — previously failing: ${prevKey}`),
+              { reconciliation_id: id, week_number: recon.week_number, year: recon.year, previously_failed_check_ids: prevKey.split(',') },
+              'info',
+            );
+          } catch {}
+        }
+      }
     }
   } catch (err) {
     recon.integrity = { passed: false, overviewStored: 0, checks: [{
@@ -1167,11 +1197,26 @@ export function getReconciliation(id) {
       passed: false,
       detail: `Integrity check threw: ${err?.message || String(err)}. Tile numbers are not verified for this recon.`,
     }] };
-    try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {}
+    // Same transition-only policy for crashes so a wedged checker
+    // doesn't write a log entry per page refresh.
+    const crashKey = `__crash__:${err?.message || 'unknown'}`;
+    if (_integrityLastState.get(id) !== crashKey) {
+      _integrityLastState.set(id, crashKey);
+      try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {}
+    }
   }
 
   return recon;
 }
+
+// Per-recon last-known integrity state, keyed by reconciliation_id.
+// Value is null when last seen passing, a sorted comma-joined string
+// of failed check ids when last seen failing, `__crash__:msg` when
+// the checker itself threw, or undefined for "never observed" (the
+// Map returns undefined for unseen keys via .get()). Reset to empty
+// on process restart — that's intentional; boot is "first sight" of
+// every recon, so failing recons rightly produce a fresh log entry.
+const _integrityLastState = new Map();
 
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals

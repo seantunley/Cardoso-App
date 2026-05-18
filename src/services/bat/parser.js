@@ -585,7 +585,8 @@ function extractOrderAmounts(rows) {
         const parsed = parseFloat(String(rawVal).replace(/[^0-9.\-]/g, ''));
         if (!isNaN(parsed)) val = parsed;
       }
-      if (!amounts.has(orderNumber)) {
+      const existing = amounts.get(orderNumber);
+      if (!existing) {
         amounts.set(orderNumber, {
           amount: val,
           isException,
@@ -593,6 +594,18 @@ function extractOrderAmounts(rows) {
           deliveryFee: deliveryCol >= 0 ? pn(row[deliveryCol]) : null,
           pricingAdj: pricingCol >= 0 ? pn(row[pricingCol]) : null,
         });
+      } else if (existing.amount == null && val != null) {
+        // Earlier occurrence of this ODR captured no amount (blank
+        // or non-numeric Sub Total cell); this later occurrence has
+        // a valid number. Upgrade the entry so downstream Missing-
+        // POD totals stop treating the order as unknown. Per-fee
+        // fields are similarly upgraded if they were null before.
+        // is_exception stays whatever the first occurrence saw —
+        // that's the pivot it appeared in.
+        existing.amount = val;
+        if (existing.discount    == null && discountCol >= 0) existing.discount    = pn(row[discountCol]);
+        if (existing.deliveryFee == null && deliveryCol >= 0) existing.deliveryFee = pn(row[deliveryCol]);
+        if (existing.pricingAdj  == null && pricingCol  >= 0) existing.pricingAdj  = pn(row[pricingCol]);
       }
     }
   }
