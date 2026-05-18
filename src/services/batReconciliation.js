@@ -764,10 +764,40 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
       existing.id
     );
 
-    // Clear old extractions for this reconciliation (keep cached ones by pdf_url)
+    // Clear old credit notes for this reconciliation. (The comment used
+    // to say "keep cached extractions by pdf_url" but extractions are
+    // handled below.)
     db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(existing.id);
 
     insertPodEntries(existing.id, podUrls);
+
+    // Prune stale extraction rows. insertPodEntries upserts the new
+    // POD set by (reconciliation_id, pdf_url), but never DELETEs rows
+    // whose pdf_url is no longer in the upload. Without this prune, a
+    // corrected re-upload (operator drops a wrong POD, fixes a typo'd
+    // URL, or the source spreadsheet legitimately removes an order)
+    // leaves the obsolete extraction row in place — making the
+    // NOT EXISTS check used by Missing PODs queries think the order is
+    // still covered. Real missing PODs are silently suppressed and the
+    // operator sees wrong totals.
+    //
+    // Guard: only prune when the new upload actually shipped POD URLs.
+    // A parse failure that produced zero podUrls must not cascade into
+    // wiping every row for the recon.
+    if (Array.isArray(podUrls) && podUrls.length > 0) {
+      const newUrls = new Set(podUrls.map(p => p.url).filter(Boolean));
+      const existingRows = db.prepare(
+        'SELECT id, pdf_url FROM bat_invoice_extractions WHERE reconciliation_id = ?'
+      ).all(existing.id);
+      const toDelete = existingRows.filter(r => r.pdf_url && !newUrls.has(r.pdf_url));
+      if (toDelete.length > 0) {
+        const del = db.prepare('DELETE FROM bat_invoice_extractions WHERE id = ?');
+        const tx = db.transaction(() => { for (const r of toDelete) del.run(r.id); });
+        tx();
+        console.log(`[bat] Pruned ${toDelete.length} stale extraction row(s) from recon ${existing.id} on re-upload (PDF URLs no longer in supplier sheet)`);
+      }
+    }
+
     // Self-heal supplier_total from the per-row data we just upserted.
     // No-ops gracefully if amounts are still incomplete; see helper docs.
     recomputeSupplierTotalSafe(existing.id);
