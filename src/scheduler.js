@@ -8,6 +8,7 @@ import { runConnectionImport } from './services/syncEngine.js';
 import { syncCreditLogicFromHub, probeHubUrl } from './services/creditLogic.js';
 import { logError } from './lib/errorLog.js';
 import { refreshSageWeekTotalsCache, probeSageHealth } from './services/batReconciliation.js';
+import { checkReconciliationIntegrity } from './services/bat/integrity.js';
 import { recordJob, pruneOldJobRuns } from './lib/jobRunner.js';
 import { evaluateAllRules } from './lib/alertRules.js';
 import { pruneResolvedAlerts } from './lib/alertEngine.js';
@@ -271,6 +272,95 @@ export async function runLocalBackup() {
   }
 }
 
+// Daily BAT integrity sweep — runs every per-recon invariant (see
+// services/bat/integrity.js) across every non-marked-zero recon and
+// writes a bat.integrity.drift entry to the System Log for each
+// failure. Operator gets a single nightly digest without having to
+// open each recon page — same source-of-truth the per-recon banner
+// and the dashboard panel use.
+//
+// Site-only: the Hub has no bat_invoice_extractions / bat_overview_orders
+// tables locally, and integrity is a per-site reconciliation concern.
+//
+// Returns an aggregate object so recordJob can attach the summary as
+// the run's context (operator can read it from /api/operations/job-runs
+// without scraping logs).
+async function runBatIntegritySweep() {
+  const recons = db.prepare(
+    "SELECT id, week_number, year, marked_zero FROM bat_reconciliations WHERE COALESCE(marked_zero, 0) = 0"
+  ).all();
+  let passing = 0;
+  let failing = 0;
+  let skipped = 0;
+  const failures = [];
+  for (const r of recons) {
+    try {
+      const integrity = checkReconciliationIntegrity({ db, reconId: r.id });
+      const failedChecks = integrity.checks.filter((c) => !c.passed && !c.skipped);
+      const skippedChecks = integrity.checks.filter((c) => c.skipped);
+      if (failedChecks.length > 0) {
+        failing++;
+        failures.push({
+          reconciliation_id: r.id,
+          week_number: r.week_number,
+          year: r.year,
+          failed_check_ids: failedChecks.map((c) => c.id),
+        });
+        // Per-recon System Log entry. Severity 'warn' because drift is
+        // operator-actionable (investigate the recon page's banner)
+        // but not a system-level failure.
+        try {
+          logError(
+            'bat.integrity.drift',
+            new Error(`Recon ${r.id} (W${r.week_number}/${r.year}) failed ${failedChecks.length} integrity check(s) on nightly sweep: ${failedChecks.map((c) => c.id).join(', ')}`),
+            {
+              reconciliation_id: r.id,
+              week_number: r.week_number,
+              year: r.year,
+              failed_check_ids: failedChecks.map((c) => c.id),
+              failed_details: failedChecks.map((c) => ({
+                id: c.id,
+                expected: c.expected,
+                actual: c.actual,
+                drift: c.drift,
+                detail: c.detail,
+              })),
+              source: 'nightly_sweep',
+            },
+            'warn',
+          );
+        } catch { /* logging is best-effort */ }
+      } else if (skippedChecks.length > 0) {
+        // Any skipped check counts the whole recon as skipped, not
+        // passing. supplier_total still runs on pre-v72 recons even
+        // when Overview-dependent checks (I2/I3/I4/I5/I6/I7) skip,
+        // so the previous "skippedChecks.length === checks.length"
+        // test was deterministically false for those recons and they
+        // got bucketed as passing — under-reporting the operator
+        // action of "re-upload to enable Overview verification".
+        skipped++;
+      } else {
+        passing++;
+      }
+    } catch (err) {
+      // Per-recon checker crash shouldn't kill the sweep — record
+      // and move on so the rest of the recons still get checked.
+      failing++;
+      failures.push({
+        reconciliation_id: r.id,
+        week_number: r.week_number,
+        year: r.year,
+        failed_check_ids: ['integrity_check_crashed'],
+        error: err?.message || String(err),
+      });
+      try { logError('bat.integrity.crash', err, { reconciliation_id: r.id }); } catch {}
+    }
+  }
+  const summary = { total: recons.length, passing, failing, skipped, failures };
+  console.log(`[bat-integrity-sweep] ${recons.length} recon(s) scanned: ${passing} passing, ${failing} failing, ${skipped} skipped (no Overview data)`);
+  return summary;
+}
+
 // Helper: wrap a scheduled job in recordJob + a swallowed-error trailer so
 // the lifecycle row gets written but a thrown error doesn't escape into
 // node-cron / setInterval (which would crash the next tick). Each call
@@ -363,6 +453,30 @@ export function startSchedulers() {
       cronTasks.push(t);
       registerJob({ name: 'backup-verify', type: 'cron', cronExpression: '30 3 * * *', taskRef: t, mode: 'site', description: 'Verify latest backup integrity (PRAGMA integrity_check + row counts)' });
     }
+
+    // BAT integrity sweep — 04:00 daily, after backup (02:00) and
+    // backup-verify (03:30), before morning sync window (06:30).
+    // Writes a bat.integrity.drift System Log entry per failing recon
+    // so the operator sees nightly drift without opening each page.
+    // The per-recon banner + dashboard panel already surface drift on
+    // page load; this is the "nobody opened the page" safety net.
+    {
+      const t = cron.schedule('0 4 * * *', track(
+        'bat-integrity-sweep',
+        runBatIntegritySweep,
+        (result) => result,
+      ));
+      cronTasks.push(t);
+      registerJob({
+        name: 'bat-integrity-sweep',
+        type: 'cron',
+        cronExpression: '0 4 * * *',
+        taskRef: t,
+        mode: 'site',
+        description: 'Nightly BAT reconciliation integrity sweep — writes bat.integrity.drift per failing recon',
+      });
+    }
+
     // ntopng integration: no local scheduled scan needed (ntopng pulls flows continuously)
 
     // Boot-time hub-URL probe. Hits ${HUB_URL}/api/health once a few seconds

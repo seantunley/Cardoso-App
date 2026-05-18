@@ -570,11 +570,23 @@ function extractOrderAmounts(rows) {
       if (!Array.isArray(row)) continue;
       const orderNumber = String(row[orderCol] || '').trim();
       if (!orderNumber.startsWith('ODR-')) continue;
+      // Capture every ODR in the Overview pivot, even when the
+      // amount cell is blank or non-numeric. The downstream
+      // bat_overview_orders persistence (uploadProcessor.js) uses
+      // this map to populate the Missing PODs detection table —
+      // skipping un-parseable rows would let those ODRs silently
+      // vanish from the audit trail, showing "no missing PODs"
+      // when the real answer is "we don't know the amount yet for
+      // these orders". amount stays null in that case so callers
+      // can distinguish "no amount yet" from "amount = R 0".
       const rawVal = row[amountCol];
-      if (rawVal === '' || rawVal == null) continue;
-      const val = parseFloat(String(rawVal).replace(/[^0-9.\-]/g, ''));
-      if (isNaN(val)) continue;
-      if (!amounts.has(orderNumber)) {
+      let val = null;
+      if (rawVal !== '' && rawVal != null) {
+        const parsed = parseFloat(String(rawVal).replace(/[^0-9.\-]/g, ''));
+        if (!isNaN(parsed)) val = parsed;
+      }
+      const existing = amounts.get(orderNumber);
+      if (!existing) {
         amounts.set(orderNumber, {
           amount: val,
           isException,
@@ -582,6 +594,18 @@ function extractOrderAmounts(rows) {
           deliveryFee: deliveryCol >= 0 ? pn(row[deliveryCol]) : null,
           pricingAdj: pricingCol >= 0 ? pn(row[pricingCol]) : null,
         });
+      } else if (existing.amount == null && val != null) {
+        // Earlier occurrence of this ODR captured no amount (blank
+        // or non-numeric Sub Total cell); this later occurrence has
+        // a valid number. Upgrade the entry so downstream Missing-
+        // POD totals stop treating the order as unknown. Per-fee
+        // fields are similarly upgraded if they were null before.
+        // is_exception stays whatever the first occurrence saw —
+        // that's the pivot it appeared in.
+        existing.amount = val;
+        if (existing.discount    == null && discountCol >= 0) existing.discount    = pn(row[discountCol]);
+        if (existing.deliveryFee == null && deliveryCol >= 0) existing.deliveryFee = pn(row[deliveryCol]);
+        if (existing.pricingAdj  == null && pricingCol  >= 0) existing.pricingAdj  = pn(row[pricingCol]);
       }
     }
   }

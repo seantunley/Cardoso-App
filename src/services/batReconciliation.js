@@ -13,6 +13,7 @@ import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/matching.js';
 import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
 import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
+import { checkReconciliationIntegrity } from './bat/integrity.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
@@ -764,13 +765,36 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
       existing.id
     );
 
-    // Clear old extractions for this reconciliation (keep cached ones by pdf_url)
+    // Clear old credit notes for this reconciliation. (The comment used
+    // to say "keep cached extractions by pdf_url" but extractions are
+    // handled below.)
     db.prepare('DELETE FROM bat_sage_credit_notes WHERE reconciliation_id = ?').run(existing.id);
 
     insertPodEntries(existing.id, podUrls);
-    // Self-heal supplier_total from the per-row data we just upserted.
-    // No-ops gracefully if amounts are still incomplete; see helper docs.
-    recomputeSupplierTotalSafe(existing.id);
+
+    // NOTE: We do NOT prune extraction rows whose pdf_url isn't in
+    // this upload. Earlier commit 3ac4d66 added that prune to fix a
+    // stale-row Missing-PODs detection bug, but the prune is
+    // destructive on multi-branch uploads: when the second branch
+    // file lands (Welkom + JHB on the same week), the first branch's
+    // extraction rows aren't in the second upload's URL set, so they
+    // would all be deleted along with their OCR/manual corrections.
+    // Per operator: keep existing rows by pdf_url (the original
+    // upsert behaviour). The stale-row case will need a separate
+    // operator-triggered cleanup tool rather than a blanket prune on
+    // every re-upload.
+
+    // NOTE: Do NOT call recomputeSupplierTotalSafe here. supplier_total
+    // is the claim summary from the Overview-tab fees claim (set on the
+    // UPDATE above to fees.total.total). Re-deriving it from per-row
+    // extraction amounts contradicts the operator-confirmed rule "BAT
+    // TOTAL is the claim summary, never POD-derived". The bottom-up
+    // recompute also produces false-positive integrity drift on every
+    // recon with missing PODs (extracted sum < claim by the value of
+    // the missing PODs), red-banner-ing recons that are working as
+    // expected. Multi-branch upload handling — the original reason
+    // the helper existed — needs a different fix (parser-side per-fee
+    // accumulation across branch uploads, or operator consolidation).
     return existing.id;
   }
 
@@ -790,7 +814,9 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
 
   const reconId = result.lastInsertRowid;
   insertPodEntries(reconId, podUrls);
-  recomputeSupplierTotalSafe(reconId);
+  // NOTE: Don't recompute supplier_total — same reasoning as the
+  // UPDATE branch above. supplier_total IS the claim summary, set
+  // from fees.total.total on the INSERT above.
   return reconId;
 }
 
@@ -879,55 +905,21 @@ export function unmarkWeekZero({ id, userEmail }) {
   return { week_number: row.week_number, year: row.year };
 }
 
-// Self-healing supplier_total. Sets the recon's supplier_total to the
-// sum of non-exception order_amounts from its rows — the operator-
-// visible BAT TOTAL and the headline number on the recon page. Returns
-// true if updated, false if skipped (incomplete amounts).
-//
-// Why this exists: createReconciliation/insertPodEntries originally
-// stamped supplier_total = parsed.fees.total.total (the sum of the
-// supplier's three fee-section lines from the spreadsheet's Overview
-// tab). That worked when every week had ONE supplier spreadsheet, but
-// broke the moment two branch spreadsheets (Welkom + JHB, etc.) landed
-// on the same week — the second upload's smaller fees overwrote the
-// first's, and the recon's BAT TOTAL silently went wrong with no
-// operator-visible signal. The W11 incident on 2026-05-11 burned
-// several rounds of debugging, a one-shot SQL fix, a Maintenance-tab
-// healer (PR #275), AND a column-not-found warning at upload (PR #274)
-// before we got here.
-//
-// This helper closes the entire class: every successful upload now
-// recomputes the headline total from the per-row data that just
-// landed. Re-uploads naturally produce the right number; merges of
-// branch spreadsheets are summed correctly because order_amount is
-// per-row (preserved by the upsert's COALESCE pattern).
-//
-// Null-safety guard (WHERE NOT EXISTS): we ONLY overwrite when every
-// non-exception row has a populated order_amount. Otherwise the SUM
-// would treat nulls as zero and the derived total would be artificially
-// low — e.g. mid-week uploads where some PODs haven't had their amount
-// set yet (filled in later by backfillOrderAmounts when a subsequent
-// week's spreadsheet arrives). In that case the UPDATE silently no-ops
-// (info.changes === 0) and the existing fees-derived supplier_total
-// stays in place. Same guard the Maintenance-tab tool uses (PR #275).
-function recomputeSupplierTotalSafe(reconId) {
-  const info = db.prepare(`
-    UPDATE bat_reconciliations
-    SET supplier_total = (
-      SELECT COALESCE(SUM(CASE WHEN COALESCE(is_exception, 0) = 0 THEN COALESCE(order_amount, 0) ELSE 0 END), 0)
-      FROM bat_invoice_extractions
-      WHERE reconciliation_id = bat_reconciliations.id
-    )
-    WHERE id = ?
-      AND NOT EXISTS (
-        SELECT 1 FROM bat_invoice_extractions
-        WHERE reconciliation_id = bat_reconciliations.id
-          AND COALESCE(is_exception, 0) = 0
-          AND order_amount IS NULL
-      )
-  `).run(reconId);
-  return info.changes > 0;
-}
+// REMOVED: recomputeSupplierTotalSafe. The helper used to overwrite
+// supplier_total with the bottom-up sum of non-exception
+// order_amounts after every upload (and from backfillOrderAmounts /
+// manualSetInvoice / end-of-OCR-cascade in earlier PR #354 commits).
+// Per the operator-confirmed rule "BAT TOTAL is the claim summary,
+// never POD-derived" (memorised 2026-05-18), supplier_total is
+// always the claim summary set from fees.total.total at upload
+// time and must NOT be re-derived from per-row extractions. Re-
+// deriving made integrity invariant I1 (supplier_total ==
+// claim_per_fee) deterministically fail on every recon with missing
+// PODs, blocking-red-bannering recons that were working as expected.
+// The Maintenance-tab tool at /api/maintenance/recompute-recon-totals
+// uses a separate implementation in services/bat/reconTotals.js for
+// operator-triggered manual recovery only — it does NOT touch
+// supplier_total on normal upload paths.
 
 function insertPodEntries(reconId, podUrls) {
   const upsert = db.prepare(`
@@ -974,13 +966,15 @@ function insertPodEntries(reconId, podUrls) {
 export function backfillOrderAmounts(orderAmounts) {
   if (!orderAmounts || orderAmounts.size === 0) return 0;
 
-  // Pull reconciliation_id alongside so we can recompute supplier_total
-  // on every recon we touched. Without this, backfilling amounts onto
-  // a prior week's rows would leave that week's headline BAT TOTAL
-  // stale (it'd still reflect the old fees-section snapshot from when
-  // the spreadsheet was uploaded — pre-backfill). Self-healing here
-  // keeps the headline total consistent with the per-row data without
-  // needing the operator to run the Maintenance-tab recompute.
+  // Fill NULL order_amount on existing extraction rows whose
+  // order_number appears in the newly-uploaded Overview pivot.
+  // NOTE: We no longer recompute supplier_total after backfill —
+  // supplier_total is the claim summary from the Overview-tab fees
+  // claim (set at upload time), not a bottom-up sum of per-row
+  // amounts. Per-row amounts inform the per-invoice audit trail,
+  // missing-POD detection, and dup detection; they don't redefine
+  // the recon's headline total. See PR #354 + operator-confirmed
+  // rule "BAT TOTAL is the claim summary".
   const rows = db.prepare(
     'SELECT id, order_number, reconciliation_id FROM bat_invoice_extractions WHERE order_amount IS NULL AND order_number IS NOT NULL'
   ).all();
@@ -1003,18 +997,8 @@ export function backfillOrderAmounts(orderAmounts) {
   });
   tx();
 
-  // Recompute supplier_total for each touched recon. Safe-recompute
-  // helper no-ops if any non-exception row in that recon STILL has
-  // a null order_amount (the backfill may have filled some but not
-  // all rows). Per recon, not in one txn — better-sqlite3 is
-  // synchronous so the inner UPDATEs serialise naturally.
-  let recomputedRecons = 0;
-  for (const reconId of touchedRecons) {
-    if (recomputeSupplierTotalSafe(reconId)) recomputedRecons++;
-  }
-
   if (count > 0) {
-    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions; recomputed supplier_total on ${recomputedRecons}/${touchedRecons.size} affected recon(s)`);
+    console.log(`[bat] Backfilled ${count} order amounts from new spreadsheet onto previous extractions across ${touchedRecons.size} recon(s)`);
   }
   return count;
 }
@@ -1096,6 +1080,33 @@ export function getReconciliation(id) {
   recon.creditNotes = db.prepare('SELECT * FROM bat_sage_credit_notes WHERE reconciliation_id = ? ORDER BY fee_type, batch_number').all(id);
   recon.extractions = db.prepare('SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? ORDER BY id').all(id);
 
+  // Missing PODs = ODRs in BAT's Overview pivot for this recon that
+  // don't have a matching extraction row in bat_invoice_extractions.
+  // The EXCEPTIONS tab needs the missing exception ODRs to balance to
+  // BAT's exception-pivot total; the Missing PODs tab shows every
+  // missing ODR (normal + exception). For recons created before v72
+  // (no bat_overview_orders rows), the array will be empty and the UI
+  // shows "Re-upload to populate" — there's no other way to recover
+  // the Overview pivot without the original .xlsx.
+  recon.missingPods = db.prepare(`
+    SELECT o.order_number, o.is_exception, o.order_amount,
+           o.supplier_discount, o.supplier_delivery, o.supplier_pricing
+    FROM bat_overview_orders o
+    WHERE o.reconciliation_id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM bat_invoice_extractions e
+        WHERE e.reconciliation_id = o.reconciliation_id
+          AND e.order_number = o.order_number
+      )
+    ORDER BY o.is_exception, o.order_number
+  `).all(id);
+  // Provenance flag so the UI can distinguish "no Overview data stored
+  // for this recon" (older recons, not yet re-uploaded) from "Overview
+  // data stored, zero PODs missing".
+  recon.overviewOrdersStored = db.prepare(
+    'SELECT COUNT(*) AS n FROM bat_overview_orders WHERE reconciliation_id = ?'
+  ).get(id).n;
+
   // Overlay Sage totals from the local cache (refreshed on schedule). The per-recon
   // bat_reconciliations.sage_* fields only get filled when the user clicks "Refresh Sage"
   // on this page; the cache is the up-to-date source of truth for week-level totals.
@@ -1123,29 +1134,238 @@ export function getReconciliation(id) {
   // and one of the two rows came back unmatched.
   recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndexService({ db }));
 
+  // Integrity invariants — runs every load so the red banner appears
+  // immediately if any check fails. The checker itself is pure read.
+  // Logging policy: we only emit a bat.integrity.drift System Log
+  // entry on STATE TRANSITION — not on every getReconciliation call.
+  // The detail view polls /api/bat/reconciliation/:id repeatedly, so
+  // logging unconditionally would write hundreds of identical rows
+  // per session and bury real operational errors. The nightly sweep
+  // (scheduler.js → runBatIntegritySweep) is the once-per-day
+  // authoritative log; this transition-only log is the immediate
+  // "something just broke" signal between sweeps.
+  try {
+    recon.integrity = checkReconciliationIntegrity({ db, reconId: id });
+    if (recon.integrity) {
+      const failed = recon.integrity.checks.filter(c => !c.passed && !c.skipped);
+      const failedKey = recon.integrity.passed
+        ? null
+        : failed.map(c => c.id).sort().join(',');
+      const prevKey = _integrityLastState.get(id) ?? undefined;
+      if (failedKey !== prevKey) {
+        // State transition: passing→failing, failing→passing, or
+        // failing→failing-with-different-checks. All worth a log
+        // entry. passing→passing produces no log (the entry is
+        // marked OK in the map and no write happens).
+        _integrityLastState.set(id, failedKey);
+        if (failedKey !== null) {
+          try {
+            logError(
+              'bat.integrity.drift',
+              new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) failed ${failed.length} integrity check(s): ${failedKey}`),
+              {
+                reconciliation_id: id,
+                week_number: recon.week_number,
+                year: recon.year,
+                failed_check_ids: failed.map(c => c.id),
+                failed_details: failed.map(c => ({ id: c.id, expected: c.expected, actual: c.actual, drift: c.drift })),
+                source: 'state_transition',
+                previous_state: prevKey === undefined ? 'first_seen' : (prevKey === null ? 'passing' : prevKey),
+              },
+              'warn',
+            );
+          } catch {}
+        } else if (prevKey !== undefined && prevKey !== null) {
+          // Recovered from a known-failing state — leave an info
+          // breadcrumb so the operator can correlate "when did the
+          // banner clear" without scraping job_runs.
+          try {
+            logError(
+              'bat.integrity.recovered',
+              new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) integrity recovered — previously failing: ${prevKey}`),
+              { reconciliation_id: id, week_number: recon.week_number, year: recon.year, previously_failed_check_ids: prevKey.split(',') },
+              'info',
+            );
+          } catch {}
+        }
+      }
+    }
+  } catch (err) {
+    recon.integrity = { passed: false, overviewStored: 0, checks: [{
+      id: 'integrity_check_crashed',
+      name: 'Integrity checker ran without crashing',
+      passed: false,
+      detail: `Integrity check threw: ${err?.message || String(err)}. Tile numbers are not verified for this recon.`,
+    }] };
+    // Same transition-only policy for crashes so a wedged checker
+    // doesn't write a log entry per page refresh.
+    const crashKey = `__crash__:${err?.message || 'unknown'}`;
+    if (_integrityLastState.get(id) !== crashKey) {
+      _integrityLastState.set(id, crashKey);
+      try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {}
+    }
+  }
+
   return recon;
 }
+
+// Per-recon last-known integrity state, keyed by reconciliation_id.
+// Value is null when last seen passing, a sorted comma-joined string
+// of failed check ids when last seen failing, `__crash__:msg` when
+// the checker itself threw, or undefined for "never observed" (the
+// Map returns undefined for unseen keys via .get()). Reset to empty
+// on process restart — that's intentional; boot is "first sight" of
+// every recon, so failing recons rightly produce a fresh log entry.
+const _integrityLastState = new Map();
 
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals
   // even when the per-recon refresh has never been run.
+  //
+  // ext_stats: per-recon OCR + amount stats, computed live every call so the
+  // per-week tile reflects current state without waiting for the cached
+  // supplier_total column to be recomputed. claim_per_fee is the BAT
+  // Overview-tab summary (what BAT says they're owed). ocr_sum is the
+  // bottom-up sum from extraction rows — the gap between the two surfaces
+  // either pending unverified rows or row-vs-summary data mismatches.
+  //
+  // dup_stats: invoice numbers that OCR returned more than once within the
+  // same recon (typical cause: a barcode prefix that mis-reads consistently
+  // across unrelated PDFs, or a genuine duplicate POD upload). The
+  // inflation value is "extra amount included in ocr_sum because of
+  // duplicates" — Σ(amount across dup rows) − Σ(max amount per dup invoice
+  // = one representative). Subtracting inflation from ocr_sum gives a
+  // dedup'd estimate of the verified value.
   return db.prepare(`
     SELECT r.*,
-      COALESCE(ext_stats.pod_count, 0)   AS pod_count,
-      COALESCE(ext_stats.found_count, 0) AS found_count,
-      COALESCE(c.delivery, r.sage_delivery) AS sage_delivery,
-      COALESCE(c.discount, r.sage_discount) AS sage_discount,
-      COALESCE(c.pricing,  r.sage_pricing)  AS sage_pricing,
-      COALESCE(c.total,    r.sage_total)    AS sage_total,
-      CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END AS sage_present
+      COALESCE(ext_stats.pod_count, 0)                    AS pod_count,
+      COALESCE(ext_stats.found_count, 0)                  AS found_count,
+      COALESCE(ext_stats.ocr_sum, 0)                      AS ocr_sum,
+      COALESCE(ext_stats.unverified_amount, 0)            AS unverified_amount,
+      COALESCE(ext_stats.unverified_count, 0)             AS unverified_count,
+      COALESCE(ext_stats.ocr_missing_amount_count, 0)     AS ocr_missing_amount_count,
+      COALESCE(r.supplier_delivery, 0)
+        + COALESCE(r.supplier_discount, 0)
+        + COALESCE(r.supplier_pricing,  0)                AS claim_per_fee,
+      COALESCE(dup_stats.duplicate_invoice_count, 0)      AS duplicate_invoice_count,
+      COALESCE(dup_stats.duplicate_inflation, 0)          AS duplicate_inflation,
+      -- Missing-POD signals from the persisted Overview-pivot ODR list
+      -- (bat_overview_orders). overview_orders_stored is the provenance
+      -- flag: 0 means this recon predates the v72 upload-time persistence
+      -- (the tile renders "Re-upload to verify" instead of a number). > 0
+      -- means real data, and missing_pods_count/value are honest.
+      COALESCE(mp_stats.overview_orders_stored, 0)        AS overview_orders_stored,
+      COALESCE(mp_stats.missing_pods_count, 0)            AS missing_pods_count,
+      COALESCE(mp_stats.missing_pods_value, 0)            AS missing_pods_value,
+      COALESCE(mp_stats.missing_pods_unknown_count, 0)    AS missing_pods_unknown_count,
+      COALESCE(c.delivery, r.sage_delivery)               AS sage_delivery,
+      COALESCE(c.discount, r.sage_discount)               AS sage_discount,
+      COALESCE(c.pricing,  r.sage_pricing)                AS sage_pricing,
+      COALESCE(c.total,    r.sage_total)                  AS sage_total,
+      CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END      AS sage_present
     FROM bat_reconciliations r
     LEFT JOIN (
       SELECT reconciliation_id,
              COUNT(*) AS pod_count,
-             SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count
+             SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count,
+             -- ocr_sum: amount that has actually been verified by OCR.
+             -- order_amount is sourced from the supplier spreadsheet at
+             -- ingest time, so a row can carry an amount even when its
+             -- PDF's OCR failed or didn't match a Cardoso invoice
+             -- (extraction_status pending/not_found/failed). Including
+             -- such rows here would falsely present unverified deliveries
+             -- as "OCR-verified" on the tile — counting only status='found'
+             -- ties the figure to OCR success rather than spreadsheet
+             -- presence. unverified_amount fills in the other side so the
+             -- tile can show how much value is still un-OCR'd.
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
+                      THEN COALESCE(order_amount,0) ELSE 0 END) AS ocr_sum,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status <> 'found'
+                      THEN COALESCE(order_amount,0) ELSE 0 END) AS unverified_amount,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status <> 'found'
+                      THEN 1 ELSE 0 END) AS unverified_count,
+             -- ocr_missing_amount_count is a SUBSET of unverified_count:
+             -- non-exception rows that are still unresolved (status <> 'found')
+             -- AND have no declared amount yet. The "OCR pending" tooltip on
+             -- the tile says "X of those rows have NO declared amount" — that
+             -- only makes sense if we're counting the same row population as
+             -- unverified_count. Without the status predicate the count would
+             -- also include found-but-amountless rows, which are not "pending"
+             -- in any operator-facing sense, and the tooltip would over-report
+             -- unresolved exposure.
+             SUM(CASE WHEN COALESCE(is_exception,0)=0
+                       AND extraction_status <> 'found'
+                       AND order_amount IS NULL THEN 1 ELSE 0 END) AS ocr_missing_amount_count
       FROM bat_invoice_extractions
       GROUP BY reconciliation_id
     ) ext_stats ON ext_stats.reconciliation_id = r.id
+    LEFT JOIN (
+      -- Duplicates restricted to non-exception OCR-verified rows so the
+      -- count and inflation use the same predicate. A "duplicate"
+      -- between two failed rows is a different pathology (same garbled
+      -- OCR output across attempts); a non-exc row + an exception row
+      -- on the same invoice adds nothing to ocr_sum because the
+      -- exception row is excluded. Including either case here would
+      -- flash a "1 dup invoice · +R 0.00" warning that doesn't
+      -- correspond to any real inflation in the verified figure.
+      SELECT reconciliation_id,
+             COUNT(*) AS duplicate_invoice_count,
+             SUM(amt_sum - amt_max) AS duplicate_inflation
+      FROM (
+        -- Normalize the invoice key with UPPER(TRIM(...)) so rows that
+        -- differ only by casing or whitespace (e.g. a manual "INV123"
+        -- vs an OCR-extracted "inv123 " on a different POD) collapse
+        -- into one duplicate group. Matches the canonical normalization
+        -- in src/services/bat/duplicates.js — without it the tile's
+        -- duplicate count under-reports real collisions and disagrees
+        -- with the per-row "×N dup" badges in the audit trail. Blank
+        -- keys are excluded so a row of pure whitespace doesn't form
+        -- a phantom duplicate group with other whitespace rows.
+        SELECT reconciliation_id, UPPER(TRIM(extracted_invoice)) AS inv_key,
+               COUNT(*) AS n,
+               SUM(COALESCE(order_amount,0)) AS amt_sum,
+               MAX(COALESCE(order_amount,0)) AS amt_max
+        FROM bat_invoice_extractions
+        WHERE extracted_invoice IS NOT NULL
+          AND TRIM(extracted_invoice) <> ''
+          AND extraction_status = 'found'
+          AND COALESCE(is_exception,0) = 0
+        GROUP BY reconciliation_id, UPPER(TRIM(extracted_invoice))
+        HAVING n > 1
+      )
+      GROUP BY reconciliation_id
+    ) dup_stats ON dup_stats.reconciliation_id = r.id
+    LEFT JOIN (
+      -- Missing-PODs aggregates from bat_overview_orders. NOT EXISTS keys
+      -- on (recon_id, order_number) — same predicate the per-recon
+      -- getReconciliation.missingPods array uses, so the tile and audit
+      -- trail can never disagree.
+      SELECT o.reconciliation_id,
+             COUNT(*) AS overview_orders_stored,
+             SUM(CASE WHEN NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN 1 ELSE 0 END) AS missing_pods_count,
+             SUM(CASE WHEN NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN COALESCE(o.order_amount, 0) ELSE 0 END) AS missing_pods_value,
+             -- Subset of missing_pods_count where the Overview-pivot
+             -- amount itself is NULL (BAT shipped the ODR but didn't
+             -- declare an amount yet). Tile surfaces this separately
+             -- so missing_pods_value doesn't read as the full exposure
+             -- when some rows are intentionally unknown — operator
+             -- would otherwise underestimate the gap.
+             SUM(CASE WHEN o.order_amount IS NULL AND NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN 1 ELSE 0 END) AS missing_pods_unknown_count
+      FROM bat_overview_orders o
+      GROUP BY o.reconciliation_id
+    ) mp_stats ON mp_stats.reconciliation_id = r.id
     LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
     ORDER BY r.year DESC, r.week_number DESC
   `).all();
@@ -1249,6 +1469,15 @@ export function manualSetInvoice(extractionId, invoiceNumber) {
         extraction_attempts = extraction_attempts + 1, manual_override = 1
     WHERE id = ?
   `).run(invoiceNumber, extractionId);
+
+  // NOTE: Do NOT recompute supplier_total here. The recon's BAT TOTAL
+  // is the BAT Overview-tab claim summary, stamped at upload time —
+  // not a number we re-derive from per-row data after each OCR fix.
+  // recomputeSupplierTotalSafe exists only for the multi-branch
+  // upload self-heal (Welkom + JHB landing on the same week, second
+  // upload's fees overwriting the first), and is called from the
+  // upload paths only. Per-row OCR status is surfaced separately on
+  // the per-week tile (OCR pending / Missing PODs indicators).
 
   return ext.reconciliation_id;
 }
@@ -1847,6 +2076,10 @@ async function runGoogleVisionRetryInner(reconId, rows) {
 
   console.log(`[bat-gv] Google Vision retry complete for reconciliation ${reconId}`);
   normalizeInvoiceNumbers(reconId);
+  // NOTE: No recompute here. BAT TOTAL stays the claim summary from
+  // the spreadsheet — OCR retry success is reflected in per-row
+  // POD-coverage signals on the tile (OCR pending shrinks, found_count
+  // grows), not in the headline number.
 }
 
 // ── OCR pause switch ───────────────────────────────────────────────────────
@@ -3389,6 +3622,12 @@ async function processQueue(reconId) {
   // preserved indefinitely in error_log / System Log, so this is not a
   // silent-failure pattern: history stays, current state reflects reality.
   db.prepare("UPDATE bat_reconciliations SET status = 'completed', last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
+  // NOTE: Don't recompute supplier_total here. The recon's BAT TOTAL
+  // is the BAT Overview-tab claim summary set at upload time, not a
+  // number derived from PODs after OCR. recomputeSupplierTotalSafe
+  // exists for the multi-branch self-heal only (upload paths). OCR
+  // status is surfaced per-row via the tile's POD-coverage signals,
+  // not by overwriting the headline total.
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
 }
@@ -3543,22 +3782,46 @@ export function getDashboardData(year) {
   const reconciliations = listReconciliations()
     .filter(r => !scoped || r.year === scoped);
 
-  // totalSupplier — single SQL aggregate against bat_reconciliations, scoped.
+  // totalSupplier — per-fee sum (delivery + discount + pricing). The
+  // per-week comparison table on the recon page sums these three fee
+  // columns to render each week's BAT figure, so by summing the same
+  // columns here the tile is mathematically guaranteed to equal the
+  // table's sum of per-week BAT — operator's mental model stays
+  // consistent.
+  //
+  // Previously this used the bat_reconciliations.supplier_total column
+  // (set by recomputeSupplierTotalSafe, which sums per-invoice
+  // order_amount from OCR extractions). That can drift from the per-
+  // fee Overview-tab claim when some rows haven't fully OCR'd or when
+  // branch-merge upsert edge cases left the column stale — the tile
+  // then disagreed with the per-week table by exactly that drift, and
+  // the operator had no way to reconcile the two numbers.
   let totalSupplier = 0;
   try {
-    const row = db.prepare(
-      `SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations ${yearWhere}`
-    ).get(...yearArg);
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(supplier_delivery), 0)
+           + COALESCE(SUM(supplier_discount), 0)
+           + COALESCE(SUM(supplier_pricing), 0) AS s
+      FROM bat_reconciliations ${yearWhere}
+    `).get(...yearArg);
     totalSupplier = row?.s || 0;
   } catch {}
   // totalSage = sum of all Sage credit notes for the chosen year (or all-time
   // if "All" picked). Bypasses bat_reconciliations entirely so weeks without
-  // an uploaded supplier sheet still count.
+  // an uploaded supplier sheet still count. Uses per-fee summing to mirror
+  // the per-week table's sage column construction (same reason as
+  // totalSupplier above).
   let totalSage = 0;
   try {
     const sql = scoped
-      ? 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?'
-      : 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache';
+      ? `SELECT COALESCE(SUM(delivery), 0)
+              + COALESCE(SUM(discount), 0)
+              + COALESCE(SUM(pricing), 0) AS s
+         FROM bat_sage_week_cache WHERE year = ?`
+      : `SELECT COALESCE(SUM(delivery), 0)
+              + COALESCE(SUM(discount), 0)
+              + COALESCE(SUM(pricing), 0) AS s
+         FROM bat_sage_week_cache`;
     const row = db.prepare(sql).get(...yearArg);
     totalSage = row?.s || 0;
   } catch {}
