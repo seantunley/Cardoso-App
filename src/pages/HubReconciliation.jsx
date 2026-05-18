@@ -21,14 +21,26 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 // deterministic regardless of where the operator's browser is.
 function workingDaysSinceSync(syncedAt, now = new Date()) {
   if (!syncedAt) return null;
+  // Guard against malformed inputs BEFORE touching Intl. A site that
+  // returns a garbled synced_at string (or a non-ISO variant the
+  // browser can't parse) would otherwise make fmt.format() throw
+  // RangeError("Invalid time value") and crash the whole Hub page
+  // — the whole stale-site UX wedging on one bad row. Treat invalid
+  // dates the same as missing: null = "no stale verdict for this site"
+  // (caller's badge code falls back to the normal Matched/Mismatch
+  // pathway).
+  const startDate = new Date(syncedAt);
+  const endDate = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+
   // YYYY-MM-DD in SAST via Intl. en-CA gives ISO-style output which
   // compares lexicographically.
   const TZ = 'Africa/Johannesburg';
   const fmt = new Intl.DateTimeFormat('en-CA', {
     timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
   });
-  const startStr = fmt.format(new Date(syncedAt));
-  const endStr   = fmt.format(now);
+  const startStr = fmt.format(startDate);
+  const endStr   = fmt.format(endDate);
   if (endStr <= startStr) return 0;
 
   // Iterate by calendar day. Anchoring at noon UTC keeps each
