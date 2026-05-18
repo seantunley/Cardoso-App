@@ -235,7 +235,7 @@ function ManualInvoiceInput({ extraction, onSaved }) {
   );
 }
 
-export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate, reconLabel }) {
+export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate, reconLabel, missingPods = [], overviewOrdersStored = 0 }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
@@ -320,8 +320,31 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
 
   const [activeTab, setActiveTab] = useState('paid');
 
-  // Split into three categories — memoized so we only re-bucket when the
-  // extractions array changes (not on every keystroke in the search box).
+  // Synthesise table-shaped rows for missing PODs (orders BAT itemised
+  // in the Overview pivot but didn't ship a POD for in the same upload).
+  // is_missing_pod=1 tells the render to mark the row visually and skip
+  // any field that depends on a real extraction (OCR status, store name,
+  // dates, etc.). Negative synthetic ids keep React keys unique and
+  // collision-free with real extraction.id values.
+  const missingPodRows = useMemo(() => (missingPods || []).map((m, idx) => ({
+    id: -1 * (idx + 1),
+    is_missing_pod: 1,
+    is_exception: m.is_exception ? 1 : 0,
+    order_number: m.order_number,
+    order_amount: m.order_amount,
+    extraction_status: null,
+    branch_name: null,
+    store_name: null,
+    extracted_invoice: null,
+    duplicate_count: 0,
+    exception_reason: m.is_exception ? '(POD missing from upload)' : null,
+  })), [missingPods]);
+
+  // Split into categories — memoized so we only re-bucket when extractions
+  // or missingPods change. EXCEPTIONS tab includes both the extracted
+  // exception rows AND the missing exception PODs so its total balances
+  // to BAT's exception pivot total. The new "Missing PODs" tab shows
+  // every missing POD (normal + exception) as an informational view.
   // All hooks must run before any early return (Rules of Hooks).
   const { paid, exceptions, nonCompliant } = useMemo(() => {
     const paid = [];
@@ -336,14 +359,23 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
         paid.push(e);
       }
     }
+    // Append missing exception PODs so the EXCEPTIONS tab balances to
+    // BAT's spreadsheet exception-pivot total. (Missing normal PODs
+    // are NOT added to paid/nonCompliant — we have no compliance
+    // signal for them without OCR, so they sit only in the Missing
+    // PODs tab where they can't be miscategorised.)
+    for (const m of missingPodRows) {
+      if (m.is_exception) exceptions.push(m);
+    }
     return { paid, exceptions, nonCompliant };
-  }, [extractions]);
+  }, [extractions, missingPodRows]);
 
   const tabData = useMemo(() => {
     if (activeTab === 'exceptions') return exceptions;
     if (activeTab === 'nonCompliant') return nonCompliant;
+    if (activeTab === 'missingPods') return missingPodRows;
     return paid;
-  }, [activeTab, paid, exceptions, nonCompliant]);
+  }, [activeTab, paid, exceptions, nonCompliant, missingPodRows]);
 
   const filtered = useMemo(() => {
     return tabData.filter((e) => {
@@ -372,6 +404,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
     { id: 'paid', label: 'Paid Invoices', count: paid.length, total: tabTotal(paid), color: 'hsl(145 55% 45%)' },
     { id: 'nonCompliant', label: 'Non-Compliant', count: nonCompliant.length, total: tabTotal(nonCompliant), color: 'hsl(var(--destructive))' },
     { id: 'exceptions', label: 'Exceptions', count: exceptions.length, total: tabTotal(exceptions), color: 'var(--phosphor)' },
+    { id: 'missingPods', label: 'Missing PODs', count: missingPodRows.length, total: tabTotal(missingPodRows), color: 'hsl(33 70% 60%)' },
   ];
 
   return (
@@ -584,13 +617,35 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
             </tr>
           </thead>
           <tbody>
+            {/* Empty-state when the Missing PODs tab is the active tab and
+                the recon predates v72 (no Overview ODR list persisted). The
+                operator can recover the data by re-uploading the same
+                spreadsheet — the upload path now writes bat_overview_orders
+                automatically. */}
+            {activeTab === 'missingPods' && missingPodRows.length === 0 && overviewOrdersStored === 0 && (
+              <tr>
+                <td colSpan={colOrder.length} className="px-4 py-6 text-center text-muted-foreground text-xs">
+                  Overview ODR list not stored for this reconciliation. Re-upload the same supplier spreadsheet to populate this view — the upload path now records every ODR from BAT's Overview pivot for Missing-POD detection.
+                </td>
+              </tr>
+            )}
+            {activeTab === 'missingPods' && missingPodRows.length === 0 && overviewOrdersStored > 0 && (
+              <tr>
+                <td colSpan={colOrder.length} className="px-4 py-6 text-center text-muted-foreground text-xs">
+                  No missing PODs — every ODR in BAT's Overview pivot has a matching POD in the Delivery POD sheet.
+                </td>
+              </tr>
+            )}
             {filtered.map((e, i) => (
               <tr
                 key={e.id}
                 className="border-t transition-colors hover:bg-muted/30 relative"
                 style={{
                   borderColor: 'hsl(var(--border))',
-                  background: e.is_exception ? 'hsla(33, 95%, 55%, 0.04)' : 'hsl(var(--card))',
+                  background: e.is_missing_pod
+                    ? 'hsla(33, 70%, 60%, 0.06)'
+                    : e.is_exception ? 'hsla(33, 95%, 55%, 0.04)' : 'hsl(var(--card))',
+                  opacity: e.is_missing_pod ? 0.85 : 1,
                 }}
               >
                 <Td muted mono>{i + 1}</Td>
@@ -606,9 +661,25 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                 <Td muted mono>{e.pod_uploaded_date || '—'}</Td>
                 <Td mono muted align="center">{e.target_days ?? '—'}</Td>
                 {activeTab === 'exceptions' && <Td muted truncate>{e.exception_reason || '—'}</Td>}
-                <Td><OcrBadge status={e.extraction_status} /></Td>
+                <Td>
+                  {e.is_missing_pod ? (
+                    <span
+                      className="font-mono text-[10px] uppercase tracking-[0.15em]"
+                      style={{ color: 'hsl(33 70% 60%)' }}
+                      title="This order appears in BAT's Overview pivot but no matching POD PDF was included in the Delivery POD sheet of the upload. No extraction row exists for it."
+                    >
+                      No POD
+                    </span>
+                  ) : (
+                    <OcrBadge status={e.extraction_status} />
+                  )}
+                </Td>
                 <Td mono>
                   <span className="inline-flex items-center gap-1.5">
+                    {e.is_missing_pod ? (
+                      <span className="font-mono text-[10px] text-muted-foreground italic">— no POD —</span>
+                    ) : (
+                      <>
                     {/* Always editable — even matched rows can be wrong. The
                         save button still pulses in and the row re-runs the
                         match query downstream, so the user always has an
@@ -651,6 +722,8 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                           })()}
                         </TooltipContent>
                       </Tooltip>
+                    )}
+                      </>
                     )}
                   </span>
                 </Td>

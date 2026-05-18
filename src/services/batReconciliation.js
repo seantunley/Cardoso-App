@@ -1096,6 +1096,33 @@ export function getReconciliation(id) {
   recon.creditNotes = db.prepare('SELECT * FROM bat_sage_credit_notes WHERE reconciliation_id = ? ORDER BY fee_type, batch_number').all(id);
   recon.extractions = db.prepare('SELECT * FROM bat_invoice_extractions WHERE reconciliation_id = ? ORDER BY id').all(id);
 
+  // Missing PODs = ODRs in BAT's Overview pivot for this recon that
+  // don't have a matching extraction row in bat_invoice_extractions.
+  // The EXCEPTIONS tab needs the missing exception ODRs to balance to
+  // BAT's exception-pivot total; the Missing PODs tab shows every
+  // missing ODR (normal + exception). For recons created before v72
+  // (no bat_overview_orders rows), the array will be empty and the UI
+  // shows "Re-upload to populate" — there's no other way to recover
+  // the Overview pivot without the original .xlsx.
+  recon.missingPods = db.prepare(`
+    SELECT o.order_number, o.is_exception, o.order_amount,
+           o.supplier_discount, o.supplier_delivery, o.supplier_pricing
+    FROM bat_overview_orders o
+    WHERE o.reconciliation_id = ?
+      AND NOT EXISTS (
+        SELECT 1 FROM bat_invoice_extractions e
+        WHERE e.reconciliation_id = o.reconciliation_id
+          AND e.order_number = o.order_number
+      )
+    ORDER BY o.is_exception, o.order_number
+  `).all(id);
+  // Provenance flag so the UI can distinguish "no Overview data stored
+  // for this recon" (older recons, not yet re-uploaded) from "Overview
+  // data stored, zero PODs missing".
+  recon.overviewOrdersStored = db.prepare(
+    'SELECT COUNT(*) AS n FROM bat_overview_orders WHERE reconciliation_id = ?'
+  ).get(id).n;
+
   // Overlay Sage totals from the local cache (refreshed on schedule). The per-recon
   // bat_reconciliations.sage_* fields only get filled when the user clicks "Refresh Sage"
   // on this page; the cache is the up-to-date source of truth for week-level totals.
