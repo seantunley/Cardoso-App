@@ -1,9 +1,78 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SummaryTile, fmtR, fmtRSigned, fmtCount, REPORT_COLORS } from '@/components/reports/lib';
-import { CheckCircle, AlertTriangle, CloudOff, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, AlertTriangle, CloudOff, Clock, ExternalLink, RefreshCw } from 'lucide-react';
 import { currentIsoWeek } from '@/lib/isoWeek';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+
+// Working-days-since-sync — counts only Mon-Fri elapsed strictly after
+// the last-sync date through "now", with both dates evaluated in the
+// business timezone (SAST / Africa/Johannesburg). Examples (now = Mon):
+//   sync Mon AM SAST → 0  (same business day)
+//   sync Fri PM SAST → 1  (Sat/Sun skipped, today Mon counts)
+//   sync Thu         → 2  (Fri + Mon)
+//   sync prev-Thu    → 6
+//
+// Why a fixed TZ: setHours(0,0,0,0) anchors to the VIEWER's local
+// timezone. A hub admin in London and one in Joburg watching the same
+// Mon-AM Hub page can see different "days elapsed" — Joburg already
+// sees Mon, London might still see late-Sun. Same data, different
+// stale badges. Pinning to SAST (which has no DST) makes the verdict
+// deterministic regardless of where the operator's browser is.
+function workingDaysSinceSync(syncedAt, now = new Date()) {
+  if (!syncedAt) return null;
+  // Guard against malformed inputs BEFORE touching Intl. A site that
+  // returns a garbled synced_at string (or a non-ISO variant the
+  // browser can't parse) would otherwise make fmt.format() throw
+  // RangeError("Invalid time value") and crash the whole Hub page
+  // — the whole stale-site UX wedging on one bad row. Treat invalid
+  // dates the same as missing: null = "no stale verdict for this site"
+  // (caller's badge code falls back to the normal Matched/Mismatch
+  // pathway).
+  const startDate = new Date(syncedAt);
+  const endDate = now instanceof Date ? now : new Date(now);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) return null;
+
+  // YYYY-MM-DD in SAST via Intl. en-CA gives ISO-style output which
+  // compares lexicographically.
+  const TZ = 'Africa/Johannesburg';
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const startStr = fmt.format(startDate);
+  const endStr   = fmt.format(endDate);
+  if (endStr <= startStr) return 0;
+
+  // Iterate by calendar day. Anchoring at noon UTC keeps each
+  // increment exactly +24h and getUTCDay() stable regardless of
+  // viewer TZ — noon UTC sits mid-day in every TZ globally, so the
+  // weekday returned matches what an operator would call that date.
+  // SAST has no DST so the math stays clean.
+  const dateAtNoonUtc = (s) => new Date(`${s}T12:00:00Z`);
+  let cur = dateAtNoonUtc(startStr);
+  const end = dateAtNoonUtc(endStr);
+  let count = 0;
+  while (cur < end) {
+    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+    const dow = cur.getUTCDay(); // 0=Sun, 6=Sat
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+// Threshold: synced strictly more than 1 working day ago = stale.
+// Friday sync seen on Monday morning is 1 working day → NOT stale.
+// Friday sync seen on Tuesday morning is 2 → stale.
+const STALE_WORKING_DAYS = 1;
+
+function isSiteStale(site) {
+  // Don't double-count: if the site is in an active error state OR has
+  // never returned data, those badges take precedence over "stale".
+  if (site.last_error) return false;
+  if (!site.has_data) return false;
+  const days = workingDaysSinceSync(site.synced_at);
+  return days != null && days > STALE_WORKING_DAYS;
+}
 
 // Plain-English explainers for every labelled metric on the per-site
 // recon card. Defining these centrally (one object per source-of-truth)
@@ -105,7 +174,32 @@ export default function HubReconciliation() {
           <div className="space-y-6">
             {/* Network-wide summary tiles */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <SummaryTile label="Sites reporting" value={`${summary.sites_with_data}/${summary.site_count}`} sub={summary.sites_with_errors > 0 ? `${summary.sites_with_errors} errors` : 'all healthy'} accent={REPORT_COLORS.info} />
+              {(() => {
+                // Headline tile reflects errors first, then staleness (sites
+                // that haven't synced in more than 1 working day) — the
+                // operator wants "ALL HEALTHY" to mean exactly that, not
+                // "no errors but some sites are days behind".
+                const staleCount = sites.filter(isSiteStale).length;
+                let sub, accent;
+                if (summary.sites_with_errors > 0) {
+                  sub = `${summary.sites_with_errors} error${summary.sites_with_errors === 1 ? '' : 's'}`;
+                  accent = REPORT_COLORS.danger;
+                } else if (staleCount > 0) {
+                  sub = `${staleCount} stale (>1 working day)`;
+                  accent = REPORT_COLORS.warning;
+                } else {
+                  sub = 'all healthy';
+                  accent = REPORT_COLORS.info;
+                }
+                return (
+                  <SummaryTile
+                    label="Sites reporting"
+                    value={`${summary.sites_with_data}/${summary.site_count}`}
+                    sub={sub}
+                    accent={accent}
+                  />
+                );
+              })()}
               <SummaryTile label="Total BAT" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
               <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
               <SummaryTile
@@ -154,11 +248,18 @@ function SiteCard({ site }) {
   const matched = Math.abs(site.total_variance) < 0.01 && site.total_supplier > 0;
   const hasError = !!site.last_error;
   const noData = !site.has_data && !hasError;
+  const stale = isSiteStale(site);
+  const daysSinceSync = workingDaysSinceSync(site.synced_at);
   let badge;
   if (hasError) {
     badge = { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.4)', Icon: AlertTriangle, label: 'Sync error' };
   } else if (noData) {
     badge = { color: 'hsl(280 70% 65%)', glow: 'hsla(280, 70%, 55%, 0.4)', Icon: CloudOff, label: 'Awaiting data' };
+  } else if (stale) {
+    // Stale takes precedence over Matched/Mismatch — the data MIGHT be
+    // matched but it's days old; operator needs to know the freshness
+    // problem before they trust the variance numbers.
+    badge = { color: REPORT_COLORS.warning, glow: 'hsla(50, 90%, 55%, 0.4)', Icon: Clock, label: `Stale · ${daysSinceSync}d` };
   } else if (matched) {
     badge = { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.4)', Icon: CheckCircle, label: 'Matched' };
   } else {
@@ -167,8 +268,17 @@ function SiteCard({ site }) {
   const { color, glow, Icon, label } = badge;
   const syncedAt = site.synced_at ? new Date(site.synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
+  // Card border highlights when the site is in any attention-worthy
+  // state — sync error (red), or stale (yellow). Mismatch/matched/no-data
+  // use the default border + the left phosphor stripe to signal status.
+  const borderColor = hasError
+    ? 'hsl(var(--destructive))'
+    : stale
+      ? REPORT_COLORS.warning
+      : 'hsl(var(--border))';
+
   return (
-    <div className="relative overflow-hidden bg-card p-4" style={{ border: `1px solid ${badge.color === 'hsl(var(--destructive))' ? 'hsl(var(--destructive))' : 'hsl(var(--border))'}`, borderRadius: '12px' }}>
+    <div className="relative overflow-hidden bg-card p-4" style={{ border: `1px solid ${borderColor}`, borderRadius: '12px' }}>
       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: color, boxShadow: `0 0 10px ${glow}` }} />
       <div className="pl-2 space-y-3">
         <div className="flex items-start justify-between gap-2">
