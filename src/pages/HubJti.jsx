@@ -191,7 +191,7 @@ export default function HubJti() {
             </div>
           ) : (
             <div className="space-y-3">
-              {groups.map((g) => {
+              {groups.map((g, idx) => {
                 const key = `${g.period_year}-${String(g.period_month).padStart(2, '0')}`;
                 const isOpen = expanded.has(key);
                 const bundleDownloading = downloadingBundle === key;
@@ -202,6 +202,7 @@ export default function HubJti() {
                     periodKey={key}
                     expectedSites={expectedSites}
                     isOpen={isOpen}
+                    isLatest={idx === 0}
                     onToggle={() => toggleExpanded(key)}
                     onDownloadBundle={() => handleDownloadBundle(g.period_year, g.period_month)}
                     onDownloadOne={handleDownloadOne}
@@ -219,7 +220,7 @@ export default function HubJti() {
 }
 
 function GroupRow({
-  group, periodKey, expectedSites, isOpen, onToggle,
+  group, periodKey, expectedSites, isOpen, isLatest, onToggle,
   onDownloadBundle, onDownloadOne, downloadingId, bundleDownloading,
 }) {
   const expectedById = new Map(expectedSites.map((s) => [s.id, s.name || s.id]));
@@ -248,6 +249,20 @@ function GroupRow({
           </div>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
+          {isLatest && (
+            <span
+              className="inline-flex items-center px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] cursor-default"
+              style={{
+                borderRadius: '6px',
+                border: '1px solid var(--phosphor)',
+                color: 'var(--phosphor)',
+                background: 'hsla(33, 95%, 55%, 0.08)',
+              }}
+              title="Most recent period the Hub has archives for"
+            >
+              Latest
+            </span>
+          )}
           <CompletenessPill complete={group.complete} received={group.received_count} expected={group.expected_count} />
           {group.complete && (
             <div
