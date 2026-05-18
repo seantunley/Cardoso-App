@@ -277,7 +277,11 @@ const APP_VERSION = "2026.3.9";
 
 const navItems = [
   { name: "Customer Management", icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
-  { name: "Customer Management", icon: IconHubDashboard,          page: "HubDashboard",     hubOnly: true },
+  // Same icon as the site-mode entry above so the sidebar looks
+  // identical regardless of install mode — operator sees one
+  // consistent "Customer Management" affordance whether they're on
+  // a site or the hub.
+  { name: "Customer Management", icon: IconCustomerSearch,        page: "HubDashboard",     hubOnly: true },
   { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
