@@ -155,3 +155,42 @@ docs/*.xlsx
 
 # Local Claude Code agent runtime state
 .claude/
+
+# Runtime database artefacts — generated locally, never committed.
+# Without these VS Code's source-control panel counts thousands of
+# preview JPEGs / archive files and disables its inline git features
+# past its change-tracking cap.
+database/backups/
+database/hub-backups/
+database/hub-archives/
+database/phase2-ocr-*.json
+
+# Investigation / debug outputs — kept locally only.
+ocr-export/
+preview/
+lectures_txt/
+figs_paramsurv/
+figs_tdcjm/
+
+# Per-machine debug artefacts in repo root (sky-city-page-*.jpg,
+# debug-fixed.jpg, etc.). Anything intentional should live under a
+# proper subdir; root *.jpg is always ad-hoc.
+/*.jpg
+
+# Personal biostats / one-off study materials. Sean keeps these in
+# the repo for proximity but they're not part of the app.
+biostats_*
+build_biostats_exam.py
+extract_*.py
+render_*.py
+verify_*.py
+preview_design.py
+
+# One-off operator probe / migration scripts that don't belong in
+# the shipped scripts/ folder.
+scripts/debug-*.mjs
+scripts/migrate-ocr-fixes.mjs
+scripts/probe-hub-backup.mjs
+
+# Generated release-note PDFs (the .md source IS tracked).
+docs/release-notes/*.pdf
