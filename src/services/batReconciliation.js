@@ -1184,6 +1184,14 @@ export function listReconciliations() {
         + COALESCE(r.supplier_pricing,  0)                AS claim_per_fee,
       COALESCE(dup_stats.duplicate_invoice_count, 0)      AS duplicate_invoice_count,
       COALESCE(dup_stats.duplicate_inflation, 0)          AS duplicate_inflation,
+      -- Missing-POD signals from the persisted Overview-pivot ODR list
+      -- (bat_overview_orders). overview_orders_stored is the provenance
+      -- flag: 0 means this recon predates the v72 upload-time persistence
+      -- (the tile renders "Re-upload to verify" instead of a number). > 0
+      -- means real data, and missing_pods_count/value are honest.
+      COALESCE(mp_stats.overview_orders_stored, 0)        AS overview_orders_stored,
+      COALESCE(mp_stats.missing_pods_count, 0)            AS missing_pods_count,
+      COALESCE(mp_stats.missing_pods_value, 0)            AS missing_pods_value,
       COALESCE(c.delivery, r.sage_delivery)               AS sage_delivery,
       COALESCE(c.discount, r.sage_discount)               AS sage_discount,
       COALESCE(c.pricing,  r.sage_pricing)                AS sage_pricing,
@@ -1240,6 +1248,26 @@ export function listReconciliations() {
       )
       GROUP BY reconciliation_id
     ) dup_stats ON dup_stats.reconciliation_id = r.id
+    LEFT JOIN (
+      -- Missing-PODs aggregates from bat_overview_orders. NOT EXISTS keys
+      -- on (recon_id, order_number) — same predicate the per-recon
+      -- getReconciliation.missingPods array uses, so the tile and audit
+      -- trail can never disagree.
+      SELECT o.reconciliation_id,
+             COUNT(*) AS overview_orders_stored,
+             SUM(CASE WHEN NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN 1 ELSE 0 END) AS missing_pods_count,
+             SUM(CASE WHEN NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN COALESCE(o.order_amount, 0) ELSE 0 END) AS missing_pods_value
+      FROM bat_overview_orders o
+      GROUP BY o.reconciliation_id
+    ) mp_stats ON mp_stats.reconciliation_id = r.id
     LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
     ORDER BY r.year DESC, r.week_number DESC
   `).all();

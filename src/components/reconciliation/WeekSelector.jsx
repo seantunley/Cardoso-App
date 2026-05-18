@@ -167,20 +167,29 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                         Suppressed on weeks with no PODs uploaded yet. */}
                     {(() => {
                       if ((r.pod_count || 0) === 0) return null;
-                      const ocrSum = r.ocr_sum || 0;
                       const unverified = r.unverified_amount || 0;
                       const unverifiedCount = r.unverified_count || 0;
                       const dupCount = r.duplicate_invoice_count || 0;
                       const dupInflation = r.duplicate_inflation || 0;
-                      // Missing PODs value = claim − (ocr'd + pending). What's
-                      // left is value BAT itemised in the Overview pivot but
-                      // never shipped a POD for in the Delivery POD sheet, so
-                      // we never created an extraction row for it.
-                      const missingPodsValue = claim - ocrSum - unverified;
+                      // Missing PODs reads from bat_overview_orders (the
+                      // persisted Overview-pivot ODR list) MINUS extraction
+                      // rows — same source as the audit-trail's Missing PODs
+                      // tab, so tile and tab can never disagree. For recons
+                      // predating v72 the table is empty for that recon
+                      // (overview_orders_stored=0), and we render
+                      // "Re-upload to verify" instead of a calculated proxy.
+                      // The previous calc (claim − ocr_sum − unverified) was
+                      // misleading on weeks where duplicate-inflated OCR sum
+                      // understated the gap; honest answer is "we don't
+                      // know yet, re-upload to seed the table".
+                      const overviewStored = r.overview_orders_stored || 0;
+                      const missingPodsCount = r.missing_pods_count || 0;
+                      const missingPodsValue = r.missing_pods_value || 0;
                       const hasPending = unverifiedCount > 0;
-                      const hasMissingPods = Math.abs(missingPodsValue) >= 0.01;
+                      const hasMissingPods = overviewStored > 0 && missingPodsCount > 0;
+                      const needsReupload = overviewStored === 0;
                       const hasDups = dupCount > 0;
-                      if (!hasPending && !hasMissingPods && !hasDups) return null;
+                      if (!hasPending && !hasMissingPods && !needsReupload && !hasDups) return null;
                       return (
                         <>
                           {hasPending && (
@@ -199,15 +208,24 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                           {hasMissingPods && (
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
-                              style={{ color: missingPodsValue > 0 ? 'var(--phosphor)' : 'hsl(0 70% 60%)' }}
-                              title={missingPodsValue > 0
-                                ? `R ${fmt(missingPodsValue)} of BAT's Overview-tab claim is for orders that have no matching POD PDF in the same upload's Delivery POD sheet — no extraction row was created for those orders. Chase BAT for the missing POD or accept the shortfall.`
-                                : `Our PODs cover R ${fmt(Math.abs(missingPodsValue))} more than BAT's Overview claim. Likely a duplicate POD or a row whose order_amount doesn't match BAT's per-invoice listing.`}
+                              style={{ color: 'var(--phosphor)' }}
+                              title={`R ${fmt(missingPodsValue)} across ${missingPodsCount} order${missingPodsCount === 1 ? '' : 's'} appears in BAT's Overview pivot but has no matching POD in the Delivery POD sheet of this upload — no extraction row was created. The Missing PODs tab on the audit trail lists each one. Chase BAT for the POD or accept the shortfall.`}
                             >
                               <span>Missing PODs</span>
                               <span className="tabular-nums">
-                                R {fmt(Math.abs(missingPodsValue))}
+                                R {fmt(missingPodsValue)}
+                                <span className="text-muted-foreground/70 ml-2">{missingPodsCount} order{missingPodsCount === 1 ? '' : 's'}</span>
                               </span>
+                            </div>
+                          )}
+                          {needsReupload && (
+                            <div
+                              className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
+                              style={{ color: 'hsl(33 70% 60%)' }}
+                              title="This recon predates the Overview-pivot persistence migration (v72). Missing-POD detection needs the spreadsheet's Overview ODR list, which is only recorded by uploads after v72 was deployed. Re-upload the same supplier spreadsheet to populate bat_overview_orders for this recon — the upload path does it automatically going forward."
+                            >
+                              <span>Missing PODs</span>
+                              <span className="tabular-nums opacity-90">Re-upload to verify</span>
                             </div>
                           )}
                           {hasDups && (
