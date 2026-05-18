@@ -1188,24 +1188,26 @@ export function listReconciliations() {
       GROUP BY reconciliation_id
     ) ext_stats ON ext_stats.reconciliation_id = r.id
     LEFT JOIN (
-      -- Duplicates also restricted to OCR-verified rows. A "duplicate"
-      -- between two failed rows is a different kind of pathology
-      -- (same garbled OCR output across attempts) — counting it here
-      -- would conflate "OCR found the same invoice twice on two
-      -- distinct PDFs" with "OCR failed on two PDFs and we have no
-      -- invoice number for either".
+      -- Duplicates restricted to non-exception OCR-verified rows so the
+      -- count and inflation use the same predicate. A "duplicate"
+      -- between two failed rows is a different pathology (same garbled
+      -- OCR output across attempts); a non-exc row + an exception row
+      -- on the same invoice adds nothing to ocr_sum because the
+      -- exception row is excluded. Including either case here would
+      -- flash a "1 dup invoice · +R 0.00" warning that doesn't
+      -- correspond to any real inflation in the verified figure.
       SELECT reconciliation_id,
              COUNT(*) AS duplicate_invoice_count,
              SUM(amt_sum - amt_max) AS duplicate_inflation
       FROM (
         SELECT reconciliation_id, extracted_invoice,
                COUNT(*) AS n,
-               SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
-                        THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_sum,
-               MAX(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
-                        THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_max
+               SUM(COALESCE(order_amount,0)) AS amt_sum,
+               MAX(COALESCE(order_amount,0)) AS amt_max
         FROM bat_invoice_extractions
-        WHERE extracted_invoice IS NOT NULL AND extraction_status = 'found'
+        WHERE extracted_invoice IS NOT NULL
+          AND extraction_status = 'found'
+          AND COALESCE(is_exception,0) = 0
         GROUP BY reconciliation_id, extracted_invoice
         HAVING n > 1
       )
