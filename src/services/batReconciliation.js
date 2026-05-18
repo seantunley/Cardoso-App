@@ -1235,15 +1235,25 @@ export function listReconciliations() {
              COUNT(*) AS duplicate_invoice_count,
              SUM(amt_sum - amt_max) AS duplicate_inflation
       FROM (
-        SELECT reconciliation_id, extracted_invoice,
+        -- Normalize the invoice key with UPPER(TRIM(...)) so rows that
+        -- differ only by casing or whitespace (e.g. a manual "INV123"
+        -- vs an OCR-extracted "inv123 " on a different POD) collapse
+        -- into one duplicate group. Matches the canonical normalization
+        -- in src/services/bat/duplicates.js — without it the tile's
+        -- duplicate count under-reports real collisions and disagrees
+        -- with the per-row "×N dup" badges in the audit trail. Blank
+        -- keys are excluded so a row of pure whitespace doesn't form
+        -- a phantom duplicate group with other whitespace rows.
+        SELECT reconciliation_id, UPPER(TRIM(extracted_invoice)) AS inv_key,
                COUNT(*) AS n,
                SUM(COALESCE(order_amount,0)) AS amt_sum,
                MAX(COALESCE(order_amount,0)) AS amt_max
         FROM bat_invoice_extractions
         WHERE extracted_invoice IS NOT NULL
+          AND TRIM(extracted_invoice) <> ''
           AND extraction_status = 'found'
           AND COALESCE(is_exception,0) = 0
-        GROUP BY reconciliation_id, extracted_invoice
+        GROUP BY reconciliation_id, UPPER(TRIM(extracted_invoice))
         HAVING n > 1
       )
       GROUP BY reconciliation_id
