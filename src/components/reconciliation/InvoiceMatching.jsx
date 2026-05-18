@@ -359,13 +359,19 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
         paid.push(e);
       }
     }
-    // Append missing exception PODs so the EXCEPTIONS tab balances to
-    // BAT's spreadsheet exception-pivot total. (Missing normal PODs
-    // are NOT added to paid/nonCompliant — we have no compliance
-    // signal for them without OCR, so they sit only in the Missing
-    // PODs tab where they can't be miscategorised.)
+    // Push missing PODs into the right balancing tab:
+    //   - Missing exception PODs → EXCEPTIONS  (so total = BAT exception pivot)
+    //   - Missing normal PODs    → NON-COMPLIANT  (a missing POD IS non-
+    //     compliant — we have no proof of delivery; classifying as
+    //     "paid" would be a lie, classifying as exception would mis-
+    //     align with BAT's pivot. NON-COMPLIANT also makes PAID + NC
+    //     balance to the BAT TOTAL claim summary, which is what the
+    //     operator needs to point at when negotiating with BAT.)
+    // The Missing PODs tab still shows every missing POD (both flavours)
+    // as a single informational view.
     for (const m of missingPodRows) {
       if (m.is_exception) exceptions.push(m);
+      else nonCompliant.push(m);
     }
     return { paid, exceptions, nonCompliant };
   }, [extractions, missingPodRows]);
