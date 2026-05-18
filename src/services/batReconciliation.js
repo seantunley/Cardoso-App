@@ -1317,15 +1317,14 @@ export function manualSetInvoice(extractionId, invoiceNumber) {
     WHERE id = ?
   `).run(invoiceNumber, extractionId);
 
-  // Manual fixes are exactly the kind of change that should refresh
-  // supplier_total. Without this, the operator corrects a misread
-  // invoice number, the row now matches Cardoso (so its amount is
-  // implicitly known), but the recon's headline BAT TOTAL stays
-  // frozen at whatever value was stamped at last upload — and the
-  // claim-vs-OCR drift indicator in the per-week table would lie.
-  // Safe-recompute no-ops if other rows in the recon still have null
-  // order_amount.
-  try { recomputeSupplierTotalSafe(ext.reconciliation_id); } catch {}
+  // NOTE: Do NOT recompute supplier_total here. The recon's BAT TOTAL
+  // is the BAT Overview-tab claim summary, stamped at upload time —
+  // not a number we re-derive from per-row data after each OCR fix.
+  // recomputeSupplierTotalSafe exists only for the multi-branch
+  // upload self-heal (Welkom + JHB landing on the same week, second
+  // upload's fees overwriting the first), and is called from the
+  // upload paths only. Per-row OCR status is surfaced separately on
+  // the per-week tile (OCR pending / Missing PODs indicators).
 
   return ext.reconciliation_id;
 }
@@ -1924,13 +1923,10 @@ async function runGoogleVisionRetryInner(reconId, rows) {
 
   console.log(`[bat-gv] Google Vision retry complete for reconciliation ${reconId}`);
   normalizeInvoiceNumbers(reconId);
-  // Same reasoning as the primary cascade's end-of-run recompute:
-  // the GV retry may have filled in invoice numbers for previously
-  // not_found/failed rows, which (via the cross-ref match) implies
-  // their amounts are now known. Without recompute, supplier_total
-  // stays stale and the claim-vs-OCR drift indicator in the per-week
-  // table would lie about how much has been verified by OCR.
-  try { recomputeSupplierTotalSafe(reconId); } catch {}
+  // NOTE: No recompute here. BAT TOTAL stays the claim summary from
+  // the spreadsheet — OCR retry success is reflected in per-row
+  // POD-coverage signals on the tile (OCR pending shrinks, found_count
+  // grows), not in the headline number.
 }
 
 // ── OCR pause switch ───────────────────────────────────────────────────────
@@ -3473,17 +3469,12 @@ async function processQueue(reconId) {
   // preserved indefinitely in error_log / System Log, so this is not a
   // silent-failure pattern: history stays, current state reflects reality.
   db.prepare("UPDATE bat_reconciliations SET status = 'completed', last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
-  // End-of-cascade recompute: refresh supplier_total now that every row
-  // has been through OCR. Prior to this call, supplier_total was a
-  // snapshot from the last spreadsheet-upload event and drifted silently
-  // as OCR fixed (or failed to fix) per-invoice amounts. The safe-
-  // recompute helper no-ops if any non-exception row still has null
-  // order_amount, so partial-OCR runs don't poison the column with a
-  // null-summed-as-zero value. The comment at the top of
-  // runGoogleVisionRetryInner ("per-row recompute would just be query
-  // churn") was warning against per-row firing — once per cascade is
-  // exactly the right granularity.
-  try { recomputeSupplierTotalSafe(reconId); } catch {}
+  // NOTE: Don't recompute supplier_total here. The recon's BAT TOTAL
+  // is the BAT Overview-tab claim summary set at upload time, not a
+  // number derived from PODs after OCR. recomputeSupplierTotalSafe
+  // exists for the multi-branch self-heal only (upload paths). OCR
+  // status is surfaced per-row via the tile's POD-coverage signals,
+  // not by overwriting the headline total.
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
 }

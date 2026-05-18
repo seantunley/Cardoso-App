@@ -146,65 +146,67 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                         <span className="text-accent ml-2">{ocrPct}%</span>
                       </span>
                     </div>
-                    {/* Tile drift breakdown. ocr_sum (live, from
-                        listReconciliations) is restricted to non-exception rows
-                        whose extraction_status = 'found' — i.e. rows whose PDF
-                        OCR succeeded and matched a real invoice. Three signals
-                        surface here so the operator can see WHY the claim and
-                        verified totals differ instead of just a net number:
-                          - Unverified R X · N rows: amount sitting on rows OCR
-                            hasn't successfully matched (failed/not_found/pending);
-                            usually the biggest contributor to a "short" reading.
-                          - Summary drift R Y: gap remaining after the unverified
-                            bucket is accounted for — BAT's Overview fees summary
-                            disagrees with the Overview per-invoice line items
-                            (BAT-side data quality issue, not ours).
-                          - Dup invoices N · +R Z: OCR returned the same invoice
-                            number on multiple distinct PDFs; inflation is the
-                            extra amount this adds to ocr_sum beyond one rep row.
+                    {/* POD-coverage signals (informational, not a drift in the
+                        headline total). The BAT TOTAL above is BAT's Overview-tab
+                        claim summary set at upload time — that's the authoritative
+                        number. These three rows describe how thoroughly the per-
+                        invoice PODs have been received and OCR'd against that
+                        claim:
+                          - OCR pending R X · N rows: PODs in the Delivery POD
+                            sheet that OCR hasn't successfully matched yet
+                            (failed / not_found / pending). Retry OCR or correct
+                            manually.
+                          - Missing PODs R Y: value of orders BAT itemised in the
+                            Overview pivot for which no POD PDF was included in
+                            the Delivery POD sheet of the same upload. Operator
+                            action: chase BAT for the missing POD or accept the
+                            shortfall.
+                          - Dup invoices N · +R Z: same invoice number OCR'd on
+                            multiple distinct PDFs in this recon (real OCR
+                            pathology — typically same garbled barcode prefix).
                         Suppressed on weeks with no PODs uploaded yet. */}
                     {(() => {
                       if ((r.pod_count || 0) === 0) return null;
-                      const claim = r.claim_per_fee || 0;
                       const ocrSum = r.ocr_sum || 0;
                       const unverified = r.unverified_amount || 0;
                       const unverifiedCount = r.unverified_count || 0;
                       const dupCount = r.duplicate_invoice_count || 0;
                       const dupInflation = r.duplicate_inflation || 0;
-                      // Summary drift = claim − (ocr_sum + unverified). What's
-                      // left when you account for "amount on rows we've OCR'd"
-                      // plus "amount on rows we haven't yet" — should be 0 if
-                      // BAT's Overview-tab summary reconciles to its per-
-                      // invoice line items.
-                      const summaryDrift = claim - ocrSum - unverified;
-                      const hasUnverified = unverifiedCount > 0;
-                      const hasSummaryDrift = Math.abs(summaryDrift) >= 0.01;
+                      // Missing PODs value = claim − (ocr'd + pending). What's
+                      // left is value BAT itemised in the Overview pivot but
+                      // never shipped a POD for in the Delivery POD sheet, so
+                      // we never created an extraction row for it.
+                      const missingPodsValue = claim - ocrSum - unverified;
+                      const hasPending = unverifiedCount > 0;
+                      const hasMissingPods = Math.abs(missingPodsValue) >= 0.01;
                       const hasDups = dupCount > 0;
-                      if (!hasUnverified && !hasSummaryDrift && !hasDups) return null;
+                      if (!hasPending && !hasMissingPods && !hasDups) return null;
                       return (
                         <>
-                          {hasUnverified && (
+                          {hasPending && (
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'var(--phosphor)' }}
-                              title={`R ${fmt(unverified)} of detail-row amount sits on ${unverifiedCount} row${unverifiedCount === 1 ? '' : 's'} OCR hasn't successfully matched yet (status: failed / not_found / pending). Run Retry or manually correct the invoice number to verify.`}
+                              title={`R ${fmt(unverified)} sits on ${unverifiedCount} POD row${unverifiedCount === 1 ? '' : 's'} OCR hasn't successfully matched yet (status: failed / not_found / pending). Run Retry or manually correct the invoice number. The BAT TOTAL above does not change as these get resolved — only the OCR coverage signals.`}
                             >
-                              <span>Unverified</span>
+                              <span>OCR pending</span>
                               <span className="tabular-nums">
                                 R {fmt(unverified)}
                                 <span className="text-muted-foreground/70 ml-2">{unverifiedCount} row{unverifiedCount === 1 ? '' : 's'}</span>
                               </span>
                             </div>
                           )}
-                          {hasSummaryDrift && (
+                          {hasMissingPods && (
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
-                              style={{ color: summaryDrift > 0 ? 'var(--phosphor)' : 'hsl(0 70% 60%)' }}
-                              title={`BAT Overview-tab summary (R ${fmt(claim)}) ${summaryDrift > 0 ? 'exceeds' : 'is less than'} the sum of per-invoice line items by R ${fmt(Math.abs(summaryDrift))}. This is a BAT data-quality gap, unrelated to OCR success — every row could be 100% verified and this would still be non-zero if BAT's own summary doesn't reconcile to their own detail.`}
+                              style={{ color: missingPodsValue > 0 ? 'var(--phosphor)' : 'hsl(0 70% 60%)' }}
+                              title={missingPodsValue > 0
+                                ? `R ${fmt(missingPodsValue)} of BAT's Overview-tab claim is for orders that have no matching POD PDF in the same upload's Delivery POD sheet — no extraction row was created for those orders. Chase BAT for the missing POD or accept the shortfall.`
+                                : `Our PODs cover R ${fmt(Math.abs(missingPodsValue))} more than BAT's Overview claim. Likely a duplicate POD or a row whose order_amount doesn't match BAT's per-invoice listing.`}
                             >
-                              <span>Summary drift</span>
+                              <span>Missing PODs</span>
                               <span className="tabular-nums">
-                                R {fmt(Math.abs(summaryDrift))}
+                                R {fmt(Math.abs(missingPodsValue))}
                               </span>
                             </div>
                           )}
@@ -212,7 +214,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'hsl(33 70% 60%)' }}
-                              title={`${dupCount} invoice number${dupCount === 1 ? '' : 's'} OCR'd successfully on multiple distinct PDFs. Inflation R ${fmt(dupInflation)} = extra amount included in OCR-verified figure beyond keeping one representative row per invoice. Dedup would bring OCR-verified from R ${fmt(ocrSum)} to R ${fmt(ocrSum - dupInflation)}.`}
+                              title={`${dupCount} invoice number${dupCount === 1 ? '' : 's'} OCR'd successfully on multiple distinct PDFs in this recon. Inflation R ${fmt(dupInflation)} = extra amount this duplication adds to the OCR-verified figure beyond keeping one representative row per invoice. Typically a garbled barcode prefix that consistently mis-reads to the same number.`}
                             >
                               <span>Dup invoices</span>
                               <span className="tabular-nums">
