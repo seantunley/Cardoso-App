@@ -348,7 +348,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
            WHERE (${nonEmpty('r.unpaid_invoices')}) OR (${nonEmpty('r.receipts')})
-           LIMIT 5000`
+           LIMIT 20000`
         : `SELECT customer_number, customer_name, outstanding_balance,
                   unpaid_invoices, receipts
            FROM datarecord
@@ -367,10 +367,20 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         for (const entry of arr) {
           if (!entry || entry.amount == null || entry.amount === '') continue;
           const amt = parseFloat(String(entry.amount).replace(/[^0-9.\-]/g, ''));
-          if (!Number.isFinite(amt) || amt <= 0) continue;
+          if (!Number.isFinite(amt) || amt === 0) continue;
+          // Receipts (PY*-style rows) carry NEGATIVE amounts in the sync
+          // (see comment at /api/customer-by-invoice-amount/sage line ~510:
+          // "receipts (PY*) carry negative amounts"). Operator types a
+          // positive bank-deposit amount; match on the absolute value so
+          // a -R11710.66 receipt matches a R11710.66 search. Without abs,
+          // every receipt was silently dropped before reaching the
+          // tolerance check — the whole "search receipts" branch was a
+          // no-op for any customer whose receipts followed the canonical
+          // sign convention.
+          const amtAbs = Math.abs(amt);
           // Integer-cents math is faster than absDiff <= tolerance and
           // safer than floating-point comparisons.
-          const amtCents = Math.round(amt * 100);
+          const amtCents = Math.round(amtAbs * 100);
           if (Math.abs(amtCents - targetRounded) > tolRounded) continue;
           const diff = (amtCents - targetRounded) / 100;
           matches.push({
@@ -379,7 +389,11 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             outstanding_balance: customer.outstanding_balance || '0',
             site_name: customer.site_name || null,
             invoice_number: String(entry.number || '').trim() || null,
-            invoice_amount: amt,
+            // Display the absolute value — the operator searched for a
+            // positive amount and expects the matched row to show in the
+            // same convention. The raw (possibly signed) value is still
+            // recoverable from the source data if anyone needs it.
+            invoice_amount: amtAbs,
             invoice_date: entry?.date || null,
             diff: Math.round(diff * 100) / 100,
             abs_diff: Math.abs(diff),
