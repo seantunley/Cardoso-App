@@ -1,9 +1,45 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SummaryTile, fmtR, fmtRSigned, fmtCount, REPORT_COLORS } from '@/components/reports/lib';
-import { CheckCircle, AlertTriangle, CloudOff, ExternalLink, RefreshCw } from 'lucide-react';
+import { CheckCircle, AlertTriangle, CloudOff, Clock, ExternalLink, RefreshCw } from 'lucide-react';
 import { currentIsoWeek } from '@/lib/isoWeek';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
+
+// Working-days-since-sync — counts only Mon-Fri elapsed strictly after
+// the last-sync date through "now". Examples (now = Mon):
+//   sync Mon AM  → 0  (same day)
+//   sync Fri PM  → 1  (Sat/Sun skipped, today Mon counts)
+//   sync Thu     → 2  (Fri + Mon)
+//   sync prev-Thu (8 cal-days) → 6
+// Returns null when synced_at is missing.
+function workingDaysSinceSync(syncedAt, now = new Date()) {
+  if (!syncedAt) return null;
+  const start = new Date(syncedAt); start.setHours(0, 0, 0, 0);
+  const end = new Date(now); end.setHours(0, 0, 0, 0);
+  if (end <= start) return 0;
+  let count = 0;
+  const cur = new Date(start);
+  while (cur < end) {
+    cur.setDate(cur.getDate() + 1);
+    const dow = cur.getDay(); // 0=Sun, 6=Sat
+    if (dow !== 0 && dow !== 6) count++;
+  }
+  return count;
+}
+
+// Threshold: synced strictly more than 1 working day ago = stale.
+// Friday sync seen on Monday morning is 1 working day → NOT stale.
+// Friday sync seen on Tuesday morning is 2 → stale.
+const STALE_WORKING_DAYS = 1;
+
+function isSiteStale(site) {
+  // Don't double-count: if the site is in an active error state OR has
+  // never returned data, those badges take precedence over "stale".
+  if (site.last_error) return false;
+  if (!site.has_data) return false;
+  const days = workingDaysSinceSync(site.synced_at);
+  return days != null && days > STALE_WORKING_DAYS;
+}
 
 // Plain-English explainers for every labelled metric on the per-site
 // recon card. Defining these centrally (one object per source-of-truth)
@@ -105,7 +141,32 @@ export default function HubReconciliation() {
           <div className="space-y-6">
             {/* Network-wide summary tiles */}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <SummaryTile label="Sites reporting" value={`${summary.sites_with_data}/${summary.site_count}`} sub={summary.sites_with_errors > 0 ? `${summary.sites_with_errors} errors` : 'all healthy'} accent={REPORT_COLORS.info} />
+              {(() => {
+                // Headline tile reflects errors first, then staleness (sites
+                // that haven't synced in more than 1 working day) — the
+                // operator wants "ALL HEALTHY" to mean exactly that, not
+                // "no errors but some sites are days behind".
+                const staleCount = sites.filter(isSiteStale).length;
+                let sub, accent;
+                if (summary.sites_with_errors > 0) {
+                  sub = `${summary.sites_with_errors} error${summary.sites_with_errors === 1 ? '' : 's'}`;
+                  accent = REPORT_COLORS.danger;
+                } else if (staleCount > 0) {
+                  sub = `${staleCount} stale (>1 working day)`;
+                  accent = REPORT_COLORS.warning;
+                } else {
+                  sub = 'all healthy';
+                  accent = REPORT_COLORS.info;
+                }
+                return (
+                  <SummaryTile
+                    label="Sites reporting"
+                    value={`${summary.sites_with_data}/${summary.site_count}`}
+                    sub={sub}
+                    accent={accent}
+                  />
+                );
+              })()}
               <SummaryTile label="Total BAT" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
               <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
               <SummaryTile
@@ -154,11 +215,18 @@ function SiteCard({ site }) {
   const matched = Math.abs(site.total_variance) < 0.01 && site.total_supplier > 0;
   const hasError = !!site.last_error;
   const noData = !site.has_data && !hasError;
+  const stale = isSiteStale(site);
+  const daysSinceSync = workingDaysSinceSync(site.synced_at);
   let badge;
   if (hasError) {
     badge = { color: 'hsl(var(--destructive))', glow: 'hsla(0, 72%, 50%, 0.4)', Icon: AlertTriangle, label: 'Sync error' };
   } else if (noData) {
     badge = { color: 'hsl(280 70% 65%)', glow: 'hsla(280, 70%, 55%, 0.4)', Icon: CloudOff, label: 'Awaiting data' };
+  } else if (stale) {
+    // Stale takes precedence over Matched/Mismatch — the data MIGHT be
+    // matched but it's days old; operator needs to know the freshness
+    // problem before they trust the variance numbers.
+    badge = { color: REPORT_COLORS.warning, glow: 'hsla(50, 90%, 55%, 0.4)', Icon: Clock, label: `Stale · ${daysSinceSync}d` };
   } else if (matched) {
     badge = { color: 'hsl(145 55% 45%)', glow: 'hsla(145, 55%, 45%, 0.4)', Icon: CheckCircle, label: 'Matched' };
   } else {
@@ -167,8 +235,17 @@ function SiteCard({ site }) {
   const { color, glow, Icon, label } = badge;
   const syncedAt = site.synced_at ? new Date(site.synced_at).toLocaleString('en-ZA', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
+  // Card border highlights when the site is in any attention-worthy
+  // state — sync error (red), or stale (yellow). Mismatch/matched/no-data
+  // use the default border + the left phosphor stripe to signal status.
+  const borderColor = hasError
+    ? 'hsl(var(--destructive))'
+    : stale
+      ? REPORT_COLORS.warning
+      : 'hsl(var(--border))';
+
   return (
-    <div className="relative overflow-hidden bg-card p-4" style={{ border: `1px solid ${badge.color === 'hsl(var(--destructive))' ? 'hsl(var(--destructive))' : 'hsl(var(--border))'}`, borderRadius: '12px' }}>
+    <div className="relative overflow-hidden bg-card p-4" style={{ border: `1px solid ${borderColor}`, borderRadius: '12px' }}>
       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: color, boxShadow: `0 0 10px ${glow}` }} />
       <div className="pl-2 space-y-3">
         <div className="flex items-start justify-between gap-2">
