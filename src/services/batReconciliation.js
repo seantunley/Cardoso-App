@@ -3543,22 +3543,46 @@ export function getDashboardData(year) {
   const reconciliations = listReconciliations()
     .filter(r => !scoped || r.year === scoped);
 
-  // totalSupplier — single SQL aggregate against bat_reconciliations, scoped.
+  // totalSupplier — per-fee sum (delivery + discount + pricing). The
+  // per-week comparison table on the recon page sums these three fee
+  // columns to render each week's BAT figure, so by summing the same
+  // columns here the tile is mathematically guaranteed to equal the
+  // table's sum of per-week BAT — operator's mental model stays
+  // consistent.
+  //
+  // Previously this used the bat_reconciliations.supplier_total column
+  // (set by recomputeSupplierTotalSafe, which sums per-invoice
+  // order_amount from OCR extractions). That can drift from the per-
+  // fee Overview-tab claim when some rows haven't fully OCR'd or when
+  // branch-merge upsert edge cases left the column stale — the tile
+  // then disagreed with the per-week table by exactly that drift, and
+  // the operator had no way to reconcile the two numbers.
   let totalSupplier = 0;
   try {
-    const row = db.prepare(
-      `SELECT COALESCE(SUM(supplier_total), 0) AS s FROM bat_reconciliations ${yearWhere}`
-    ).get(...yearArg);
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(supplier_delivery), 0)
+           + COALESCE(SUM(supplier_discount), 0)
+           + COALESCE(SUM(supplier_pricing), 0) AS s
+      FROM bat_reconciliations ${yearWhere}
+    `).get(...yearArg);
     totalSupplier = row?.s || 0;
   } catch {}
   // totalSage = sum of all Sage credit notes for the chosen year (or all-time
   // if "All" picked). Bypasses bat_reconciliations entirely so weeks without
-  // an uploaded supplier sheet still count.
+  // an uploaded supplier sheet still count. Uses per-fee summing to mirror
+  // the per-week table's sage column construction (same reason as
+  // totalSupplier above).
   let totalSage = 0;
   try {
     const sql = scoped
-      ? 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache WHERE year = ?'
-      : 'SELECT COALESCE(SUM(total), 0) AS s FROM bat_sage_week_cache';
+      ? `SELECT COALESCE(SUM(delivery), 0)
+              + COALESCE(SUM(discount), 0)
+              + COALESCE(SUM(pricing), 0) AS s
+         FROM bat_sage_week_cache WHERE year = ?`
+      : `SELECT COALESCE(SUM(delivery), 0)
+              + COALESCE(SUM(discount), 0)
+              + COALESCE(SUM(pricing), 0) AS s
+         FROM bat_sage_week_cache`;
     const row = db.prepare(sql).get(...yearArg);
     totalSage = row?.s || 0;
   } catch {}
