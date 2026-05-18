@@ -1107,6 +1107,44 @@ export default function Reconciliation() {
                                   <div className="font-mono text-[9px] uppercase tracking-[0.15em] mt-0.5" style={{ color: row.sage_present ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))' }}>
                                     {row.sage_present ? `${row.batch_count} batch${row.batch_count !== 1 ? 'es' : ''}` : 'no sage'}
                                   </div>
+                                  {/* Claim-vs-OCR drift indicator. The BAT figures
+                                      in this row are the Overview-tab claim (per-fee
+                                      sum) — they don't change when an invoice OCR
+                                      fails. This chip surfaces the gap between that
+                                      claim and what's actually been verified by OCR
+                                      (sum of non-exception order_amount from
+                                      bat_invoice_extractions, computed live in the
+                                      week-status endpoint). Without it the operator
+                                      has no signal that the visible BAT total is
+                                      backed by unverified invoices. */}
+                                  {(() => {
+                                    if (row.marked_zero) return null;
+                                    if (!row.ocr_extraction_count) return null;
+                                    const drift = supTotal - (row.ocr_sum || 0);
+                                    if (Math.abs(drift) < 0.01) return null;
+                                    const missing = row.ocr_missing_amount_count || 0;
+                                    const short = drift > 0;
+                                    const label = short
+                                      ? `OCR R ${fmt(drift)} short`
+                                      : `OCR R ${fmt(Math.abs(drift))} over`;
+                                    const tail = missing > 0 ? ` · ${missing} pending` : '';
+                                    const tip = short
+                                      ? `BAT claim is R ${fmt(supTotal)} but only R ${fmt(row.ocr_sum)} has been verified through OCR'd invoices${missing > 0 ? ` (${missing} non-exception row${missing === 1 ? '' : 's'} still missing an order_amount)` : ' (every row has an amount, so the OCR’d invoices simply add up to less than the claim — possible missing POD or wrong amount on a row)'}.`
+                                      : `OCR'd invoices sum to R ${fmt(row.ocr_sum)}, which is R ${fmt(Math.abs(drift))} more than the BAT claim of R ${fmt(supTotal)} — duplicate invoice or wrong amount on a row.`;
+                                    return (
+                                      <div
+                                        className="mt-1 inline-block px-1.5 py-0.5 rounded-sm font-mono text-[9px] uppercase tracking-[0.15em] cursor-help"
+                                        style={{
+                                          color: 'var(--phosphor)',
+                                          background: 'hsla(33, 95%, 55%, 0.12)',
+                                          border: '1px solid hsla(33, 95%, 55%, 0.4)',
+                                        }}
+                                        title={tip}
+                                      >
+                                        {label}{tail}
+                                      </div>
+                                    );
+                                  })()}
                                   {row.marked_zero && (
                                     <button
                                       type="button"

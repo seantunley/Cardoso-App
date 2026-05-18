@@ -1250,6 +1250,16 @@ export function manualSetInvoice(extractionId, invoiceNumber) {
     WHERE id = ?
   `).run(invoiceNumber, extractionId);
 
+  // Manual fixes are exactly the kind of change that should refresh
+  // supplier_total. Without this, the operator corrects a misread
+  // invoice number, the row now matches Cardoso (so its amount is
+  // implicitly known), but the recon's headline BAT TOTAL stays
+  // frozen at whatever value was stamped at last upload — and the
+  // claim-vs-OCR drift indicator in the per-week table would lie.
+  // Safe-recompute no-ops if other rows in the recon still have null
+  // order_amount.
+  try { recomputeSupplierTotalSafe(ext.reconciliation_id); } catch {}
+
   return ext.reconciliation_id;
 }
 
@@ -1847,6 +1857,13 @@ async function runGoogleVisionRetryInner(reconId, rows) {
 
   console.log(`[bat-gv] Google Vision retry complete for reconciliation ${reconId}`);
   normalizeInvoiceNumbers(reconId);
+  // Same reasoning as the primary cascade's end-of-run recompute:
+  // the GV retry may have filled in invoice numbers for previously
+  // not_found/failed rows, which (via the cross-ref match) implies
+  // their amounts are now known. Without recompute, supplier_total
+  // stays stale and the claim-vs-OCR drift indicator in the per-week
+  // table would lie about how much has been verified by OCR.
+  try { recomputeSupplierTotalSafe(reconId); } catch {}
 }
 
 // ── OCR pause switch ───────────────────────────────────────────────────────
@@ -3389,6 +3406,17 @@ async function processQueue(reconId) {
   // preserved indefinitely in error_log / System Log, so this is not a
   // silent-failure pattern: history stays, current state reflects reality.
   db.prepare("UPDATE bat_reconciliations SET status = 'completed', last_error = NULL, last_error_at = NULL WHERE id = ?").run(reconId);
+  // End-of-cascade recompute: refresh supplier_total now that every row
+  // has been through OCR. Prior to this call, supplier_total was a
+  // snapshot from the last spreadsheet-upload event and drifted silently
+  // as OCR fixed (or failed to fix) per-invoice amounts. The safe-
+  // recompute helper no-ops if any non-exception row still has null
+  // order_amount, so partial-OCR runs don't poison the column with a
+  // null-summed-as-zero value. The comment at the top of
+  // runGoogleVisionRetryInner ("per-row recompute would just be query
+  // churn") was warning against per-row firing — once per cascade is
+  // exactly the right granularity.
+  try { recomputeSupplierTotalSafe(reconId); } catch {}
   console.log(`[bat-ocr] Extraction complete for reconciliation ${reconId}`);
   emitExtractionUpdate(reconId);
 }
