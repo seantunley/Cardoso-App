@@ -75,7 +75,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
         <DialogHeader>
           <DialogTitle className="font-display text-2xl">Find invoice by amount</DialogTitle>
           <DialogDescription className="font-sans normal-case tracking-normal text-sm leading-relaxed text-muted-foreground">
-            For matching unidentified bank deposits — searches every unpaid invoice within the chosen rand tolerance of the typed amount.
+            For matching unidentified bank deposits — searches every unpaid invoice <em>and</em> recent receipt within the chosen rand tolerance.
           </DialogDescription>
         </DialogHeader>
 
@@ -198,6 +198,13 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                             {m.invoice_number ? ` · ${m.invoice_number}` : ""}
                             {m.invoice_date ? ` · ${m.invoice_date}` : ""}
                             {m.site_name ? ` · ${m.site_name}` : ""}
+                            {m.source === "receipt" && (
+                              <span className="ml-2 px-1.5 py-0.5 rounded-sm font-mono text-[10px] tracking-[0.15em]"
+                                    style={{ color: "var(--phosphor)", border: "1px solid hsla(33,95%,55%,0.4)", background: "hsla(33,95%,55%,0.08)" }}
+                                    title="Matched against a past payment receipt, not an open invoice">
+                                Receipt
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="text-right">
