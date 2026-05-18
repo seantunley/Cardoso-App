@@ -6,22 +6,43 @@ import { currentIsoWeek } from '@/lib/isoWeek';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
 // Working-days-since-sync — counts only Mon-Fri elapsed strictly after
-// the last-sync date through "now". Examples (now = Mon):
-//   sync Mon AM  → 0  (same day)
-//   sync Fri PM  → 1  (Sat/Sun skipped, today Mon counts)
-//   sync Thu     → 2  (Fri + Mon)
-//   sync prev-Thu (8 cal-days) → 6
-// Returns null when synced_at is missing.
+// the last-sync date through "now", with both dates evaluated in the
+// business timezone (SAST / Africa/Johannesburg). Examples (now = Mon):
+//   sync Mon AM SAST → 0  (same business day)
+//   sync Fri PM SAST → 1  (Sat/Sun skipped, today Mon counts)
+//   sync Thu         → 2  (Fri + Mon)
+//   sync prev-Thu    → 6
+//
+// Why a fixed TZ: setHours(0,0,0,0) anchors to the VIEWER's local
+// timezone. A hub admin in London and one in Joburg watching the same
+// Mon-AM Hub page can see different "days elapsed" — Joburg already
+// sees Mon, London might still see late-Sun. Same data, different
+// stale badges. Pinning to SAST (which has no DST) makes the verdict
+// deterministic regardless of where the operator's browser is.
 function workingDaysSinceSync(syncedAt, now = new Date()) {
   if (!syncedAt) return null;
-  const start = new Date(syncedAt); start.setHours(0, 0, 0, 0);
-  const end = new Date(now); end.setHours(0, 0, 0, 0);
-  if (end <= start) return 0;
+  // YYYY-MM-DD in SAST via Intl. en-CA gives ISO-style output which
+  // compares lexicographically.
+  const TZ = 'Africa/Johannesburg';
+  const fmt = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const startStr = fmt.format(new Date(syncedAt));
+  const endStr   = fmt.format(now);
+  if (endStr <= startStr) return 0;
+
+  // Iterate by calendar day. Anchoring at noon UTC keeps each
+  // increment exactly +24h and getUTCDay() stable regardless of
+  // viewer TZ — noon UTC sits mid-day in every TZ globally, so the
+  // weekday returned matches what an operator would call that date.
+  // SAST has no DST so the math stays clean.
+  const dateAtNoonUtc = (s) => new Date(`${s}T12:00:00Z`);
+  let cur = dateAtNoonUtc(startStr);
+  const end = dateAtNoonUtc(endStr);
   let count = 0;
-  const cur = new Date(start);
   while (cur < end) {
-    cur.setDate(cur.getDate() + 1);
-    const dow = cur.getDay(); // 0=Sun, 6=Sat
+    cur = new Date(cur.getTime() + 24 * 60 * 60 * 1000);
+    const dow = cur.getUTCDay(); // 0=Sun, 6=Sat
     if (dow !== 0 && dow !== 6) count++;
   }
   return count;
