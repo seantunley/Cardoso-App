@@ -772,32 +772,17 @@ export function createReconciliation({ weekNumber, year, filename, fees, podUrls
 
     insertPodEntries(existing.id, podUrls);
 
-    // Prune stale extraction rows. insertPodEntries upserts the new
-    // POD set by (reconciliation_id, pdf_url), but never DELETEs rows
-    // whose pdf_url is no longer in the upload. Without this prune, a
-    // corrected re-upload (operator drops a wrong POD, fixes a typo'd
-    // URL, or the source spreadsheet legitimately removes an order)
-    // leaves the obsolete extraction row in place — making the
-    // NOT EXISTS check used by Missing PODs queries think the order is
-    // still covered. Real missing PODs are silently suppressed and the
-    // operator sees wrong totals.
-    //
-    // Guard: only prune when the new upload actually shipped POD URLs.
-    // A parse failure that produced zero podUrls must not cascade into
-    // wiping every row for the recon.
-    if (Array.isArray(podUrls) && podUrls.length > 0) {
-      const newUrls = new Set(podUrls.map(p => p.url).filter(Boolean));
-      const existingRows = db.prepare(
-        'SELECT id, pdf_url FROM bat_invoice_extractions WHERE reconciliation_id = ?'
-      ).all(existing.id);
-      const toDelete = existingRows.filter(r => r.pdf_url && !newUrls.has(r.pdf_url));
-      if (toDelete.length > 0) {
-        const del = db.prepare('DELETE FROM bat_invoice_extractions WHERE id = ?');
-        const tx = db.transaction(() => { for (const r of toDelete) del.run(r.id); });
-        tx();
-        console.log(`[bat] Pruned ${toDelete.length} stale extraction row(s) from recon ${existing.id} on re-upload (PDF URLs no longer in supplier sheet)`);
-      }
-    }
+    // NOTE: We do NOT prune extraction rows whose pdf_url isn't in
+    // this upload. Earlier commit 3ac4d66 added that prune to fix a
+    // stale-row Missing-PODs detection bug, but the prune is
+    // destructive on multi-branch uploads: when the second branch
+    // file lands (Welkom + JHB on the same week), the first branch's
+    // extraction rows aren't in the second upload's URL set, so they
+    // would all be deleted along with their OCR/manual corrections.
+    // Per operator: keep existing rows by pdf_url (the original
+    // upsert behaviour). The stale-row case will need a separate
+    // operator-triggered cleanup tool rather than a blanket prune on
+    // every re-upload.
 
     // NOTE: Do NOT call recomputeSupplierTotalSafe here. supplier_total
     // is the claim summary from the Overview-tab fees claim (set on the
@@ -1253,7 +1238,18 @@ export function listReconciliations() {
                       THEN COALESCE(order_amount,0) ELSE 0 END) AS unverified_amount,
              SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status <> 'found'
                       THEN 1 ELSE 0 END) AS unverified_count,
-             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND order_amount IS NULL THEN 1 ELSE 0 END) AS ocr_missing_amount_count
+             -- ocr_missing_amount_count is a SUBSET of unverified_count:
+             -- non-exception rows that are still unresolved (status <> 'found')
+             -- AND have no declared amount yet. The "OCR pending" tooltip on
+             -- the tile says "X of those rows have NO declared amount" — that
+             -- only makes sense if we're counting the same row population as
+             -- unverified_count. Without the status predicate the count would
+             -- also include found-but-amountless rows, which are not "pending"
+             -- in any operator-facing sense, and the tooltip would over-report
+             -- unresolved exposure.
+             SUM(CASE WHEN COALESCE(is_exception,0)=0
+                       AND extraction_status <> 'found'
+                       AND order_amount IS NULL THEN 1 ELSE 0 END) AS ocr_missing_amount_count
       FROM bat_invoice_extractions
       GROUP BY reconciliation_id
     ) ext_stats ON ext_stats.reconciliation_id = r.id
