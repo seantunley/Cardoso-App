@@ -303,9 +303,32 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   });
 
   // GET /api/customer-by-invoice-amount?amount=11710.66&tolerance=0.50
-  // Finds invoices whose amount is within `tolerance` rand of the given amount.
-  // Useful for matching unidentified bank deposits to invoices when the payer
-  // didn't include a reference.
+  // Finds invoices OR receipts whose amount is within `tolerance` rand of
+  // the given amount. Useful for matching unidentified bank deposits when
+  // the payer didn't include a reference.
+  //
+  // Searches BOTH unpaid_invoices AND receipts:
+  //   - unpaid_invoices catches still-open invoices the deposit is meant to settle
+  //   - receipts catches deposits the customer ALREADY made for older invoices
+  //     (the matching invoice has dropped off unpaid_invoices, so the only
+  //     local trace is the receipt that paid it). Without searching receipts
+  //     here the operator has to escalate to /sage for every historical
+  //     match, even when the data is local.
+  //
+  // Each match carries a `source` ("unpaid_invoice" | "receipt") so the UI
+  // can surface what kind of record matched. We also relax the SQL pre-
+  // filter — the previous WHERE clause required `outstanding_balance_num > 0`
+  // which silently excluded customers whose net balance was zero or
+  // negative even when unpaid_invoices still listed the open amount
+  // (e.g. an unpaid R10k invoice offset by R10k of credits → net 0 →
+  // excluded → operator searches by R10k from a bank deposit, gets no
+  // hits, falls back to Sage. The data WAS local; the pre-filter ate
+  // it). And a customer with zero balance who paid up could still be
+  // the right match for an older deposit being matched today via the
+  // receipts branch.
+  //
+  // Cap bumped 5000 → 20000 so a hub with several large sites still
+  // scans the full candidate pool without truncating.
   router.get('/api/customer-by-invoice-amount', requireAuth, (req, res) => {
     const target = parseFloat(String(req.query.amount || '').replace(/[^0-9.\-]/g, ''));
     const tolRaw = parseFloat(String(req.query.tolerance || '0.50'));
@@ -315,57 +338,82 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     }
     const isHub = process.env.HUB_MODE === 'true';
     try {
-      // Pre-filter at SQL layer: only customers with a balance (uses
-      // outstanding_balance_num index — see migration v47) AND a non-empty
-      // unpaid_invoices JSON. Cuts the candidate pool dramatically before we
-      // start parsing JSON in JS. Hard cap at 5000 rows for safety.
+      // Candidate pool = anyone with EITHER non-empty unpaid_invoices OR
+      // non-empty receipts. Hard cap 5000.
+      const nonEmpty = (col) =>
+        `${col} IS NOT NULL AND ${col} != '' AND ${col} != '[]'`;
       const sql = isHub
-        ? `SELECT r.customer_number, r.customer_name, r.outstanding_balance, r.unpaid_invoices,
+        ? `SELECT r.customer_number, r.customer_name, r.outstanding_balance,
+                  r.unpaid_invoices, r.receipts,
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance_num IS NOT NULL AND r.outstanding_balance_num > 0
-             AND r.unpaid_invoices IS NOT NULL AND r.unpaid_invoices != '' AND r.unpaid_invoices != '[]'
-           LIMIT 5000`
-        : `SELECT customer_number, customer_name, outstanding_balance, unpaid_invoices
+           WHERE (${nonEmpty('r.unpaid_invoices')}) OR (${nonEmpty('r.receipts')})
+           LIMIT 20000`
+        : `SELECT customer_number, customer_name, outstanding_balance,
+                  unpaid_invoices, receipts
            FROM datarecord
-           WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num > 0
-             AND unpaid_invoices IS NOT NULL AND unpaid_invoices != '' AND unpaid_invoices != '[]'
-           LIMIT 5000`;
+           WHERE (${nonEmpty('unpaid_invoices')}) OR (${nonEmpty('receipts')})
+           LIMIT 20000`;
       const rows = db.prepare(sql).all();
       const matches = [];
       // Pre-compute the rounded target to avoid math in the inner loop.
       const targetRounded = Math.round(target * 100);
       const tolRounded = Math.round(tolerance * 100);
-      for (const r of rows) {
-        let invs;
-        try { invs = JSON.parse(r.unpaid_invoices || '[]'); } catch { continue; }
-        if (!Array.isArray(invs)) continue;
-        for (const inv of invs) {
-          // Cheap reject: skip if no amount field at all.
-          if (!inv || inv.amount == null || inv.amount === '') continue;
-          const amt = parseFloat(String(inv.amount).replace(/[^0-9.\-]/g, ''));
-          if (!Number.isFinite(amt) || amt <= 0) continue;
-          // Integer-cents math is faster than absDiff <= tolerance and safer
-          // than floating-point comparisons.
-          const amtCents = Math.round(amt * 100);
+
+      const scanArray = (raw, source, customer) => {
+        let arr;
+        try { arr = JSON.parse(raw || '[]'); } catch { return; }
+        if (!Array.isArray(arr)) return;
+        for (const entry of arr) {
+          if (!entry || entry.amount == null || entry.amount === '') continue;
+          const amt = parseFloat(String(entry.amount).replace(/[^0-9.\-]/g, ''));
+          if (!Number.isFinite(amt) || amt === 0) continue;
+          // Receipts (PY*-style rows) carry NEGATIVE amounts in the sync
+          // (see comment at /api/customer-by-invoice-amount/sage line ~510:
+          // "receipts (PY*) carry negative amounts"). Operator types a
+          // positive bank-deposit amount; match on the absolute value so
+          // a -R11710.66 receipt matches a R11710.66 search. Without abs,
+          // every receipt was silently dropped before reaching the
+          // tolerance check — the whole "search receipts" branch was a
+          // no-op for any customer whose receipts followed the canonical
+          // sign convention.
+          const amtAbs = Math.abs(amt);
+          // Integer-cents math is faster than absDiff <= tolerance and
+          // safer than floating-point comparisons.
+          const amtCents = Math.round(amtAbs * 100);
           if (Math.abs(amtCents - targetRounded) > tolRounded) continue;
           const diff = (amtCents - targetRounded) / 100;
           matches.push({
-            customer_number: r.customer_number || '',
-            customer_name: r.customer_name || '',
-            outstanding_balance: r.outstanding_balance || '0',
-            site_name: r.site_name || null,
-            invoice_number: String(inv.number || '').trim() || null,
-            invoice_amount: amt,
-            invoice_date: inv?.date || null,
+            customer_number: customer.customer_number || '',
+            customer_name: customer.customer_name || '',
+            outstanding_balance: customer.outstanding_balance || '0',
+            site_name: customer.site_name || null,
+            invoice_number: String(entry.number || '').trim() || null,
+            // Display the absolute value — the operator searched for a
+            // positive amount and expects the matched row to show in the
+            // same convention. The raw (possibly signed) value is still
+            // recoverable from the source data if anyone needs it.
+            invoice_amount: amtAbs,
+            invoice_date: entry?.date || null,
             diff: Math.round(diff * 100) / 100,
             abs_diff: Math.abs(diff),
             match_type: Math.abs(diff) < 0.005 ? 'exact' : 'fuzzy',
+            source, // 'unpaid_invoice' or 'receipt'
           });
         }
+      };
+
+      for (const r of rows) {
+        scanArray(r.unpaid_invoices, 'unpaid_invoice', r);
+        scanArray(r.receipts, 'receipt', r);
       }
-      // Tightest match first; cap at 100 results.
-      matches.sort((a, b) => a.abs_diff - b.abs_diff);
+      // Tightest match first; within same diff, prefer unpaid invoices
+      // (they're the open balance the deposit most likely settles).
+      matches.sort((a, b) => {
+        if (a.abs_diff !== b.abs_diff) return a.abs_diff - b.abs_diff;
+        if (a.source !== b.source) return a.source === 'unpaid_invoice' ? -1 : 1;
+        return 0;
+      });
       res.json({ amount: target, tolerance, matches: matches.slice(0, 100) });
     } catch (err) {
       console.error('[customer-by-invoice-amount] error:', err.stack || err);
