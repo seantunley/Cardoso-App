@@ -194,6 +194,12 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                       const overviewStored = r.overview_orders_stored || 0;
                       const missingPodsCount = r.missing_pods_count || 0;
                       const missingPodsValue = r.missing_pods_value || 0;
+                      // Subset of missing PODs whose Overview amount is
+                      // NULL (BAT hasn't declared a value yet). Shown
+                      // separately so missing_pods_value's R figure
+                      // doesn't read as full exposure when some rows
+                      // are intentionally unknown.
+                      const missingPodsUnknown = r.missing_pods_unknown_count || 0;
                       const hasPending = unverifiedCount > 0;
                       const hasMissingPods = overviewStored > 0 && missingPodsCount > 0;
                       const needsReupload = overviewStored === 0;
@@ -221,12 +227,15 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'var(--phosphor)' }}
-                              title={`R ${fmt(missingPodsValue)} across ${missingPodsCount} order${missingPodsCount === 1 ? '' : 's'} appears in BAT's Overview pivot but has no matching POD in the Delivery POD sheet of this upload — no extraction row was created. The Missing PODs tab on the audit trail lists each one. Chase BAT for the POD or accept the shortfall.`}
+                              title={`R ${fmt(missingPodsValue)} across ${missingPodsCount} order${missingPodsCount === 1 ? '' : 's'} appears in BAT's Overview pivot but has no matching POD in the Delivery POD sheet of this upload — no extraction row was created.${missingPodsUnknown > 0 ? ` ${missingPodsUnknown} of those order${missingPodsUnknown === 1 ? '' : 's'} has NO declared amount in the Overview pivot — the R value understates true exposure by whatever those amounts turn out to be.` : ''} The Missing PODs tab on the audit trail lists each one. Chase BAT for the POD or accept the shortfall.`}
                             >
                               <span>Missing PODs</span>
                               <span className="tabular-nums">
                                 R {fmt(missingPodsValue)}
                                 <span className="text-muted-foreground/70 ml-2">{missingPodsCount} order{missingPodsCount === 1 ? '' : 's'}</span>
+                                {missingPodsUnknown > 0 && (
+                                  <span style={{ color: 'hsl(33 70% 60%)' }} className="ml-2">· {missingPodsUnknown} unknown</span>
+                                )}
                               </span>
                             </div>
                           )}

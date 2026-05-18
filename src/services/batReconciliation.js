@@ -1257,6 +1257,7 @@ export function listReconciliations() {
       COALESCE(mp_stats.overview_orders_stored, 0)        AS overview_orders_stored,
       COALESCE(mp_stats.missing_pods_count, 0)            AS missing_pods_count,
       COALESCE(mp_stats.missing_pods_value, 0)            AS missing_pods_value,
+      COALESCE(mp_stats.missing_pods_unknown_count, 0)    AS missing_pods_unknown_count,
       COALESCE(c.delivery, r.sage_delivery)               AS sage_delivery,
       COALESCE(c.discount, r.sage_discount)               AS sage_discount,
       COALESCE(c.pricing,  r.sage_pricing)                AS sage_pricing,
@@ -1350,7 +1351,18 @@ export function listReconciliations() {
                SELECT 1 FROM bat_invoice_extractions e
                WHERE e.reconciliation_id = o.reconciliation_id
                  AND e.order_number = o.order_number
-             ) THEN COALESCE(o.order_amount, 0) ELSE 0 END) AS missing_pods_value
+             ) THEN COALESCE(o.order_amount, 0) ELSE 0 END) AS missing_pods_value,
+             -- Subset of missing_pods_count where the Overview-pivot
+             -- amount itself is NULL (BAT shipped the ODR but didn't
+             -- declare an amount yet). Tile surfaces this separately
+             -- so missing_pods_value doesn't read as the full exposure
+             -- when some rows are intentionally unknown — operator
+             -- would otherwise underestimate the gap.
+             SUM(CASE WHEN o.order_amount IS NULL AND NOT EXISTS (
+               SELECT 1 FROM bat_invoice_extractions e
+               WHERE e.reconciliation_id = o.reconciliation_id
+                 AND e.order_number = o.order_number
+             ) THEN 1 ELSE 0 END) AS missing_pods_unknown_count
       FROM bat_overview_orders o
       GROUP BY o.reconciliation_id
     ) mp_stats ON mp_stats.reconciliation_id = r.id

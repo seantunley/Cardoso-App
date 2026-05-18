@@ -115,84 +115,142 @@ export function checkReconciliationIntegrity({ db, reconId }) {
   // claim (delivery+discount+pricing). If these disagree, our parser
   // read the two halves of the same spreadsheet inconsistently, or
   // BAT's own spreadsheet is internally inconsistent.
-  const normalSum = db.prepare(`
-    SELECT COALESCE(SUM(order_amount), 0) AS s
+  //
+  // Skip when any normal-pivot ODR has NULL order_amount — the row
+  // exists in Overview but the parser couldn't read a numeric Sub
+  // Total cell yet (BAT often ships these for not-yet-priced orders;
+  // a later upload upgrades them via the parser's amount-upgrade
+  // path). SUM treats NULLs as zero, so checking against the claim
+  // would deterministically fail and trigger a red banner even
+  // though the data is simply incomplete.
+  const normalRow = db.prepare(`
+    SELECT COALESCE(SUM(order_amount), 0) AS s,
+           SUM(CASE WHEN order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_overview_orders WHERE reconciliation_id = ? AND is_exception = 0
-  `).get(reconId).s;
-  checks.push({
-    id: 'overview_normal_sum_matches_claim',
-    name: 'Σ Overview normal-pivot order_amount = claim_per_fee',
-    passed: eqMoney(normalSum, claimPerFee),
-    expected: fmtR(claimPerFee),
-    actual: fmtR(normalSum),
-    drift: normalSum - claimPerFee,
-    detail: eqMoney(normalSum, claimPerFee)
-      ? 'BAT spreadsheet self-consistent on the normal pivot.'
-      : `BAT's normal-pivot per-invoice line items sum to ${fmtR(normalSum)}, but BAT's Overview-tab fees claim is ${fmtR(claimPerFee)}. Either our parser drifted between the two reads, or BAT shipped a spreadsheet whose summary doesn't reconcile to its own detail. Investigate before sending the operator to BAT.`,
-  });
+  `).get(reconId);
+  const normalSum = normalRow.s;
+  const normalNulls = normalRow.nulls;
+  if (normalNulls > 0) {
+    checks.push({
+      id: 'overview_normal_sum_matches_claim',
+      name: 'Σ Overview normal-pivot order_amount = claim_per_fee',
+      passed: true,
+      skipped: true,
+      detail: `Skipped — ${normalNulls} normal-pivot ODR${normalNulls === 1 ? '' : 's'} have no parseable amount yet (BAT ships these for not-yet-priced orders). Sum of known amounts: ${fmtR(normalSum)} of claim ${fmtR(claimPerFee)}; gap of ${fmtR(claimPerFee - normalSum)} expected to be made up by the unknown rows on a later upload.`,
+    });
+  } else {
+    checks.push({
+      id: 'overview_normal_sum_matches_claim',
+      name: 'Σ Overview normal-pivot order_amount = claim_per_fee',
+      passed: eqMoney(normalSum, claimPerFee),
+      expected: fmtR(claimPerFee),
+      actual: fmtR(normalSum),
+      drift: normalSum - claimPerFee,
+      detail: eqMoney(normalSum, claimPerFee)
+        ? 'BAT spreadsheet self-consistent on the normal pivot.'
+        : `BAT's normal-pivot per-invoice line items sum to ${fmtR(normalSum)}, but BAT's Overview-tab fees claim is ${fmtR(claimPerFee)}. Either our parser drifted between the two reads, or BAT shipped a spreadsheet whose summary doesn't reconcile to its own detail. Investigate before sending the operator to BAT.`,
+    });
+  }
 
   // I3. Tab-bucket coverage. PAID + NON-COMPLIANT (extraction rows
   // + missing normal PODs) must equal the normal-pivot sum. Same
   // arithmetic the audit-trail tiles do — if it ever disagrees the
   // tile display logic and the source-of-truth have drifted.
-  const extractedNormalSum = db.prepare(`
-    SELECT COALESCE(SUM(order_amount), 0) AS s
+  //
+  // Skip when any of the inputs (extractions or missing-POD Overview
+  // rows) carry NULL order_amount on the normal-pivot side. SUM
+  // treats NULL as 0, so a missing-POD ODR with unknown amount
+  // would cause this to fail deterministically even though the
+  // data is just incomplete.
+  const extractedNormalRow = db.prepare(`
+    SELECT COALESCE(SUM(order_amount), 0) AS s,
+           SUM(CASE WHEN order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_invoice_extractions
     WHERE reconciliation_id = ? AND COALESCE(is_exception, 0) = 0
-  `).get(reconId).s;
-  const missingNormalSum = db.prepare(`
-    SELECT COALESCE(SUM(o.order_amount), 0) AS s
+  `).get(reconId);
+  const missingNormalRow = db.prepare(`
+    SELECT COALESCE(SUM(o.order_amount), 0) AS s,
+           SUM(CASE WHEN o.order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_overview_orders o
     WHERE o.reconciliation_id = ? AND o.is_exception = 0
       AND NOT EXISTS (
         SELECT 1 FROM bat_invoice_extractions e
         WHERE e.reconciliation_id = o.reconciliation_id AND e.order_number = o.order_number
       )
-  `).get(reconId).s;
-  const paidPlusNonComp = extractedNormalSum + missingNormalSum;
-  checks.push({
-    id: 'paid_plus_noncomp_equals_claim',
-    name: 'PAID + NON-COMPLIANT (extractions + missing normal PODs) = claim_per_fee',
-    passed: eqMoney(paidPlusNonComp, claimPerFee),
-    expected: fmtR(claimPerFee),
-    actual: fmtR(paidPlusNonComp),
-    drift: paidPlusNonComp - claimPerFee,
-    detail: eqMoney(paidPlusNonComp, claimPerFee)
-      ? 'Audit-trail PAID + NON-COMPLIANT balances to BAT TOTAL claim.'
-      : `PAID + NON-COMP bucket sum (${fmtR(paidPlusNonComp)}) does not equal BAT TOTAL claim (${fmtR(claimPerFee)}). Drift ${fmtR(paidPlusNonComp - claimPerFee)}. Likely cause: stale extraction rows from a prior upload not pruned, OR an extracted row whose order_number isn't in the persisted Overview pivot (look at the orphan-extractions check below).`,
-  });
+  `).get(reconId);
+  const paidPlusNonComp = extractedNormalRow.s + missingNormalRow.s;
+  const normalSideNulls = (extractedNormalRow.nulls || 0) + (missingNormalRow.nulls || 0);
+  if (normalSideNulls > 0) {
+    checks.push({
+      id: 'paid_plus_noncomp_equals_claim',
+      name: 'PAID + NON-COMPLIANT (extractions + missing normal PODs) = claim_per_fee',
+      passed: true,
+      skipped: true,
+      detail: `Skipped — ${normalSideNulls} normal-side row${normalSideNulls === 1 ? '' : 's'} have NULL order_amount yet (extraction or missing-POD with un-priced Overview cell). Sum of known: ${fmtR(paidPlusNonComp)} of claim ${fmtR(claimPerFee)}.`,
+    });
+  } else {
+    checks.push({
+      id: 'paid_plus_noncomp_equals_claim',
+      name: 'PAID + NON-COMPLIANT (extractions + missing normal PODs) = claim_per_fee',
+      passed: eqMoney(paidPlusNonComp, claimPerFee),
+      expected: fmtR(claimPerFee),
+      actual: fmtR(paidPlusNonComp),
+      drift: paidPlusNonComp - claimPerFee,
+      detail: eqMoney(paidPlusNonComp, claimPerFee)
+        ? 'Audit-trail PAID + NON-COMPLIANT balances to BAT TOTAL claim.'
+        : `PAID + NON-COMP bucket sum (${fmtR(paidPlusNonComp)}) does not equal BAT TOTAL claim (${fmtR(claimPerFee)}). Drift ${fmtR(paidPlusNonComp - claimPerFee)}. Likely cause: stale extraction rows from a prior upload not pruned, OR an extracted row whose order_number isn't in the persisted Overview pivot (look at the orphan-extractions check below).`,
+    });
+  }
 
   // I4. Exception bucket = exception-pivot Overview sum.
-  const exceptionOverviewSum = db.prepare(`
-    SELECT COALESCE(SUM(order_amount), 0) AS s
+  // Same null-aware skip as I3 — exception-pivot Overview rows
+  // and is_exception=1 extractions can also have NULL amounts.
+  const exceptionOverviewRow = db.prepare(`
+    SELECT COALESCE(SUM(order_amount), 0) AS s,
+           SUM(CASE WHEN order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_overview_orders WHERE reconciliation_id = ? AND is_exception = 1
-  `).get(reconId).s;
-  const extractedExceptionSum = db.prepare(`
-    SELECT COALESCE(SUM(order_amount), 0) AS s
+  `).get(reconId);
+  const extractedExceptionRow = db.prepare(`
+    SELECT COALESCE(SUM(order_amount), 0) AS s,
+           SUM(CASE WHEN order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_invoice_extractions
     WHERE reconciliation_id = ? AND COALESCE(is_exception, 0) = 1
-  `).get(reconId).s;
-  const missingExceptionSum = db.prepare(`
-    SELECT COALESCE(SUM(o.order_amount), 0) AS s
+  `).get(reconId);
+  const missingExceptionRow = db.prepare(`
+    SELECT COALESCE(SUM(o.order_amount), 0) AS s,
+           SUM(CASE WHEN o.order_amount IS NULL THEN 1 ELSE 0 END) AS nulls
     FROM bat_overview_orders o
     WHERE o.reconciliation_id = ? AND o.is_exception = 1
       AND NOT EXISTS (
         SELECT 1 FROM bat_invoice_extractions e
         WHERE e.reconciliation_id = o.reconciliation_id AND e.order_number = o.order_number
       )
-  `).get(reconId).s;
-  const exceptionsBucket = extractedExceptionSum + missingExceptionSum;
-  checks.push({
-    id: 'exceptions_bucket_equals_overview_exception_pivot',
-    name: 'EXCEPTIONS (extractions + missing exc PODs) = Σ Overview exception-pivot order_amount',
-    passed: eqMoney(exceptionsBucket, exceptionOverviewSum),
-    expected: fmtR(exceptionOverviewSum),
-    actual: fmtR(exceptionsBucket),
-    drift: exceptionsBucket - exceptionOverviewSum,
-    detail: eqMoney(exceptionsBucket, exceptionOverviewSum)
-      ? 'EXCEPTIONS tab balances to BAT spreadsheet exception pivot.'
-      : `EXCEPTIONS bucket sum (${fmtR(exceptionsBucket)}) does not equal BAT exception-pivot total (${fmtR(exceptionOverviewSum)}). Drift ${fmtR(exceptionsBucket - exceptionOverviewSum)}.`,
-  });
+  `).get(reconId);
+  const exceptionsBucket = extractedExceptionRow.s + missingExceptionRow.s;
+  const exceptionSideNulls = (exceptionOverviewRow.nulls || 0)
+                           + (extractedExceptionRow.nulls || 0)
+                           + (missingExceptionRow.nulls || 0);
+  if (exceptionSideNulls > 0) {
+    checks.push({
+      id: 'exceptions_bucket_equals_overview_exception_pivot',
+      name: 'EXCEPTIONS (extractions + missing exc PODs) = Σ Overview exception-pivot order_amount',
+      passed: true,
+      skipped: true,
+      detail: `Skipped — ${exceptionSideNulls} exception-side row${exceptionSideNulls === 1 ? '' : 's'} have NULL order_amount yet. Sum of known: ${fmtR(exceptionsBucket)} of pivot ${fmtR(exceptionOverviewRow.s)}.`,
+    });
+  } else {
+    checks.push({
+      id: 'exceptions_bucket_equals_overview_exception_pivot',
+      name: 'EXCEPTIONS (extractions + missing exc PODs) = Σ Overview exception-pivot order_amount',
+      passed: eqMoney(exceptionsBucket, exceptionOverviewRow.s),
+      expected: fmtR(exceptionOverviewRow.s),
+      actual: fmtR(exceptionsBucket),
+      drift: exceptionsBucket - exceptionOverviewRow.s,
+      detail: eqMoney(exceptionsBucket, exceptionOverviewRow.s)
+        ? 'EXCEPTIONS tab balances to BAT spreadsheet exception pivot.'
+        : `EXCEPTIONS bucket sum (${fmtR(exceptionsBucket)}) does not equal BAT exception-pivot total (${fmtR(exceptionOverviewRow.s)}). Drift ${fmtR(exceptionsBucket - exceptionOverviewRow.s)}.`,
+    });
+  }
 
   // I5. Every extraction's order_number is in bat_overview_orders for
   // this recon — no orphan extractions referencing ODRs BAT doesn't
