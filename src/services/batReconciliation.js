@@ -1149,6 +1149,8 @@ export function listReconciliations() {
       COALESCE(ext_stats.pod_count, 0)                    AS pod_count,
       COALESCE(ext_stats.found_count, 0)                  AS found_count,
       COALESCE(ext_stats.ocr_sum, 0)                      AS ocr_sum,
+      COALESCE(ext_stats.unverified_amount, 0)            AS unverified_amount,
+      COALESCE(ext_stats.unverified_count, 0)             AS unverified_count,
       COALESCE(ext_stats.ocr_missing_amount_count, 0)     AS ocr_missing_amount_count,
       COALESCE(r.supplier_delivery, 0)
         + COALESCE(r.supplier_discount, 0)
@@ -1165,22 +1167,45 @@ export function listReconciliations() {
       SELECT reconciliation_id,
              COUNT(*) AS pod_count,
              SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count,
-             SUM(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS ocr_sum,
+             -- ocr_sum: amount that has actually been verified by OCR.
+             -- order_amount is sourced from the supplier spreadsheet at
+             -- ingest time, so a row can carry an amount even when its
+             -- PDF's OCR failed or didn't match a Cardoso invoice
+             -- (extraction_status pending/not_found/failed). Including
+             -- such rows here would falsely present unverified deliveries
+             -- as "OCR-verified" on the tile — counting only status='found'
+             -- ties the figure to OCR success rather than spreadsheet
+             -- presence. unverified_amount fills in the other side so the
+             -- tile can show how much value is still un-OCR'd.
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
+                      THEN COALESCE(order_amount,0) ELSE 0 END) AS ocr_sum,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status <> 'found'
+                      THEN COALESCE(order_amount,0) ELSE 0 END) AS unverified_amount,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status <> 'found'
+                      THEN 1 ELSE 0 END) AS unverified_count,
              SUM(CASE WHEN COALESCE(is_exception,0)=0 AND order_amount IS NULL THEN 1 ELSE 0 END) AS ocr_missing_amount_count
       FROM bat_invoice_extractions
       GROUP BY reconciliation_id
     ) ext_stats ON ext_stats.reconciliation_id = r.id
     LEFT JOIN (
+      -- Duplicates also restricted to OCR-verified rows. A "duplicate"
+      -- between two failed rows is a different kind of pathology
+      -- (same garbled OCR output across attempts) — counting it here
+      -- would conflate "OCR found the same invoice twice on two
+      -- distinct PDFs" with "OCR failed on two PDFs and we have no
+      -- invoice number for either".
       SELECT reconciliation_id,
              COUNT(*) AS duplicate_invoice_count,
              SUM(amt_sum - amt_max) AS duplicate_inflation
       FROM (
         SELECT reconciliation_id, extracted_invoice,
                COUNT(*) AS n,
-               SUM(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_sum,
-               MAX(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_max
+               SUM(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
+                        THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_sum,
+               MAX(CASE WHEN COALESCE(is_exception,0)=0 AND extraction_status = 'found'
+                        THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_max
         FROM bat_invoice_extractions
-        WHERE extracted_invoice IS NOT NULL
+        WHERE extracted_invoice IS NOT NULL AND extraction_status = 'found'
         GROUP BY reconciliation_id, extracted_invoice
         HAVING n > 1
       )

@@ -135,42 +135,65 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                         <span className="text-accent ml-2">{ocrPct}%</span>
                       </span>
                     </div>
-                    {/* Drift = BAT claim summary (Overview-tab fees) − live OCR sum
-                        (Σ non-exception order_amount from extractions). Updates
-                        on every page load — listReconciliations computes ocr_sum
-                        live from bat_invoice_extractions, so as PODs OCR and
-                        amounts backfill, the drift number tracks. Suppressed
-                        when no extractions exist (nothing to verify). */}
+                    {/* Tile drift breakdown. ocr_sum (live, from
+                        listReconciliations) is restricted to non-exception rows
+                        whose extraction_status = 'found' — i.e. rows whose PDF
+                        OCR succeeded and matched a real invoice. Three signals
+                        surface here so the operator can see WHY the claim and
+                        verified totals differ instead of just a net number:
+                          - Unverified R X · N rows: amount sitting on rows OCR
+                            hasn't successfully matched (failed/not_found/pending);
+                            usually the biggest contributor to a "short" reading.
+                          - Summary drift R Y: gap remaining after the unverified
+                            bucket is accounted for — BAT's Overview fees summary
+                            disagrees with the Overview per-invoice line items
+                            (BAT-side data quality issue, not ours).
+                          - Dup invoices N · +R Z: OCR returned the same invoice
+                            number on multiple distinct PDFs; inflation is the
+                            extra amount this adds to ocr_sum beyond one rep row.
+                        Suppressed on weeks with no PODs uploaded yet. */}
                     {(() => {
+                      if ((r.pod_count || 0) === 0) return null;
                       const claim = r.claim_per_fee || 0;
                       const ocrSum = r.ocr_sum || 0;
-                      const drift = claim - ocrSum;
-                      const missing = r.ocr_missing_amount_count || 0;
+                      const unverified = r.unverified_amount || 0;
+                      const unverifiedCount = r.unverified_count || 0;
                       const dupCount = r.duplicate_invoice_count || 0;
                       const dupInflation = r.duplicate_inflation || 0;
-                      if ((r.pod_count || 0) === 0) return null;
-                      const hasDrift = Math.abs(drift) >= 0.01;
+                      // Summary drift = claim − (ocr_sum + unverified). What's
+                      // left when you account for "amount on rows we've OCR'd"
+                      // plus "amount on rows we haven't yet" — should be 0 if
+                      // BAT's Overview-tab summary reconciles to its per-
+                      // invoice line items.
+                      const summaryDrift = claim - ocrSum - unverified;
+                      const hasUnverified = unverifiedCount > 0;
+                      const hasSummaryDrift = Math.abs(summaryDrift) >= 0.01;
                       const hasDups = dupCount > 0;
-                      if (!hasDrift && !hasDups) return null;
-                      const driftTip = hasDrift
-                        ? drift > 0
-                          ? `BAT claim R ${fmt(claim)} vs OCR-verified R ${fmt(ocrSum)} = R ${fmt(drift)} short${missing > 0 ? ` (${missing} row${missing === 1 ? '' : 's'} still awaiting an order_amount)` : ' (every row has an amount, so detail rows simply sum to less than the claim — missing POD or wrong amount on a row)'}.`
-                          : `OCR-verified R ${fmt(ocrSum)} exceeds BAT claim R ${fmt(claim)} by R ${fmt(Math.abs(drift))} — likely duplicates or wrong amount on a row.`
-                        : null;
-                      const dupTip = hasDups
-                        ? `${dupCount} invoice number${dupCount === 1 ? '' : 's'} OCR'd more than once. Inflation R ${fmt(dupInflation)} = extra amount included in OCR-verified figure beyond keeping one representative row per invoice. Dedup would bring OCR-verified to R ${fmt(ocrSum - dupInflation)}.`
-                        : null;
+                      if (!hasUnverified && !hasSummaryDrift && !hasDups) return null;
                       return (
                         <>
-                          {hasDrift && (
+                          {hasUnverified && (
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'var(--phosphor)' }}
-                              title={driftTip}
+                              title={`R ${fmt(unverified)} of detail-row amount sits on ${unverifiedCount} row${unverifiedCount === 1 ? '' : 's'} OCR hasn't successfully matched yet (status: failed / not_found / pending). Run Retry or manually correct the invoice number to verify.`}
                             >
-                              <span>{drift > 0 ? 'OCR short' : 'OCR over'}</span>
+                              <span>Unverified</span>
                               <span className="tabular-nums">
-                                R {fmt(Math.abs(drift))}
+                                R {fmt(unverified)}
+                                <span className="text-muted-foreground/70 ml-2">{unverifiedCount} row{unverifiedCount === 1 ? '' : 's'}</span>
+                              </span>
+                            </div>
+                          )}
+                          {hasSummaryDrift && (
+                            <div
+                              className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
+                              style={{ color: summaryDrift > 0 ? 'var(--phosphor)' : 'hsl(0 70% 60%)' }}
+                              title={`BAT Overview-tab summary (R ${fmt(claim)}) ${summaryDrift > 0 ? 'exceeds' : 'is less than'} the sum of per-invoice line items by R ${fmt(Math.abs(summaryDrift))}. This is a BAT data-quality gap, unrelated to OCR success — every row could be 100% verified and this would still be non-zero if BAT's own summary doesn't reconcile to their own detail.`}
+                            >
+                              <span>Summary drift</span>
+                              <span className="tabular-nums">
+                                R {fmt(Math.abs(summaryDrift))}
                               </span>
                             </div>
                           )}
@@ -178,7 +201,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                             <div
                               className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
                               style={{ color: 'hsl(33 70% 60%)' }}
-                              title={dupTip}
+                              title={`${dupCount} invoice number${dupCount === 1 ? '' : 's'} OCR'd successfully on multiple distinct PDFs. Inflation R ${fmt(dupInflation)} = extra amount included in OCR-verified figure beyond keeping one representative row per invoice. Dedup would bring OCR-verified from R ${fmt(ocrSum)} to R ${fmt(ocrSum - dupInflation)}.`}
                             >
                               <span>Dup invoices</span>
                               <span className="tabular-nums">
