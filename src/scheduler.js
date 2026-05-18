@@ -330,7 +330,14 @@ async function runBatIntegritySweep() {
             'warn',
           );
         } catch { /* logging is best-effort */ }
-      } else if (skippedChecks.length === integrity.checks.length) {
+      } else if (skippedChecks.length > 0) {
+        // Any skipped check counts the whole recon as skipped, not
+        // passing. supplier_total still runs on pre-v72 recons even
+        // when Overview-dependent checks (I2/I3/I4/I5/I6/I7) skip,
+        // so the previous "skippedChecks.length === checks.length"
+        // test was deterministically false for those recons and they
+        // got bucketed as passing — under-reporting the operator
+        // action of "re-upload to enable Overview verification".
         skipped++;
       } else {
         passing++;

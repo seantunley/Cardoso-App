@@ -391,16 +391,21 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
     return tabData.filter((e) => {
       // The extraction_status filter (not_found / pending) only makes
       // sense for real OCR rows. Missing-POD synthetic rows have
-      // extraction_status=null because there is no extraction to have
-      // a status — applying the filter would hide every row on the
-      // Missing PODs tab whenever the operator left the dropdown on
-      // not_found or pending from a previous tab visit, and the empty
-      // table reads as "no missing PODs" even when the tab count is
-      // non-zero. Skip the status filter for missing-POD rows so the
-      // tab always shows its real population.
-      if (filterStatus !== 'all' && !e.is_missing_pod) {
-        if (filterStatus === 'not_found' && e.extraction_status !== 'not_found') return false;
-        if (filterStatus === 'pending' && e.extraction_status !== 'pending') return false;
+      // extraction_status=null because there's no extraction to have
+      // a status. Bypass the filter ONLY on the Missing PODs tab so
+      // the operator can always see the tab's real population there.
+      // On other tabs (NON-COMPLIANT, EXCEPTIONS) missing-POD rows
+      // are mixed with real extractions for balance — if the operator
+      // selects "OCR failed" or "Pending" on those tabs they're
+      // legitimately asking for status-bearing rows only, so the
+      // synthetic missing-POD rows fall out naturally (their null
+      // status doesn't match any status value).
+      if (filterStatus !== 'all') {
+        const bypassForMissingTab = activeTab === 'missingPods' && e.is_missing_pod;
+        if (!bypassForMissingTab) {
+          if (filterStatus === 'not_found' && e.extraction_status !== 'not_found') return false;
+          if (filterStatus === 'pending' && e.extraction_status !== 'pending') return false;
+        }
       }
       if (search) {
         const q = search.toLowerCase();
@@ -412,7 +417,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       }
       return true;
     });
-  }, [tabData, filterStatus, search]);
+  }, [tabData, filterStatus, search, activeTab]);
 
   // Don't bail just because there are zero extraction rows — a recon
   // can legitimately have N missing-POD rows and zero extractions (BAT
