@@ -13,6 +13,7 @@ import { isoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/matching.js';
 import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
 import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
+import { checkReconciliationIntegrity } from './bat/integrity.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
@@ -1179,6 +1180,42 @@ export function getReconciliation(id) {
   // every cross-week dupe — operator only noticed when Sage reconciled
   // and one of the two rows came back unmatched.
   recon.extractionStats = buildExtractionStats(recon.extractions, recon.id, buildGlobalDuplicateIndexService({ db }));
+
+  // Integrity invariants — runs every load so any drift between the
+  // numbers operators see on the page and the underlying data shows
+  // up immediately as a red blocking banner. See
+  // src/services/bat/integrity.js for the full invariant list.
+  // Failures are silently swallowed at this layer because integrity
+  // is an observation tool, not a transactional concern — if the
+  // checker itself breaks we still want the recon page to load.
+  try {
+    recon.integrity = checkReconciliationIntegrity({ db, reconId: id });
+    if (recon.integrity && recon.integrity.passed === false) {
+      const failed = recon.integrity.checks.filter(c => !c.passed && !c.skipped);
+      try {
+        logError(
+          'bat.integrity.drift',
+          new Error(`Recon ${id} (W${recon.week_number}/${recon.year}) failed ${failed.length} integrity check(s): ${failed.map(c => c.id).join(', ')}`),
+          {
+            reconciliation_id: id,
+            week_number: recon.week_number,
+            year: recon.year,
+            failed_check_ids: failed.map(c => c.id),
+            failed_details: failed.map(c => ({ id: c.id, expected: c.expected, actual: c.actual, drift: c.drift })),
+          },
+          'warn',
+        );
+      } catch {}
+    }
+  } catch (err) {
+    recon.integrity = { passed: false, overviewStored: 0, checks: [{
+      id: 'integrity_check_crashed',
+      name: 'Integrity checker ran without crashing',
+      passed: false,
+      detail: `Integrity check threw: ${err?.message || String(err)}. Tile numbers are not verified for this recon.`,
+    }] };
+    try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {}
+  }
 
   return recon;
 }

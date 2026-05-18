@@ -1607,6 +1607,57 @@ export default function Reconciliation() {
                 <p className="font-mono text-xs text-accent pl-2">{backfillMsg}</p>
               </div>
             )}
+            {selected.integrity && selected.integrity.passed === false && (() => {
+              // Red blocking banner. Integrity invariants come from
+              // src/services/bat/integrity.js — getReconciliation runs them
+              // on every load. Banner lists every failed check so the
+              // operator can see exactly what doesn't reconcile and
+              // (importantly) is not given a dismiss button, per the
+              // operator-requested "blocking dismiss until investigated"
+              // treatment: trust in the numbers was eroded enough during
+              // PR #354 work that a quiet chip wasn't strong enough.
+              const failed = selected.integrity.checks.filter(c => !c.passed && !c.skipped);
+              if (failed.length === 0) return null;
+              return (
+                <div
+                  className="relative overflow-hidden border-2 px-5 py-4"
+                  style={{
+                    borderColor: 'hsl(var(--destructive))',
+                    background: 'hsla(0, 72%, 50%, 0.08)',
+                    borderRadius: '12px',
+                    boxShadow: '0 0 18px hsla(0, 72%, 50%, 0.2)',
+                  }}
+                >
+                  <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-destructive font-semibold mb-2">
+                    ▲ Integrity drift — numbers on this recon do not reconcile to source-of-truth
+                  </div>
+                  <div className="text-xs text-foreground/90 mb-3">
+                    {failed.length} invariant{failed.length === 1 ? '' : 's'} failing. Investigate before trusting any total on this page — the displayed PAID / NON-COMPLIANT / EXCEPTIONS / Missing PODs may be wrong.
+                  </div>
+                  <ul className="space-y-2">
+                    {failed.map((c) => (
+                      <li key={c.id} className="font-mono text-[11px] leading-relaxed pl-3" style={{ borderLeft: '2px solid hsl(var(--destructive))' }}>
+                        <div className="text-foreground font-semibold">{c.name}</div>
+                        {c.expected != null && c.actual != null && (
+                          <div className="text-muted-foreground mt-0.5">
+                            Expected <span className="text-foreground tabular-nums">{c.expected}</span>
+                            <span className="text-muted-foreground/60 mx-1.5">→</span>
+                            Actual <span className="text-destructive tabular-nums">{c.actual}</span>
+                            {Number.isFinite(c.drift) && Math.abs(c.drift) >= 0.01 && (
+                              <span className="text-muted-foreground/70 ml-2">drift {c.drift > 0 ? '+' : ''}{c.drift.toFixed(2)}</span>
+                            )}
+                          </div>
+                        )}
+                        {c.detail && <div className="text-foreground/80 mt-1">{c.detail}</div>}
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-3">
+                    Logged to System Log as <span className="text-foreground">bat.integrity.drift</span> for this recon.
+                  </div>
+                </div>
+              );
+            })()}
             <ReconciliationSummary recon={selected} />
 
             <div className="flex flex-wrap gap-3 items-center pb-4 border-b border-border">
