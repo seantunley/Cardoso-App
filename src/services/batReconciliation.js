@@ -1129,23 +1129,63 @@ export function getReconciliation(id) {
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals
   // even when the per-recon refresh has never been run.
+  //
+  // ext_stats: per-recon OCR + amount stats, computed live every call so the
+  // per-week tile reflects current state without waiting for the cached
+  // supplier_total column to be recomputed. claim_per_fee is the BAT
+  // Overview-tab summary (what BAT says they're owed). ocr_sum is the
+  // bottom-up sum from extraction rows — the gap between the two surfaces
+  // either pending unverified rows or row-vs-summary data mismatches.
+  //
+  // dup_stats: invoice numbers that OCR returned more than once within the
+  // same recon (typical cause: a barcode prefix that mis-reads consistently
+  // across unrelated PDFs, or a genuine duplicate POD upload). The
+  // inflation value is "extra amount included in ocr_sum because of
+  // duplicates" — Σ(amount across dup rows) − Σ(max amount per dup invoice
+  // = one representative). Subtracting inflation from ocr_sum gives a
+  // dedup'd estimate of the verified value.
   return db.prepare(`
     SELECT r.*,
-      COALESCE(ext_stats.pod_count, 0)   AS pod_count,
-      COALESCE(ext_stats.found_count, 0) AS found_count,
-      COALESCE(c.delivery, r.sage_delivery) AS sage_delivery,
-      COALESCE(c.discount, r.sage_discount) AS sage_discount,
-      COALESCE(c.pricing,  r.sage_pricing)  AS sage_pricing,
-      COALESCE(c.total,    r.sage_total)    AS sage_total,
-      CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END AS sage_present
+      COALESCE(ext_stats.pod_count, 0)                    AS pod_count,
+      COALESCE(ext_stats.found_count, 0)                  AS found_count,
+      COALESCE(ext_stats.ocr_sum, 0)                      AS ocr_sum,
+      COALESCE(ext_stats.ocr_missing_amount_count, 0)     AS ocr_missing_amount_count,
+      COALESCE(r.supplier_delivery, 0)
+        + COALESCE(r.supplier_discount, 0)
+        + COALESCE(r.supplier_pricing,  0)                AS claim_per_fee,
+      COALESCE(dup_stats.duplicate_invoice_count, 0)      AS duplicate_invoice_count,
+      COALESCE(dup_stats.duplicate_inflation, 0)          AS duplicate_inflation,
+      COALESCE(c.delivery, r.sage_delivery)               AS sage_delivery,
+      COALESCE(c.discount, r.sage_discount)               AS sage_discount,
+      COALESCE(c.pricing,  r.sage_pricing)                AS sage_pricing,
+      COALESCE(c.total,    r.sage_total)                  AS sage_total,
+      CASE WHEN c.year IS NOT NULL THEN 1 ELSE 0 END      AS sage_present
     FROM bat_reconciliations r
     LEFT JOIN (
       SELECT reconciliation_id,
              COUNT(*) AS pod_count,
-             SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count
+             SUM(CASE WHEN extraction_status = 'found' THEN 1 ELSE 0 END) AS found_count,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS ocr_sum,
+             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND order_amount IS NULL THEN 1 ELSE 0 END) AS ocr_missing_amount_count
       FROM bat_invoice_extractions
       GROUP BY reconciliation_id
     ) ext_stats ON ext_stats.reconciliation_id = r.id
+    LEFT JOIN (
+      SELECT reconciliation_id,
+             COUNT(*) AS duplicate_invoice_count,
+             SUM(amt_sum - amt_max) AS duplicate_inflation
+      FROM (
+        SELECT reconciliation_id, extracted_invoice,
+               COUNT(*) AS n,
+               SUM(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_sum,
+               MAX(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END) AS amt_max
+        FROM bat_invoice_extractions
+        WHERE extracted_invoice IS NOT NULL
+        GROUP BY reconciliation_id, extracted_invoice
+        HAVING n > 1
+      )
+      GROUP BY reconciliation_id
+    ) dup_stats ON dup_stats.reconciliation_id = r.id
     LEFT JOIN bat_sage_week_cache c ON c.year = r.year AND c.week_number = r.week_number
     ORDER BY r.year DESC, r.week_number DESC
   `).all();

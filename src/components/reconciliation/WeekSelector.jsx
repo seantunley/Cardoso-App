@@ -127,7 +127,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                     <DataRow label="Credit Notes" value={r.sage_present ? fmt(r.sage_total) : '—'} muted />
                   </div>
 
-                  <div className="pt-2 border-t border-border">
+                  <div className="pt-2 border-t border-border space-y-1">
                     <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                       <span>OCR</span>
                       <span className="tabular-nums">
@@ -135,6 +135,61 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                         <span className="text-accent ml-2">{ocrPct}%</span>
                       </span>
                     </div>
+                    {/* Drift = BAT claim summary (Overview-tab fees) − live OCR sum
+                        (Σ non-exception order_amount from extractions). Updates
+                        on every page load — listReconciliations computes ocr_sum
+                        live from bat_invoice_extractions, so as PODs OCR and
+                        amounts backfill, the drift number tracks. Suppressed
+                        when no extractions exist (nothing to verify). */}
+                    {(() => {
+                      const claim = r.claim_per_fee || 0;
+                      const ocrSum = r.ocr_sum || 0;
+                      const drift = claim - ocrSum;
+                      const missing = r.ocr_missing_amount_count || 0;
+                      const dupCount = r.duplicate_invoice_count || 0;
+                      const dupInflation = r.duplicate_inflation || 0;
+                      if ((r.pod_count || 0) === 0) return null;
+                      const hasDrift = Math.abs(drift) >= 0.01;
+                      const hasDups = dupCount > 0;
+                      if (!hasDrift && !hasDups) return null;
+                      const driftTip = hasDrift
+                        ? drift > 0
+                          ? `BAT claim R ${fmt(claim)} vs OCR-verified R ${fmt(ocrSum)} = R ${fmt(drift)} short${missing > 0 ? ` (${missing} row${missing === 1 ? '' : 's'} still awaiting an order_amount)` : ' (every row has an amount, so detail rows simply sum to less than the claim — missing POD or wrong amount on a row)'}.`
+                          : `OCR-verified R ${fmt(ocrSum)} exceeds BAT claim R ${fmt(claim)} by R ${fmt(Math.abs(drift))} — likely duplicates or wrong amount on a row.`
+                        : null;
+                      const dupTip = hasDups
+                        ? `${dupCount} invoice number${dupCount === 1 ? '' : 's'} OCR'd more than once. Inflation R ${fmt(dupInflation)} = extra amount included in OCR-verified figure beyond keeping one representative row per invoice. Dedup would bring OCR-verified to R ${fmt(ocrSum - dupInflation)}.`
+                        : null;
+                      return (
+                        <>
+                          {hasDrift && (
+                            <div
+                              className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
+                              style={{ color: 'var(--phosphor)' }}
+                              title={driftTip}
+                            >
+                              <span>{drift > 0 ? 'OCR short' : 'OCR over'}</span>
+                              <span className="tabular-nums">
+                                R {fmt(Math.abs(drift))}
+                              </span>
+                            </div>
+                          )}
+                          {hasDups && (
+                            <div
+                              className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider cursor-help"
+                              style={{ color: 'hsl(33 70% 60%)' }}
+                              title={dupTip}
+                            >
+                              <span>Dup invoices</span>
+                              <span className="tabular-nums">
+                                {dupCount}
+                                <span className="text-muted-foreground/70 ml-2">+R {fmt(dupInflation)}</span>
+                              </span>
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                 </>
               )}

@@ -669,29 +669,10 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       FROM bat_reconciliations
     `).all();
 
-    // Live OCR coverage per recon. Sum of non-exception extracted
-    // order_amount and a count of rows that still have a null amount.
-    // The per-week table uses these to flag drift between the BAT
-    // claim (supplier_delivery+discount+pricing, from the Overview
-    // tab at upload time) and what's actually been verified via OCR.
-    // The cached supplier_total column drifts because it only updates
-    // on upload events / end-of-cascade — computing live here gives
-    // the operator an up-to-the-second drift signal.
-    const ocrRows = db.prepare(`
-      SELECT reconciliation_id,
-             COALESCE(SUM(CASE WHEN COALESCE(is_exception,0)=0 THEN COALESCE(order_amount,0) ELSE 0 END), 0) AS ocr_sum,
-             SUM(CASE WHEN COALESCE(is_exception,0)=0 AND order_amount IS NULL THEN 1 ELSE 0 END) AS missing_amount_count,
-             COUNT(*) AS extraction_count
-      FROM bat_invoice_extractions
-      GROUP BY reconciliation_id
-    `).all();
-    const ocrByRecon = new Map(ocrRows.map(r => [r.reconciliation_id, r]));
-
     // Merge into one comparison list keyed by (year, week_number)
     const merged = new Map();
     const keyOf = (y, w) => `${y}/${w}`;
     for (const s of supplierRows) {
-      const ocr = ocrByRecon.get(s.id);
       merged.set(keyOf(s.year, s.week_number), {
         recon_id: s.id,
         year: s.year,
@@ -705,9 +686,6 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
         marked_zero_by: s.marked_zero_by || null,
         marked_zero_at: s.marked_zero_at || null,
         marked_zero_note: s.marked_zero_note || null,
-        ocr_sum: ocr ? Number(ocr.ocr_sum) || 0 : 0,
-        ocr_missing_amount_count: ocr ? Number(ocr.missing_amount_count) || 0 : 0,
-        ocr_extraction_count: ocr ? Number(ocr.extraction_count) || 0 : 0,
       });
     }
     for (const t of sageWeekTotals) {
@@ -715,7 +693,6 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       const row = merged.get(k) || {
         year: t.year, week_number: t.week_number,
         supplier_delivery: 0, supplier_discount: 0, supplier_pricing: 0,
-        ocr_sum: 0, ocr_missing_amount_count: 0, ocr_extraction_count: 0,
       };
       row.sage_delivery = t.delivery;
       row.sage_discount = t.discount;
