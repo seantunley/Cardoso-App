@@ -240,6 +240,17 @@ export async function probeSageHealth() {
     if (_sageHealthState.consecutiveFailures === 1) {
       try { logError('bat.sage.health_probe', err, { phase: 'first_failure' }, 'warn'); } catch {}
     }
+    // Reset the cached pool on every probe failure so the next probe
+    // opens a fresh connection from scratch. Without this, the
+    // mssql/tedious library can keep reporting pool.connected=true on a
+    // pool whose underlying TCP socket has been silently killed (Tailscale
+    // re-route, Sage box reboot, etc.), so getSagePool() keeps returning
+    // the same dead pool forever — every probe times out, every BAT op
+    // that needs Sage stalls, and the operator had to manually run "Test
+    // Connection" in Settings to nuke the cached pool. Self-heal here
+    // removes that workaround: the next probe (60s later, or the next
+    // BAT op, whichever comes first) opens a brand-new pool.
+    try { await resetSagePool(); } catch {}
     return _sageHealthState;
   }
 }
