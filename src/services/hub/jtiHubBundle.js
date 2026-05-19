@@ -234,15 +234,17 @@ export function streamArchiveBundle({ db, sites, periodYear, periodMonth, res, o
   });
   zip.pipe(res);
 
-  // Layout inside the ZIP: <site_id>/<original_filename>. Site folders
-  // make it easy for an operator to confirm each site is represented
-  // without parsing filenames. Also avoids any chance of two sites
-  // colliding on the same filename (they shouldn't, but defensive).
+  // Layout inside the ZIP: flat — every spreadsheet at the root, no
+  // site folders. Operator-requested 2026-05-19: the per-site UUID
+  // folders the previous layout produced made the unzipped bundle
+  // awkward to hand to JTI (operator had to drag-extract each file).
+  // Safe to go flat because spreadsheet filenames already embed the
+  // site (e.g. JTI_Cardoso_Sales_Ermelo_YYYYMMDD.xlsx) — two sites
+  // can't produce the same filename by convention.
   for (const entry of enrichedEntries) {
-    const safeSite = String(entry.site_id).replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 64);
     const safeFile = path.basename(String(entry.filename || `archive-${entry.id}.xlsx`))
       .replace(/[^A-Za-z0-9 \-_.]/g, '_').slice(0, 200);
-    zip.file(entry.file_path, { name: `${safeSite}/${safeFile}` });
+    zip.file(entry.file_path, { name: safeFile });
   }
 
   zip.finalize().catch((err) => {
