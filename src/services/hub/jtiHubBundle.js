@@ -250,12 +250,19 @@ export function streamArchiveBundle({ db, sites, periodYear, periodMonth, res, o
   // colliding entry with __<site_id_short> before the extension so
   // both files land in the bundle. Only kicks in on actual
   // collision — the happy path stays flat and clean.
-  const usedNames = new Set();
+  // Collision detection uses a case-insensitive key (lowercased) so
+  // case-only variants ("Ermelo" vs "ermelo") still trigger the
+  // rename branch. Windows and default macOS extraction treat such
+  // names as the same file in the same directory — without a
+  // normalised check the ZIP would carry two entries but extraction
+  // would overwrite or prompt, dropping one site's spreadsheet. The
+  // entry we actually write keeps its original case.
+  const usedNamesLower = new Set();
   for (const entry of enrichedEntries) {
     const rawSafe = path.basename(String(entry.filename || `archive-${entry.id}.xlsx`))
       .replace(/[^A-Za-z0-9 \-_.]/g, '_').slice(0, 200);
     let safeFile = rawSafe;
-    if (usedNames.has(safeFile)) {
+    if (usedNamesLower.has(safeFile.toLowerCase())) {
       const siteShort = String(entry.site_id || `id${entry.id}`)
         .replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 16);
       const ext = path.extname(rawSafe);
@@ -265,20 +272,13 @@ export function streamArchiveBundle({ db, sites, periodYear, periodMonth, res, o
       // share the same id prefix after sanitisation), fall through
       // to a numeric tiebreaker so we never lose a file.
       let tiebreak = 2;
-      while (usedNames.has(safeFile)) {
+      while (usedNamesLower.has(safeFile.toLowerCase())) {
         safeFile = `${base}__${siteShort}__${tiebreak}${ext}`;
         tiebreak += 1;
       }
-      try {
-        if (typeof onError === 'function') {
-          // Re-using onError as a soft signal channel would be wrong
-          // (it destroys the response). Just log to stderr — the
-          // bundle still ships correctly with both files.
-        }
-      } catch {}
-      console.warn(`[jti-bundle] Filename collision in ${periodYear}-${String(periodMonth).padStart(2, '0')} bundle: "${rawSafe}" already used; renaming site ${entry.site_id}'s copy to "${safeFile}". Set site_label on this site to avoid the "Unknown" fallback.`);
+      console.warn(`[jti-bundle] Filename collision (case-insensitive) in ${periodYear}-${String(periodMonth).padStart(2, '0')} bundle: "${rawSafe}" already used; renaming site ${entry.site_id}'s copy to "${safeFile}". Set a unique site_label on this site to avoid the rename.`);
     }
-    usedNames.add(safeFile);
+    usedNamesLower.add(safeFile.toLowerCase());
     zip.file(entry.file_path, { name: safeFile });
   }
 
