@@ -5,6 +5,12 @@ import { CheckCircle, AlertTriangle, CloudOff, Clock, ExternalLink, RefreshCw } 
 import { currentIsoWeek } from '@/lib/isoWeek';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 
+// Hoisted to module scope so callers don't allocate a new Intl formatter on
+// every invocation (this function runs once per site on each render).
+const SAST_DATE_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Africa/Johannesburg', year: 'numeric', month: '2-digit', day: '2-digit',
+});
+
 // Working-days-since-sync — counts only Mon-Fri elapsed strictly after
 // the last-sync date through "now", with both dates evaluated in the
 // business timezone (SAST / Africa/Johannesburg). Examples (now = Mon):
@@ -35,12 +41,8 @@ function workingDaysSinceSync(syncedAt, now = new Date()) {
 
   // YYYY-MM-DD in SAST via Intl. en-CA gives ISO-style output which
   // compares lexicographically.
-  const TZ = 'Africa/Johannesburg';
-  const fmt = new Intl.DateTimeFormat('en-CA', {
-    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-  });
-  const startStr = fmt.format(startDate);
-  const endStr   = fmt.format(endDate);
+  const startStr = SAST_DATE_FMT.format(startDate);
+  const endStr   = SAST_DATE_FMT.format(endDate);
   if (endStr <= startStr) return 0;
 
   // Iterate by calendar day. Anchoring at noon UTC keeps each

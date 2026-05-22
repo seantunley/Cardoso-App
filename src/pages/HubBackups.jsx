@@ -1,7 +1,7 @@
 // src/pages/HubBackups.jsx
 // Hub admin page — monitors backup health across all registered sites.
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
@@ -33,12 +33,13 @@ function fmtRelative(iso) {
   return `${days}d ago`;
 }
 
+const FMT_DATE = new Intl.DateTimeFormat("en-ZA", {
+  year: "numeric", month: "short", day: "2-digit",
+  hour: "2-digit", minute: "2-digit",
+});
 function fmtDate(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-ZA", {
-    year: "numeric", month: "short", day: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  return FMT_DATE.format(new Date(iso));
 }
 
 const STATUS_META = {
@@ -498,7 +499,10 @@ export default function HubBackups() {
   }, [syncEnabled, toast]);
 
   const sites = data?.sites || [];
-  const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
+  const hubBackupMap = useMemo(
+    () => Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s])),
+    [hubBackupData?.sites],
+  );
 
   const handleDownload = useCallback(async (site) => {
     setDownloading(site.site_id);

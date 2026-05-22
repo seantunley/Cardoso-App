@@ -28,18 +28,15 @@ async function fetchLoginLogs() {
   return Array.isArray(result) ? result : [];
 }
 
+const LOGIN_DT_FMT = new Intl.DateTimeFormat(undefined, {
+  year: "numeric", month: "short", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
 function formatDateTime(raw) {
   if (!raw) return "—";
   const d = new Date(raw.endsWith("Z") ? raw : raw + "Z");
   if (isNaN(d.getTime())) return raw;
-  return d.toLocaleString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
+  return LOGIN_DT_FMT.format(d);
 }
 
 export default function AuditLog() {
