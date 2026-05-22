@@ -1702,43 +1702,68 @@ export function getOcrCounters({ windowHours = 1 } = {}) {
 export function getRecentBatReconciliations(limit = 20) {
   const lim = Math.min(Math.max(parseInt(limit, 10) || 20, 1), 100);
   try {
+    // Previously ran 8 correlated subqueries per recon × LIMIT 20 = ~160
+    // scans of bat_invoice_extractions per call. Rewritten as two
+    // narrow CTE aggregations (status counts + duplicate clusters)
+    // each scoped via `WHERE reconciliation_id IN lim_recons`, joined
+    // back to the limited recon set.
+    //
+    // Duplicate definition matches services/bat/duplicates.js — an
+    // extracted_invoice must be NOT NULL AND non-empty after TRIM.
+    // Without the TRIM check, empty-string clusters (seen in the
+    // wild after some pipeline failures) would count as one giant
+    // duplicate cluster.
     return db.prepare(`
+      WITH lim_recons AS (
+        SELECT id, week_number, year, status, last_error, last_error_at, created_at
+        FROM bat_reconciliations
+        ORDER BY id DESC
+        LIMIT ?
+      ),
+      status_counts AS (
+        SELECT
+          reconciliation_id,
+          COUNT(*) AS rows_total,
+          SUM(CASE WHEN extraction_status = 'found'     THEN 1 ELSE 0 END) AS rows_found,
+          SUM(CASE WHEN extraction_status = 'pending'   THEN 1 ELSE 0 END) AS rows_pending,
+          SUM(CASE WHEN extraction_status = 'not_found' THEN 1 ELSE 0 END) AS rows_not_found,
+          SUM(CASE WHEN extraction_status = 'failed'    THEN 1 ELSE 0 END) AS rows_failed
+        FROM bat_invoice_extractions
+        WHERE reconciliation_id IN (SELECT id FROM lim_recons)
+        GROUP BY reconciliation_id
+      ),
+      dup_clusters AS (
+        SELECT reconciliation_id, extracted_invoice, COUNT(*) AS cluster_size
+        FROM bat_invoice_extractions
+        WHERE reconciliation_id IN (SELECT id FROM lim_recons)
+          AND extraction_status = 'found'
+          AND extracted_invoice IS NOT NULL
+          AND TRIM(extracted_invoice) != ''
+        GROUP BY reconciliation_id, extracted_invoice
+        HAVING COUNT(*) >= 2
+      ),
+      dup_counts AS (
+        SELECT
+          reconciliation_id,
+          COALESCE(SUM(cluster_size), 0) AS rows_duplicates,
+          COUNT(*) AS duplicate_invoices
+        FROM dup_clusters
+        GROUP BY reconciliation_id
+      )
       SELECT
         r.id, r.week_number, r.year, r.status,
         r.last_error, r.last_error_at, r.created_at,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id) AS rows_total,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'found') AS rows_found,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'pending') AS rows_pending,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'not_found') AS rows_not_found,
-        (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = r.id AND extraction_status = 'failed') AS rows_failed,
-        -- Filter matches services/bat/duplicates.js — extracted_invoice
-        -- must be NOT NULL AND non-empty after trimming. Without the
-        -- TRIM check, empty-string clusters (which shouldn't happen but
-        -- have been seen in the wild after some pipeline failures) get
-        -- counted as a single mega-cluster of "duplicates".
-        (SELECT COALESCE(SUM(c), 0) FROM (
-          SELECT COUNT(*) AS c
-          FROM bat_invoice_extractions
-          WHERE reconciliation_id = r.id
-            AND extraction_status = 'found'
-            AND extracted_invoice IS NOT NULL
-            AND TRIM(extracted_invoice) != ''
-          GROUP BY extracted_invoice
-          HAVING COUNT(*) >= 2
-        )) AS rows_duplicates,
-        (SELECT COUNT(*) FROM (
-          SELECT extracted_invoice
-          FROM bat_invoice_extractions
-          WHERE reconciliation_id = r.id
-            AND extraction_status = 'found'
-            AND extracted_invoice IS NOT NULL
-            AND TRIM(extracted_invoice) != ''
-          GROUP BY extracted_invoice
-          HAVING COUNT(*) >= 2
-        )) AS duplicate_invoices
-      FROM bat_reconciliations r
+        COALESCE(sc.rows_total,         0) AS rows_total,
+        COALESCE(sc.rows_found,         0) AS rows_found,
+        COALESCE(sc.rows_pending,       0) AS rows_pending,
+        COALESCE(sc.rows_not_found,     0) AS rows_not_found,
+        COALESCE(sc.rows_failed,        0) AS rows_failed,
+        COALESCE(dc.rows_duplicates,    0) AS rows_duplicates,
+        COALESCE(dc.duplicate_invoices, 0) AS duplicate_invoices
+      FROM lim_recons r
+      LEFT JOIN status_counts sc ON sc.reconciliation_id = r.id
+      LEFT JOIN dup_counts    dc ON dc.reconciliation_id = r.id
       ORDER BY r.id DESC
-      LIMIT ?
     `).all(lim);
   } catch {
     return [];
