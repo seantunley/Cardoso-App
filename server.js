@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import cors from 'cors';
 import session from 'express-session';
@@ -111,7 +112,22 @@ if (IS_PRODUCTION) {
 } else {
   app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173', credentials: true }));
 }
-app.use(express.json());
+// gzip JSON responses. Hub payloads (sites list, kpis, aged-debtors)
+// run into multiple MB and ship over Tailscale/LAN — gzip cuts wire
+// size 5-10×. Note: must be mounted BEFORE express.static so the
+// hashed JS/CSS bundles get compressed too.
+app.use(compression());
+
+// 2 MB JSON body cap. The previous (default) limit was 100kb but
+// express's default actually allows unbounded bodies on app.use(json())
+// without an explicit `limit` — every hub receive endpoint
+// (/api/hub/receive-rules, /api/hub/receive-users) accepted arbitrarily
+// large payloads, a memory-DoS vector. 2MB comfortably covers the
+// largest known payload (full users + rules push for a 50-user
+// install ≈ 200KB) with 10× headroom; raise per-route via a dedicated
+// express.json({ limit: ... }) on a router if a future endpoint
+// legitimately needs more.
+app.use(express.json({ limit: '2mb' }));
 
 // Session store backed by a dedicated better-sqlite3 connection. Replaces
 // connect-sqlite3 (which depended on the legacy `sqlite3` package and pulled
