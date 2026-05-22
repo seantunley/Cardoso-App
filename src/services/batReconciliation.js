@@ -1554,31 +1554,62 @@ export function getOcrSnapshot() {
     });
   }
 
+  // Single GROUP BY scan replaces three full-table COUNT(*) scans —
+  // previously this handler polled every few seconds and scanned the
+  // whole bat_invoice_extractions table three times per poll.
   let pending = 0;
   let failed = 0;
   let notFound = 0;
   try {
-    pending = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'pending'").get()?.c || 0;
-    failed = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'failed'").get()?.c || 0;
-    notFound = db.prepare("SELECT COUNT(*) AS c FROM bat_invoice_extractions WHERE extraction_status = 'not_found'").get()?.c || 0;
+    const statusRows = db.prepare(
+      `SELECT extraction_status AS status, COUNT(*) AS c
+       FROM bat_invoice_extractions
+       WHERE extraction_status IN ('pending', 'failed', 'not_found')
+       GROUP BY extraction_status`,
+    ).all();
+    for (const r of statusRows) {
+      if (r.status === 'pending') pending = r.c;
+      else if (r.status === 'failed') failed = r.c;
+      else if (r.status === 'not_found') notFound = r.c;
+    }
   } catch { /* table may not exist on first boot */ }
 
   // Active recon = the one the worker is currently chewing through.
   // We want week_number / year so the operator sees "currently working
-  // week 38 / 2025" instead of a bare id.
+  // week 38 / 2025" instead of a bare id. Counts come from one
+  // GROUP BY scoped to the active recon instead of five correlated
+  // subqueries against the whole table.
   let activeRecon = null;
   if (workerRunning && workerReconId != null) {
     try {
-      const r = db.prepare(`
-        SELECT id, week_number, year, status, last_error, last_error_at,
-          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id) AS rows_total,
-          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'found') AS rows_found,
-          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'pending') AS rows_pending,
-          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'not_found') AS rows_not_found,
-          (SELECT COUNT(*) FROM bat_invoice_extractions WHERE reconciliation_id = bat_reconciliations.id AND extraction_status = 'failed') AS rows_failed
-        FROM bat_reconciliations WHERE id = ?
-      `).get(workerReconId);
-      if (r) activeRecon = r;
+      const recon = db.prepare(
+        `SELECT id, week_number, year, status, last_error, last_error_at
+         FROM bat_reconciliations WHERE id = ?`,
+      ).get(workerReconId);
+      if (recon) {
+        const counts = db.prepare(
+          `SELECT extraction_status AS status, COUNT(*) AS c
+           FROM bat_invoice_extractions
+           WHERE reconciliation_id = ?
+           GROUP BY extraction_status`,
+        ).all(workerReconId);
+        let total = 0, found = 0, p = 0, nf = 0, f = 0;
+        for (const r of counts) {
+          total += r.c;
+          if (r.status === 'found') found = r.c;
+          else if (r.status === 'pending') p = r.c;
+          else if (r.status === 'not_found') nf = r.c;
+          else if (r.status === 'failed') f = r.c;
+        }
+        activeRecon = {
+          ...recon,
+          rows_total: total,
+          rows_found: found,
+          rows_pending: p,
+          rows_not_found: nf,
+          rows_failed: f,
+        };
+      }
     } catch { /* table may not exist on first boot */ }
   }
 
