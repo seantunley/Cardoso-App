@@ -1,7 +1,7 @@
-import { useState, useEffect, Suspense } from "react";
+import { Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
-import { reportClientError } from "@/lib/clientLog";
+import { useHubMode } from "@/lib/useAppInfo";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { queryClientInstance } from "@/lib/query-client";
 import NavigationTracker from "@/lib/NavigationTracker";
@@ -118,13 +118,10 @@ const RootRedirect = ({ children, hubMode }) => {
 
 const AuthenticatedApp = () => {
   const { isLoadingAuth, isLoadingPublicSettings, authError, isAuthenticated, forcePasswordChange, completePasswordChange } = useAuth();
-  const [hubMode, setHubMode] = useState(false);
-  useEffect(() => {
-    fetch("/api/app-info", { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(err => reportClientError("App.appInfo", err));
-  }, [isAuthenticated]);
+  const hubMode = useHubMode();
+  // `isAuthenticated` referenced only for the previous effect; re-flow
+  // when auth changes is now handled by React Query staleTime + auth gate.
+  void isAuthenticated;
 
   if (isLoadingPublicSettings || isLoadingAuth) {
     return (

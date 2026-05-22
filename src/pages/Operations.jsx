@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { useHubMode } from "@/lib/useAppInfo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Activity, AlertTriangle, Download, RefreshCw, Shield, ScanLine, Calendar } from "lucide-react";
 import { toast } from "sonner";
@@ -28,21 +29,10 @@ import HubSyncLog from "@/pages/HubSyncLog";
 
 export default function Operations() {
   const { user } = useAuth();
-  const [hubMode, setHubMode] = useState(false);
+  const hubMode = useHubMode();
   const [activeTab, setActiveTab] = useState("jobs");
   const [detectiveMode, setDetectiveMode] = useState(false);
   const [traceMode, setTraceMode] = useState(false);
-
-  // Hub Sync Log tab only renders in hub mode (the underlying endpoints
-  // /api/hub/sync-log and /api/hub/sync don't exist on a site install).
-  // Same fetch the Layout already does — small duplication, avoids a
-  // prop-drilling refactor.
-  useEffect(() => {
-    fetch("/api/app-info", { credentials: "include" })
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(() => {});
-  }, []);
 
   useEffect(() => {
     let logsIndex = 0;

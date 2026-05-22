@@ -4,7 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { reportClientError } from "@/lib/clientLog";
+import { useHubMode } from "@/lib/useAppInfo";
 import { getLedgerFortune, getReportSignature } from "@/lib/fun";
 
 // ── Resizable column widths (mirrors the CustomerBalances pattern) ──────────
@@ -170,7 +170,7 @@ const formatCurrency = (val) => {
 
 export default function Inventory() {
   const colorScheme = useColorScheme();
-  const [hubMode, setHubMode] = useState(false);
+  const hubMode = useHubMode();
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [hideZeroQty, setHideZeroQty] = useState(true);
@@ -190,12 +190,6 @@ export default function Inventory() {
     }
   }
 
-  useEffect(() => {
-    fetch("/api/app-info")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d?.hub_mode) setHubMode(true); })
-      .catch(err => reportClientError("Inventory.appInfo", err));
-  }, []);
 
   // Debounce search 200ms
   useEffect(() => {

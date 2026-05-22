@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAppInfo } from "@/lib/useAppInfo";
 import {
   Activity,
   AlertCircle,
@@ -256,11 +257,7 @@ export default function NetworkDevices() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
 
-  const appInfoQuery = useQuery({
-    queryKey: ["app-info"],
-    queryFn: () => apiFetch("/api/app-info"),
-    staleTime: 60_000,
-  });
+  const appInfoQuery = useAppInfo();
 
   const hubMode = !!appInfoQuery.data?.hub_mode;
 
