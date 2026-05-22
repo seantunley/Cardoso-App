@@ -39,7 +39,14 @@ const FMT_DATE = new Intl.DateTimeFormat("en-ZA", {
 });
 function fmtDate(iso) {
   if (!iso) return "—";
-  return FMT_DATE.format(new Date(iso));
+  // Guard against malformed payloads — a partially upgraded site could
+  // ship a non-ISO timestamp, and Intl.format() on an invalid Date
+  // throws RangeError mid-render, which would take out the whole page.
+  // The pre-hoist toLocaleString() form silently produced "Invalid Date"
+  // instead of throwing; preserve that contract.
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return FMT_DATE.format(d);
 }
 
 const STATUS_META = {
