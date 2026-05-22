@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useQuery } from "@tanstack/react-query";
 import { Filter, Scale } from "lucide-react";
@@ -107,9 +107,9 @@ function ResizeHandle({ id, startResize, resetColumn }) {
 }
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
-function CreditBadge({ row, creditLogicConfig }) {
-  const result = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG), [row, creditLogicConfig]);
-  const meta = CREDIT_BADGE_META[result.verdict] || CREDIT_BADGE_META.caution;
+const CreditBadge = React.memo(function CreditBadge({ result }) {
+  const safeResult = result || { verdict: "caution", score: 0 };
+  const meta = CREDIT_BADGE_META[safeResult.verdict] || CREDIT_BADGE_META.caution;
 
   return (
     <Tooltip>
@@ -118,10 +118,10 @@ function CreditBadge({ row, creditLogicConfig }) {
           {meta.label}
         </span>
       </TooltipTrigger>
-      <TooltipContent>Score: {result.score ?? "—"}/100 — {meta.label}</TooltipContent>
+      <TooltipContent>Score: {safeResult.score ?? "—"}/100 — {meta.label}</TooltipContent>
     </Tooltip>
   );
-}
+});
 
 const PAGE_SIZE = 50;
 
@@ -235,6 +235,47 @@ function parseAmount(val) {
 function formatAmount(val) {
   const num = parseAmount(val);
   return num.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function parseDDMMYYYY(str) {
+  if (!str || str.length < 8) return 0;
+  const clean = str.replace(/[^0-9]/g, '');
+  if (clean.length !== 8) return 0;
+  return parseInt(`${clean.slice(4, 8)}${clean.slice(2, 4)}${clean.slice(0, 2)}`, 10);
+}
+
+const EMPTY_ARRAY = Object.freeze([]);
+
+function sortRows(raw, sortField, sortDir, creditScores) {
+  return [...raw].sort((a, b) => {
+    let va, vb;
+    if (sortField === "outstanding_balance") {
+      va = parseAmount(a.outstanding_balance);
+      vb = parseAmount(b.outstanding_balance);
+    } else if (sortField === "customer_name") {
+      va = (a.customer_name || "").toLowerCase();
+      vb = (b.customer_name || "").toLowerCase();
+      return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
+    } else if (sortField === "customer_number") {
+      va = String(a.customer_number || "");
+      vb = String(b.customer_number || "");
+      return sortDir === "asc"
+        ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" })
+        : vb.localeCompare(va, undefined, { numeric: true, sensitivity: "base" });
+    } else if (sortField === "last_invoice_date") {
+      va = parseDDMMYYYY(a.last_unpaid_invoice_1_date);
+      vb = parseDDMMYYYY(b.last_unpaid_invoice_1_date);
+    } else if (sortField === "last_receipt_date") {
+      va = parseDDMMYYYY(a.last_receipt_1_date);
+      vb = parseDDMMYYYY(b.last_receipt_1_date);
+    } else if (sortField === "credit") {
+      va = creditScores?.get(a) ?? 0;
+      vb = creditScores?.get(b) ?? 0;
+    } else {
+      return 0;
+    }
+    return sortDir === "asc" ? va - vb : vb - va;
+  });
 }
 
 const FLAG_DOT = {
@@ -451,67 +492,33 @@ export default function CustomerBalances() {
     enabled: totalRecords > PAGE_SIZE,
   });
 
-  function parseDDMMYYYY(str) {
-    if (!str || str.length < 8) return 0;
-    const clean = str.replace(/[^0-9]/g, '');
-    if (clean.length !== 8) return 0;
-    return parseInt(`${clean.slice(4, 8)}${clean.slice(2, 4)}${clean.slice(0, 2)}`, 10);
-  }
-
-  const VERDICT_ORDER = { approve: 4, caution: 3, dormant: 2, hold: 1 };
-
-  // Cache credit scores so sorting doesn't re-run analyseInvoiceCredit per comparison
-  const creditScores = useMemo(() => {
+  // Analyse credit once per row; both the badge and the credit-sort
+  // reuse this map. Recomputes only when records or credit-logic config change.
+  const creditAnalyses = useMemo(() => {
     const raw = data?.records ?? [];
-    if (sortField !== "credit") return null;
     const map = new Map();
     for (const row of raw) {
-      try { map.set(row, analyseInvoiceCredit([row], [], creditLogicConfig).score ?? 0); }
-      catch { map.set(row, 0); }
+      try { map.set(row, analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG)); }
+      catch { map.set(row, { verdict: "caution", score: 0 }); }
     }
     return map;
-  }, [data?.records, sortField, creditLogicConfig]);
+  }, [data?.records, creditLogicConfig]);
 
-  const sortRows = (raw) => {
-    return [...raw].sort((a, b) => {
-      let va, vb;
-      if (sortField === "outstanding_balance") {
-        va = parseAmount(a.outstanding_balance);
-        vb = parseAmount(b.outstanding_balance);
-      } else if (sortField === "customer_name") {
-        va = (a.customer_name || "").toLowerCase();
-        vb = (b.customer_name || "").toLowerCase();
-        return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
-      } else if (sortField === "customer_number") {
-        va = String(a.customer_number || "");
-        vb = String(b.customer_number || "");
-        return sortDir === "asc"
-          ? va.localeCompare(vb, undefined, { numeric: true, sensitivity: "base" })
-          : vb.localeCompare(va, undefined, { numeric: true, sensitivity: "base" });
-      } else if (sortField === "last_invoice_date") {
-        va = parseDDMMYYYY(a.last_unpaid_invoice_1_date);
-        vb = parseDDMMYYYY(b.last_unpaid_invoice_1_date);
-      } else if (sortField === "last_receipt_date") {
-        va = parseDDMMYYYY(a.last_receipt_1_date);
-        vb = parseDDMMYYYY(b.last_receipt_1_date);
-      } else if (sortField === "credit") {
-        va = creditScores?.get(a) ?? 0;
-        vb = creditScores?.get(b) ?? 0;
-      } else {
-        return 0;
-      }
-      return sortDir === "asc" ? va - vb : vb - va;
-    });
-  };
+  const creditScores = useMemo(() => {
+    if (sortField !== "credit") return null;
+    const map = new Map();
+    for (const [row, result] of creditAnalyses) map.set(row, result.score ?? 0);
+    return map;
+  }, [creditAnalyses, sortField]);
 
   const rows = useMemo(() => {
     const raw = data?.records ?? [];
-    return sortRows(raw);
+    return sortRows(raw, sortField, sortDir, creditScores);
   }, [data?.records, sortField, sortDir, creditScores]);
 
   const printRows = useMemo(() => {
     const raw = printData?.records ?? data?.records ?? [];
-    return sortRows(raw);
+    return sortRows(raw, sortField, sortDir, creditScores);
   }, [printData?.records, data?.records, sortField, sortDir, creditScores]);
 
   const totalPages = data?.totalPages ?? 1;
@@ -525,12 +532,8 @@ export default function CustomerBalances() {
   const currentPageTotal = data?.pageTotalOutstanding ?? 0;
   const minBalanceThreshold = data?.minBalanceThreshold ?? 0;
 
-  const sites = useMemo(() => {
-    return data?.sites ?? [];
-  }, [data?.sites]);
-  const salesReps = useMemo(() => {
-    return data?.salesReps ?? [];
-  }, [data?.salesReps]);
+  const sites = data?.sites ?? EMPTY_ARRAY;
+  const salesReps = data?.salesReps ?? EMPTY_ARRAY;
 
   useEffect(() => {
     if (data?.page && data.page !== page) setPage(data.page);
@@ -884,7 +887,7 @@ export default function CustomerBalances() {
                           </span>
                         </td>
                         <td className="px-2 py-1 text-center">
-                          <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
+                          <CreditBadge result={creditAnalyses.get(row)} />
                         </td>
                       </tr>
                     );
