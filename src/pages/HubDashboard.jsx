@@ -888,6 +888,11 @@ export default function HubDashboard() {
 
   useEffect(() => { fetchAll(); }, [dateRange]);
 
+  // Stable reference for `sites` so the memoised <HubCustomerSearch />
+  // isn't invalidated by a fresh [] identity each render when kpis is
+  // null. Must live above any early return for hook-order stability.
+  const sites = useMemo(() => kpis?.sites || EMPTY_ARRAY, [kpis?.sites]);
+
   const triggerSync = async () => {
     setSyncing(true);
     try {
@@ -985,8 +990,6 @@ export default function HubDashboard() {
       </div>
     </div>
   );
-
-  const sites = useMemo(() => kpis?.sites || EMPTY_ARRAY, [kpis?.sites]);
 
   return (
     <div className="min-h-screen bg-background">
