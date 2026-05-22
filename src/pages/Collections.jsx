@@ -114,12 +114,13 @@ export default function Collections() {
   });
 
   const filteredRows = useMemo(() => {
-    let rows = data;
-    if (statusFilter !== "all") rows = rows.filter((row) => row.status === statusFilter);
-    if (flagFilter === "hold") rows = rows.filter((row) => row.flag_color === "red");
-    if (flagFilter === "caution") rows = rows.filter((row) => row.flag_color === "orange");
-
-    return [...rows].sort((a, b) => {
+    const filtered = data.filter((row) => {
+      if (statusFilter !== "all" && row.status !== statusFilter) return false;
+      if (flagFilter === "hold" && row.flag_color !== "red") return false;
+      if (flagFilter === "caution" && row.flag_color !== "orange") return false;
+      return true;
+    });
+    return filtered.sort((a, b) => {
       const diff = parseAmount(a.outstanding_balance) - parseAmount(b.outstanding_balance);
       return sortDirection === "desc" ? -diff : diff;
     });

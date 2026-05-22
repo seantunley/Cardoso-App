@@ -112,7 +112,7 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
   const SqlIcon = sqlMeta.icon;
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm shadow-black/5 backdrop-blur-sm">
+    <div className="rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm shadow-black/5">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3 min-w-0">
