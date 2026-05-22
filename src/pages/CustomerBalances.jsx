@@ -528,6 +528,16 @@ export default function CustomerBalances() {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
   }
+  // Precompute column widths as percentages so the JSX doesn't run an
+  // O(cols) reduce + per-cell percentage call on every render.
+  const colWidthPct = useMemo(() => {
+    const total = Object.values(colWidths).reduce((s, v) => s + v, 0) || 1;
+    const out = {};
+    for (const [k, v] of Object.entries(colWidths)) out[k] = `${((v || 100) / total) * 100}%`;
+    return out;
+  }, [colWidths]);
+  const pct = (id) => colWidthPct[id] || '0%';
+
   const filteredGrandTotal = data?.filteredTotalOutstanding ?? 0;
   const currentPageTotal = data?.pageTotalOutstanding ?? 0;
   const minBalanceThreshold = data?.minBalanceThreshold ?? 0;
@@ -815,10 +825,6 @@ export default function CustomerBalances() {
               className="rounded-xl border border-border bg-card overflow-hidden"
               style={{ height: "min(900px, calc(100vh - 180px))", overflowY: "auto", overflowX: "hidden" }}
             >
-              {(() => {
-                const totalWidth = Object.values(colWidths).reduce((s, v) => s + v, 0) || 1;
-                const pct = (id) => `${((colWidths[id] || 100) / totalWidth) * 100}%`;
-                return (
               <table className="text-sm w-full" style={{ tableLayout: "fixed" }}>
                 <colgroup>
                   <col style={{ width: pct("idx") }} />
@@ -894,8 +900,6 @@ export default function CustomerBalances() {
                   })}
                 </tbody>
               </table>
-                );
-              })()}
             </div>
           )}
 
