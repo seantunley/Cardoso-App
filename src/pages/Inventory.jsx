@@ -154,6 +154,9 @@ async function fetchHubSites() {
   return res.json();
 }
 
+const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
+const EXCLUDED_COMMODITIES = new Set(['10']);
+
 const formatNum = (val, decimals = 2) => {
   if (val === null || val === undefined || val === '') return '—';
   const n = parseFloat(String(val).replace(/,/g, ''));
@@ -219,8 +222,6 @@ export default function Inventory() {
     placeholderData: (prev) => prev,
   });
 
-  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
-  const EXCLUDED_COMMODITIES = new Set(['10']);
   const allRows = data?.records ?? [];
   // The hub-side endpoint paginates and silently caps at 1000 rows
   // when no limit/offset is sent (which is our case — we don't send
@@ -243,7 +244,7 @@ export default function Inventory() {
       if (v && !EXCLUDED_COMMODITIES.has(v)) seen.add(v);
     }
     return [...seen].sort();
-  }, [allRows, EXCLUDED_COMMODITIES]);
+  }, [allRows]);
   const rows = useMemo(() => {
     const filtered = allRows
       .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
@@ -263,7 +264,7 @@ export default function Inventory() {
         return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       }
     });
-  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
+  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir]);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -565,7 +566,6 @@ export default function Inventory() {
             hubMode={hubMode}
             formatNum={formatNum}
             formatCurrency={formatCurrency}
-            COMMODITY_LABELS={COMMODITY_LABELS}
             highlightBelowCost={highlightBelowCost}
             sortField={sortField}
             sortDir={sortDir}
@@ -590,7 +590,6 @@ export default function Inventory() {
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 const ROW_HEIGHT = 30;
-const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
 function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlightBelowCost }) {
   const isBelowCost = (row) => {
@@ -643,7 +642,7 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
   );
 }
 
-function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
+function InventoryTable({ rows, hubMode, formatNum, formatCurrency, highlightBelowCost, sortField, sortDir, onSort }) {
   function SA({ field }) {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;
