@@ -1,11 +1,15 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, ChevronRight } from 'lucide-react';
-import AgedDebtors from '@/components/reports/AgedDebtors';
-import SalesRepExposure from '@/components/reports/SalesRepExposure';
-import BatWeekly from '@/components/reports/BatWeekly';
-import BatYtd from '@/components/reports/BatYtd';
-import BatExceptions from '@/components/reports/BatExceptions';
-import InventoryValue from '@/components/reports/InventoryValue';
+
+// Each report pulls in recharts and bespoke logic; lazy-load so the
+// active report is the only chunk fetched, instead of shipping all six
+// on first paint.
+const AgedDebtors      = lazy(() => import('@/components/reports/AgedDebtors'));
+const SalesRepExposure = lazy(() => import('@/components/reports/SalesRepExposure'));
+const BatWeekly        = lazy(() => import('@/components/reports/BatWeekly'));
+const BatYtd           = lazy(() => import('@/components/reports/BatYtd'));
+const BatExceptions    = lazy(() => import('@/components/reports/BatExceptions'));
+const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
 
 const REPORTS = [
   {
@@ -107,7 +111,15 @@ export default function Reports() {
           </aside>
 
           <main>
-            {active?.component ? <active.component /> : (
+            {active?.component ? (
+              <Suspense fallback={
+                <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
+                  <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Loading report…</p>
+                </div>
+              }>
+                <active.component />
+              </Suspense>
+            ) : (
               <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
                 <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Select a report from the left.</p>
               </div>
