@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { toast } from 'sonner';
 import { humanizeApiError } from '@/lib/humanizeApiError';
 import { reportClientError } from '@/lib/clientLog';
@@ -892,6 +892,29 @@ export default function Reconciliation() {
     }
   };
 
+  // Derived rows for the BAT-vs-Sage weekly comparison. Previously this
+  // ran inside an IIFE in the JSX, recomputing on every render of the
+  // dashboard regardless of whether any of its inputs had changed.
+  const weekComparisonDerived = useMemo(() => {
+    const rows = weekStatus?.weekComparison;
+    if (!rows?.length) return null;
+    const isBalanced = (r) => {
+      const worst = Math.max(
+        Math.abs((r.supplier_delivery || 0) - (r.sage_delivery || 0)),
+        Math.abs((r.supplier_discount || 0) - (r.sage_discount || 0)),
+        Math.abs((r.supplier_pricing  || 0) - (r.sage_pricing  || 0)),
+      );
+      return worst < 0.01;
+    };
+    const allYears = Array.from(new Set(rows.map(r => r.year))).sort((a, b) => b - a);
+    const yearScoped = weekCompYear === 'all'
+      ? rows
+      : rows.filter(r => String(r.year) === String(weekCompYear));
+    const balancedCount = yearScoped.filter(isBalanced).length;
+    const filteredRows = hideBalanced ? yearScoped.filter((r) => !isBalanced(r)) : yearScoped;
+    return { allYears, yearScoped, balancedCount, filteredRows, isBalanced };
+  }, [weekStatus?.weekComparison, weekCompYear, hideBalanced]);
+
   return (
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-10">
@@ -1092,7 +1115,8 @@ export default function Reconciliation() {
 
             {/* Per-year/week Supplier vs Sage comparison — 3 fee rows per week.
                 Show even when Sage errors so supplier values stay visible. */}
-            {weekStatus?.weekComparison?.length > 0 && (() => {
+            {weekComparisonDerived && (() => {
+              const { allYears, balancedCount, filteredRows, isBalanced } = weekComparisonDerived;
               const fmt = (v) => Math.abs(v || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
               const ragColor = (sup, sage) => {
                 const signed = (sup || 0) - (sage || 0);
@@ -1108,23 +1132,6 @@ export default function Reconciliation() {
                 { key: 'discount', label: 'Discount',     sup: 'supplier_discount', sage: 'sage_discount' },
                 { key: 'pricing',  label: 'Price Adj',    sup: 'supplier_pricing',  sage: 'sage_pricing'  },
               ];
-              const allYears = Array.from(new Set(weekStatus.weekComparison.map(r => r.year))).sort((a, b) => b - a);
-              const yearScoped = weekCompYear === 'all'
-                ? weekStatus.weekComparison
-                : weekStatus.weekComparison.filter(r => String(r.year) === String(weekCompYear));
-              // A week is "balanced" when the worst per-fee diff is < R 0.01.
-              const isBalanced = (r) => {
-                const worst = Math.max(
-                  Math.abs((r.supplier_delivery || 0) - (r.sage_delivery || 0)),
-                  Math.abs((r.supplier_discount || 0) - (r.sage_discount || 0)),
-                  Math.abs((r.supplier_pricing  || 0) - (r.sage_pricing  || 0)),
-                );
-                return worst < 0.01;
-              };
-              const balancedCount = yearScoped.filter(isBalanced).length;
-              const filteredRows = hideBalanced
-                ? yearScoped.filter((r) => !isBalanced(r))
-                : yearScoped;
               return (
                 <div
                   className="border border-border bg-card overflow-hidden"
