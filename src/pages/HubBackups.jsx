@@ -515,7 +515,7 @@ export default function HubBackups() {
       a.href = url;
       a.download = `cardoso-${site.site_id}-${new Date().toISOString().slice(0, 10)}.db`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       toast({ title: "Backup downloaded", description: site.site_name });
     } catch (err) {
       toast({ title: "Download failed", description: err.message, variant: "destructive" });
@@ -535,7 +535,7 @@ export default function HubBackups() {
       a.href = url;
       a.download = `cardoso-config-${site.site_id}-${new Date().toISOString().slice(0, 10)}.env`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       toast({ title: ".env downloaded", description: site.site_name });
     } catch (err) {
       toast({ title: ".env download failed", description: err.message, variant: "destructive" });

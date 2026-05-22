@@ -295,7 +295,10 @@ export default function Inventory() {
     a.href = url;
     a.download = `inventory-export-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Defer revoke so the browser has actually initiated the download
+    // before the blob URL becomes invalid (Firefox in particular can
+    // race the synchronous revoke).
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (

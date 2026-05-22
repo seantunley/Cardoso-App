@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { Input } from "@/components/ui/input";
@@ -92,6 +92,11 @@ export default function Records() {
     queryFn: () => api.entities.CustomFieldConfig.list(),
     staleTime: Infinity,
   });
+  // Pre-filter active fields once so each card doesn't re-filter on render.
+  const activeCustomFields = useMemo(
+    () => customFields.filter((cf) => cf.is_active),
+    [customFields],
+  );
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => api.entities.DataRecord.update(id, data),
@@ -263,7 +268,7 @@ export default function Records() {
               >
                 <RecordCard
                   record={record}
-                  customFields={customFields}
+                  customFields={activeCustomFields}
                   onFlagChange={canFlagRecords ? handleFlagChange : null}
                   onEdit={canEditRecords ? setEditingRecord : null}
                   isSelected={selectedRecords.has(record.id)}
