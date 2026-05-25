@@ -73,6 +73,15 @@ describe('parseDescription', () => {
     expect(r.isValid).toBe(false);
   });
 
+  it('rejects non-ASCII characters (en dash, curly quotes, etc.)', () => {
+    const enDash = parseDescription('DELIVERY FEE WEEK 13 – BAT');
+    expect(enDash.isValid).toBe(false);
+    expect(enDash.problems.some(p => p.includes('non-ASCII'))).toBe(true);
+
+    const curly = parseDescription('DELIVERY FEE WEEK 13 ‘BAT’');
+    expect(curly.isValid).toBe(false);
+  });
+
   it('is case-insensitive for week extraction', () => {
     const r = parseDescription('Delivery Fee week 5 - bat');
     expect(r.weekNumber).toBe(5);

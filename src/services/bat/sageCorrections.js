@@ -2,6 +2,7 @@ import sql from 'mssql';
 import { getSagePool } from '../batReconciliation.js';
 
 const TEXTDESC_MAX_LEN = 60;
+const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
 
 export function parseDescription(text) {
   const problems = [];
@@ -11,6 +12,9 @@ export function parseDescription(text) {
   const trimmed = text.trim();
   if (trimmed.length > TEXTDESC_MAX_LEN) {
     problems.push(`Exceeds ${TEXTDESC_MAX_LEN} character limit (${trimmed.length})`);
+  }
+  if (!PRINTABLE_ASCII.test(trimmed)) {
+    problems.push('Contains non-ASCII or control characters (only printable ASCII is allowed)');
   }
 
   let weekNumber = null;
@@ -33,7 +37,7 @@ export function parseDescription(text) {
   else if (upper.startsWith('PRICE'))    feeType = 'PRICING ADJ';
   else problems.push('Unrecognised fee type prefix (expected DELIVERY, DISCOUNT, PRICING, or PRICE)');
 
-  const isValid = weekNumber !== null && feeType !== 'OTHER' && trimmed.length <= TEXTDESC_MAX_LEN;
+  const isValid = problems.length === 0 && weekNumber !== null && feeType !== 'OTHER';
   return { weekNumber, feeType, isValid, problems };
 }
 
