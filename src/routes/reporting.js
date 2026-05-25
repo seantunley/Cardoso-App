@@ -28,6 +28,42 @@ const SITE_SLUG = process.env.SITE_SLUG || 'local';
 const SITE_NAME = process.env.SITE_NAME || 'Local';
 const CUSTOMER_BALANCES_MIN_AMOUNT = 3;
 
+function getHubAllowedSiteIds(req) {
+  if (process.env.HUB_MODE !== 'true') return null;
+  const userEmail = String(req.currentUser?.email || req.user?.email || '').trim();
+  if (!userEmail) return null;
+  try {
+    const slugs = db.prepare(`SELECT site_slug FROM hub_user_allowed_sites WHERE email = ?`).all(userEmail).map((r) => r.site_slug);
+    if (!slugs.length) return null;
+    const placeholders = slugs.map(() => '?').join(',') || "''";
+    const ids = db.prepare(`SELECT id FROM hub_sites WHERE slug IN (${placeholders})`).all(...slugs).map((r) => String(r.id));
+    return new Set(ids);
+  } catch {
+    return null;
+  }
+}
+
+function resolveScopedSiteId(req, res, { bodyKey = 'site_id', queryKey = 'site_id', requiredInHub = false } = {}) {
+  const allowed = getHubAllowedSiteIds(req);
+  const bodySite = String(req.body?.[bodyKey] || '').trim();
+  const querySite = String(req.query?.[queryKey] || '').trim();
+  const siteId = bodySite || querySite;
+
+  if (allowed === null) return siteId;
+  if (!siteId) {
+    if (requiredInHub) {
+      res.status(400).json({ error: 'site_id is required in hub mode for this endpoint' });
+      return null;
+    }
+    return '';
+  }
+  if (!allowed.has(siteId)) {
+    res.status(403).json({ error: 'You do not have access to this site.' });
+    return null;
+  }
+  return siteId;
+}
+
 function parseAmount(value) {
   const num = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
   return Number.isFinite(num) ? num : 0;
@@ -1155,7 +1191,8 @@ export function createReportingRouter({ requireAuth }) {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
     const params = [];
     const where = [];
-    const siteId = String(req.query.site_id || '').trim();
+    const siteId = resolveScopedSiteId(req, res, { queryKey: 'site_id', requiredInHub: true });
+    if (siteId === null) return;
     if (siteId) {
       where.push(`COALESCE(sr.site_id, '') = ?`);
       params.push(siteId);
@@ -1194,7 +1231,8 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/stock-receipts/:receiptLineId/expiry', requireAuth, (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
-    const siteId = String(req.query.site_id || '').trim();
+    const siteId = resolveScopedSiteId(req, res, { queryKey: 'site_id', requiredInHub: true });
+    if (siteId === null) return;
     try {
       const line = db.prepare(`
         SELECT srl.*, sr.receipt_number, sr.receipt_date, sr.source_table
@@ -1219,7 +1257,8 @@ export function createReportingRouter({ requireAuth }) {
   router.post('/api/stock-receipts/:receiptLineId/expiry', requireAuth, express.json(), (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
-    const siteId = String(req.body?.site_id || '').trim();
+    const siteId = resolveScopedSiteId(req, res, { bodyKey: 'site_id', requiredInHub: true });
+    if (siteId === null) return;
     const expiryDate = normaliseIsoDate(req.body?.expiry_date);
     const qtyAtExpiry = String(req.body?.qty_at_expiry ?? '').trim();
     const notes = String(req.body?.notes ?? '').trim().slice(0, 1000);
