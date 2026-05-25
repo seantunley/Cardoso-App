@@ -37,7 +37,20 @@ function normaliseIsoDate(value) {
   const v = String(value || '').trim();
   if (!v) return null;
   const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  if (iso) {
+    const y = Number(iso[1]);
+    const m = Number(iso[2]);
+    const d = Number(iso[3]);
+    if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d)) return null;
+    if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (
+      dt.getUTCFullYear() !== y ||
+      dt.getUTCMonth() + 1 !== m ||
+      dt.getUTCDate() !== d
+    ) return null;
+    return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  }
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   const y = d.getUTCFullYear();
