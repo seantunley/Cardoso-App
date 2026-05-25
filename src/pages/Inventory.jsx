@@ -267,13 +267,24 @@ export default function Inventory() {
     staleTime: 30_000,
   });
   const receiptRows = receiptData?.records || [];
+  const visibleReceiptLineIds = useMemo(
+    () => new Set(receiptRows.map((r) => Number(r.receipt_line_id)).filter((id) => Number.isFinite(id) && id > 0)),
+    [receiptRows]
+  );
+  const selectedReceiptLineVisible = selectedReceiptLineId != null && visibleReceiptLineIds.has(Number(selectedReceiptLineId));
   useEffect(() => {
-    if (!selectedReceiptLineId && receiptRows.length > 0) setSelectedReceiptLineId(receiptRows[0].receipt_line_id);
-  }, [selectedReceiptLineId, receiptRows]);
+    if (receiptRows.length === 0) {
+      if (selectedReceiptLineId !== null) setSelectedReceiptLineId(null);
+      return;
+    }
+    if (!selectedReceiptLineVisible) {
+      setSelectedReceiptLineId(receiptRows[0].receipt_line_id);
+    }
+  }, [receiptRows, selectedReceiptLineId, selectedReceiptLineVisible]);
   const { data: expiryDetail, isLoading: expiryLoading, error: expiryError } = useQuery({
     queryKey: ["stock-receipt-expiry", selectedReceiptLineId],
     queryFn: () => fetchLineExpiry(selectedReceiptLineId),
-    enabled: !!selectedReceiptLineId,
+    enabled: !!selectedReceiptLineId && selectedReceiptLineVisible,
   });
   const saveExpiry = useMutation({
     mutationFn: createLineExpiry,
@@ -689,7 +700,7 @@ export default function Inventory() {
                     <input value={newExpiryNotes} onChange={(e) => setNewExpiryNotes(e.target.value)} placeholder="Notes" className="rounded border border-border bg-background px-2 py-1 text-sm" />
                   </div>
                   <button
-                    disabled={!selectedReceiptLineId || !newExpiryDate || saveExpiry.isPending}
+                    disabled={!selectedReceiptLineId || !selectedReceiptLineVisible || !newExpiryDate || saveExpiry.isPending}
                     onClick={() => saveExpiry.mutate({ receiptLineId: selectedReceiptLineId, expiry_date: newExpiryDate, qty_at_expiry: newExpiryQty, notes: newExpiryNotes })}
                     className="mt-2 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
                   >
