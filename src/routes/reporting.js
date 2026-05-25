@@ -1668,4 +1668,3 @@ export function createReportingRouter({ requireAuth }) {
 
   return router;
 }
-    const siteId = String(req.body?.site_id || '').trim();
