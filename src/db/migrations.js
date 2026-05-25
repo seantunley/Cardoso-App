@@ -2299,6 +2299,54 @@ function buildMigrations(db) {
       },
     },
     {
+      version: 77,
+      name: 'stock_receipt_drop_legacy_global_unique',
+      up() {
+        db.exec(`
+          CREATE TABLE stock_receipt_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site_id TEXT NOT NULL DEFAULT '',
+            source_table TEXT NOT NULL,
+            receipt_number TEXT NOT NULL,
+            supplier_code TEXT,
+            supplier_name TEXT,
+            receipt_date TEXT,
+            external_uid TEXT,
+            imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(site_id, source_table, receipt_number)
+          );
+
+          INSERT INTO stock_receipt_new (
+            id, site_id, source_table, receipt_number,
+            supplier_code, supplier_name, receipt_date, external_uid,
+            imported_at, created_date, updated_date
+          )
+          SELECT
+            id,
+            COALESCE(site_id, ''),
+            source_table,
+            receipt_number,
+            supplier_code,
+            supplier_name,
+            receipt_date,
+            external_uid,
+            imported_at,
+            created_date,
+            updated_date
+          FROM stock_receipt;
+
+          DROP TABLE stock_receipt;
+          ALTER TABLE stock_receipt_new RENAME TO stock_receipt;
+
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_site ON stock_receipt(site_id);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_number ON stock_receipt(receipt_number);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_date ON stock_receipt(receipt_date);
+        `);
+      },
+    },
+    {
       // Drop the NOT NULL constraint on bat_overview_orders.order_amount
       // so the parser can persist "amount not declared yet" as a true
       // NULL instead of coercing to 0. Without this, an Overview pivot
