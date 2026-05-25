@@ -212,7 +212,7 @@ function initSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS stock_receipt (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      site_id TEXT,
+      site_id TEXT NOT NULL DEFAULT '',
       source_table TEXT NOT NULL,
       receipt_number TEXT NOT NULL,
       supplier_code TEXT,

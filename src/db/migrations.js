@@ -2286,6 +2286,19 @@ function buildMigrations(db) {
       },
     },
     {
+      version: 76,
+      name: 'stock_receipt_site_id_normalized_uniqueness',
+      up() {
+        db.exec(`
+          UPDATE stock_receipt
+             SET site_id = ''
+           WHERE site_id IS NULL;
+          CREATE UNIQUE INDEX IF NOT EXISTS idx_stock_receipt_site_source_number_unique
+            ON stock_receipt(COALESCE(site_id, ''), source_table, receipt_number);
+        `);
+      },
+    },
+    {
       // Drop the NOT NULL constraint on bat_overview_orders.order_amount
       // so the parser can persist "amount not declared yet" as a true
       // NULL instead of coercing to 0. Without this, an Overview pivot
