@@ -38,8 +38,9 @@ function getHubAllowedSiteIds(req) {
     const placeholders = slugs.map(() => '?').join(',') || "''";
     const ids = db.prepare(`SELECT id FROM hub_sites WHERE slug IN (${placeholders})`).all(...slugs).map((r) => String(r.id));
     return new Set(ids);
-  } catch {
-    return null;
+  } catch (err) {
+    console.error('[stock-receipts] allowed-site lookup failed:', err?.message || err);
+    return new Set();
   }
 }
 
