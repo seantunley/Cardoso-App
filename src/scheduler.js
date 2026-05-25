@@ -17,6 +17,8 @@ import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiSchedu
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
+import { syncSalesFromSage } from './services/inventoryMovement.js';
+import { computeAllForecasts } from './services/inventoryForecast.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -423,6 +425,18 @@ export function startSchedulers() {
     // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
     setTimeout(track('sage-cache-refresh', refreshSageWeekTotalsCache), 15000);
     registerJob({ name: 'sage-cache-refresh', type: 'one-shot', delayMs: 15000, mode: 'site', description: 'BAT Sage cache — boot refresh' });
+
+    // Inventory movement — nightly sync of sales aggregates from Sage
+    // OESHDT into the local inventory_sales_cache table. Runs at 04:00
+    // so the data is fresh by the time operators check in the morning.
+    {
+      const t = cron.schedule('0 4 * * *', track('inventory-sales-sync', async () => {
+        await syncSalesFromSage();
+        computeAllForecasts();
+      }));
+      cronTasks.push(t);
+      registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute' });
+    }
   }
 
   if (process.env.HUB_MODE !== 'true') {

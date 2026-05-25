@@ -353,7 +353,65 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
-    // Network devices: now served live from ntopng API — no ETL pull here.
+    // Inventory movement (sales velocity cache) — paginated fetch using
+    // the same pattern as the inventory sync above. Each page is 1000
+    // rows with a 10s timeout; large sites with many SKUs × months no
+    // longer risk aborting on a single oversized response.
+    //
+    // All pages are collected in memory first, then the delete+insert
+    // runs in a single transaction. This prevents a partial replace if
+    // a later page fetch fails — the old data stays intact until a
+    // fully successful sync completes.
+    try {
+      const fetchMovPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-movement?offset=${pageOffset}&limit=1000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory movement fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      // Stage: collect all pages before touching the DB.
+      const allMovRecords = [];
+      let movOffset = 0;
+      let nextMovPromise = guardOrphan(fetchMovPage(0));
+      while (true) {
+        const movData = await nextMovPromise;
+        const movRecords = movData?.records || [];
+        const consumed = movRecords.length;
+        const willHaveMore = movData?.has_more === true && consumed > 0;
+        nextMovPromise = willHaveMore ? guardOrphan(fetchMovPage(movOffset + consumed)) : null;
+        for (const r of movRecords) allMovRecords.push(r);
+        movOffset += consumed;
+        if (!nextMovPromise) break;
+      }
+
+      // Swap: atomic delete + insert in one transaction.
+      const upsertMov = db.prepare(`
+        INSERT INTO hub_inventory_sales (site_id, item_number, period, qty_sold, revenue, order_count, last_sale_date, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(site_id, item_number, period) DO UPDATE SET
+          qty_sold=excluded.qty_sold, revenue=excluded.revenue,
+          order_count=excluded.order_count, last_sale_date=excluded.last_sale_date,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_sales WHERE site_id = ?').run(site.id);
+        for (const r of allMovRecords) {
+          upsertMov.run(site.id, r.item_number, r.period, r.qty_sold || 0, r.revenue || 0, r.order_count || 0, r.last_sale_date || null);
+        }
+      })();
+    } catch (movErr) {
+      console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
+    }
 
     // BAT Reconciliation summary — recorded into hub_bat_summary.
     // The fetch was kicked off in parallel right after KPIs (above),
