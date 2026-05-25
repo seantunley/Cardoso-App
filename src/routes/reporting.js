@@ -1219,6 +1219,7 @@ export function createReportingRouter({ requireAuth }) {
   router.post('/api/stock-receipts/:receiptLineId/expiry', requireAuth, express.json(), (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
+    const siteId = String(req.body?.site_id || '').trim();
     const expiryDate = normaliseIsoDate(req.body?.expiry_date);
     const qtyAtExpiry = String(req.body?.qty_at_expiry ?? '').trim();
     const notes = String(req.body?.notes ?? '').trim().slice(0, 1000);
