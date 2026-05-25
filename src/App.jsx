@@ -35,6 +35,7 @@ const pagePermissions = {
   Connections: "can_access_connections",
   Jti: "can_access_jti",
   HubJti: "can_access_jti",
+  StockReceipts: "can_access_stock_receipt_expiry",
 };
 
 const LayoutWrapper = ({ children, currentPageName }) =>

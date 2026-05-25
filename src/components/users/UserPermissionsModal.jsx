@@ -31,6 +31,7 @@ const permissionGroups = [
       { key: "can_access_connections", label: "Connections", description: "Manage database connections" },
       { key: "can_access_settings", label: "Settings", description: "Access settings panel" },
       { key: "can_access_jti", label: "JTI Export", description: "Generate JTI sales export from live Accpac (vendor-scoped, replaces the Crystal report + Excel macro flow)" },
+      { key: "can_access_stock_receipt_expiry", label: "Stock Receipt Expiry", description: "View and capture expiry dates on stock receipt lines from Sage PO receipts" },
     ]
   },
   {

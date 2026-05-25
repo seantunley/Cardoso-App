@@ -65,6 +65,16 @@ const IconInventory = ({ className, style }) => (
   </svg>
 );
 
+const IconStockExpiry = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <rect x="3" y="4" width="10" height="13" rx="1.5" fill="#fb923c" opacity="0.7"/>
+    <rect x="5" y="7" width="6" height="1" rx="0.5" fill="#fdba74"/>
+    <rect x="5" y="10" width="4" height="1" rx="0.5" fill="#fdba74"/>
+    <circle cx="14" cy="13" r="4.5" fill="#dc2626" opacity="0.85"/>
+    <text x="14" y="14.5" textAnchor="middle" fill="white" fontSize="5" fontWeight="bold">!</text>
+  </svg>
+);
+
 // Network Devices — stacked server racks with status LEDs + signal bars.
 const IconNetworkDevices = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
@@ -285,6 +295,7 @@ const navItems = [
   { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Stock Expiry",        icon: IconStockExpiry,           page: "StockReceipts",    permission: "can_access_stock_receipt_expiry" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },

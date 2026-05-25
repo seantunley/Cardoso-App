@@ -1506,6 +1506,35 @@ export function createReportingRouter({ requireAuth }) {
     });
   });
 
+  router.get('/api/reporting/stock-receipt-expiry', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
+      const rows = prep(`
+        SELECT
+          sr.receipt_number, sr.supplier_name, sr.receipt_date,
+          srl.id AS receipt_line_id, srl.line_no, srl.item_number, srl.item_description,
+          srl.qty_received, srl.uom, srl.unit_cost,
+          e.expiry_date, e.qty_at_expiry, e.entered_by, e.entry_source, e.notes, e.created_date AS expiry_created
+        FROM stock_receipt_line srl
+        JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        LEFT JOIN stock_receipt_line_expiry e ON e.receipt_line_id = srl.id
+        ORDER BY sr.receipt_date DESC, srl.id, e.expiry_date ASC, e.id ASC
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
+      res.json({
+        site_id: SITE_ID,
+        site_slug: SITE_SLUG,
+        offset,
+        limit,
+        count: rows.length,
+        has_more: rows.length === limit,
+        records: rows,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- JTI archive intake (server-to-server, hub→site pull-fallback) ----
   //
   // The user-facing /api/jti/archive endpoints are gated by login +

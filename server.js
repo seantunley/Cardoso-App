@@ -27,6 +27,7 @@ import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
 import { createJtiRouter } from './src/routes/jti.js';
+import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -201,6 +202,11 @@ app.use(createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermis
 
 // ── JTI Sales export (Accpac OE Shipment History → .xlsx) ──
 app.use(createJtiRouter({ requireAuth, requirePermission }));
+
+// Stock Receipt Expiry — mounted on both site and hub. The router
+// internally gates write operations (sync, add-expiry) to site-only;
+// hub gets read-only list endpoints querying hub_stock_receipt_expiry.
+app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();

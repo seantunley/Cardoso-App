@@ -355,6 +355,66 @@ async function syncSite(site) {
 
     // Network devices: now served live from ntopng API — no ETL pull here.
 
+    // Stock receipt expiry — read-only hub copy for cross-site visibility.
+    // Paginated fetch (1000 rows / 10s per page), stage all pages in
+    // memory, then atomic delete+insert so a mid-page failure leaves
+    // existing data intact.
+    try {
+      const fetchSrePage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/stock-receipt-expiry?offset=${pageOffset}&limit=1000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Stock receipt expiry fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      const allSreRecords = [];
+      let sreOffset = 0;
+      let nextSrePromise = guardOrphan(fetchSrePage(0));
+      while (true) {
+        const sreData = await nextSrePromise;
+        const sreRecords = sreData?.records || [];
+        const consumed = sreRecords.length;
+        const willHaveMore = sreData?.has_more === true && consumed > 0;
+        nextSrePromise = willHaveMore ? guardOrphan(fetchSrePage(sreOffset + consumed)) : null;
+        for (const r of sreRecords) allSreRecords.push(r);
+        sreOffset += consumed;
+        if (!nextSrePromise) break;
+      }
+
+      const insertSre = db.prepare(`
+        INSERT INTO hub_stock_receipt_expiry (
+          site_id, receipt_number, supplier_name, receipt_date,
+          receipt_line_id, line_no, item_number, item_description,
+          qty_received, uom, unit_cost,
+          expiry_date, qty_at_expiry, entered_by, entry_source, notes, expiry_created,
+          synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_stock_receipt_expiry WHERE site_id = ?').run(site.id);
+        for (const r of allSreRecords) {
+          insertSre.run(
+            site.id, r.receipt_number, r.supplier_name, r.receipt_date,
+            r.receipt_line_id, r.line_no, r.item_number, r.item_description,
+            r.qty_received, r.uom, r.unit_cost,
+            r.expiry_date || null, r.qty_at_expiry || null, r.entered_by || null,
+            r.entry_source || null, r.notes || null, r.expiry_created || null,
+          );
+        }
+      })();
+    } catch (sreErr) {
+      console.log(`[hub-etl] Stock receipt expiry sync skipped for ${site.id}: ${sreErr.message}`);
+    }
+
     // BAT Reconciliation summary — recorded into hub_bat_summary.
     // The fetch was kicked off in parallel right after KPIs (above),
     // so by this point the response is usually already in flight or
