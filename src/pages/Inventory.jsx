@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
@@ -154,6 +154,42 @@ async function fetchHubSites() {
   return res.json();
 }
 
+async function fetchStockReceiptLines({ search, missingExpiry }) {
+  const params = new URLSearchParams();
+  if (search) params.set("search", search);
+  if (missingExpiry) params.set("missing_expiry", "true");
+  params.set("limit", "300");
+  const res = await fetch(`/api/stock-receipts?${params.toString()}`, { credentials: "include" });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || "Failed to load stock receipts");
+  }
+  return res.json();
+}
+
+async function fetchLineExpiry(receiptLineId) {
+  const res = await fetch(`/api/stock-receipts/${receiptLineId}/expiry`, { credentials: "include" });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || "Failed to load expiry entries");
+  }
+  return res.json();
+}
+
+async function createLineExpiry({ receiptLineId, expiry_date, qty_at_expiry, notes }) {
+  const res = await fetch(`/api/stock-receipts/${receiptLineId}/expiry`, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ expiry_date, qty_at_expiry, notes }),
+  });
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}));
+    throw new Error(d.error || "Failed to save expiry");
+  }
+  return res.json();
+}
+
 const formatNum = (val, decimals = 2) => {
   if (val === null || val === undefined || val === '') return '—';
   const n = parseFloat(String(val).replace(/,/g, ''));
@@ -166,6 +202,7 @@ const formatCurrency = (val) => {
 };
 
 export default function Inventory() {
+  const queryClient = useQueryClient();
   const colorScheme = useColorScheme();
   const [hubMode, setHubMode] = useState(false);
   const [siteFilter, setSiteFilter] = useState("all");
@@ -177,6 +214,12 @@ export default function Inventory() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortField, setSortField] = useState("item_description");
   const [sortDir, setSortDir] = useState("asc");
+  const [receiptSearch, setReceiptSearch] = useState("");
+  const [missingExpiryOnly, setMissingExpiryOnly] = useState(true);
+  const [selectedReceiptLineId, setSelectedReceiptLineId] = useState(null);
+  const [newExpiryDate, setNewExpiryDate] = useState("");
+  const [newExpiryQty, setNewExpiryQty] = useState("");
+  const [newExpiryNotes, setNewExpiryNotes] = useState("");
 
   function handleSort(field) {
     if (sortField === field) {
@@ -217,6 +260,30 @@ export default function Inventory() {
       }),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
+  });
+  const { data: receiptData, isLoading: receiptLoading, error: receiptError } = useQuery({
+    queryKey: ["stock-receipts", receiptSearch, missingExpiryOnly],
+    queryFn: () => fetchStockReceiptLines({ search: receiptSearch, missingExpiry: missingExpiryOnly }),
+    staleTime: 30_000,
+  });
+  const receiptRows = receiptData?.records || [];
+  useEffect(() => {
+    if (!selectedReceiptLineId && receiptRows.length > 0) setSelectedReceiptLineId(receiptRows[0].receipt_line_id);
+  }, [selectedReceiptLineId, receiptRows]);
+  const { data: expiryDetail, isLoading: expiryLoading, error: expiryError } = useQuery({
+    queryKey: ["stock-receipt-expiry", selectedReceiptLineId],
+    queryFn: () => fetchLineExpiry(selectedReceiptLineId),
+    enabled: !!selectedReceiptLineId,
+  });
+  const saveExpiry = useMutation({
+    mutationFn: createLineExpiry,
+    onSuccess: async () => {
+      setNewExpiryDate("");
+      setNewExpiryQty("");
+      setNewExpiryNotes("");
+      await queryClient.invalidateQueries({ queryKey: ["stock-receipt-expiry", selectedReceiptLineId] });
+      await queryClient.invalidateQueries({ queryKey: ["stock-receipts"] });
+    },
   });
 
   const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
@@ -583,6 +650,57 @@ export default function Inventory() {
             The server caps results to keep the page snappy; refine your search to see the rest.
           </div>
         )}
+
+        <div className="mt-8 rounded-2xl border border-border bg-card p-4">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold">Stock Receipt Expiry Capture</h2>
+            <div className="flex items-center gap-2">
+              <input value={receiptSearch} onChange={(e) => setReceiptSearch(e.target.value)} placeholder="Search receipt/item…" className="rounded border border-border bg-background px-2 py-1 text-sm" />
+              <FilterToggle active={missingExpiryOnly} onClick={() => setMissingExpiryOnly(v => !v)}>
+                Missing expiry only
+              </FilterToggle>
+            </div>
+          </div>
+          {receiptError && <div className="text-sm text-red-400 mb-2">{receiptError.message}</div>}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <div className="max-h-80 overflow-auto rounded border border-border">
+              {receiptLoading ? <div className="p-3 text-sm text-muted-foreground">Loading…</div> : receiptRows.map((r) => (
+                <button key={r.receipt_line_id} onClick={() => setSelectedReceiptLineId(r.receipt_line_id)} className={`w-full text-left p-2 border-b border-border text-sm ${selectedReceiptLineId === r.receipt_line_id ? "bg-accent/20" : ""}`}>
+                  <div className="font-medium">{r.receipt_number} · Line {r.line_no ?? "—"} · {r.item_number}</div>
+                  <div className="text-xs text-muted-foreground">{r.item_description || "No description"} · Expiry rows: {r.expiry_rows}</div>
+                </button>
+              ))}
+            </div>
+            <div className="rounded border border-border p-3">
+              {expiryError && <div className="text-sm text-red-400 mb-2">{expiryError.message}</div>}
+              {expiryLoading ? <div className="text-sm text-muted-foreground">Loading line details…</div> : (
+                <>
+                  <div className="text-sm font-medium mb-2">Expiry entries</div>
+                  <div className="max-h-36 overflow-auto mb-3 text-sm">
+                    {(expiryDetail?.expiries || []).length === 0 ? <div className="text-muted-foreground">No expiry entries yet.</div> : expiryDetail.expiries.map((e) => (
+                      <div key={e.id} className="py-1 border-b border-border/60">
+                        {e.expiry_date} · Qty: {e.qty_at_expiry || "—"} · {e.entered_by || "unknown"}
+                      </div>
+                    ))}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <input type="date" value={newExpiryDate} onChange={(e) => setNewExpiryDate(e.target.value)} className="rounded border border-border bg-background px-2 py-1 text-sm" />
+                    <input value={newExpiryQty} onChange={(e) => setNewExpiryQty(e.target.value)} placeholder="Qty at expiry" className="rounded border border-border bg-background px-2 py-1 text-sm" />
+                    <input value={newExpiryNotes} onChange={(e) => setNewExpiryNotes(e.target.value)} placeholder="Notes" className="rounded border border-border bg-background px-2 py-1 text-sm" />
+                  </div>
+                  <button
+                    disabled={!selectedReceiptLineId || !newExpiryDate || saveExpiry.isPending}
+                    onClick={() => saveExpiry.mutate({ receiptLineId: selectedReceiptLineId, expiry_date: newExpiryDate, qty_at_expiry: newExpiryQty, notes: newExpiryNotes })}
+                    className="mt-2 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
+                  >
+                    {saveExpiry.isPending ? "Saving…" : "Add expiry"}
+                  </button>
+                  {saveExpiry.error && <div className="mt-2 text-sm text-red-400">{saveExpiry.error.message}</div>}
+                </>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

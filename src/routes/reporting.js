@@ -33,6 +33,19 @@ function parseAmount(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function normaliseIsoDate(value) {
+  const v = String(value || '').trim();
+  if (!v) return null;
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return null;
+  const y = d.getUTCFullYear();
+  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(d.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function getFirstNonEmptyValue(source, aliases) {
   const value = getFirstNonEmptyObjectValue(source, aliases);
   return value === '' ? null : String(value);
@@ -1124,6 +1137,92 @@ export function createReportingRouter({ requireAuth }) {
     } catch (err) {
       console.error('inventory error', err);
       res.status(500).json({ error: 'Failed to fetch inventory' });
+    }
+  });
+
+  // Stock receipts (Sage import target) + per-line expiry capture.
+  router.get('/api/stock-receipts', requireAuth, (req, res) => {
+    const search = String(req.query.search || '').trim();
+    const missingOnly = String(req.query.missing_expiry || '').toLowerCase() === 'true';
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
+    const params = [];
+    const where = [];
+    if (search) {
+      where.push(`(sr.receipt_number LIKE ? OR srl.item_number LIKE ? OR srl.item_description LIKE ?)`);
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+    if (missingOnly) where.push(`COALESCE(e.expiry_rows, 0) = 0`);
+    params.push(limit);
+    const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    try {
+      const rows = db.prepare(`
+        SELECT
+          sr.id AS receipt_id, sr.source_table, sr.receipt_number, sr.receipt_date,
+          srl.id AS receipt_line_id, srl.line_no, srl.item_number, srl.item_description, srl.qty_received, srl.batch_or_lot,
+          COALESCE(e.expiry_rows, 0) AS expiry_rows
+        FROM stock_receipt_line srl
+        JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        LEFT JOIN (
+          SELECT receipt_line_id, COUNT(*) AS expiry_rows
+          FROM stock_receipt_line_expiry
+          GROUP BY receipt_line_id
+        ) e ON e.receipt_line_id = srl.id
+        ${whereSql}
+        ORDER BY sr.receipt_date DESC, sr.id DESC, srl.line_no ASC, srl.id ASC
+        LIMIT ?
+      `).all(...params);
+      res.json({ count: rows.length, records: rows });
+    } catch (err) {
+      console.error('[stock-receipts] list failed:', err);
+      res.status(500).json({ error: 'Failed to load stock receipts' });
+    }
+  });
+
+  router.get('/api/stock-receipts/:receiptLineId/expiry', requireAuth, (req, res) => {
+    const receiptLineId = parseInt(req.params.receiptLineId, 10);
+    if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
+    try {
+      const line = db.prepare(`
+        SELECT srl.*, sr.receipt_number, sr.receipt_date, sr.source_table
+        FROM stock_receipt_line srl
+        JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        WHERE srl.id = ?
+      `).get(receiptLineId);
+      if (!line) return res.status(404).json({ error: 'Receipt line not found' });
+      const expiries = db.prepare(`
+        SELECT id, receipt_line_id, expiry_date, qty_at_expiry, entered_by, entry_source, notes, created_date, updated_date
+        FROM stock_receipt_line_expiry
+        WHERE receipt_line_id = ?
+        ORDER BY expiry_date ASC, id ASC
+      `).all(receiptLineId);
+      res.json({ line, expiries });
+    } catch (err) {
+      console.error('[stock-receipts] expiry detail failed:', err);
+      res.status(500).json({ error: 'Failed to load expiry entries' });
+    }
+  });
+
+  router.post('/api/stock-receipts/:receiptLineId/expiry', requireAuth, express.json(), (req, res) => {
+    const receiptLineId = parseInt(req.params.receiptLineId, 10);
+    if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
+    const expiryDate = normaliseIsoDate(req.body?.expiry_date);
+    const qtyAtExpiry = String(req.body?.qty_at_expiry ?? '').trim();
+    const notes = String(req.body?.notes ?? '').trim().slice(0, 1000);
+    const enteredBy = String(req.user?.username || req.user?.email || req.user?.id || 'unknown');
+    if (!expiryDate) return res.status(400).json({ error: 'expiry_date must be a valid date' });
+    try {
+      const line = db.prepare(`SELECT id FROM stock_receipt_line WHERE id = ?`).get(receiptLineId);
+      if (!line) return res.status(404).json({ error: 'Receipt line not found' });
+      const result = db.prepare(`
+        INSERT INTO stock_receipt_line_expiry (
+          receipt_line_id, expiry_date, qty_at_expiry, entered_by, entry_source, notes, updated_date
+        ) VALUES (?, ?, ?, ?, 'manual', ?, CURRENT_TIMESTAMP)
+      `).run(receiptLineId, expiryDate, qtyAtExpiry, enteredBy, notes);
+      const created = db.prepare(`SELECT * FROM stock_receipt_line_expiry WHERE id = ?`).get(result.lastInsertRowid);
+      res.status(201).json({ ok: true, record: created });
+    } catch (err) {
+      console.error('[stock-receipts] add expiry failed:', err);
+      res.status(500).json({ error: 'Failed to add expiry entry' });
     }
   });
 
