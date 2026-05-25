@@ -2385,12 +2385,69 @@ function buildMigrations(db) {
             updated_date
           FROM stock_receipt;
 
+          CREATE TABLE stock_receipt_line_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            receipt_id INTEGER NOT NULL REFERENCES stock_receipt_new(id) ON DELETE CASCADE,
+            line_no INTEGER,
+            item_number TEXT NOT NULL,
+            item_description TEXT,
+            qty_received TEXT,
+            uom TEXT,
+            unit_cost TEXT,
+            batch_or_lot TEXT,
+            source_line_uid TEXT,
+            created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(receipt_id, line_no, item_number)
+          );
+
+          INSERT INTO stock_receipt_line_new (
+            id, receipt_id, line_no, item_number, item_description,
+            qty_received, uom, unit_cost, batch_or_lot, source_line_uid,
+            created_date, updated_date
+          )
+          SELECT
+            id, receipt_id, line_no, item_number, item_description,
+            qty_received, uom, unit_cost, batch_or_lot, source_line_uid,
+            created_date, updated_date
+          FROM stock_receipt_line;
+
+          CREATE TABLE stock_receipt_line_expiry_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            receipt_line_id INTEGER NOT NULL REFERENCES stock_receipt_line_new(id) ON DELETE CASCADE,
+            expiry_date TEXT NOT NULL,
+            qty_at_expiry TEXT,
+            entered_by TEXT,
+            entry_source TEXT DEFAULT 'manual',
+            notes TEXT,
+            created_date TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_date TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+
+          INSERT INTO stock_receipt_line_expiry_new (
+            id, receipt_line_id, expiry_date, qty_at_expiry, entered_by,
+            entry_source, notes, created_date, updated_date
+          )
+          SELECT
+            id, receipt_line_id, expiry_date, qty_at_expiry, entered_by,
+            entry_source, notes, created_date, updated_date
+          FROM stock_receipt_line_expiry;
+
+          DROP TABLE stock_receipt_line_expiry;
+          DROP TABLE stock_receipt_line;
           DROP TABLE stock_receipt;
+
           ALTER TABLE stock_receipt_new RENAME TO stock_receipt;
+          ALTER TABLE stock_receipt_line_new RENAME TO stock_receipt_line;
+          ALTER TABLE stock_receipt_line_expiry_new RENAME TO stock_receipt_line_expiry;
 
           CREATE INDEX IF NOT EXISTS idx_stock_receipt_site ON stock_receipt(site_id);
           CREATE INDEX IF NOT EXISTS idx_stock_receipt_number ON stock_receipt(receipt_number);
           CREATE INDEX IF NOT EXISTS idx_stock_receipt_date ON stock_receipt(receipt_date);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_line_item ON stock_receipt_line(item_number);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_line_receipt ON stock_receipt_line(receipt_id);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_expiry_date ON stock_receipt_line_expiry(expiry_date);
+          CREATE INDEX IF NOT EXISTS idx_stock_receipt_expiry_line ON stock_receipt_line_expiry(receipt_line_id);
         `);
       },
     },
