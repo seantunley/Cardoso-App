@@ -1262,7 +1262,7 @@ export function createReportingRouter({ requireAuth }) {
     const expiryDate = normaliseIsoDate(req.body?.expiry_date);
     const qtyAtExpiry = String(req.body?.qty_at_expiry ?? '').trim();
     const notes = String(req.body?.notes ?? '').trim().slice(0, 1000);
-    const enteredBy = String(req.user?.username || req.user?.email || req.user?.id || 'unknown');
+    const enteredBy = String(req.currentUser?.username || req.currentUser?.email || req.currentUser?.id || req.user?.username || req.user?.email || req.user?.id || 'unknown');
     if (!expiryDate) return res.status(400).json({ error: 'expiry_date must be a valid date' });
     try {
       const line = db.prepare(`
