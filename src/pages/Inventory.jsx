@@ -154,10 +154,11 @@ async function fetchHubSites() {
   return res.json();
 }
 
-async function fetchStockReceiptLines({ search, missingExpiry }) {
+async function fetchStockReceiptLines({ search, missingExpiry, siteId }) {
   const params = new URLSearchParams();
   if (search) params.set("search", search);
   if (missingExpiry) params.set("missing_expiry", "true");
+  if (siteId) params.set("site_id", siteId);
   params.set("limit", "300");
   const res = await fetch(`/api/stock-receipts?${params.toString()}`, { credentials: "include" });
   if (!res.ok) {
@@ -167,8 +168,9 @@ async function fetchStockReceiptLines({ search, missingExpiry }) {
   return res.json();
 }
 
-async function fetchLineExpiry(receiptLineId) {
-  const res = await fetch(`/api/stock-receipts/${receiptLineId}/expiry`, { credentials: "include" });
+async function fetchLineExpiry(receiptLineId, siteId) {
+  const qs = siteId ? `?site_id=${encodeURIComponent(siteId)}` : "";
+  const res = await fetch(`/api/stock-receipts/${receiptLineId}/expiry${qs}`, { credentials: "include" });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
     throw new Error(d.error || "Failed to load expiry entries");
@@ -176,12 +178,12 @@ async function fetchLineExpiry(receiptLineId) {
   return res.json();
 }
 
-async function createLineExpiry({ receiptLineId, expiry_date, qty_at_expiry, notes }) {
+async function createLineExpiry({ receiptLineId, expiry_date, qty_at_expiry, notes, site_id }) {
   const res = await fetch(`/api/stock-receipts/${receiptLineId}/expiry`, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ expiry_date, qty_at_expiry, notes }),
+    body: JSON.stringify({ expiry_date, qty_at_expiry, notes, site_id }),
   });
   if (!res.ok) {
     const d = await res.json().catch(() => ({}));
@@ -261,9 +263,10 @@ export default function Inventory() {
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
+  const selectedSiteId = hubMode && siteFilter !== "all" ? siteFilter : "";
   const { data: receiptData, isLoading: receiptLoading, error: receiptError } = useQuery({
-    queryKey: ["stock-receipts", receiptSearch, missingExpiryOnly],
-    queryFn: () => fetchStockReceiptLines({ search: receiptSearch, missingExpiry: missingExpiryOnly }),
+    queryKey: ["stock-receipts", receiptSearch, missingExpiryOnly, selectedSiteId],
+    queryFn: () => fetchStockReceiptLines({ search: receiptSearch, missingExpiry: missingExpiryOnly, siteId: selectedSiteId }),
     staleTime: 30_000,
   });
   const receiptRows = receiptData?.records || [];
@@ -282,8 +285,8 @@ export default function Inventory() {
     }
   }, [receiptRows, selectedReceiptLineId, selectedReceiptLineVisible]);
   const { data: expiryDetail, isLoading: expiryLoading, error: expiryError } = useQuery({
-    queryKey: ["stock-receipt-expiry", selectedReceiptLineId],
-    queryFn: () => fetchLineExpiry(selectedReceiptLineId),
+    queryKey: ["stock-receipt-expiry", selectedReceiptLineId, selectedSiteId],
+    queryFn: () => fetchLineExpiry(selectedReceiptLineId, selectedSiteId),
     enabled: !!selectedReceiptLineId && selectedReceiptLineVisible,
   });
   const saveExpiry = useMutation({
@@ -701,7 +704,7 @@ export default function Inventory() {
                   </div>
                   <button
                     disabled={!selectedReceiptLineId || !selectedReceiptLineVisible || !newExpiryDate || saveExpiry.isPending}
-                    onClick={() => saveExpiry.mutate({ receiptLineId: selectedReceiptLineId, expiry_date: newExpiryDate, qty_at_expiry: newExpiryQty, notes: newExpiryNotes })}
+                    onClick={() => saveExpiry.mutate({ receiptLineId: selectedReceiptLineId, expiry_date: newExpiryDate, qty_at_expiry: newExpiryQty, notes: newExpiryNotes, site_id: hubMode && siteFilter !== "all" ? siteFilter : "" })}
                     className="mt-2 rounded bg-primary px-3 py-1.5 text-sm text-primary-foreground disabled:opacity-50"
                   >
                     {saveExpiry.isPending ? "Saving…" : "Add expiry"}

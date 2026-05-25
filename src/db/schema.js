@@ -212,6 +212,7 @@ function initSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS stock_receipt (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id TEXT,
       source_table TEXT NOT NULL,
       receipt_number TEXT NOT NULL,
       supplier_code TEXT,
@@ -221,8 +222,9 @@ function initSchema(db) {
       imported_at TEXT DEFAULT CURRENT_TIMESTAMP,
       created_date TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_date TEXT DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(source_table, receipt_number)
+      UNIQUE(site_id, source_table, receipt_number)
     );
+    CREATE INDEX IF NOT EXISTS idx_stock_receipt_site ON stock_receipt(site_id);
     CREATE INDEX IF NOT EXISTS idx_stock_receipt_number ON stock_receipt(receipt_number);
     CREATE INDEX IF NOT EXISTS idx_stock_receipt_date ON stock_receipt(receipt_date);
 

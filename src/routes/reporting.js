@@ -1155,6 +1155,11 @@ export function createReportingRouter({ requireAuth }) {
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
     const params = [];
     const where = [];
+    const siteId = String(req.query.site_id || '').trim();
+    if (siteId) {
+      where.push(`COALESCE(sr.site_id, '') = ?`);
+      params.push(siteId);
+    }
     if (search) {
       where.push(`(sr.receipt_number LIKE ? OR srl.item_number LIKE ? OR srl.item_description LIKE ?)`);
       params.push(`%${search}%`, `%${search}%`, `%${search}%`);
@@ -1189,13 +1194,14 @@ export function createReportingRouter({ requireAuth }) {
   router.get('/api/stock-receipts/:receiptLineId/expiry', requireAuth, (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
+    const siteId = String(req.query.site_id || '').trim();
     try {
       const line = db.prepare(`
         SELECT srl.*, sr.receipt_number, sr.receipt_date, sr.source_table
         FROM stock_receipt_line srl
         JOIN stock_receipt sr ON sr.id = srl.receipt_id
-        WHERE srl.id = ?
-      `).get(receiptLineId);
+        WHERE srl.id = ? ${siteId ? "AND COALESCE(sr.site_id, '') = ?" : ''}
+      `).get(...(siteId ? [receiptLineId, siteId] : [receiptLineId]));
       if (!line) return res.status(404).json({ error: 'Receipt line not found' });
       const expiries = db.prepare(`
         SELECT id, receipt_line_id, expiry_date, qty_at_expiry, entered_by, entry_source, notes, created_date, updated_date
@@ -1219,7 +1225,12 @@ export function createReportingRouter({ requireAuth }) {
     const enteredBy = String(req.user?.username || req.user?.email || req.user?.id || 'unknown');
     if (!expiryDate) return res.status(400).json({ error: 'expiry_date must be a valid date' });
     try {
-      const line = db.prepare(`SELECT id FROM stock_receipt_line WHERE id = ?`).get(receiptLineId);
+      const line = db.prepare(`
+        SELECT srl.id
+          FROM stock_receipt_line srl
+          JOIN stock_receipt sr ON sr.id = srl.receipt_id
+         WHERE srl.id = ? ${siteId ? "AND COALESCE(sr.site_id, '') = ?" : ''}
+      `).get(...(siteId ? [receiptLineId, siteId] : [receiptLineId]));
       if (!line) return res.status(404).json({ error: 'Receipt line not found' });
       const result = db.prepare(`
         INSERT INTO stock_receipt_line_expiry (
@@ -1657,3 +1668,4 @@ export function createReportingRouter({ requireAuth }) {
 
   return router;
 }
+    const siteId = String(req.body?.site_id || '').trim();

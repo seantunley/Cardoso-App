@@ -2278,6 +2278,14 @@ function buildMigrations(db) {
       },
     },
     {
+      version: 75,
+      name: 'stock_receipt_site_context',
+      up() {
+        ensureColumn(db, 'stock_receipt', 'site_id', 'TEXT');
+        db.exec(`CREATE INDEX IF NOT EXISTS idx_stock_receipt_site ON stock_receipt(site_id)`);
+      },
+    },
+    {
       // Drop the NOT NULL constraint on bat_overview_orders.order_amount
       // so the parser can persist "amount not declared yet" as a true
       // NULL instead of coercing to 0. Without this, an Overview pivot
