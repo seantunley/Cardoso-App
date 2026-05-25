@@ -2346,6 +2346,7 @@ function buildMigrations(db) {
         `);
       },
     },
+
     {
       version: 77,
       name: 'stock_receipt_drop_legacy_global_unique',
@@ -2449,6 +2450,14 @@ function buildMigrations(db) {
           CREATE INDEX IF NOT EXISTS idx_stock_receipt_expiry_date ON stock_receipt_line_expiry(expiry_date);
           CREATE INDEX IF NOT EXISTS idx_stock_receipt_expiry_line ON stock_receipt_line_expiry(receipt_line_id);
         `);
+      },
+    },
+    {
+      version: 78,
+      name: 'stock_receipt_expiry_permission',
+      up() {
+        ensureColumn(db, 'user', 'can_access_stock_receipt_expiry', 'INTEGER DEFAULT 0');
+        db.prepare(`UPDATE "user" SET can_access_stock_receipt_expiry = COALESCE(can_access_inventory, 0) WHERE can_access_stock_receipt_expiry IS NULL OR can_access_stock_receipt_expiry = 0`).run();
       },
     },
 

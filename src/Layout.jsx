@@ -285,6 +285,7 @@ const navItems = [
   { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Stock Expiry",        icon: IconInventory,             page: "StockReceiptExpiry", permission: "can_access_stock_receipt_expiry" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },

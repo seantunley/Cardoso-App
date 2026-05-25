@@ -387,7 +387,7 @@ $result | ConvertTo-Json -Depth 6 -Compress
   return parsed;
 }
 
-export function createReportingRouter({ requireAuth }) {
+export function createReportingRouter({ requireAuth, requirePermission }) {
   const stmts = buildStatements(db);
   const router = express.Router();
 
@@ -1185,7 +1185,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // Stock receipts (Sage import target) + per-line expiry capture.
-  router.get('/api/stock-receipts', requireAuth, (req, res) => {
+  router.get('/api/stock-receipts', requireAuth, requirePermission('can_access_stock_receipt_expiry'), (req, res) => {
     const search = String(req.query.search || '').trim();
     const missingOnly = String(req.query.missing_expiry || '').toLowerCase() === 'true';
     const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1000);
@@ -1228,7 +1228,7 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
-  router.get('/api/stock-receipts/:receiptLineId/expiry', requireAuth, (req, res) => {
+  router.get('/api/stock-receipts/:receiptLineId/expiry', requireAuth, requirePermission('can_access_stock_receipt_expiry'), (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
     const siteId = resolveScopedSiteId(req, res, { queryKey: 'site_id', requiredInHub: true });
@@ -1254,7 +1254,7 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
-  router.post('/api/stock-receipts/:receiptLineId/expiry', requireAuth, express.json(), (req, res) => {
+  router.post('/api/stock-receipts/:receiptLineId/expiry', requireAuth, requirePermission('can_access_stock_receipt_expiry'), express.json(), (req, res) => {
     const receiptLineId = parseInt(req.params.receiptLineId, 10);
     if (!Number.isFinite(receiptLineId) || receiptLineId <= 0) return res.status(400).json({ error: 'Invalid receiptLineId' });
     const siteId = resolveScopedSiteId(req, res, { bodyKey: 'site_id', requiredInHub: true });

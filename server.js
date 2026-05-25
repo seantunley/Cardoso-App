@@ -190,7 +190,7 @@ app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createCreditLogicRouter({ requireAuth, requirePermission }));
 app.use(createBackupRouter());
 app.use(createDrRouter());
-app.use(createReportingRouter({ requireAuth }));
+app.use(createReportingRouter({ requireAuth, requirePermission }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
