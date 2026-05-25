@@ -51,12 +51,7 @@ function normaliseIsoDate(value) {
     ) return null;
     return `${iso[1]}-${iso[2]}-${iso[3]}`;
   }
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return null;
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, '0');
-  const day = String(d.getUTCDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+  return null;
 }
 
 function getFirstNonEmptyValue(source, aliases) {
