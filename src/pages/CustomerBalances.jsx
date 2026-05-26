@@ -898,23 +898,54 @@ export default function CustomerBalances() {
 
           {/* Pagination */}
           {!isLoading && !isError && totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-4">
+            <div className="mt-4 flex items-center justify-center gap-2">
+              <button
+                onClick={() => setPage(1)}
+                disabled={currentPage <= 1}
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="First page"
+              >
+                First
+              </button>
               <button
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage <= 1}
-                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
-                Previous
+                Prev
               </button>
-              <span className="text-sm text-muted-foreground">
-                Page {currentPage} of {totalPages}
-              </span>
+              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span>Page</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  key={currentPage}
+                  defaultValue={currentPage}
+                  onBlur={(e) => {
+                    const v = parseInt(e.target.value, 10);
+                    if (Number.isFinite(v) && v >= 1 && v <= totalPages) setPage(v);
+                    else e.target.value = currentPage;
+                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                  className="w-14 h-7 rounded border border-border bg-card px-1.5 text-center text-xs text-foreground tabular-nums"
+                />
+                <span>of {totalPages}</span>
+              </div>
               <button
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage >= totalPages}
-                className="rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 Next
+              </button>
+              <button
+                onClick={() => setPage(totalPages)}
+                disabled={currentPage >= totalPages}
+                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Last page"
+              >
+                Last
               </button>
             </div>
           )}
