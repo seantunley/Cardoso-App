@@ -957,24 +957,41 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         const expandedRecord = expandDataRecord(record);
         const customerNumber = String(expandedRecord.customer_number || '').trim();
         const isParent = /^\d+$/.test(customerNumber);
+        const numericPrefix = (customerNumber.match(/^(\d+)/) || [])[1] || null;
 
         let subAccounts = [];
-        if (isParent) {
+        if (numericPrefix) {
           const prefixMatches = db.prepare(`
             SELECT *
             FROM datarecord
             WHERE TRIM(customer_number) LIKE ?
               AND TRIM(customer_number) != ?
             ORDER BY customer_number ASC, id ASC
-          `).all(`${customerNumber}%`, customerNumber);
+          `).all(`${numericPrefix}%`, customerNumber);
 
           subAccounts = prefixMatches
             .map(expandDataRecord)
             .filter((row) => {
               const childNumber = String(row.customer_number || '').trim();
               const match = childNumber.match(/^(\d+)/);
-              return match && match[1] === customerNumber;
+              return match && match[1] === numericPrefix;
             });
+
+          if (!isParent) {
+            const parent = db.prepare(`
+              SELECT *
+              FROM datarecord
+              WHERE TRIM(customer_number) = ?
+              LIMIT 1
+            `).get(numericPrefix);
+            if (parent) {
+              const expanded = expandDataRecord(parent);
+              const alreadyIncluded = subAccounts.some(
+                (r) => String(r.customer_number || '').trim() === numericPrefix
+              );
+              if (!alreadyIncluded) subAccounts.unshift(expanded);
+            }
+          }
         }
 
         const elapsedMs = Date.now() - startedAtMs;
