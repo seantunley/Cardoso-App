@@ -33,6 +33,7 @@ import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js
 import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
 import { createPricingRouter } from './src/routes/pricing.js';
 import { createDepotProfileRouter } from './src/routes/depotProfile.js';
+import { createCommissionRouter } from './src/routes/commission.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -236,6 +237,7 @@ app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 
 // ── Price List (Sage ICPRICP per-unit prices) ──
 app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));
+app.use(createCommissionRouter({ requireAuth, requirePermission }));
 
 // ── Depot profile (letterhead details for customer-facing documents) ──
 app.use(createDepotProfileRouter({ db, requireAuth, requireAdmin }));

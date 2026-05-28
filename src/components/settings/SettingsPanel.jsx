@@ -32,6 +32,7 @@ import SageCorrectionsTab from "@/components/settings/tabs/SageCorrectionsTab";
 import ForecastSettingsTab from "@/components/settings/tabs/ForecastSettingsTab";
 import DepotProfileTab from "@/components/settings/tabs/DepotProfileTab";
 import PriceListSettingsTab from "@/components/settings/tabs/PriceListSettingsTab";
+import CommissionSettingsTab from "@/components/settings/tabs/CommissionSettingsTab";
 
 // Section/Row — tiny layout helpers used (only) by TlsTab. Kept here and
 // re-exported (rather than moved to a _shared file) per the issue brief.
@@ -101,6 +102,7 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
         isAdmin && { id: "reconciliation", label: "Reconciliation" },
         !hubMode && isAdmin && { id: "forecast", label: "Forecast" },
         !hubMode && isAdmin && { id: "pricelist", label: "Price List" },
+        !hubMode && isAdmin && { id: "commission", label: "Commission" },
       ],
     },
     {
@@ -213,6 +215,7 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
               {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
               {activeTab === "forecast" && <ForecastSettingsTab />}
               {activeTab === "pricelist" && <PriceListSettingsTab />}
+              {activeTab === "commission" && <CommissionSettingsTab />}
               {activeTab === "accounting" && <AccountingTab />}
               {activeTab === "sagecorrections" && <SageCorrectionsTab />}
             </TabsContent>

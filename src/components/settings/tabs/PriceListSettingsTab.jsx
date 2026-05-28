@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Plus, Tag, Trash2, X } from "lucide-react";
+import { Loader2, Plus, Tag, X } from "lucide-react";
 import { toast } from "sonner";
 
 async function getExclusions() {

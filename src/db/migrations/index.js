@@ -83,6 +83,7 @@ import m77 from './v077_add_price_list_permission.js';
 import m78 from './v078_depot_profile.js';
 import m79 from './v079_price_list_exclusions.js';
 import m80 from './v080_collections_worklists_v1.js';
+import m81 from './v081_commission_settings.js';
 
 const migrations = [
   m1,
@@ -165,6 +166,7 @@ const migrations = [
   m78,
   m79,
   m80,
+  m81,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

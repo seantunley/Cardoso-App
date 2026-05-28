@@ -71,6 +71,7 @@ const HubJti = React.lazy(() => import('./pages/HubJti'));
 const InventoryMovement = React.lazy(() => import('./pages/InventoryMovement'));
 const PriceList = React.lazy(() => import('./pages/PriceList'));
 const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
+const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
 
 
 export const PAGES = {
@@ -99,6 +100,7 @@ export const PAGES = {
     "InventoryMovement": InventoryMovement,
     "PriceList": PriceList,
     "StockReceipts": StockReceipts,
+    "SalesCommission": SalesCommission,
 }
 
 export const pagesConfig = {

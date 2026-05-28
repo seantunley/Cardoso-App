@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
-import { Package, Search, RefreshCw, X, Download, Printer, Filter } from "lucide-react";
+import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import SummaryTile from "@/components/shared/SummaryTile";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

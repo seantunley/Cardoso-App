@@ -229,6 +229,19 @@ const IconTrends = ({ className, style }) => (
 // Reconciliation — phosphor pulse cutting through stacked ledger rows.
 // Teal rows = static records; amber waveform = live matching across them.
 // Reports — stacked report sheets with a colourful bar-chart popping forward.
+const IconCommission = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Receipt / pay slip */}
+    <path d="M4 2.5 L16 2.5 L16 16 L13.5 14.5 L11 16 L8.5 14.5 L6 16 L4 14.5 Z"
+          fill="#f59e0b" opacity="0.15" stroke="#f59e0b" strokeWidth="0.9" strokeLinejoin="round"/>
+    {/* Lines */}
+    <line x1="6.5" y1="6"  x2="13.5" y2="6"  stroke="#fbbf24" strokeWidth="0.8" strokeLinecap="round"/>
+    <line x1="6.5" y1="8.5" x2="13.5" y2="8.5" stroke="#fbbf24" strokeWidth="0.8" strokeLinecap="round"/>
+    {/* Rand symbol */}
+    <text x="9.5" y="13.4" fontSize="6.5" fontFamily="ui-monospace, monospace" fontWeight="bold" fill="#fbbf24" textAnchor="middle">R</text>
+  </svg>
+);
+
 const IconReports = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
     {/* Back sheet (offset for depth) */}
@@ -323,6 +336,7 @@ const navItems = [
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true, group: "BAT and JTI" },
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true, group: "BAT and JTI" },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
+  { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_commission", siteOnly: true, group: "Reports" },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true, group: "Hub" },
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Hub" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true, group: "Hub" },

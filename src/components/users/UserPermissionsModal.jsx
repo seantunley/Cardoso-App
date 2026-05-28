@@ -45,6 +45,7 @@ const permissionTabs = [
       { key: "can_access_hub_reconciliation", label: "Hub Reconciliation", description: "View cross-site BAT reconciliation summary (hub mode only)" },
       { key: "can_access_jti", label: "JTI Export", description: "Generate JTI sales export from live Accpac (vendor-scoped, replaces the Crystal report + Excel macro flow)" },
       { key: "can_access_reports", label: "Reports", description: "View the printable reports module (Aged Debtors, BAT Weekly, Sales Rep Exposure, etc.)" },
+      { key: "can_access_commission", label: "Sales Commission", description: "Generate the per-rep commission report (Sweet/Cig+Tob splits, Excel + PDF export)" },
       { key: "can_access_records", label: "Records", description: "View and browse all raw data records" },
     ],
   },
