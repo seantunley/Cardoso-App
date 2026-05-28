@@ -2,6 +2,7 @@ import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 
 // Default SQL for Sage 300 PO Receipt of Goods. Operators can override
 // this via the stock_receipt_settings table (same pattern as the JTI
@@ -57,13 +58,20 @@ export function getReceiptSqlOverride() {
 }
 
 export function setReceiptSqlOverride(sqlText) {
-  db.prepare(`
-    INSERT INTO hub_settings (key, value) VALUES ('stock_receipt_sql_override', ?)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value
-  `).run(sqlText || '');
+  try {
+    db.prepare(`
+      INSERT INTO hub_settings (key, value) VALUES ('stock_receipt_sql_override', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(sqlText || '');
+  } catch (err) {
+    logError('stockReceipts.set_sql_override', err);
+    throw err;
+  }
 }
 
 export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
+  logError('stockReceipts.sync', new Error('stockReceipts.sync starting'), { fromDate, toDate }, 'info');
+  try {
   const pool = await getSagePool();
   const now = new Date();
   const to = toDate || now;
@@ -146,9 +154,20 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
     `).run();
   } catch (err) {
     console.error('[stock-receipts] Failed to update sync timestamp:', err.message);
+    logError('stockReceipts.sync', err, { phase: 'update_timestamp' }, 'warn');
   }
 
+  logError(
+    'stockReceipts.sync',
+    new Error(`stockReceipts.sync completed: ${rows.length} rows, ${seenReceipts.size} receipts, ${linesUpserted} lines`),
+    { rows: rows.length, receipts: seenReceipts.size, lines: linesUpserted },
+    'info',
+  );
   return { rows: rows.length, receiptsUpserted: seenReceipts.size, linesUpserted };
+  } catch (err) {
+    logError('stockReceipts.sync', err, { fromDate, toDate });
+    throw err;
+  }
 }
 
 export function getSyncMeta() {
@@ -226,25 +245,30 @@ export function getLineWithExpiries(receiptLineId) {
 }
 
 export function addExpiry({ receiptLineId, expiryDate, qtyAtExpiry, notes, enteredBy, req }) {
-  const line = db.prepare('SELECT id FROM stock_receipt_line WHERE id = ?').get(receiptLineId);
-  if (!line) throw new Error('Receipt line not found');
+  try {
+    const line = db.prepare('SELECT id FROM stock_receipt_line WHERE id = ?').get(receiptLineId);
+    if (!line) throw new Error('Receipt line not found');
 
-  const result = db.prepare(`
-    INSERT INTO stock_receipt_line_expiry (receipt_line_id, expiry_date, qty_at_expiry, entered_by, entry_source, notes)
-    VALUES (?, ?, ?, ?, 'manual', ?)
-  `).run(receiptLineId, expiryDate, qtyAtExpiry || null, enteredBy, notes || null);
+    const result = db.prepare(`
+      INSERT INTO stock_receipt_line_expiry (receipt_line_id, expiry_date, qty_at_expiry, entered_by, entry_source, notes)
+      VALUES (?, ?, ?, ?, 'manual', ?)
+    `).run(receiptLineId, expiryDate, qtyAtExpiry || null, enteredBy, notes || null);
 
-  const created = db.prepare('SELECT * FROM stock_receipt_line_expiry WHERE id = ?').get(result.lastInsertRowid);
+    const created = db.prepare('SELECT * FROM stock_receipt_line_expiry WHERE id = ?').get(result.lastInsertRowid);
 
-  logAudit({
-    req,
-    action: 'stock_receipt_add_expiry',
-    resourceType: 'system',
-    resourceId: `receipt_line:${receiptLineId}`,
-    resourceName: `Expiry ${expiryDate} on line ${receiptLineId}`,
-    details: `Qty: ${qtyAtExpiry || '—'}`,
-    changes: { after: { expiry_date: expiryDate, qty_at_expiry: qtyAtExpiry, notes } },
-  });
+    logAudit({
+      req,
+      action: 'stock_receipt_add_expiry',
+      resourceType: 'system',
+      resourceId: `receipt_line:${receiptLineId}`,
+      resourceName: `Expiry ${expiryDate} on line ${receiptLineId}`,
+      details: `Qty: ${qtyAtExpiry || '—'}`,
+      changes: { after: { expiry_date: expiryDate, qty_at_expiry: qtyAtExpiry, notes } },
+    });
 
-  return created;
+    return created;
+  } catch (err) {
+    logError('stockReceipts.add_expiry', err, { receiptLineId, expiryDate, qtyAtExpiry });
+    throw err;
+  }
 }

@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
+import { logError } from '../lib/errorLog.js';
 
 // Sage 300 stores per-unit prices in ICPRICP keyed by (item, price list,
 // unit of measure). Each (item, price list) combination typically has
@@ -39,19 +40,29 @@ export function addExclusion({ pattern, note, createdBy }) {
   const clean = String(pattern || '').trim().toUpperCase();
   if (!clean) throw new Error('Pattern is required');
   if (clean.length > 50) throw new Error('Pattern must be 50 characters or less');
-  db.prepare(`
-    INSERT INTO price_list_exclusions (pattern, note, created_by)
-    VALUES (?, ?, ?)
-    ON CONFLICT(pattern) DO UPDATE SET
-      note = excluded.note,
-      created_at = price_list_exclusions.created_at
-  `).run(clean, note || null, createdBy || null);
-  return db.prepare('SELECT * FROM price_list_exclusions WHERE pattern = ?').get(clean);
+  try {
+    db.prepare(`
+      INSERT INTO price_list_exclusions (pattern, note, created_by)
+      VALUES (?, ?, ?)
+      ON CONFLICT(pattern) DO UPDATE SET
+        note = excluded.note,
+        created_at = price_list_exclusions.created_at
+    `).run(clean, note || null, createdBy || null);
+    return db.prepare('SELECT * FROM price_list_exclusions WHERE pattern = ?').get(clean);
+  } catch (err) {
+    logError('pricing.exclusion_create', err, { pattern: clean });
+    throw err;
+  }
 }
 
 export function deleteExclusion(id) {
-  const r = db.prepare('DELETE FROM price_list_exclusions WHERE id = ?').run(id);
-  return r.changes > 0;
+  try {
+    const r = db.prepare('DELETE FROM price_list_exclusions WHERE id = ?').run(id);
+    return r.changes > 0;
+  } catch (err) {
+    logError('pricing.exclusion_delete', err, { id });
+    throw err;
+  }
 }
 
 // A pattern can be one of:
@@ -108,21 +119,27 @@ function itemsForSupplier(supplier) {
 }
 
 export async function getPriceLists() {
-  const pool = await getSagePool();
-  const r = await pool.request().query(`
-    SELECT
-      LTRIM(RTRIM(PRICELIST)) AS code,
-      COUNT(DISTINCT ITEMNO)  AS item_count
-    FROM ICPRICP
-    WHERE LTRIM(RTRIM(PRICELIST)) <> ''
-      AND UNITPRICE > 0
-    GROUP BY LTRIM(RTRIM(PRICELIST))
-    ORDER BY 1
-  `);
-  return r.recordset;
+  try {
+    const pool = await getSagePool();
+    const r = await pool.request().query(`
+      SELECT
+        LTRIM(RTRIM(PRICELIST)) AS code,
+        COUNT(DISTINCT ITEMNO)  AS item_count
+      FROM ICPRICP
+      WHERE LTRIM(RTRIM(PRICELIST)) <> ''
+        AND UNITPRICE > 0
+      GROUP BY LTRIM(RTRIM(PRICELIST))
+      ORDER BY 1
+    `);
+    return r.recordset;
+  } catch (err) {
+    logError('pricing.lists', err);
+    throw err;
+  }
 }
 
 export async function getPriceListItems({ priceList, commodity, supplier }) {
+  try {
   // Supplier filter is applied locally because Sage doesn't hold the
   // item-to-supplier mapping we use (it comes from the local
   // stock_receipt table). Build the set first; if empty, short-circuit.
@@ -164,4 +181,8 @@ export async function getPriceListItems({ priceList, commodity, supplier }) {
   const isExcluded = loadExclusionMatcher();
   rows = rows.filter(row => !isExcluded(row.item_number));
   return rows;
+  } catch (err) {
+    logError('pricing.items', err, { priceList, commodity, supplier });
+    throw err;
+  }
 }

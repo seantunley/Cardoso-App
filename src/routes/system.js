@@ -1050,7 +1050,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       await launchViaTaskScheduler(taskName, wrapper);
     } catch (err) {
       console.error('[AutoUpdate-delta] Task Scheduler launch failed:', err.message);
-      try { logError('app.update.delta', err, { phase: 'task_scheduler_launch' }); } catch {}
+      try { logError('app.update.delta', err, { phase: 'task_scheduler_launch' }); } catch (e) { console.error('[system.task_scheduler]', { phase: 'delta_launch_log' }, e.message); }
       return { ok: false, reason: `task_scheduler_launch_failed:${err.message}` };
     }
     return { ok: true, mode: 'delta' };
@@ -1138,7 +1138,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         await launchViaTaskScheduler(taskName, installerScript);
       } catch (err) {
         console.error('[AutoUpdate] Task Scheduler launch failed:', err.message);
-        try { logError('app.update.full', err, { phase: 'task_scheduler_launch' }); } catch {}
+        try { logError('app.update.full', err, { phase: 'task_scheduler_launch' }); } catch (e) { console.error('[system.task_scheduler]', { phase: 'full_launch_log' }, e.message); }
         autoUpdateRunning = false;
         autoUpdatePhase = null;
         autoUpdateStartedAt = null;
@@ -1375,7 +1375,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       });
     } catch (error) {
       console.error('[maintenance] backup-now failed:', error.message);
-      try { logError('maintenance.backup_now', error); } catch {}
+      try { logError('maintenance.backup_now', error); } catch (e) { console.error('[system.maintenance_backup_log]', { op: 'backup_now' }, e.message); }
       res.status(500).json({ error: error.message || 'Failed to create backup' });
     }
   });

@@ -125,7 +125,7 @@ export function logAudit({
         // code separately makes triage faster.
         sqlite_code: err.code,
       });
-    } catch {}
+    } catch (e) { console.error('[audit.insert]', { action }, e.message); }
   }
 }
 

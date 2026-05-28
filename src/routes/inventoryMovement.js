@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import db from '../db/index.js';
+import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 import {
   syncSalesFromSage,
   getSyncMeta,
@@ -206,6 +208,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
           });
       res.json({ rows });
     } catch (err) {
+      logError('inventoryMovement.top_movers', err, { query: req.query });
       res.status(500).json({ error: err.message });
     }
   });
@@ -222,6 +225,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
         : getItemTrend({ itemNumber: item, from: from || undefined, to: to || undefined });
       res.json({ rows });
     } catch (err) {
+      logError('inventoryMovement.item_trend', err, { item: req.query?.item });
       res.status(500).json({ error: err.message });
     }
   });
@@ -246,6 +250,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
           });
       res.json({ rows });
     } catch (err) {
+      logError('inventoryMovement.dead_stock', err, { query: req.query });
       res.status(500).json({ error: err.message });
     }
   });
@@ -255,6 +260,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       if (isHub()) return res.json({ hub: true, message: 'Hub syncs movement data from sites during ETL' });
       res.json(getSyncMeta());
     } catch (err) {
+      logError('inventoryMovement.sync_meta', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -263,9 +269,18 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly — data comes from sites during ETL sync.' });
     try {
       const result = await syncSalesFromSage();
+      logAudit({
+        req,
+        action: 'inventoryMovement.sync',
+        resourceType: 'inventory_sales_cache',
+        resourceId: 'sync',
+        resourceName: 'Inventory sales sync',
+        details: `Synced ${result.synced} aggregates, ${result.transactions} transactions from Sage`,
+      });
       res.json({ ok: true, ...result });
     } catch (err) {
       const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      logError('inventoryMovement.sync', err, { sage_down: isSageDown });
       res.status(isSageDown ? 503 : 500).json({ error: err.message });
     }
   });
@@ -274,6 +289,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     try {
       res.json({ commodities: isHub() ? hubCommodities() : getCommodities() });
     } catch (err) {
+      logError('inventoryMovement.commodities', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -285,6 +301,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       // hide the filter dropdown.
       res.json({ suppliers: isHub() ? [] : getSuppliers() });
     } catch (err) {
+      logError('inventoryMovement.suppliers', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -293,6 +310,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     try {
       res.json({ hub: isHub(), sites: isHub() ? hubSites() : [] });
     } catch (err) {
+      logError('inventoryMovement.sites', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -310,6 +328,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       });
       res.json({ rows });
     } catch (err) {
+      logError('inventoryMovement.item_transactions', err, { item: req.query?.item });
       res.status(500).json({ error: err.message });
     }
   });
@@ -321,6 +340,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       if (!item) return res.status(400).json({ error: 'item is required' });
       res.json(getItemStats({ itemNumber: item }));
     } catch (err) {
+      logError('inventoryMovement.item_stats', err, { item: req.query?.item });
       res.status(500).json({ error: err.message });
     }
   });
@@ -339,6 +359,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       });
       res.json({ rows });
     } catch (err) {
+      logError('inventoryMovement.forecast', err, { query: req.query });
       res.status(500).json({ error: err.message });
     }
   });
@@ -348,6 +369,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     try {
       res.json(getForecastConfig());
     } catch (err) {
+      logError('inventoryMovement.forecast_config_get', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -355,19 +377,40 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.put('/api/inventory-movement/forecast-config', requireAuth, requireAdmin, (req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Forecast config is only available on site installs.' });
     try {
+      const before = getForecastConfig();
       updateForecastConfig(req.body || {});
-      res.json({ ok: true, config: getForecastConfig() });
+      const after = getForecastConfig();
+      logAudit({
+        req,
+        action: 'inventoryMovement.forecast_config_update',
+        resourceType: 'inventory_forecast_config',
+        resourceId: '__global__',
+        resourceName: 'Forecast config (global)',
+        details: 'Updated global forecast parameters',
+        changes: { before, after },
+      });
+      res.json({ ok: true, config: after });
     } catch (err) {
+      logError('inventoryMovement.forecast_config_update', err, { body: req.body });
       res.status(500).json({ error: err.message });
     }
   });
 
-  router.post('/api/inventory-movement/recompute-forecast', ...guard, (_req, res) => {
+  router.post('/api/inventory-movement/recompute-forecast', ...guard, (req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Forecast is only available on site installs.' });
     try {
       const result = computeAllForecasts();
+      logAudit({
+        req,
+        action: 'inventoryMovement.forecast_recompute',
+        resourceType: 'inventory_forecast',
+        resourceId: 'recompute',
+        resourceName: 'Forecast recompute',
+        details: `Recomputed forecast for ${result.computed} items`,
+      });
       res.json({ ok: true, ...result });
     } catch (err) {
+      logError('inventoryMovement.forecast_recompute', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -379,6 +422,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       if (!item) return res.status(400).json({ error: 'item is required' });
       res.json(getItemSeasonality(item));
     } catch (err) {
+      logError('inventoryMovement.item_seasonality', err, { item: req.query?.item });
       res.status(500).json({ error: err.message });
     }
   });

@@ -1,6 +1,7 @@
 import express from 'express';
 import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 import {
   listWorklists, createWorklist, getWorklist, updateWorklist, archiveWorklist,
   listAssignmentsForWorklist, getAssignment, addAssignment, bulkAddAssignments,
@@ -50,6 +51,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       })));
     } catch (error) {
       console.error('collections list error:', error);
+      logError('collections.list', error);
       res.status(500).json({ error: 'Failed to load collections pipeline' });
     }
   });
@@ -98,6 +100,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       });
     } catch (error) {
       console.error('collections update error:', error);
+      logError('collections.legacy_update', error, { customer_id: req.params?.customer_id });
       res.status(500).json({ error: 'Failed to update collections item' });
     }
   });
@@ -109,6 +112,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       const includeArchived = req.query.includeArchived === 'true' || req.query.includeArchived === '1';
       res.json({ worklists: listWorklists({ includeArchived }) });
     } catch (err) {
+      logError('collections.worklists_list', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -123,11 +127,16 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
         createdByUserId: req.currentUser?.id || null,
       });
       logAudit({
-        req, action: 'create_worklist', resourceType: 'collection_worklist',
-        resourceId: String(w.id), resourceName: w.name,
+        req,
+        action: 'collections.worklist_create',
+        resourceType: 'collection_worklist',
+        resourceId: String(w.id),
+        resourceName: w.name,
+        details: `Created worklist "${w.name}"${owner_user_id ? ` (owner ${owner_user_id})` : ''}`,
       });
       res.json({ worklist: w });
     } catch (err) {
+      logError('collections.worklist_create', err, { name: req.body?.name });
       res.status(400).json({ error: err.message });
     }
   });
@@ -138,27 +147,53 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       if (!w) return res.status(404).json({ error: 'Worklist not found' });
       res.json({ worklist: w });
     } catch (err) {
+      logError('collections.worklist_get', err, { id: req.params?.id });
       res.status(500).json({ error: err.message });
     }
   });
 
   router.put('/api/collections/worklists/:id', ...guard, (req, res) => {
     try {
+      const id = parseInt(req.params.id, 10);
       const { name, owner_user_id, description } = req.body || {};
-      const w = updateWorklist(parseInt(req.params.id, 10), {
+      const before = getWorklist(id);
+      const w = updateWorklist(id, {
         name, ownerUserId: owner_user_id, description,
+      });
+      logAudit({
+        req,
+        action: 'collections.worklist_update',
+        resourceType: 'collection_worklist',
+        resourceId: String(id),
+        resourceName: w?.name || `Worklist ${id}`,
+        details: `Updated worklist #${id}`,
+        changes: {
+          before: { name: before?.name, owner_user_id: before?.owner_user_id, description: before?.description },
+          after: { name: w?.name, owner_user_id: w?.owner_user_id, description: w?.description },
+        },
       });
       res.json({ worklist: w });
     } catch (err) {
+      logError('collections.worklist_update', err, { id: req.params?.id });
       res.status(400).json({ error: err.message });
     }
   });
 
   router.post('/api/collections/worklists/:id/archive', ...guard, (req, res) => {
     try {
-      const w = archiveWorklist(parseInt(req.params.id, 10));
+      const id = parseInt(req.params.id, 10);
+      const w = archiveWorklist(id);
+      logAudit({
+        req,
+        action: 'collections.worklist_archive',
+        resourceType: 'collection_worklist',
+        resourceId: String(id),
+        resourceName: w?.name || `Worklist ${id}`,
+        details: `Archived worklist #${id}`,
+      });
       res.json({ worklist: w });
     } catch (err) {
+      logError('collections.worklist_archive', err, { id: req.params?.id });
       res.status(500).json({ error: err.message });
     }
   });
@@ -170,6 +205,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       const status = req.query.status || 'active';
       res.json({ assignments: listAssignmentsForWorklist(parseInt(req.params.id, 10), { status }) });
     } catch (err) {
+      logError('collections.assignments_list', err, { id: req.params?.id });
       res.status(500).json({ error: err.message });
     }
   });
@@ -186,30 +222,64 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
         customerIds: customer_ids.map(String),
         assignedByUserId: req.currentUser?.id || null,
       });
+      logAudit({
+        req,
+        action: 'collections.assignment_bulk_create',
+        resourceType: 'collection_worklist',
+        resourceId: String(worklistId),
+        resourceName: `Worklist ${worklistId}`,
+        details: `Bulk add: ${result.added} added, ${result.reopened} reopened, ${result.alreadyActive} already active, ${result.busy?.length || 0} busy, ${result.missing?.length || 0} missing`,
+      });
       res.json(result);
     } catch (err) {
+      logError('collections.assignment_bulk_create', err, {
+        worklist_id: req.params?.id,
+        customer_count: Array.isArray(req.body?.customer_ids) ? req.body.customer_ids.length : 0,
+      });
       res.status(400).json({ error: err.message });
     }
   });
 
   router.put('/api/collections/assignments/:id/status', ...guard, (req, res) => {
     try {
+      const id = parseInt(req.params.id, 10);
       const { status, reason } = req.body || {};
-      const a = setAssignmentStatus(parseInt(req.params.id, 10), {
+      const a = setAssignmentStatus(id, {
         status, reason, userId: req.currentUser?.id || null,
+      });
+      logAudit({
+        req,
+        action: 'collections.assignment_status_change',
+        resourceType: 'collection_assignment',
+        resourceId: String(id),
+        resourceName: a?.customer_name || `Assignment ${id}`,
+        details: `Status → ${status}${reason ? ` (${reason})` : ''}`,
       });
       res.json({ assignment: a });
     } catch (err) {
+      logError('collections.assignment_status_change', err, {
+        id: req.params?.id, status: req.body?.status,
+      });
       res.status(400).json({ error: err.message });
     }
   });
 
   router.put('/api/collections/assignments/:id/followup', ...guard, (req, res) => {
     try {
+      const id = parseInt(req.params.id, 10);
       const { date } = req.body || {};
-      const a = setAssignmentFollowup(parseInt(req.params.id, 10), date || null);
+      const a = setAssignmentFollowup(id, date || null);
+      logAudit({
+        req,
+        action: 'collections.assignment_followup_set',
+        resourceType: 'collection_assignment',
+        resourceId: String(id),
+        resourceName: a?.customer_name || `Assignment ${id}`,
+        details: date ? `Follow-up set to ${date}` : 'Follow-up cleared',
+      });
       res.json({ assignment: a });
     } catch (err) {
+      logError('collections.assignment_followup_set', err, { id: req.params?.id });
       res.status(400).json({ error: err.message });
     }
   });
@@ -291,6 +361,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       `).all(...params);
       res.json({ candidates: rows });
     } catch (err) {
+      logError('collections.candidates', err, { query: req.query });
       res.status(500).json({ error: err.message });
     }
   });
@@ -315,6 +386,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       for (const r of rows) map[r.customer_id] = r;
       res.json({ assignments: map });
     } catch (err) {
+      logError('collections.customer_assignments', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -332,6 +404,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       `).all();
       res.json({ reps: rows.map(r => r.sales_rep) });
     } catch (err) {
+      logError('collections.candidate_reps', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -342,6 +415,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
     try {
       res.json({ activity: listActivityForCustomer(String(req.params.customer_id)) });
     } catch (err) {
+      logError('collections.activity_list', err, { customer_id: req.params?.customer_id });
       res.status(500).json({ error: err.message });
     }
   });
@@ -358,8 +432,19 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
         notes: notes || null,
         source: 'manual',
       });
+      logAudit({
+        req,
+        action: 'collections.activity_create',
+        resourceType: 'collection_activity',
+        resourceId: String(entry.id),
+        resourceName: `Customer ${customerId}`,
+        details: `${kind}${amount != null ? ` amount=${amount}` : ''}${promise_date ? ` promise=${promise_date}` : ''}`,
+      });
       res.json({ activity: entry });
     } catch (err) {
+      logError('collections.activity_create', err, {
+        customer_id: req.params?.customer_id, kind: req.body?.kind,
+      });
       res.status(400).json({ error: err.message });
     }
   });
@@ -369,8 +454,17 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
   router.post('/api/collections/sync-deltas', ...guard, (req, res) => {
     try {
       const result = processCollectionBalanceDelta();
+      logAudit({
+        req,
+        action: 'collections.sync_deltas',
+        resourceType: 'collection_assignment',
+        resourceId: 'sync',
+        resourceName: 'Collection balance delta scan',
+        details: `payments=${result.payments} auto-collected=${result.autoCollected}`,
+      });
       res.json(result);
     } catch (err) {
+      logError('collections.sync_deltas', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -388,6 +482,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
       `).all();
       res.json({ users: rows });
     } catch (err) {
+      logError('collections.assignable_users', err);
       res.status(500).json({ error: err.message });
     }
   });

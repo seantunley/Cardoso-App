@@ -12,6 +12,7 @@
 // src/routes/collections.js.
 
 import db from '../db/index.js';
+import { logError } from '../lib/errorLog.js';
 
 function parseAmount(value) {
   const n = parseFloat(String(value ?? '').replace(/,/g, '').replace(/\s/g, ''));
@@ -47,11 +48,16 @@ export function createWorklist({ name, ownerUserId, description, createdByUserId
   const cleanName = String(name || '').trim();
   if (!cleanName) throw new Error('Worklist name is required');
   if (cleanName.length > 80) throw new Error('Worklist name must be 80 characters or less');
-  const info = db.prepare(`
-    INSERT INTO collection_worklist (name, owner_user_id, description, created_by_user_id)
-    VALUES (?, ?, ?, ?)
-  `).run(cleanName, ownerUserId || null, description || null, createdByUserId || null);
-  return getWorklist(info.lastInsertRowid);
+  try {
+    const info = db.prepare(`
+      INSERT INTO collection_worklist (name, owner_user_id, description, created_by_user_id)
+      VALUES (?, ?, ?, ?)
+    `).run(cleanName, ownerUserId || null, description || null, createdByUserId || null);
+    return getWorklist(info.lastInsertRowid);
+  } catch (err) {
+    logError('collections.worklist_create', err, { name: cleanName, ownerUserId });
+    throw err;
+  }
 }
 
 export function getWorklist(id) {
@@ -75,13 +81,23 @@ export function updateWorklist(id, { name, ownerUserId, description }) {
   if (description !== undefined) { fields.push('description = ?'); params.push(description || null); }
   if (!fields.length) return getWorklist(id);
   params.push(id);
-  db.prepare(`UPDATE collection_worklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
-  return getWorklist(id);
+  try {
+    db.prepare(`UPDATE collection_worklist SET ${fields.join(', ')} WHERE id = ?`).run(...params);
+    return getWorklist(id);
+  } catch (err) {
+    logError('collections.worklist_update', err, { id, fields: fields.length });
+    throw err;
+  }
 }
 
 export function archiveWorklist(id) {
-  db.prepare(`UPDATE collection_worklist SET archived_at = ? WHERE id = ?`).run(nowIso(), id);
-  return getWorklist(id);
+  try {
+    db.prepare(`UPDATE collection_worklist SET archived_at = ? WHERE id = ?`).run(nowIso(), id);
+    return getWorklist(id);
+  } catch (err) {
+    logError('collections.worklist_archive', err, { id });
+    throw err;
+  }
 }
 
 // ── Assignments ──────────────────────────────────────────────────
@@ -139,6 +155,7 @@ export function getAssignmentForCustomer(customerId, worklistId) {
 // rather than creating a new assignment. Closed/collected assignments
 // on the SAME list are re-opened (history preserved).
 export function addAssignment({ worklistId, customerId, assignedByUserId }) {
+  try {
   const customer = db.prepare(`SELECT id, outstanding_balance_num FROM datarecord WHERE id = ?`).get(customerId);
   if (!customer) throw new Error(`Customer ${customerId} not found`);
   const opening = customer.outstanding_balance_num ?? 0;
@@ -186,31 +203,47 @@ export function addAssignment({ worklistId, customerId, assignedByUserId }) {
     VALUES (?, ?, 'active', ?, ?, ?, ?)
   `).run(worklistId, customerId, assignedByUserId || null, opening, opening, nowIso());
   return { assignment: getAssignment(info.lastInsertRowid), reopened: false, created: true };
+  } catch (err) {
+    if (!/not found/i.test(err.message)) {
+      logError('collections.assignment_create', err, { worklistId, customerId });
+    }
+    throw err;
+  }
 }
 
 export function bulkAddAssignments({ worklistId, customerIds, assignedByUserId }) {
   const result = { added: 0, reopened: 0, alreadyActive: 0, missing: [], busy: [] };
-  const txn = db.transaction(() => {
-    for (const id of customerIds) {
-      try {
-        const r = addAssignment({ worklistId, customerId: id, assignedByUserId });
-        if (r.created) result.added++;
-        else if (r.reopened) result.reopened++;
-        else if (r.busy) result.busy.push({ id, worklist: r.busy_on_worklist_name });
-        else result.alreadyActive++;
-      } catch (err) {
-        if (/not found/i.test(err.message)) result.missing.push(id);
-        else throw err;
+  try {
+    const txn = db.transaction(() => {
+      for (const id of customerIds) {
+        try {
+          const r = addAssignment({ worklistId, customerId: id, assignedByUserId });
+          if (r.created) result.added++;
+          else if (r.reopened) result.reopened++;
+          else if (r.busy) result.busy.push({ id, worklist: r.busy_on_worklist_name });
+          else result.alreadyActive++;
+        } catch (err) {
+          if (/not found/i.test(err.message)) result.missing.push(id);
+          else throw err;
+        }
       }
-    }
-  });
-  txn();
-  return result;
+    });
+    txn();
+    return result;
+  } catch (err) {
+    logError('collections.assignment_bulk_create', err, { worklistId, count: customerIds?.length });
+    throw err;
+  }
 }
 
 export function setAssignmentFollowup(id, dateOrNull) {
-  db.prepare(`UPDATE collection_assignment SET next_followup_date = ? WHERE id = ?`).run(dateOrNull || null, id);
-  return getAssignment(id);
+  try {
+    db.prepare(`UPDATE collection_assignment SET next_followup_date = ? WHERE id = ?`).run(dateOrNull || null, id);
+    return getAssignment(id);
+  } catch (err) {
+    logError('collections.assignment_followup_set', err, { id });
+    throw err;
+  }
 }
 
 export function setAssignmentStatus(id, { status, reason, userId }) {
@@ -219,18 +252,23 @@ export function setAssignmentStatus(id, { status, reason, userId }) {
   const existing = getAssignment(id);
   if (!existing) throw new Error('Assignment not found');
   const closedAt = status === 'active' ? null : nowIso();
-  db.prepare(`
-    UPDATE collection_assignment
-    SET status = ?, closed_at = ?, closed_reason = ?
-    WHERE id = ?
-  `).run(status, closedAt, reason || null, id);
-  addActivity({
-    customerId: existing.customer_id, assignmentId: id, userId,
-    kind: 'status_changed',
-    notes: `${existing.status} → ${status}${reason ? `: ${reason}` : ''}`,
-    source: 'manual',
-  });
-  return getAssignment(id);
+  try {
+    db.prepare(`
+      UPDATE collection_assignment
+      SET status = ?, closed_at = ?, closed_reason = ?
+      WHERE id = ?
+    `).run(status, closedAt, reason || null, id);
+    addActivity({
+      customerId: existing.customer_id, assignmentId: id, userId,
+      kind: 'status_changed',
+      notes: `${existing.status} → ${status}${reason ? `: ${reason}` : ''}`,
+      source: 'manual',
+    });
+    return getAssignment(id);
+  } catch (err) {
+    logError('collections.assignment_status_change', err, { id, status });
+    throw err;
+  }
 }
 
 // ── Activity log ─────────────────────────────────────────────────
@@ -248,13 +286,18 @@ export function addActivity({
 }) {
   if (!VALID_KINDS.has(kind)) throw new Error(`Invalid activity kind: ${kind}`);
   if (!customerId) throw new Error('customerId is required');
-  const info = db.prepare(`
-    INSERT INTO collection_activity
-      (customer_id, assignment_id, user_id, kind, amount, promise_date,
-       previous_balance, new_balance, notes, source)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(customerId, assignmentId, userId, kind, amount, promiseDate, previousBalance, newBalance, notes, source);
-  return getActivity(info.lastInsertRowid);
+  try {
+    const info = db.prepare(`
+      INSERT INTO collection_activity
+        (customer_id, assignment_id, user_id, kind, amount, promise_date,
+         previous_balance, new_balance, notes, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(customerId, assignmentId, userId, kind, amount, promiseDate, previousBalance, newBalance, notes, source);
+    return getActivity(info.lastInsertRowid);
+  } catch (err) {
+    logError('collections.activity_create', err, { customerId, assignmentId, kind, source });
+    throw err;
+  }
 }
 
 export function getActivity(id) {
@@ -290,6 +333,8 @@ export function listActivityForCustomer(customerId) {
 //
 // Idempotent — calling it twice in a row writes no extra events.
 export function processCollectionBalanceDelta() {
+  logError('collections.sync_deltas.run', new Error('collections.sync_deltas.run starting'), {}, 'info');
+  try {
   const rows = db.prepare(`
     SELECT a.id AS assignment_id, a.customer_id, a.last_known_balance,
            d.outstanding_balance_num
@@ -349,5 +394,15 @@ export function processCollectionBalanceDelta() {
   if (payments || autoCollected) {
     console.log(`[collections-sync] payments=${payments} auto-collected=${autoCollected}`);
   }
+  logError(
+    'collections.sync_deltas.run',
+    new Error(`collections.sync_deltas.run completed: payments=${payments} auto-collected=${autoCollected}`),
+    { payments, autoCollected, scanned: rows.length },
+    'info',
+  );
   return { payments, autoCollected };
+  } catch (err) {
+    logError('collections.sync_deltas.run', err);
+    throw err;
+  }
 }

@@ -31,7 +31,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       if (!password && connectionId) {
         const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
-          try { password = decryptPassword(stored.encrypted_password); } catch {}
+          try { password = decryptPassword(stored.encrypted_password); } catch (e) { console.error('[connection.decrypt]', { connId: connectionId, host }, e.message); }
         }
         // Use saved encryption preference if not overridden in the test request
         if (use_encryption == null && stored != null) {
@@ -111,7 +111,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       if (!password && connectionId) {
         const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
-          try { password = decryptPassword(stored.encrypted_password); } catch {}
+          try { password = decryptPassword(stored.encrypted_password); } catch (e) { console.error('[connection.decrypt]', { connId: connectionId, host }, e.message); }
         }
         if (use_encryption == null && stored != null) use_encryption = stored.use_encryption;
       }

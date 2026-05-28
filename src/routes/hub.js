@@ -894,7 +894,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       });
       res.json({ orphans: enriched });
     } catch (err) {
-      try { logError('hub.orphan_sites', err); } catch {}
+      try { logError('hub.orphan_sites', err); } catch (e) { console.error('[hub.recon_orphan_cleanup]', { op: 'orphan_sites_list' }, e.message); }
       res.status(500).json({ error: err.message });
     }
   });
@@ -940,7 +940,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
       res.json({ ok: true, counts });
     } catch (err) {
-      try { logError('hub.forget_orphan_site', err, { site_id: siteId }); } catch {}
+      try { logError('hub.forget_orphan_site', err, { site_id: siteId }); } catch (e) { console.error('[hub.recon_orphan_cleanup]', { siteId }, e.message); }
       res.status(500).json({ error: err.message });
     }
   });
@@ -1533,7 +1533,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           // syncSite will eventually correct the displayed time. But
           // surface the failure so it's not silent if v62-style
           // schema drift bites again.
-          try { logError('hub.trigger_accpac_sync.stamp', updateErr, { site_id: site.id }); } catch {}
+          try { logError('hub.trigger_accpac_sync.stamp', updateErr, { site_id: site.id }); } catch (e) { console.error('[hub.sync_site]', { siteId: site.id, phase: 'stamp_log' }, e.message); }
         }
       }
 
@@ -1574,7 +1574,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       } catch (pullErr) {
         hubPullOk = false;
         hubPullError = pullErr?.message || String(pullErr);
-        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch {}
+        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch (e) { console.error('[hub.sync_site]', { siteId: site.id, phase: 'refresh_log' }, e.message); }
       }
 
       res.json({
@@ -1739,7 +1739,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const isValidationError = err instanceof TypeError || err instanceof RangeError;
       const status = isValidationError ? 400 : 500;
       console.error(`[hub-jti] receive failed for site=${matched.id}: ${err.message}`);
-      try { logError('hub.jti_receive', err, { site_id: matched.id, status }); } catch {}
+      try { logError('hub.jti_receive', err, { site_id: matched.id, status }); } catch (e) { console.error('[hub.jti_receive]', { siteId: matched.id, status }, e.message); }
       res.status(status).json({ ok: false, error: err.message });
     }
   });
@@ -1830,7 +1830,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       periodYear: year, periodMonth: month,
       res,
       onError: (err) => {
-        try { logError('hub.jti_bundle', err, { period_year: year, period_month: month }); } catch {}
+        try { logError('hub.jti_bundle', err, { period_year: year, period_month: month }); } catch (e) { console.error('[hub.jti_bundle]', { period_year: year, period_month: month }, e.message); }
         try {
           logAudit({
             req, action: 'hub_jti_bundle_download', resourceType: 'system',

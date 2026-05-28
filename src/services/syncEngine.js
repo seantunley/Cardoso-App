@@ -655,20 +655,25 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
     let connRow = null;
     try {
       connRow = db.prepare(`SELECT name, host, database_name FROM databaseconnection WHERE id = ?`).get(connectionId);
-    } catch {}
+    } catch (e) {
+      console.error('[sync.import.connrow_lookup] failed', { connectionId }, e.message);
+    }
     const friendly = describeSqlError(error, {
       op: connRow ? `sync ${connRow.name}` : 'sync',
       host: connRow?.host,
       database: connRow?.database_name,
     });
-    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId, friendly }); } catch {}
+    try { logError('sync.import', error, { connection_id: connectionId, sync_run_id: syncRunId, friendly }); }
+    catch (e) { console.error('[sync.import.log_error] failed', { connectionId }, e.message); }
     try {
       db.prepare(`
         UPDATE databaseconnection
         SET status = 'error', last_error = ?, updated_date = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(friendly, connectionId);
-    } catch {}
+    } catch (e) {
+      console.error('[sync.import.mark_connection_error] failed', { connectionId }, e.message);
+    }
 
     try {
       if (syncRunId) {
@@ -682,14 +687,18 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           syncRunId
         );
       }
-    } catch {}
+    } catch (e) {
+      console.error('[sync.import.mark_syncrun_failed] failed', { connectionId, syncRunId }, e.message);
+    }
 
     throw error;
   } finally {
     if (pool) {
       try {
         await pool.close();
-      } catch {}
+      } catch (e) {
+        console.error('[sync.import.pool_close] failed', { connectionId }, e.message);
+      }
     }
 
     releaseSyncLock(connectionId);

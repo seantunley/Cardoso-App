@@ -1,4 +1,5 @@
 import db from '../db/index.js';
+import { logError } from '../lib/errorLog.js';
 
 const Z_SCORES = { 0.90: 1.28, 0.95: 1.65, 0.97: 1.88, 0.99: 2.33 };
 
@@ -20,6 +21,8 @@ function getConfig(itemNumber) {
 }
 
 export function computeAllForecasts() {
+  logError('inventoryForecast.run', new Error('inventoryForecast.run starting'), {}, 'info');
+  try {
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentPeriod = `${now.getFullYear()}-${String(currentMonth).padStart(2, '0')}`;
@@ -220,7 +223,12 @@ export function computeAllForecasts() {
     }
   })();
 
+  logError('inventoryForecast.run', new Error(`inventoryForecast.run completed: ${computed} items`), { computed }, 'info');
   return { computed };
+  } catch (err) {
+    logError('inventoryForecast.run', err);
+    throw err;
+  }
 }
 
 function weightedAvg(months, weights) {
@@ -320,19 +328,24 @@ export function getForecastConfig() {
 }
 
 export function updateForecastConfig({ leadTimeDays, orderCycleDays, serviceLevel, minOrderQty }) {
-  db.prepare(`
-    UPDATE inventory_forecast_config SET
-      lead_time_days = COALESCE(?, lead_time_days),
-      order_cycle_days = COALESCE(?, order_cycle_days),
-      service_level = COALESCE(?, service_level),
-      min_order_qty = COALESCE(?, min_order_qty)
-    WHERE item_number = '__global__'
-  `).run(
-    leadTimeDays != null ? parseInt(leadTimeDays, 10) : null,
-    orderCycleDays != null ? parseInt(orderCycleDays, 10) : null,
-    serviceLevel != null ? parseFloat(serviceLevel) : null,
-    minOrderQty != null ? parseFloat(minOrderQty) : null,
-  );
+  try {
+    db.prepare(`
+      UPDATE inventory_forecast_config SET
+        lead_time_days = COALESCE(?, lead_time_days),
+        order_cycle_days = COALESCE(?, order_cycle_days),
+        service_level = COALESCE(?, service_level),
+        min_order_qty = COALESCE(?, min_order_qty)
+      WHERE item_number = '__global__'
+    `).run(
+      leadTimeDays != null ? parseInt(leadTimeDays, 10) : null,
+      orderCycleDays != null ? parseInt(orderCycleDays, 10) : null,
+      serviceLevel != null ? parseFloat(serviceLevel) : null,
+      minOrderQty != null ? parseFloat(minOrderQty) : null,
+    );
+  } catch (err) {
+    logError('inventoryForecast.config_update', err, { leadTimeDays, orderCycleDays, serviceLevel, minOrderQty });
+    throw err;
+  }
 }
 
 export function getItemSeasonality(itemNumber) {

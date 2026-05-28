@@ -341,7 +341,9 @@ const navItems = [
 const NAV_GROUP_ORDER = ["Customers", "Inventory", "BAT and JTI", "Reports", "Hub", "System"];
 
 // localStorage key for which groups the operator has collapsed.
-const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v1";
+// v2: reset all operators to fully-expanded sidebar groups (user request
+// 2026-05-28). Existing v1 keys are abandoned, not migrated.
+const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v2";
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed]       = useState(true);
@@ -358,13 +360,17 @@ export default function Layout({ children, currentPageName }) {
     try {
       const stored = JSON.parse(localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY) || "[]");
       return new Set(Array.isArray(stored) ? stored : []);
-    } catch { return new Set(); }
+    } catch (e) {
+      console.warn('[sidebar.collapsed_groups.read] localStorage parse failed', e.message);
+      return new Set();
+    }
   });
   const toggleGroup = (name) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name); else next.add(name);
-      try { localStorage.setItem(NAV_COLLAPSED_GROUPS_KEY, JSON.stringify([...next])); } catch {}
+      try { localStorage.setItem(NAV_COLLAPSED_GROUPS_KEY, JSON.stringify([...next])); }
+      catch (e) { console.warn('[sidebar.collapsed_groups.write] localStorage write failed', e.message); }
       return next;
     });
   };

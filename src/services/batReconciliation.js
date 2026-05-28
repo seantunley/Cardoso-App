@@ -48,14 +48,14 @@ function emitExtractionUpdate(reconId) {
   if (sinceLast >= EMIT_THROTTLE_MS) {
     state.lastFiredAt = now;
     _emitState.set(reconId, state);
-    try { extractionEvents.emit(`update:${reconId}`); } catch {}
+    try { extractionEvents.emit(`update:${reconId}`); } catch (e) { console.error('[bat-ocr.emit_event]', { reconId, phase: 'immediate' }, e.message); }
     return;
   }
   if (state.pending) return; // a trailing emit is already scheduled
   state.pending = setTimeout(() => {
     state.pending = null;
     state.lastFiredAt = Date.now();
-    try { extractionEvents.emit(`update:${reconId}`); } catch {}
+    try { extractionEvents.emit(`update:${reconId}`); } catch (e) { console.error('[bat-ocr.emit_event]', { reconId, phase: 'trailing' }, e.message); }
   }, EMIT_THROTTLE_MS - sinceLast);
   if (typeof state.pending.unref === 'function') state.pending.unref();
   _emitState.set(reconId, state);
@@ -2178,7 +2178,7 @@ export function setOcrPaused(v) {
     // logError persists to System Log; the previous console.error
     // duplicate ran alongside it just to mirror to stderr, which
     // logError already does internally.
-    try { logError('bat-ocr.pause', err, { paused: next }); } catch {}
+    try { logError('bat-ocr.pause', err, { paused: next }); } catch (e) { console.error('[bat-ocr.pause_log]', { paused: next }, e.message); }
   }
   try {
     logError('bat-ocr.pause', new Error(next ? 'OCR worker paused' : 'OCR worker resumed'), { paused: next }, 'info');
@@ -2201,7 +2201,7 @@ function startExtractionWorker(reconId) {
   processQueue(reconId).catch(err => {
     // logError mirrors to stderr internally so the previous
     // console.error duplicate is unnecessary.
-    try { logError('bat-ocr.worker', err, { reconciliation_id: reconId, phase: 'crash' }); } catch {}
+    try { logError('bat-ocr.worker', err, { reconciliation_id: reconId, phase: 'crash' }); } catch (e) { console.error('[bat-ocr.crash_log]', { reconId }, e.message); }
     recordReconciliationError(reconId, `Worker crashed: ${err.message}`);
   }).finally(() => {
     // Capture *why* we stopped so an operator looking at the System Log can
@@ -3194,7 +3194,7 @@ async function processQueue(reconId) {
           // bat_settings so the operator-visible Pause toggle stays in
           // sync, and pending rows survive a service restart in their
           // pending state.
-          try { setOcrPaused(true); } catch {}
+          try { setOcrPaused(true); } catch (e) { console.error('[bat-ocr.extract_row]', { reconId, phase: 'regex_streak_halt_pause', extractionId: o.extraction_id }, e.message); }
           regexHaltTriggered = true;
           const haltMsg =
             `OCR auto-halted: ${cascadeExhaustedStreak} consecutive rows returned text but no invoice regex match. ` +
@@ -3213,7 +3213,7 @@ async function processQueue(reconId) {
               },
               'error',
             );
-          } catch {}
+          } catch (e) { console.error('[bat-ocr.extract_row]', { reconId, phase: 'regex_streak_halt_log', extractionId: o.extraction_id }, e.message); }
           try { recordReconciliationError(reconId, haltMsg); } catch {}
           // Reset so a future resume gets a fresh window.
           cascadeExhaustedStreak = 0;
@@ -3259,7 +3259,7 @@ async function processQueue(reconId) {
             { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url },
             'warn',
           );
-        } catch {}
+        } catch (e) { console.error('[bat-ocr.extract_row]', { reconId, phase: 'url_skipped_log', extractionId: next.id }, e.message); }
         recordOutcome(next._claimSeq, 'noop');
         inFlight.delete(next.id);
         emitExtractionUpdate(reconId);

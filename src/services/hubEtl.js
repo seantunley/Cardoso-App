@@ -788,7 +788,7 @@ async function pullBackupForSite(site) {
             bodyTimedOut = true;
             // cancel() rejects any in-flight read() — caught inside
             // the loop so we exit cleanly with whatever bytes arrived.
-            try { reader.cancel(); } catch {}
+            try { reader.cancel(); } catch (e) { console.error('[hubEtl.stream_close]', { siteId: site.id, phase: 'body_timeout_cancel' }, e.message); }
           }, BODY_READ_TIMEOUT_MS);
           try {
             while (total < BODY_BYTE_CAP) {
@@ -806,7 +806,7 @@ async function pullBackupForSite(site) {
           } finally {
             clearTimeout(bodyTimer);
             // Release the connection so the upstream can stop sending.
-            try { await reader.cancel(); } catch {}
+            try { await reader.cancel(); } catch (e) { console.error('[hubEtl.stream_close]', { siteId: site.id, phase: 'finally_cancel' }, e.message); }
           }
           let prefix = '';
           if (total > 0) {
@@ -844,7 +844,7 @@ async function pullBackupForSite(site) {
       try {
         db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
           .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
-      } catch {}
+      } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'http_error_row' }, e.message); }
       return { ok: false, error: friendly };
     }
     const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
@@ -929,11 +929,11 @@ async function pullBackupForSite(site) {
         // a valid 0-file snapshot to a future restore.
         const MIN_ZIP_BYTES = 22;
         if (previewSize < MIN_ZIP_BYTES) {
-          try { unlinkSync(previewFile); } catch {}
+          try { unlinkSync(previewFile); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'too_small' }, e.message); }
           console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch returned ${previewSize} bytes — too small to be a valid zip; deleted.`);
           previewsResult = { ok: false, error: `zip too small: ${previewSize} bytes` };
         } else if (Number.isFinite(expectedSize) && expectedSize > 0 && previewSize !== expectedSize) {
-          try { unlinkSync(previewFile); } catch {}
+          try { unlinkSync(previewFile); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'truncated' }, e.message); }
           console.warn(`[HUB BACKUP] ${site.name}: BAT previews truncated download (${previewSize} of ${expectedSize} bytes) — deleted.`);
           previewsResult = { ok: false, error: `truncated: ${previewSize}/${expectedSize}` };
         } else {
@@ -948,7 +948,7 @@ async function pullBackupForSite(site) {
       try {
         const { unlinkSync, existsSync } = await import('fs');
         if (existsSync(previewFile)) unlinkSync(previewFile);
-      } catch {}
+      } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'partial_cleanup' }, e.message); }
       console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
     }
 
@@ -990,13 +990,13 @@ async function pullBackupForSite(site) {
           const { statSync, unlinkSync } = await import('fs');
           const size = statSync(file).size;
           if (size < MIN_ZIP_BYTES) {
-            try { unlinkSync(file); } catch {}
+            try { unlinkSync(file); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_too_small', archive: name }, e.message); }
             console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch returned ${size} bytes — too small to be a valid zip; deleted.`);
             archiveResults[name] = { ok: false, error: `zip too small: ${size} bytes` };
             continue;
           }
           if (Number.isFinite(expectedSize) && expectedSize > 0 && size !== expectedSize) {
-            try { unlinkSync(file); } catch {}
+            try { unlinkSync(file); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_truncated', archive: name }, e.message); }
             console.warn(`[HUB BACKUP] ${site.name}: ${label} truncated download (${size} of ${expectedSize} bytes) — deleted.`);
             archiveResults[name] = { ok: false, error: `truncated: ${size}/${expectedSize}` };
             continue;
@@ -1013,7 +1013,7 @@ async function pullBackupForSite(site) {
         try {
           const { unlinkSync, existsSync } = await import('fs');
           if (existsSync(file)) unlinkSync(file);
-        } catch {}
+        } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_partial_cleanup', archive: name }, e.message); }
         console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch failed — ${describeFetchError(err, `${site.url}/api/backup/${name}`)}`);
         archiveResults[name] = { ok: false, error: err.message };
       }
@@ -1042,7 +1042,7 @@ async function pullBackupForSite(site) {
       const dbKeep = Number.isFinite(parsedDbKeep) && parsedDbKeep >= 1 ? parsedDbKeep : 30;
       const dbToDelete = dbFiles.slice(dbKeep);
       for (const f of dbToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
+        try { unlinkSync(path.join(dir, f.name)); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: f.name, reason: 'db_prune' }, e.message); }
       }
       if (dbToDelete.length > 0) {
         console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
@@ -1069,7 +1069,7 @@ async function pullBackupForSite(site) {
         const keepN = Number.isFinite(parsed) && parsed >= 1 ? parsed : defaultKeep;
         const toDelete = zips.slice(keepN);
         for (const f of toDelete) {
-          try { unlinkSync(path.join(dir, f.name)); } catch {}
+          try { unlinkSync(path.join(dir, f.name)); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: f.name, reason: 'zip_prune', prefix }, e.message); }
         }
         if (toDelete.length > 0) {
           console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old ${label}(s), keeping ${keepN}`);
@@ -1092,7 +1092,7 @@ async function pullBackupForSite(site) {
     try {
       db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
         .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
-    } catch {}
+    } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'outer_catch_row' }, e.message); }
     return { ok: false, error: friendly };
   }
 }

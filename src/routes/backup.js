@@ -67,7 +67,7 @@ function requireReportingToken(req, res, next) {
         },
         'warn',
       );
-    } catch {}
+    } catch (e) { console.error('[backup.auth_failed.log]', { route: req.path }, e.message); }
     return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
   }
 

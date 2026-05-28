@@ -949,7 +949,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
                 { query_length: query.length, hit: false, latency_ms: elapsedMs },
                 'warn',
               );
-            } catch {}
+            } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_slow_miss' }, e.message); }
           }
           return res.json({ record: null, subAccounts: [] });
         }
@@ -1003,7 +1003,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
               { query_length: query.length, hit: true, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
               'warn',
             );
-          } catch {}
+          } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_slow_hit' }, e.message); }
         }
 
         res.json({
@@ -1018,7 +1018,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             latency_ms: elapsedMs,
             err_kind: error?.constructor?.name,
           });
-        } catch {}
+        } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup' }, e.message); }
         res.status(500).json({ error: 'Failed to lookup customer' });
       }
     }
@@ -1088,7 +1088,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
               { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
               'warn',
             );
-          } catch {}
+          } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_suggestions_slow' }, e.message); }
         }
 
         res.json({
@@ -1102,7 +1102,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             latency_ms: elapsedMs,
             err_kind: error?.constructor?.name,
           });
-        } catch {}
+        } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_suggestions' }, e.message); }
         res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
       }
     }

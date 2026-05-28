@@ -1,5 +1,6 @@
 import sql from 'mssql';
 import { getSagePool } from '../batReconciliation.js';
+import { logError } from '../../lib/errorLog.js';
 
 const TEXTDESC_MAX_LEN = 60;
 const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
@@ -104,8 +105,10 @@ export function parseDescription(text) {
 }
 
 export async function queryProblematicLines(year) {
-  const pool = await getSagePool();
-  const result = await pool.request()
+  logError('sageCorrections.run', new Error(`sageCorrections.run scan starting for year ${year}`), { year }, 'info');
+  try {
+    const pool = await getSagePool();
+    const result = await pool.request()
     .input('year', sql.Int, year)
     .query(`
       ;WITH all_bat_lines AS (
@@ -212,7 +215,12 @@ export async function queryProblematicLines(year) {
     return a.line_number - b.line_number;
   });
 
-  return lines;
+    logError('sageCorrections.run', new Error(`sageCorrections.run completed: ${lines.length} lines for year ${year}`), { year, total_lines: lines.length }, 'info');
+    return lines;
+  } catch (err) {
+    logError('sageCorrections.run', err, { year });
+    throw err;
+  }
 }
 
 export async function readCurrentDescription(batchNumber, itemNumber, lineNumber) {
@@ -236,16 +244,21 @@ export async function updateSageDescription({ batchNumber, itemNumber, lineNumbe
     throw new Error('Description contains non-printable characters');
   }
 
-  const pool = await getSagePool();
-  const result = await pool.request()
-    .input('newDesc', sql.NVarChar(TEXTDESC_MAX_LEN), newDescription)
-    .input('batch', sql.Int, batchNumber)
-    .input('item', sql.Int, itemNumber)
-    .input('line', sql.Int, lineNumber)
-    .query('UPDATE APIBD SET TEXTDESC = @newDesc WHERE CNTBTCH = @batch AND CNTITEM = @item AND CNTLINE = @line');
+  try {
+    const pool = await getSagePool();
+    const result = await pool.request()
+      .input('newDesc', sql.NVarChar(TEXTDESC_MAX_LEN), newDescription)
+      .input('batch', sql.Int, batchNumber)
+      .input('item', sql.Int, itemNumber)
+      .input('line', sql.Int, lineNumber)
+      .query('UPDATE APIBD SET TEXTDESC = @newDesc WHERE CNTBTCH = @batch AND CNTITEM = @item AND CNTLINE = @line');
 
-  const affected = result.rowsAffected?.[0] ?? 0;
-  if (affected === 0) throw new Error('No matching line found — it may have been deleted or the key is wrong');
-  if (affected > 1) throw new Error(`Safety check failed: ${affected} rows would be affected (expected exactly 1)`);
-  return { rowsAffected: affected };
+    const affected = result.rowsAffected?.[0] ?? 0;
+    if (affected === 0) throw new Error('No matching line found — it may have been deleted or the key is wrong');
+    if (affected > 1) throw new Error(`Safety check failed: ${affected} rows would be affected (expected exactly 1)`);
+    return { rowsAffected: affected };
+  } catch (err) {
+    logError('sageCorrections.update_description', err, { batchNumber, itemNumber, lineNumber });
+    throw err;
+  }
 }

@@ -3,6 +3,8 @@ import {
   getPriceLists, getPriceListItems, getSuppliers,
   getExclusions, addExclusion, deleteExclusion,
 } from '../services/pricing.js';
+import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
 
 export function createPricingRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
@@ -14,6 +16,7 @@ export function createPricingRouter({ requireAuth, requireAdmin, requirePermissi
       res.json({ lists });
     } catch (err) {
       const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      logError('pricing.lists', err, { sage_down: isSageDown });
       res.status(isSageDown ? 503 : 500).json({
         error: isSageDown
           ? 'Sage connection unavailable. Check that the Sage connection is configured and active.'
@@ -26,6 +29,7 @@ export function createPricingRouter({ requireAuth, requireAdmin, requirePermissi
     try {
       res.json({ suppliers: getSuppliers() });
     } catch (err) {
+      logError('pricing.suppliers', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -48,6 +52,12 @@ export function createPricingRouter({ requireAuth, requireAdmin, requirePermissi
       });
     } catch (err) {
       const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      logError('pricing.items', err, {
+        price_list: req.query?.price_list,
+        commodity: req.query?.commodity,
+        supplier: req.query?.supplier,
+        sage_down: isSageDown,
+      });
       res.status(isSageDown ? 503 : 500).json({ error: err.message });
     }
   });
@@ -57,6 +67,7 @@ export function createPricingRouter({ requireAuth, requireAdmin, requirePermissi
     try {
       res.json({ exclusions: getExclusions() });
     } catch (err) {
+      logError('pricing.exclusions_list', err);
       res.status(500).json({ error: err.message });
     }
   });
@@ -68,18 +79,37 @@ export function createPricingRouter({ requireAuth, requireAdmin, requirePermissi
         pattern, note,
         createdBy: req.currentUser?.email || null,
       });
+      logAudit({
+        req,
+        action: 'pricing.exclusion_create',
+        resourceType: 'price_list_exclusion',
+        resourceId: String(created.id),
+        resourceName: created.pattern,
+        details: note ? `Pattern "${created.pattern}" (note: ${String(note).slice(0, 80)})` : `Pattern "${created.pattern}"`,
+      });
       res.json({ exclusion: created });
     } catch (err) {
+      logError('pricing.exclusion_create', err, { pattern: req.body?.pattern });
       res.status(400).json({ error: err.message });
     }
   });
 
   router.delete('/api/pricing/exclusions/:id', requireAuth, requireAdmin, (req, res) => {
     try {
-      const ok = deleteExclusion(parseInt(req.params.id, 10));
+      const id = parseInt(req.params.id, 10);
+      const ok = deleteExclusion(id);
       if (!ok) return res.status(404).json({ error: 'Not found' });
+      logAudit({
+        req,
+        action: 'pricing.exclusion_delete',
+        resourceType: 'price_list_exclusion',
+        resourceId: String(id),
+        resourceName: `Exclusion ${id}`,
+        details: `Removed price list exclusion #${id}`,
+      });
       res.json({ ok: true });
     } catch (err) {
+      logError('pricing.exclusion_delete', err, { id: req.params?.id });
       res.status(500).json({ error: err.message });
     }
   });

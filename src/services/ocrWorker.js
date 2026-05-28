@@ -77,7 +77,7 @@ function withTimeout(promise, timeoutMs, label) {
 // which row is on which step in real time. Best-effort: a postMessage
 // failure here is non-fatal — extraction continues.
 function emitProgress(id, stage) {
-  try { parentPort.postMessage({ type: 'progress', id, stage }); } catch {}
+  try { parentPort.postMessage({ type: 'progress', id, stage }); } catch (e) { console.error('[ocrWorker.emit_progress]', { id, stage }, e.message); }
 }
 
 // ── Per-engine rate-limit cooldown ──────────────────────────────────────────
@@ -172,7 +172,7 @@ async function getSharp() {
   // in `bat.ocr.memory` metrics. The lane-level recycle in
   // batReconciliation.js still runs as the primary defence; this just
   // removes one source of growth.
-  try { _sharp.cache(false); } catch {}
+  try { _sharp.cache(false); } catch (e) { console.error('[ocrWorker.sharp_init]', { op: 'cache_disable' }, e.message); }
   return _sharp;
 }
 
@@ -502,7 +502,7 @@ async function fetchBoundedBuffer(response, maxBytes) {
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
-        try { await reader.cancel(); } catch {}
+        try { await reader.cancel(); } catch (e) { console.error('[ocrWorker.fetch_bounded]', { phase: 'cancel_oversize', total, maxBytes }, e.message); }
         throw new Error(`PDF size exceeds limit ${maxBytes} (cancelled at ${total} bytes)`);
       }
       chunks.push(value);
@@ -588,7 +588,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         }
         return null;
       } finally {
-        try { doc.destroy(); } catch {}
+        try { doc.destroy(); } catch (e) { console.error('[ocrWorker.pdf_text]', { phase: 'doc_destroy' }, e.message); }
       }
     })(), 20_000, 'pdf_text');
     if (result?.invoice) {
@@ -917,7 +917,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
             tierError: !!err?.tierError,
             rateLimited,
           });
-        } catch {}
+        } catch (e) { console.error('[ocrWorker.engine_error_post]', { msgId, engine: engine.name, angle }, e.message); }
         if (err.tierError && !tierError) tierError = `${engine.name}: ${err.message}`;
         // If Tesseract crashed mid-run, surface so the main thread can rebuild this lane.
         if (engine.name.startsWith('Tesseract') && _tesseract) {
