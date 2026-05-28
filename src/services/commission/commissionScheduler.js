@@ -13,13 +13,13 @@ import { archiveCommissionReport, hasScheduledArchive, commissionPeriodForRun } 
 import { pushCommissionArchiveToHub } from './commissionHubPush.js';
 import { logError } from '../../lib/errorLog.js';
 
-function readDepotName(db) {
+function readDepotProfile(db) {
   try {
-    const row = db.prepare(`SELECT name FROM depot_profile WHERE id = 1`).get();
-    return (row?.name || '').trim();
+    const row = db.prepare(`SELECT name, city FROM depot_profile WHERE id = 1`).get();
+    return { name: (row?.name || '').trim(), city: (row?.city || '').trim() };
   } catch (e) {
-    console.warn('[commission.scheduler.depot_name]', e.message);
-    return '';
+    console.warn('[commission.scheduler.depot_profile]', e.message);
+    return { name: '', city: '' };
   }
 }
 
@@ -55,7 +55,7 @@ export async function generateAndArchiveCommissionPeriod({
     return { status: 'skipped', reason: `report_query_failed: ${err.message}` };
   }
 
-  const depotName = readDepotName(db);
+  const { name: depotName, city: depotCity } = readDepotProfile(db);
   let pdfBuffer;
   try {
     pdfBuffer = buildCommissionPdf({ depotName, report });
@@ -63,7 +63,10 @@ export async function generateAndArchiveCommissionPeriod({
     return { status: 'skipped', reason: `pdf_build_failed: ${err.message}` };
   }
 
-  const filenamePrefix = depotName ? `${depotName} Commission` : 'Commission';
+  // Filename uses the city alone (e.g. "Johannesburg") — full depot
+  // name with "Cardoso Cigarettes" prefix is too long for a filename
+  // and is already in the PDF heading.
+  const filenamePrefix = depotCity ? `${depotCity} Commission` : 'Commission';
   const filename = `${filenamePrefix} ${fromDate} to ${toDate}.pdf`;
 
   const archiveRow = archiveCommissionReport({

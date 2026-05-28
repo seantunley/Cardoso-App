@@ -4,6 +4,8 @@ import {
   buildCommissionReport,
   getCommissionSettings,
   updateCommissionSettings,
+  DEFAULT_COMMISSION_SALES_SQL,
+  DEFAULT_COMMISSION_RECEIPTS_SQL,
 } from '../services/commission.js';
 import {
   listCommissionArchives,
@@ -14,6 +16,37 @@ import { generateAndArchiveCommissionPeriod } from '../services/commission/commi
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 import db from '../db/index.js';
+
+/**
+ * Minimal admin-supplied SQL guardrails. Refuses DML/DDL keywords and
+ * requires each declared `@param` to appear at least once. Catches the
+ * "operator pasted just an INSERT statement by mistake" class of bug at
+ * save time rather than at report-build time.
+ *
+ * @param {string} sql
+ * @param {{ expectedParams: string[] }} opts
+ * @returns {string | null}  error message, or null when OK
+ */
+function validateOverrideSql(sql, { expectedParams }) {
+  if (sql === null || sql === undefined) return null;
+  const s = String(sql).trim();
+  if (s.length === 0) return null; // empty = clear back to default
+  // Allowlist on starting verb — must be SELECT or WITH.
+  if (!/^(\s*--[^\n]*\n)*\s*(SELECT|WITH)\b/i.test(s)) {
+    return 'must start with SELECT or WITH (read-only)';
+  }
+  // Blocklist mutations + dangerous Sage extensions.
+  const banned = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
+  if (banned.test(s)) return 'contains a forbidden write/DDL keyword';
+  // Param-presence check: every declared @param must appear in the SQL.
+  for (const p of expectedParams) {
+    const re = new RegExp(`@${p}\\b`, 'i');
+    if (!re.test(s)) return `must reference @${p} for the date / vat parameter binding`;
+  }
+  // Length cap so a runaway override can't poison error_log on bind failure.
+  if (s.length > 20_000) return 'too long (max 20,000 chars)';
+  return null;
+}
 
 export function createCommissionRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
@@ -40,9 +73,30 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
     }
   });
 
-  router.get('/api/commission/settings', ...reportGuard, (_req, res) => {
+  router.get('/api/commission/settings', ...reportGuard, (req, res) => {
     try {
-      res.json(getCommissionSettings());
+      const settings = getCommissionSettings();
+      const isAdmin = req.currentUser?.role === 'admin';
+      // Non-admins shouldn't see the override SQL or the defaults — the
+      // SQL view is the admin-only "advanced" surface (same gate as
+      // JTI's queryOverride). Strip the SQL fields on the way out.
+      if (!isAdmin) {
+        const { sales_query_override, receipts_query_override, ...rest } = settings;
+        return res.json({ ...rest });
+      }
+      const effectiveSalesSql = (settings.sales_query_override || '').trim().length > 0
+        ? settings.sales_query_override
+        : DEFAULT_COMMISSION_SALES_SQL;
+      const effectiveReceiptsSql = (settings.receipts_query_override || '').trim().length > 0
+        ? settings.receipts_query_override
+        : DEFAULT_COMMISSION_RECEIPTS_SQL;
+      res.json({
+        ...settings,
+        defaultSalesSql: DEFAULT_COMMISSION_SALES_SQL,
+        defaultReceiptsSql: DEFAULT_COMMISSION_RECEIPTS_SQL,
+        effectiveSalesSql,
+        effectiveReceiptsSql,
+      });
     } catch (err) {
       logError('commission.settings.get', err);
       res.status(500).json({ error: 'Failed to load commission settings' });
@@ -50,30 +104,65 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
   });
 
   router.put('/api/commission/settings', ...settingsGuard, (req, res) => {
-    const { sweets_rate, cigtob_rate, reference_rate, vat_rate } = req.body || {};
-    // Parsing here rather than at the service so the route can return a
-    // clean 400 instead of letting the service throw a generic 500.
-    const parsed = {
-      sweets_rate: Number(sweets_rate),
-      cigtob_rate: Number(cigtob_rate),
-      reference_rate: Number(reference_rate),
-      vat_rate: Number(vat_rate),
-    };
-    if (![parsed.sweets_rate, parsed.cigtob_rate, parsed.reference_rate, parsed.vat_rate].every(Number.isFinite)) {
-      return res.status(400).json({ error: 'All rates must be numeric (decimal, e.g. 0.015 for 1.5%)' });
+    const body = req.body || {};
+    const { sweets_rate, cigtob_rate, reference_rate, vat_rate,
+            sales_query_override, receipts_query_override } = body;
+    const isAdmin = req.currentUser?.role === 'admin';
+
+    // Admin gate for the SQL override fields. Settings-permission
+    // operators can still adjust rates from the same endpoint without
+    // being blocked — only the SQL fields are restricted.
+    if ((sales_query_override !== undefined || receipts_query_override !== undefined) && !isAdmin) {
+      return res.status(403).json({
+        error: 'Editing the commission report SQL is restricted to admin users.',
+      });
     }
+
+    // Validate each provided rate. A field can be omitted (sparse PUT) —
+    // but if present it must be numeric.
+    const checked = {};
+    for (const [key, val] of [
+      ['sweets_rate', sweets_rate], ['cigtob_rate', cigtob_rate],
+      ['reference_rate', reference_rate], ['vat_rate', vat_rate],
+    ]) {
+      if (val === undefined) continue;
+      const n = Number(val);
+      if (!Number.isFinite(n)) {
+        return res.status(400).json({ error: `${key} must be numeric (decimal, e.g. 0.015 for 1.5%)` });
+      }
+      checked[key] = n;
+    }
+
+    // Validate SQL overrides — empty / undefined = clear / no change.
+    if (sales_query_override !== undefined) {
+      const issue = validateOverrideSql(sales_query_override, { expectedParams: ['from', 'to'] });
+      if (issue) return res.status(400).json({ error: `Sales query: ${issue}` });
+      checked.sales_query_override = sales_query_override;
+    }
+    if (receipts_query_override !== undefined) {
+      const issue = validateOverrideSql(receipts_query_override, { expectedParams: ['from', 'to', 'vat'] });
+      if (issue) return res.status(400).json({ error: `Receipts query: ${issue}` });
+      checked.receipts_query_override = receipts_query_override;
+    }
+
     try {
-      const updated = updateCommissionSettings({ ...parsed, userId: req.currentUser?.id });
+      const before = getCommissionSettings();
+      const updated = updateCommissionSettings({ ...checked, userId: req.currentUser?.id });
+      const sqlChanged =
+        (sales_query_override    !== undefined && before.sales_query_override    !== updated.sales_query_override) ||
+        (receipts_query_override !== undefined && before.receipts_query_override !== updated.receipts_query_override);
       logAudit({
         req,
         action: 'commission.settings_update',
         resourceType: 'commission_settings',
         resourceId: 1,
-        details: `sweets=${(updated.sweets_rate * 100).toFixed(3)}% cigtob=${(updated.cigtob_rate * 100).toFixed(3)}% ref=${(updated.reference_rate * 100).toFixed(3)}% vat=${(updated.vat_rate * 100).toFixed(3)}%`,
+        details:
+          `sweets=${(updated.sweets_rate * 100).toFixed(3)}% cigtob=${(updated.cigtob_rate * 100).toFixed(3)}% ref=${(updated.reference_rate * 100).toFixed(3)}% vat=${(updated.vat_rate * 100).toFixed(3)}%`
+          + (sqlChanged ? ` · SQL override changed by ${req.currentUser?.email || 'unknown'}` : ''),
       });
       res.json(updated);
     } catch (err) {
-      logError('commission.settings.update', err, parsed);
+      logError('commission.settings.update', err, checked);
       res.status(500).json({ error: 'Failed to update commission settings' });
     }
   });

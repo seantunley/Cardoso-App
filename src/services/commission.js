@@ -39,34 +39,85 @@ function toYyyymmddInt(ymd) {
 
 export function getCommissionSettings() {
   const row = db.prepare(`
-    SELECT sweets_rate, cigtob_rate, reference_rate, vat_rate, updated_at, updated_by_user_id
+    SELECT sweets_rate, cigtob_rate, reference_rate, vat_rate,
+           sales_query_override, receipts_query_override,
+           updated_at, updated_by_user_id
     FROM commission_settings WHERE id = 1
   `).get();
   // Migration v81 seeds this row; if it's somehow missing, fall back to
   // the spreadsheet defaults instead of returning nulls that the UI
   // would render as NaN%.
   if (!row) {
-    return { sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, vat_rate: 0.14, updated_at: null, updated_by_user_id: null };
+    return {
+      sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, vat_rate: 0.14,
+      sales_query_override: null, receipts_query_override: null,
+      updated_at: null, updated_by_user_id: null,
+    };
   }
   return row;
 }
 
-export function updateCommissionSettings({ sweets_rate, cigtob_rate, reference_rate, vat_rate, userId }) {
-  const next = {
-    sweets_rate: Number.isFinite(sweets_rate) ? Math.max(0, sweets_rate) : 0,
-    cigtob_rate: Number.isFinite(cigtob_rate) ? Math.max(0, cigtob_rate) : 0,
-    reference_rate: Number.isFinite(reference_rate) ? Math.max(0, reference_rate) : 0,
-    vat_rate: Number.isFinite(vat_rate) ? Math.max(0, vat_rate) : 0,
-  };
-  db.prepare(`
-    UPDATE commission_settings
-       SET sweets_rate = ?, cigtob_rate = ?, reference_rate = ?, vat_rate = ?,
-           updated_at = datetime('now'),
-           updated_by_user_id = ?
-     WHERE id = 1
-  `).run(next.sweets_rate, next.cigtob_rate, next.reference_rate, next.vat_rate, userId ?? null);
+export function updateCommissionSettings({
+  sweets_rate, cigtob_rate, reference_rate, vat_rate,
+  sales_query_override, receipts_query_override,
+  userId,
+}) {
+  // Build a sparse update so callers can flip just rates OR just SQL
+  // without clobbering the other side. Empty string normalises to NULL
+  // (= "use default") so the UI's "Reset to default" button just sends
+  // an empty string instead of a special clear sentinel.
+  const sets = [];
+  const args = [];
+  if (Number.isFinite(sweets_rate))    { sets.push('sweets_rate = ?');    args.push(Math.max(0, sweets_rate)); }
+  if (Number.isFinite(cigtob_rate))    { sets.push('cigtob_rate = ?');    args.push(Math.max(0, cigtob_rate)); }
+  if (Number.isFinite(reference_rate)) { sets.push('reference_rate = ?'); args.push(Math.max(0, reference_rate)); }
+  if (Number.isFinite(vat_rate))       { sets.push('vat_rate = ?');       args.push(Math.max(0, vat_rate)); }
+  if (sales_query_override !== undefined) {
+    sets.push('sales_query_override = ?');
+    args.push(sales_query_override && String(sales_query_override).trim().length > 0 ? String(sales_query_override) : null);
+  }
+  if (receipts_query_override !== undefined) {
+    sets.push('receipts_query_override = ?');
+    args.push(receipts_query_override && String(receipts_query_override).trim().length > 0 ? String(receipts_query_override) : null);
+  }
+  if (sets.length === 0) return getCommissionSettings();
+
+  sets.push("updated_at = datetime('now')");
+  sets.push('updated_by_user_id = ?');
+  args.push(userId ?? null);
+  db.prepare(`UPDATE commission_settings SET ${sets.join(', ')} WHERE id = 1`).run(...args);
   return getCommissionSettings();
 }
+
+// --- Default Sage SQL (exported for the Settings UI's "view default" view) ---
+//
+// Both queries take three named @-params: @from, @to (YYYYMMDD ints) and
+// @vat (1 + vat_rate, used as the divisor). Override SQL MUST keep these
+// param names or the runtime bind step will fail.
+
+export const DEFAULT_COMMISSION_SALES_SQL = `
+SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
+       SUM(ISNULL(OESHDT.FAMTSALES, 0)) AS gross_amount,
+       SUM(ISNULL(OESHDT.FRETSALES, 0)) AS credit_amount
+FROM OESHDT
+INNER JOIN ICITMV ON OESHDT.ITEM = ICITMV.ITEMNO
+INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
+WHERE OESHDT.TRANDATE BETWEEN @from AND @to
+  AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
+GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, '')))
+`.trim();
+
+export const DEFAULT_COMMISSION_RECEIPTS_SQL = `
+SELECT LTRIM(RTRIM(ISNULL(c.CODESLSP1, ''))) AS sales_rep,
+       SUM(ISNULL(o.AMTPAYMHC, 0)) / @vat AS receipt_amount
+FROM AROBP o
+INNER JOIN ARCUS c
+  ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
+ AND c.CODECURN = o.CODECURN
+WHERE o.DATERMIT BETWEEN @from AND @to
+  AND LTRIM(RTRIM(o.IDINVC)) LIKE 'PY%'
+GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
+`.trim();
 
 /**
  * Run the three Sage queries and assemble the per-rep report.
@@ -97,43 +148,16 @@ export async function buildCommissionReport({ from, to }) {
 
   const settings = getCommissionSettings();
 
-  // Mirrors the operator's existing Sage query — same source, same joins,
-  // same rep field. OESHDT carries BOTH sales (FAMTSALES) and credit
-  // returns (FRETSALES) per row; OESHDT.SALESPER is the rep at time of
-  // sale (sticky), which is what the spreadsheet uses for attribution.
-  // INNER JOIN ICITMV filters items without a vendor record — matches
-  // the spreadsheet's scope.
-  const salesAndCreditsSql = `
-    SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
-           SUM(ISNULL(OESHDT.FAMTSALES, 0)) AS gross_amount,
-           SUM(ISNULL(OESHDT.FRETSALES, 0)) AS credit_amount
-    FROM OESHDT
-    INNER JOIN ICITMV ON OESHDT.ITEM = ICITMV.ITEMNO
-    INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-    WHERE OESHDT.TRANDATE BETWEEN @from AND @to
-      AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
-    GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, '')))
-  `;
-  // --- 2. Customer payments (receipts) -----------------------------------
-  // AROBP holds paired application rows (PY-prefixed = receipt headers,
-  // IN-prefixed = invoice applications) that net to zero. The receipt
-  // amount is on the PY-prefixed rows.
-  //
-  // Divide by (1 + VAT) — operator's spreadsheet shows customer payments
-  // VAT-exclusive (gross / 1.14 at the historical 14% rate). The divisor
-  // is settings-driven so the rate can be changed without a code deploy.
+  // Use admin-supplied SQL overrides when present, otherwise the bundled
+  // defaults. Both queries take @from, @to, @vat — overrides MUST keep
+  // those param names or the bind step throws (validated at save time).
   const vatDivisor = 1 + (Number.isFinite(settings.vat_rate) ? settings.vat_rate : 0.14);
-  const receiptsSql = `
-    SELECT LTRIM(RTRIM(ISNULL(c.CODESLSP1, ''))) AS sales_rep,
-           SUM(ISNULL(o.AMTPAYMHC, 0)) / @vat AS receipt_amount
-    FROM AROBP o
-    INNER JOIN ARCUS c
-      ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
-     AND c.CODECURN = o.CODECURN
-    WHERE o.DATERMIT BETWEEN @from AND @to
-      AND LTRIM(RTRIM(o.IDINVC)) LIKE 'PY%'
-    GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
-  `;
+  const salesAndCreditsSql = (settings.sales_query_override || '').trim().length > 0
+    ? settings.sales_query_override
+    : DEFAULT_COMMISSION_SALES_SQL;
+  const receiptsSql = (settings.receipts_query_override || '').trim().length > 0
+    ? settings.receipts_query_override
+    : DEFAULT_COMMISSION_RECEIPTS_SQL;
 
   const params = { from: fromInt, to: toInt, vat: vatDivisor };
 

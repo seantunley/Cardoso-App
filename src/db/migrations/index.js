@@ -87,6 +87,7 @@ import m81 from './v081_commission_settings.js';
 import m82 from './v082_commission_vat_rate.js';
 import m83 from './v083_commission_archive.js';
 import m84 from './v084_hub_commission_archive.js';
+import m85 from './v085_commission_sql_overrides.js';
 
 const migrations = [
   m1,
@@ -173,6 +174,7 @@ const migrations = [
   m82,
   m83,
   m84,
+  m85,
 ];
 
 migrations.sort((a, b) => a.version - b.version);
