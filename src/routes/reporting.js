@@ -1506,6 +1506,29 @@ export function createReportingRouter({ requireAuth }) {
     });
   });
 
+  router.get('/api/reporting/inventory-movement', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
+      const rows = prep(
+        `SELECT item_number, period, qty_sold, revenue, order_count, last_sale_date
+         FROM inventory_sales_cache ORDER BY item_number, period LIMIT ? OFFSET ?`
+      ).all(limit, offset);
+      const meta = db.prepare('SELECT last_synced_at, last_synced_to, rows_synced FROM inventory_sales_sync_meta WHERE id = 1').get();
+      res.json({
+        site_id: SITE_ID,
+        site_slug: SITE_SLUG,
+        offset,
+        limit,
+        count: rows.length,
+        has_more: rows.length === limit,
+        records: rows,
+        sync_meta: meta || {},
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- JTI archive intake (server-to-server, hub→site pull-fallback) ----
   //
   // The user-facing /api/jti/archive endpoints are gated by login +

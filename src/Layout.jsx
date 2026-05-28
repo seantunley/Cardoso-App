@@ -65,6 +65,16 @@ const IconInventory = ({ className, style }) => (
   </svg>
 );
 
+const IconInventoryMovement = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <rect x="2" y="14" width="3" height="4" rx="0.5" fill="#fb923c" opacity="0.5"/>
+    <rect x="6" y="10" width="3" height="8" rx="0.5" fill="#fb923c" opacity="0.7"/>
+    <rect x="10" y="6" width="3" height="12" rx="0.5" fill="#fb923c" opacity="0.85"/>
+    <rect x="14" y="2" width="3" height="16" rx="0.5" fill="#f97316"/>
+    <line x1="3" y1="13" x2="16" y2="3" stroke="#fdba74" strokeWidth="1" strokeDasharray="2 1" opacity="0.6"/>
+  </svg>
+);
+
 // Network Devices — stacked server racks with status LEDs + signal bars.
 const IconNetworkDevices = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
@@ -285,6 +295,7 @@ const navItems = [
   { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
   { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
   { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
+  { name: "Inventory Movement",  icon: IconInventoryMovement,     page: "InventoryMovement", permission: "can_access_inventory" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
   { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },

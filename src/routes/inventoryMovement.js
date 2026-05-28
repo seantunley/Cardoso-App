@@ -1,0 +1,365 @@
+import { Router } from 'express';
+import db from '../db/index.js';
+import {
+  syncSalesFromSage,
+  getSyncMeta,
+  getTopMovers,
+  getItemTrend,
+  getDeadStock,
+  getCommodities,
+  getItemTransactions,
+  getItemStats,
+} from '../services/inventoryMovement.js';
+import {
+  computeAllForecasts,
+  getForecastList,
+  getForecastConfig,
+  updateForecastConfig,
+  getItemSeasonality,
+} from '../services/inventoryForecast.js';
+
+function isHub() { return process.env.HUB_MODE === 'true'; }
+
+function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
+  // Build params in exact SQL placeholder order:
+  //   1. scWhere: [siteId?, from?, to?]
+  //   2. ir subquery WHERE: [siteId?]
+  //   3. outer WHERE commodity: [commodity?]
+  //   4. LIMIT: [limit]
+  //
+  // Sales are always grouped per (site_id, item_number) — each site
+  // holds physical stock independently, so collapsing would pair
+  // multi-site sales totals with one arbitrary site's inventory row.
+  let scWhere = 'WHERE 1=1';
+  const scParams = [];
+  if (siteId) { scWhere += ' AND sc.site_id = ?'; scParams.push(siteId); }
+  if (from) { scWhere += ' AND sc.period >= ?'; scParams.push(from); }
+  if (to) { scWhere += ' AND sc.period <= ?'; scParams.push(to); }
+
+  // When a commodity filter is active, use INNER JOIN so only items
+  // matching that commodity appear in the results. Without a filter,
+  // LEFT JOIN preserves items with sales but no hub_inventory record.
+  let irFilter = 'WHERE 1=1';
+  const irSubParams = [];
+  if (siteId) { irFilter += ' AND site_id = ?'; irSubParams.push(siteId); }
+  if (commodity) { irFilter += ' AND commodity = ?'; irSubParams.push(commodity); }
+  const joinType = commodity ? 'INNER JOIN' : 'LEFT JOIN';
+
+  const params = [...scParams, ...irSubParams, limit];
+
+  return db.prepare(`
+    SELECT
+      agg.item_number,
+      ir.item_description,
+      ir.commodity,
+      CAST(REPLACE(REPLACE(COALESCE(ir.qty_on_hand, '0'), ',', ''), ' ', '') AS REAL) AS qty_on_hand,
+      CAST(REPLACE(REPLACE(COALESCE(ir.last_cost, '0'), ',', ''), ' ', '') AS REAL) AS last_cost,
+      ir.price,
+      ir.stocking_uom,
+      COALESCE(s.name, agg.site_id) AS site_name,
+      agg.site_id,
+      agg.total_qty_sold,
+      agg.total_revenue,
+      agg.total_orders,
+      agg.last_sale_date
+    FROM (
+      SELECT
+        sc.site_id,
+        sc.item_number,
+        SUM(sc.qty_sold)       AS total_qty_sold,
+        SUM(sc.revenue)        AS total_revenue,
+        SUM(sc.order_count)    AS total_orders,
+        MAX(sc.last_sale_date) AS last_sale_date
+      FROM hub_inventory_sales sc
+      ${scWhere}
+      GROUP BY sc.site_id, sc.item_number
+    ) agg
+    ${joinType} (
+      SELECT site_id, item_number,
+             item_description, commodity, qty_on_hand, last_cost, price, stocking_uom,
+             ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+      FROM hub_inventory
+      ${irFilter}
+    ) ir ON ir.item_number = agg.item_number AND ir.rn = 1
+            AND ir.site_id = agg.site_id
+    LEFT JOIN hub_sites s ON s.id = agg.site_id
+    ORDER BY agg.total_qty_sold DESC
+    LIMIT ?
+  `).all(...params);
+}
+
+function hubItemTrend({ itemNumber, from, to, siteId }) {
+  let where = 'WHERE sc.item_number = ?';
+  const params = [itemNumber];
+  if (siteId) { where += ' AND sc.site_id = ?'; params.push(siteId); }
+  if (from) { where += ' AND sc.period >= ?'; params.push(from); }
+  if (to) { where += ' AND sc.period <= ?'; params.push(to); }
+
+  return db.prepare(`
+    SELECT
+      sc.period,
+      SUM(sc.qty_sold)    AS qty_sold,
+      SUM(sc.revenue)     AS revenue,
+      SUM(sc.order_count) AS order_count,
+      MAX(sc.last_sale_date) AS last_sale_date
+    FROM hub_inventory_sales sc
+    ${where}
+    GROUP BY sc.period
+    ORDER BY sc.period ASC
+  `).all(...params);
+}
+
+function hubDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity, siteId }) {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - thresholdDays);
+  const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
+
+  // Always partition/group by (site_id, item_number) — each site holds
+  // physical stock independently, so collapsing across sites would hide
+  // which location has the dead stock and inflate/deflate qty + capital.
+  //
+  // Params are assembled in exact SQL placeholder order:
+  //   irWhere: [siteId?, commodity?]
+  //   then:    [cutoff, minValue]
+  //   LIMIT:   [limit]
+  let irWhere = 'WHERE ir.rn = 1 AND ir.qty_num > 0';
+  const irParams = [];
+  if (siteId) { irWhere += ' AND ir.site_id = ?'; irParams.push(siteId); }
+  if (commodity) { irWhere += ' AND ir.commodity = ?'; irParams.push(commodity); }
+  const params = [...irParams, cutoff, minValue, limit];
+
+  return db.prepare(`
+    SELECT
+      ir.item_number,
+      ir.item_description,
+      ir.commodity,
+      ir.qty_num   AS qty_on_hand,
+      ir.cost_num  AS last_cost,
+      ir.price,
+      ir.stocking_uom,
+      COALESCE(s.name, ir.site_id) AS site_name,
+      ir.site_id,
+      COALESCE(sale.last_sale_date, 'never') AS last_sale_date,
+      CASE
+        WHEN sale.last_sale_date IS NULL THEN 999999
+        ELSE CAST(julianday('now') - julianday(sale.last_sale_date) AS INTEGER)
+      END AS days_since_sale,
+      ROUND(ir.qty_num * ir.cost_num, 2) AS capital_tied_up
+    FROM (
+      SELECT site_id, item_number, item_description, commodity, qty_on_hand, last_cost, price, stocking_uom,
+             CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL) AS qty_num,
+             CAST(REPLACE(REPLACE(COALESCE(last_cost, '0'), ',', ''), ' ', '') AS REAL) AS cost_num,
+             ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+      FROM hub_inventory
+    ) ir
+    LEFT JOIN (
+      SELECT site_id, item_number, MAX(last_sale_date) AS last_sale_date
+      FROM hub_inventory_sales
+      GROUP BY site_id, item_number
+    ) sale ON sale.item_number = ir.item_number AND sale.site_id = ir.site_id
+    LEFT JOIN hub_sites s ON s.id = ir.site_id
+    ${irWhere}
+      AND (sale.last_sale_date IS NULL OR sale.last_sale_date < ?)
+      AND ROUND(ir.qty_num * ir.cost_num, 2) >= ?
+    ORDER BY capital_tied_up DESC
+    LIMIT ?
+  `).all(...params);
+}
+
+function hubCommodities() {
+  return db.prepare(
+    "SELECT DISTINCT commodity FROM hub_inventory WHERE commodity IS NOT NULL AND TRIM(commodity) != '' ORDER BY commodity"
+  ).all().map(r => r.commodity);
+}
+
+function hubSites() {
+  return db.prepare("SELECT id, COALESCE(name, slug, id) AS name FROM hub_sites ORDER BY name").all();
+}
+
+export function createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermission }) {
+  const router = Router();
+  const guard = [requireAuth, requirePermission('can_access_inventory')];
+
+  router.get('/api/inventory-movement/top-movers', ...guard, (req, res) => {
+    try {
+      const { from, to, limit, commodity, site_id } = req.query;
+      const rows = isHub()
+        ? hubTopMovers({
+            from: from || undefined, to: to || undefined,
+            limit: Math.max(1, parseInt(limit, 10) || 50),
+            commodity: commodity && commodity !== 'all' ? commodity : undefined,
+            siteId: site_id && site_id !== 'all' ? site_id : undefined,
+          })
+        : getTopMovers({
+            from: from || undefined, to: to || undefined,
+            limit: Math.max(1, parseInt(limit, 10) || 50),
+            commodity: commodity && commodity !== 'all' ? commodity : undefined,
+          });
+      res.json({ rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/item-trend', ...guard, (req, res) => {
+    try {
+      const { item, from, to, site_id } = req.query;
+      if (!item) return res.status(400).json({ error: 'item is required' });
+      const rows = isHub()
+        ? hubItemTrend({
+            itemNumber: item, from: from || undefined, to: to || undefined,
+            siteId: site_id && site_id !== 'all' ? site_id : undefined,
+          })
+        : getItemTrend({ itemNumber: item, from: from || undefined, to: to || undefined });
+      res.json({ rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/dead-stock', ...guard, (req, res) => {
+    try {
+      const { threshold, minValue, limit, commodity, site_id } = req.query;
+      const rows = isHub()
+        ? hubDeadStock({
+            thresholdDays: Math.max(1, parseInt(threshold, 10) || 90),
+            minValue: parseFloat(minValue) || 0,
+            limit: Math.max(1, parseInt(limit, 10) || 100),
+            commodity: commodity && commodity !== 'all' ? commodity : undefined,
+            siteId: site_id && site_id !== 'all' ? site_id : undefined,
+          })
+        : getDeadStock({
+            thresholdDays: Math.max(1, parseInt(threshold, 10) || 90),
+            minValue: parseFloat(minValue) || 0,
+            limit: Math.max(1, parseInt(limit, 10) || 100),
+            commodity: commodity && commodity !== 'all' ? commodity : undefined,
+          });
+      res.json({ rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/sync-meta', ...guard, (_req, res) => {
+    try {
+      if (isHub()) return res.json({ hub: true, message: 'Hub syncs movement data from sites during ETL' });
+      res.json(getSyncMeta());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/inventory-movement/sync', requireAuth, requirePermission('can_access_inventory'), async (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly — data comes from sites during ETL sync.' });
+    try {
+      const result = await syncSalesFromSage();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      res.status(isSageDown ? 503 : 500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/commodities', ...guard, (_req, res) => {
+    try {
+      res.json({ commodities: isHub() ? hubCommodities() : getCommodities() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/sites', ...guard, (_req, res) => {
+    try {
+      res.json({ hub: isHub(), sites: isHub() ? hubSites() : [] });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/item-transactions', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Transaction drill-through is only available on site installs. Hub shows aggregated data from ETL sync.' });
+    try {
+      const { item, from, to, limit } = req.query;
+      if (!item) return res.status(400).json({ error: 'item is required' });
+      const rows = getItemTransactions({
+        itemNumber: item,
+        from: from || undefined,
+        to: to || undefined,
+        limit: Math.max(1, parseInt(limit, 10) || 500),
+      });
+      res.json({ rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/item-stats', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Item stats are only available on site installs.' });
+    try {
+      const { item } = req.query;
+      if (!item) return res.status(400).json({ error: 'item is required' });
+      res.json(getItemStats({ itemNumber: item }));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/forecast', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Forecast is only available on site installs.' });
+    try {
+      const { sort, dir, abc, limit, commodity } = req.query;
+      const rows = getForecastList({
+        sortField: sort || 'days_of_stock',
+        sortDir: dir || 'asc',
+        abcFilter: abc || 'all',
+        limit: Math.max(1, parseInt(limit, 10) || 200),
+        commodity: commodity && commodity !== 'all' ? commodity : undefined,
+      });
+      res.json({ rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/forecast-config', ...guard, (_req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Forecast config is only available on site installs.' });
+    try {
+      res.json(getForecastConfig());
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.put('/api/inventory-movement/forecast-config', requireAuth, requireAdmin, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Forecast config is only available on site installs.' });
+    try {
+      updateForecastConfig(req.body || {});
+      res.json({ ok: true, config: getForecastConfig() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/inventory-movement/recompute-forecast', ...guard, (_req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Forecast is only available on site installs.' });
+    try {
+      const result = computeAllForecasts();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/item-seasonality', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Seasonality is only available on site installs.' });
+    try {
+      const { item } = req.query;
+      if (!item) return res.status(400).json({ error: 'item is required' });
+      res.json(getItemSeasonality(item));
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  return router;
+}

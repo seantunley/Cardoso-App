@@ -29,6 +29,7 @@ import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
 import { createJtiRouter } from './src/routes/jti.js';
 import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
+import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -221,6 +222,9 @@ app.use(createSageCorrectionsRouter({ requireAuth, requireAdmin }));
 
 // ── JTI Sales export (Accpac OE Shipment History → .xlsx) ──
 app.use(createJtiRouter({ requireAuth, requirePermission }));
+
+// ── Inventory Movement (sales velocity / dead stock analytics) ──
+app.use(createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermission }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();

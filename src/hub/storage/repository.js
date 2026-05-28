@@ -62,6 +62,19 @@ export function createHubRepository(adapter) {
         synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(site_id, item_number)
       );
+      CREATE TABLE IF NOT EXISTS hub_inventory_sales (
+        site_id       TEXT    NOT NULL,
+        item_number   TEXT    NOT NULL,
+        period        TEXT    NOT NULL,
+        qty_sold      REAL    NOT NULL DEFAULT 0,
+        revenue       REAL    NOT NULL DEFAULT 0,
+        order_count   INTEGER NOT NULL DEFAULT 0,
+        last_sale_date TEXT,
+        synced_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (site_id, item_number, period)
+      );
+      CREATE INDEX IF NOT EXISTS idx_hub_inv_sales_site_period
+        ON hub_inventory_sales(site_id, period);
     `);
 
     adapter.run(`

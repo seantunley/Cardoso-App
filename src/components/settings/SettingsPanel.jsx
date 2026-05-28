@@ -29,6 +29,7 @@ import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
 import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
 import SageCorrectionsTab from "@/components/settings/tabs/SageCorrectionsTab";
+import ForecastSettingsTab from "@/components/settings/tabs/ForecastSettingsTab";
 
 // Section/Row — tiny layout helpers used (only) by TlsTab. Kept here and
 // re-exported (rather than moved to a _shared file) per the issue brief.
@@ -75,6 +76,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     hubMode && isAdmin && { id: "hubmaintenance", label: "Maintenance" },
     hubMode && isAdmin && { id: "network", label: "Network" },
     isAdmin && { id: "reconciliation", label: "Reconciliation" },
+    !hubMode && isAdmin && { id: "forecast", label: "Forecast" },
     isAdmin && { id: "accounting", label: "Accounting" },
     !hubMode && isAdmin && { id: "sagecorrections", label: "Sage Corrections" },
   ].filter(Boolean);
@@ -118,6 +120,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
               {activeTab === "hubmaintenance" && <HubMaintenanceTab />}
               {activeTab === "network" && <NtopngTab />}
               {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
+              {activeTab === "forecast" && <ForecastSettingsTab />}
               {activeTab === "accounting" && <AccountingTab />}
               {activeTab === "sagecorrections" && <SageCorrectionsTab />}
             </TabsContent>
