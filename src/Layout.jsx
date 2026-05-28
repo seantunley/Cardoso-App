@@ -337,6 +337,7 @@ const navItems = [
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true, group: "BAT and JTI" },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
   { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_commission", siteOnly: true, group: "Reports" },
+  { name: "Sales Commission",    icon: IconCommission,            page: "HubCommission",    permission: "can_access_commission", hubOnly: true,  group: "Reports" },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true, group: "Hub" },
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Hub" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true, group: "Hub" },

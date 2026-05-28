@@ -237,7 +237,7 @@ app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 
 // ── Price List (Sage ICPRICP per-unit prices) ──
 app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));
-app.use(createCommissionRouter({ requireAuth, requirePermission }));
+app.use(createCommissionRouter({ requireAuth, requireAdmin, requirePermission }));
 
 // ── Depot profile (letterhead details for customer-facing documents) ──
 app.use(createDepotProfileRouter({ db, requireAuth, requireAdmin }));

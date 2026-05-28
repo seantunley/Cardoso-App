@@ -30,6 +30,11 @@ import {
   listArchiveGroups,
   streamArchiveBundle,
 } from '../services/hub/jtiHubBundle.js';
+import {
+  receiveCommissionArchive,
+  listHubCommissionArchives,
+  getHubCommissionArchive,
+} from '../services/hub/commissionHubReceive.js';
 import fs from 'fs';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -1876,6 +1881,128 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       ...(outcome.received_count   != null ? { received_count:   outcome.received_count   } : {}),
       ...(outcome.expected_count   != null ? { expected_count:   outcome.expected_count   } : {}),
     });
+  });
+
+  // ========================================================================
+  // Commission archive intake — site pushes a finished monthly .pdf + metadata
+  // ========================================================================
+  //
+  // Same shape as the JTI receive endpoint above. Token-auth via
+  // requireJtiSiteToken (same HUB_SITES list — a site has one reporting
+  // token covering both JTI + commission rather than two separate
+  // secrets). PDFs are larger than the JTI xlsx export, so this multer
+  // instance caps at 20 MB rather than 25 — still well above realistic
+  // payload size for the report (~50 KB typical) but appropriate for the
+  // expected medium.
+  const commissionUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 30 },
+  });
+
+  router.post('/api/hub/receive-commission-archive', requireJtiSiteToken, commissionUpload.single('file'), async (req, res) => {
+    const matched = req._jtiSite;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing file part — POST as multipart/form-data with field name "file"' });
+    }
+
+    const f = req.body || {};
+    try {
+      const result = receiveCommissionArchive({
+        db,
+        archive: {
+          siteId: matched.id,    // trust the token-mapped id, NOT req.body.site_id
+          siteArchiveId: f.site_archive_id ? Number(f.site_archive_id) : undefined,
+          buffer: req.file.buffer,
+          filename: req.file.originalname || f.filename || 'commission.pdf',
+          periodYear: Number(f.period_year),
+          periodMonth: Number(f.period_month),
+          periodFrom: f.period_from,
+          periodTo: f.period_to,
+          generatedAt: f.generated_at,
+          generatedBy: f.generated_by || null,
+          source: f.source,
+          declaredSha256: f.sha256,
+          declaredByteSize: f.byte_size != null ? Number(f.byte_size) : undefined,
+          reportJson: f.report_json,
+          siteLabel: f.site_label || null,
+          receivedVia: 'push',
+        },
+      });
+
+      if (result.deduped) {
+        console.log(`[hub-commission] dedup hit for site=${matched.id} sha256=${result.row.sha256.slice(0, 12)}… (existing hub id ${result.row.id})`);
+      } else {
+        console.log(`[hub-commission] received from site=${matched.id} ${f.period_year}-${String(f.period_month).padStart(2, '0')} (${result.row.byte_size} bytes) → hub id ${result.row.id}`);
+      }
+
+      res.json({
+        ok: true,
+        deduped: result.deduped,
+        hubArchiveId: result.row.id,
+        siteId: matched.id,
+        sha256: result.row.sha256,
+      });
+    } catch (err) {
+      // Validation errors (sha mismatch, bad period, etc.) → 400.
+      // Anything else → 500. The site's push retry handles 5xx
+      // automatically; 4xx means the site sent something nonsensical.
+      const isValidationError = err instanceof TypeError || err instanceof RangeError;
+      const status = isValidationError ? 400 : 500;
+      console.error(`[hub-commission] receive failed for site=${matched.id}: ${err.message}`);
+      try { logError('hub.commission_receive', err, { site_id: matched.id, status }); } catch (e) { console.error('[hub.commission_receive]', { siteId: matched.id, status }, e.message); }
+      res.status(status).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/hub/commission/archives — list across all sites (latest first)
+  // OR per-site if ?site_id=... given.
+  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+    try {
+      const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
+        ? req.query.site_id : null;
+      const limitRaw = Number(req.query?.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 60;
+      const archives = listHubCommissionArchives({ db, siteId, limit });
+      const expected_sites = (HUB_SITES || []).map((s) => ({
+        id: s.id, name: s.name || s.slug || s.id,
+      }));
+      res.json({ ok: true, archives, expected_sites, limit });
+    } catch (err) {
+      console.error('[hub-commission] list failed:', err.message);
+      try { logError('hub.commission_list', err); } catch (e) { console.error('[hub.commission_list]', e.message); }
+      res.status(500).json({ error: `Failed to list hub commission archives: ${err.message}` });
+    }
+  });
+
+  // GET /api/hub/commission/archives/:id/download — stream a previously-
+  // received .pdf back to the operator. Audited.
+  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid hub archive id' });
+    }
+    const row = getHubCommissionArchive({ db, id });
+    if (!row) return res.status(404).json({ error: `Hub commission archive #${id} not found` });
+    if (!fs.existsSync(row.file_path)) {
+      console.error(`[hub-commission] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
+      logAudit({
+        req, action: 'hub_commission_archive_download', resourceType: 'system', resourceName: row.filename,
+        details: `Hub archive #${id} requested but file missing`, status: 'failure',
+      });
+      return res.status(410).json({ error: `Hub commission archive #${id} record exists but file missing on disk` });
+    }
+    logAudit({
+      req, action: 'hub_commission_archive_download', resourceType: 'system', resourceName: row.filename,
+      details: `Downloaded hub commission archive #${id} (site=${row.site_id}, ${row.period_year}-${String(row.period_month).padStart(2, '0')})`,
+    });
+    const buffer = fs.readFileSync(row.file_path);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('X-Hub-Commission-Archive-Id', String(id));
+    res.setHeader('X-Commission-Archive-Sha256', row.sha256);
+    res.end(buffer);
   });
 
   // ========================================================================

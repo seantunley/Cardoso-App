@@ -84,6 +84,9 @@ import m78 from './v078_depot_profile.js';
 import m79 from './v079_price_list_exclusions.js';
 import m80 from './v080_collections_worklists_v1.js';
 import m81 from './v081_commission_settings.js';
+import m82 from './v082_commission_vat_rate.js';
+import m83 from './v083_commission_archive.js';
+import m84 from './v084_hub_commission_archive.js';
 
 const migrations = [
   m1,
@@ -167,6 +170,9 @@ const migrations = [
   m79,
   m80,
   m81,
+  m82,
+  m83,
+  m84,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

@@ -30,12 +30,14 @@ export default function CommissionSettingsTab() {
   const [sweets, setSweets] = useState("");
   const [cigtob, setCigtob] = useState("");
   const [reference, setReference] = useState("");
+  const [vat, setVat] = useState("");
 
   useEffect(() => {
     if (settings.data) {
       setSweets(toPct(settings.data.sweets_rate));
       setCigtob(toPct(settings.data.cigtob_rate));
       setReference(toPct(settings.data.reference_rate));
+      setVat(toPct(settings.data.vat_rate ?? 0.14));
     }
   }, [settings.data]);
 
@@ -45,6 +47,7 @@ export default function CommissionSettingsTab() {
         sweets_rate: fromPct(sweets),
         cigtob_rate: fromPct(cigtob),
         reference_rate: fromPct(reference),
+        vat_rate: fromPct(vat),
       };
       const r = await fetch("/api/commission/settings", {
         method: "PUT",
@@ -97,6 +100,12 @@ export default function CommissionSettingsTab() {
         hint="Shown alongside the sweets column as a comparison. Spreadsheet default 1.0%."
         value={reference}
         onChange={setReference}
+      />
+      <RateField
+        label="VAT rate"
+        hint="AR receipts (AMTPAYMHC) are stripped of VAT before display: gross ÷ (1 + this rate). Default 14% matches the historical spreadsheet formula."
+        value={vat}
+        onChange={setVat}
       />
 
       <button

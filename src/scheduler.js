@@ -16,6 +16,11 @@ import { pruneOldRows, vacuumDb } from './lib/retention.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
+import {
+  runScheduledMonthlyCommissionJob,
+  runCommissionBootCatchUp,
+} from './services/commission/commissionScheduler.js';
+import { pushPendingCommissionArchives } from './services/commission/commissionHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
 import { syncSalesFromSage } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
@@ -598,6 +603,51 @@ export function startSchedulers() {
       { successCheck: () => true }, // failed-to-push is normal, not a job failure
     ), 15 * 60 * 1000));
     registerJob({ name: 'jti-hub-push-retry', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'site', description: 'JTI hub push retry — re-attempt any pending/failed pushes' });
+
+    // Commission monthly archive — fires at 03:00 site-local on the 24th
+    // of every month. The commission cycle is "24th of prev month → 23rd
+    // of current month", so running on the 24th means the previous-day
+    // window has just closed and a complete period is ready to archive.
+    // Site-only (HUB_MODE installs receive these archives via push).
+    {
+      const t = cron.schedule('0 3 24 * *', track(
+        'commission-monthly-archive',
+        () => runScheduledMonthlyCommissionJob({ db }),
+        (result) => result,
+        // Skipped runs (already_archived, report_query_failed) are
+        // normal outcomes for this job, not failures.
+        { successCheck: () => true },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'commission-monthly-archive', type: 'cron', cronExpression: '0 3 24 * *', taskRef: t, mode: 'site', description: 'Commission monthly archive — generate + archive the current commission period (24th-of-month cycle)' });
+    }
+
+    // Commission boot-time catch-up — backfills up to 12 missed months
+    // on app startup. 60-second delay so migrations + Sage health probe
+    // have settled; the catch-up may run several reports back-to-back
+    // if the site has been offline for months, better to start cleanly.
+    setTimeout(track(
+      'commission-boot-catchup',
+      () => runCommissionBootCatchUp({ db, monthsBack: 12 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 60_000);
+    registerJob({ name: 'commission-boot-catchup', type: 'one-shot', delayMs: 60_000, mode: 'site', description: 'Commission catch-up — backfill up to 12 missed months on boot' });
+
+    // Commission hub-push retry tick — every 15 minutes, scan for
+    // archives in pending/failed state and try to send them. Same
+    // safety-net role as the JTI retry tick.
+    intervals.push(setInterval(track(
+      'commission-hub-push-retry',
+      () => pushPendingCommissionArchives({ db, batchSize: 10 }),
+      (result) => result,
+      { successCheck: () => true },
+    ), 15 * 60 * 1000));
+    registerJob({ name: 'commission-hub-push-retry', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'site', description: 'Commission hub push retry — re-attempt any pending/failed pushes' });
   }
 
   // Alert engine evaluation tick — runs every 60s, evaluates the rules

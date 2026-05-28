@@ -1,7 +1,8 @@
 import { useState, useMemo } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
-import { Calendar, Download, FileSpreadsheet, Loader2, Receipt, Settings } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Archive, Calendar, Download, FileSpreadsheet, Loader2, PlayCircle, Receipt, Settings } from "lucide-react";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/AuthContext";
 
 // Format helpers — keep R-prefixed amounts compact + thousands-separated,
 // matching the legacy spreadsheet ("R 104,105.00").
@@ -35,6 +36,10 @@ export default function SalesCommission() {
   // until the operator hits "Generate".
   const [submitted, setSubmitted] = useState(initial);
 
+  const { user: currentUser } = useAuth();
+  const isAdmin = currentUser?.role === "admin";
+  const queryClient = useQueryClient();
+
   const report = useQuery({
     queryKey: ["commission-report", submitted.from, submitted.to],
     queryFn: async () => {
@@ -50,6 +55,83 @@ export default function SalesCommission() {
     enabled: Boolean(submitted.from && submitted.to),
     staleTime: 60_000,
   });
+
+  // Branch name used in PDF heading + filename — same source as the
+  // price list's letterhead so the two stay in sync.
+  const depotProfile = useQuery({
+    queryKey: ["depot-profile"],
+    queryFn: async () => {
+      const r = await fetch("/api/depot-profile", { credentials: "include" });
+      if (!r.ok) return { profile: {} };
+      return r.json();
+    },
+    staleTime: 5 * 60_000,
+  });
+  const depotName = depotProfile.data?.profile?.name?.trim() || "";
+
+  // Past commission archives — populated by the monthly cron (24th of
+  // each month) plus any operator-triggered "Run now" calls.
+  const archives = useQuery({
+    queryKey: ["commission-archives"],
+    queryFn: async () => {
+      const r = await fetch("/api/commission/archives?limit=60", { credentials: "include" });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      return r.json();
+    },
+    staleTime: 30_000,
+  });
+
+  const runNow = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/commission/archives/run-now", {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${r.status}`);
+      }
+      return r.json();
+    },
+    onSuccess: (res) => {
+      if (res?.status === "archived") {
+        toast.success(`Archived ${res.period?.year}-${String(res.period?.month).padStart(2, "0")} (#${res.archiveId})`);
+      } else {
+        toast.info(`Run skipped: ${res?.reason || "no work to do"}`);
+      }
+      queryClient.invalidateQueries({ queryKey: ["commission-archives"] });
+    },
+    onError: (err) => toast.error(`Run-now failed: ${err.message}`),
+  });
+
+  const downloadArchive = async (id, filename) => {
+    try {
+      const r = await fetch(`/api/commission/archives/${id}/download`, { credentials: "include" });
+      if (!r.ok) {
+        let message = `HTTP ${r.status}`;
+        try { message = (await r.json()).error || message; }
+        catch (e) { console.error("[salesCommission.archive_download_parse]", { id }, e.message); }
+        throw new Error(message);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      try {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename || `Commission_archive_${id}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      } finally {
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } catch (err) {
+      toast.error(`Archive download failed: ${err.message}`);
+    }
+  };
 
   const data = report.data;
   const reps = data?.reps || [];
@@ -85,6 +167,7 @@ export default function SalesCommission() {
       // up top, commission calculations below) so the file lands in an
       // operator's email looking the same as the legacy report.
       const sheet = [
+        ...(depotName ? [[depotName]] : []),
         [headerTitle],
         [],
         ["Sales Person", "Sweet Sales", "Credits", "Net Sweets", "Customer Payment Total", "Cig + Tob Base"],
@@ -101,7 +184,8 @@ export default function SalesCommission() {
       ];
       const ws = XLSX.utils.aoa_to_sheet(sheet);
       XLSX.utils.book_append_sheet(wb, ws, "Commission");
-      const fname = `Commission ${submitted.from} to ${submitted.to}.xlsx`;
+      const prefix = depotName ? `${depotName} Commission` : "Commission";
+      const fname = `${prefix} ${submitted.from} to ${submitted.to}.xlsx`;
       XLSX.writeFile(wb, fname);
       return fname;
     },
@@ -117,16 +201,22 @@ export default function SalesCommission() {
       const sweetsRate = settings?.sweets_rate ?? 0.015;
       const cigtobRate = settings?.cigtob_rate ?? 0.0017;
       const refRate = settings?.reference_rate ?? 0.01;
+      if (depotName) {
+        doc.setFontSize(11);
+        doc.setTextColor(80);
+        doc.text(depotName, 14, 12);
+      }
       doc.setFontSize(14);
-      doc.text(headerTitle, 14, 14);
+      doc.setTextColor(0);
+      doc.text(headerTitle, 14, depotName ? 19 : 14);
       doc.setFontSize(9);
       doc.setTextColor(120);
       doc.text(
         `Sweets rate ${formatPct(sweetsRate)} · Cig+Tob rate ${formatPct(cigtobRate)} · Reference rate ${formatPct(refRate)}`,
-        14, 20,
+        14, depotName ? 25 : 20,
       );
       autoTable(doc, {
-        startY: 26,
+        startY: depotName ? 31 : 26,
         head: [["Sales Person", "Sweet Sales", "Credits", "Net Sweets", "Customer Payment Total", "Cig + Tob Base"]],
         body: [
           ...reps.map(r => [
@@ -157,7 +247,8 @@ export default function SalesCommission() {
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [33, 33, 33] },
       });
-      const fname = `Commission ${submitted.from} to ${submitted.to}.pdf`;
+      const prefix = depotName ? `${depotName} Commission` : "Commission";
+      const fname = `${prefix} ${submitted.from} to ${submitted.to}.pdf`;
       doc.save(fname);
       return fname;
     },
@@ -305,7 +396,160 @@ export default function SalesCommission() {
           />
         </>
       )}
+
+      <ArchivesPanel
+        archives={archives.data?.archives || []}
+        loading={archives.isLoading}
+        error={archives.isError ? String(archives.error?.message || "Failed to load archives") : ""}
+        isAdmin={isAdmin}
+        onRunNow={() => runNow.mutate()}
+        runNowPending={runNow.isPending}
+        onDownload={downloadArchive}
+      />
     </div>
+  );
+}
+
+// Past commission archives — same period covered as the report above,
+// but persisted on disk + pushed to the hub. The monthly cron writes
+// 'scheduled' rows on the 24th; admins can ad-hoc-trigger a run via
+// the "Run now" button (creates an additional 'manual' or 'scheduled'
+// row depending on whether one already exists for the period).
+const MONTH_NAMES = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+function formatPeriod(year, month) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return `${year}-${String(month).padStart(2, "0")}`;
+  }
+  return `${MONTH_NAMES[month - 1]} ${year}`;
+}
+function formatTs(s) {
+  if (!s) return "—";
+  const d = new Date(s.replace(" ", "T") + "Z");
+  if (Number.isNaN(d.getTime())) return s;
+  return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+function ArchivesPanel({ archives, loading, error, isAdmin, onRunNow, runNowPending, onDownload }) {
+  return (
+    <div className="rounded-xl border border-border bg-card mb-4 overflow-hidden">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Archive className="w-4 h-4 text-muted-foreground" />
+          Archives
+        </h2>
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={onRunNow}
+            disabled={runNowPending}
+            className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card hover:bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
+            title="Generate the commission archive for the current period now"
+          >
+            {runNowPending
+              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              : <PlayCircle className="w-3.5 h-3.5" />}
+            Run now
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="px-4 py-3 text-sm text-red-300 bg-red-500/10 border-b border-red-500/40">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="px-4 py-6 text-center text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin inline mr-1" />
+          Loading archives…
+        </div>
+      ) : archives.length === 0 ? (
+        <div className="px-4 py-6 text-center text-muted-foreground text-sm">
+          No archives yet. The monthly cron fires on the 24th of each month;
+          admins can trigger a run on demand with "Run now".
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-card">
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Period</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Generated</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Source</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Hub push</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Download</th>
+              </tr>
+            </thead>
+            <tbody>
+              {archives.map((a) => (
+                <tr key={a.id} className="border-b border-border last:border-0 hover:bg-muted/30">
+                  <td className="px-3 py-1.5 font-medium text-foreground">
+                    {formatPeriod(a.period_year, a.period_month)}
+                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">
+                    {formatTs(a.generated_at)}
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <SourceBadge source={a.source} />
+                  </td>
+                  <td className="px-3 py-1.5">
+                    <HubPushBadge status={a.hub_push_status} error={a.hub_push_error} />
+                  </td>
+                  <td className="px-3 py-1.5 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onDownload(a.id, a.filename)}
+                      className="inline-flex items-center gap-1 rounded-md border border-border bg-card hover:bg-muted/50 px-2 py-1 text-xs text-muted-foreground"
+                      title={a.filename}
+                    >
+                      <Download className="w-3 h-3" />
+                      PDF
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SourceBadge({ source }) {
+  const isScheduled = source === "scheduled";
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide rounded ${
+        isScheduled
+          ? "bg-amber-500/15 text-amber-300"
+          : "bg-muted/40 text-muted-foreground"
+      }`}
+    >
+      {source || "—"}
+    </span>
+  );
+}
+
+function HubPushBadge({ status, error }) {
+  const map = {
+    pushed:           { label: "pushed",   cls: "bg-emerald-500/15 text-emerald-300" },
+    pending:          { label: "pending",  cls: "bg-muted/40 text-muted-foreground" },
+    failed:           { label: "failed",   cls: "bg-red-500/15 text-red-300" },
+    skipped_no_hub:   { label: "no hub",   cls: "bg-muted/40 text-muted-foreground" },
+  };
+  const cfg = map[status] || { label: status || "—", cls: "bg-muted/40 text-muted-foreground" };
+  return (
+    <span
+      className={`inline-block px-2 py-0.5 text-[10px] font-mono uppercase tracking-wide rounded ${cfg.cls}`}
+      title={error || undefined}
+    >
+      {cfg.label}
+    </span>
   );
 }
 

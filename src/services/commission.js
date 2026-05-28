@@ -39,31 +39,32 @@ function toYyyymmddInt(ymd) {
 
 export function getCommissionSettings() {
   const row = db.prepare(`
-    SELECT sweets_rate, cigtob_rate, reference_rate, updated_at, updated_by_user_id
+    SELECT sweets_rate, cigtob_rate, reference_rate, vat_rate, updated_at, updated_by_user_id
     FROM commission_settings WHERE id = 1
   `).get();
   // Migration v81 seeds this row; if it's somehow missing, fall back to
   // the spreadsheet defaults instead of returning nulls that the UI
   // would render as NaN%.
   if (!row) {
-    return { sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, updated_at: null, updated_by_user_id: null };
+    return { sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, vat_rate: 0.14, updated_at: null, updated_by_user_id: null };
   }
   return row;
 }
 
-export function updateCommissionSettings({ sweets_rate, cigtob_rate, reference_rate, userId }) {
+export function updateCommissionSettings({ sweets_rate, cigtob_rate, reference_rate, vat_rate, userId }) {
   const next = {
     sweets_rate: Number.isFinite(sweets_rate) ? Math.max(0, sweets_rate) : 0,
     cigtob_rate: Number.isFinite(cigtob_rate) ? Math.max(0, cigtob_rate) : 0,
     reference_rate: Number.isFinite(reference_rate) ? Math.max(0, reference_rate) : 0,
+    vat_rate: Number.isFinite(vat_rate) ? Math.max(0, vat_rate) : 0,
   };
   db.prepare(`
     UPDATE commission_settings
-       SET sweets_rate = ?, cigtob_rate = ?, reference_rate = ?,
+       SET sweets_rate = ?, cigtob_rate = ?, reference_rate = ?, vat_rate = ?,
            updated_at = datetime('now'),
            updated_by_user_id = ?
      WHERE id = 1
-  `).run(next.sweets_rate, next.cigtob_rate, next.reference_rate, userId ?? null);
+  `).run(next.sweets_rate, next.cigtob_rate, next.reference_rate, next.vat_rate, userId ?? null);
   return getCommissionSettings();
 }
 
@@ -118,13 +119,13 @@ export async function buildCommissionReport({ from, to }) {
   // IN-prefixed = invoice applications) that net to zero. The receipt
   // amount is on the PY-prefixed rows.
   //
-  // Divide by 1.14 — operator's spreadsheet shows customer payments
-  // VAT-exclusive (the AR receipt is gross / 1.14). Confirmed against
-  // Feb 24 → Mar 23 2026 reference: raw PY% sum is exactly 14% over
-  // the spreadsheet across every rep.
+  // Divide by (1 + VAT) — operator's spreadsheet shows customer payments
+  // VAT-exclusive (gross / 1.14 at the historical 14% rate). The divisor
+  // is settings-driven so the rate can be changed without a code deploy.
+  const vatDivisor = 1 + (Number.isFinite(settings.vat_rate) ? settings.vat_rate : 0.14);
   const receiptsSql = `
     SELECT LTRIM(RTRIM(ISNULL(c.CODESLSP1, ''))) AS sales_rep,
-           SUM(ISNULL(o.AMTPAYMHC, 0)) / 1.14 AS receipt_amount
+           SUM(ISNULL(o.AMTPAYMHC, 0)) / @vat AS receipt_amount
     FROM AROBP o
     INNER JOIN ARCUS c
       ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
@@ -134,7 +135,7 @@ export async function buildCommissionReport({ from, to }) {
     GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
   `;
 
-  const params = { from: fromInt, to: toInt };
+  const params = { from: fromInt, to: toInt, vat: vatDivisor };
 
   let salesCreditRows = [], receiptRows = [];
   try {
