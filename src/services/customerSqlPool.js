@@ -70,7 +70,7 @@ async function getCustomerSqlPool() {
   }
   // Re-open pool if config changed or the cached one died.
   if (pool && (poolKey !== loaded.key || pool.connected === false)) {
-    try { await pool.close(); } catch {}
+    try { await pool.close(); } catch {} // eslint-disable-line no-empty -- best-effort close of a stale pool; we're discarding it anyway
     pool = null;
   }
   if (pool) return pool;
@@ -78,7 +78,7 @@ async function getCustomerSqlPool() {
   try {
     pool = await sql.connect(loaded.config);
   } catch (err) {
-    try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {}
+    try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;
   }
   poolKey = loaded.key;
@@ -132,19 +132,19 @@ export async function runCustomerSqlQuery(sqlText, params = null) {
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[customer-sql] Pool dropped, reopening and retrying once');
-      try { logError('customer.sql.query', err, { phase: 'pool_dropped_retrying', sql_preview: sqlPreview, role: 'customer_lookup' }, 'info'); } catch {}
-      try { await p.close(); } catch {}
+      try { logError('customer.sql.query', err, { phase: 'pool_dropped_retrying', sql_preview: sqlPreview, role: 'customer_lookup' }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; pool retry continues regardless
+      try { await p.close(); } catch {} // eslint-disable-line no-empty -- pool is already dead; closing is best-effort cleanup
       pool = null;
       p = await getCustomerSqlPool();
       return await buildRequest().query(sqlText);
     }
-    try { logError('customer.sql.query', err, { sql_preview: sqlPreview, role: 'customer_lookup', sql_code: err.code }); } catch {}
+    try { logError('customer.sql.query', err, { sql_preview: sqlPreview, role: 'customer_lookup', sql_code: err.code }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;
   }
 }
 
 export function resetCustomerSqlPool() {
-  if (pool) { try { pool.close(); } catch {} }
+  if (pool) { try { pool.close(); } catch {} } // eslint-disable-line no-empty -- best-effort close during pool reset
   pool = null;
   poolKey = null;
 }

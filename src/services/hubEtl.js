@@ -42,7 +42,7 @@ async function checkBackupIntegrity(siteId, filePath) {
     resultText = err.message || 'integrity_check_failed';
     needsCorruptRename = true;
   } finally {
-    try { backupDb?.close(); } catch (_) {}
+    try { backupDb?.close(); } catch (e) { console.warn('[hubEtl.integrity_check.close]', { filePath }, e.message); }
     backupDb = null;
   }
 

@@ -591,7 +591,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       res.json(getSecuritySignals());
     } catch (err) {
       console.error('[system.security-signals] failed:', err.message);
-      try { logError('system.security_signals', err); } catch {}
+      try { logError('system.security_signals', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Failed to load security signals' });
     }
   });
@@ -695,7 +695,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         child.stderr.on('data', (d) => { out += d.toString(); });
         child.on('close', () => resolve(out));
         child.on('error', reject);
-        setTimeout(() => { try { child.kill(); } catch {} resolve(out); }, 5000);
+        setTimeout(() => { try { child.kill(); } catch (e) { console.warn('[system.tls_status.kill_sc_query]', e.message); } resolve(out); }, 5000);
       });
       let serviceStatus = 'not_installed';
       if (/STATE\s*:\s*\d+\s+RUNNING/i.test(queryOutput)) serviceStatus = 'running';
@@ -768,7 +768,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
 
       res.json({ ok: true, hostname, message: 'Cert re-issued and Caddy restarted.' });
     } catch (err) {
-      try { logError('system.tls_renew', err, { hostname }); } catch {}
+      try { logError('system.tls_renew', err, { hostname }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log below
       logAudit({
         req, action: 'tls_cert_renew', resourceType: 'system',
         resourceName: hostname || 'unknown',
@@ -834,7 +834,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const probe = await probeHubUrl();
       res.json({ ok: true, probe });
     } catch (err) {
-      try { logError('system.hub_url_update', err); } catch {}
+      try { logError('system.hub_url_update', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: err.message });
     }
   });
@@ -1022,7 +1022,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     autoUpdatePhase = 'verifying';
     const actual = await sha256File(tmpZip);
     if (actual !== manifest.app_zip_sha256.toLowerCase()) {
-      try { fs.unlinkSync(tmpZip); } catch {}
+      try { fs.unlinkSync(tmpZip); } catch (e) { console.warn('[system.autoUpdate.sha_mismatch_cleanup]', { tmpZip }, e.message); }
       return { ok: false, reason: 'app_zip_sha_mismatch' };
     }
     console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1 via Task Scheduler.');
@@ -1158,7 +1158,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       autoUpdatePhase = null;
       autoUpdateStartedAt = null;
       if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch {}
+        try { fs.unlinkSync(tmpPath); } catch (e) { console.warn('[system.autoUpdate.error_cleanup]', { tmpPath }, e.message); }
       }
       return { ok: false, reason: err.message };
     }
@@ -1287,7 +1287,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const dbPath = process.env.DB_PATH || './database/cardoso.db';
       const resolvedDbPath = path.resolve(dbPath);
       const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
-      try { fs.mkdirSync(backupDir, { recursive: true }); } catch {}
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (e) { console.warn('[system.backup.mkdir]', { backupDir }, e.message); }
       const siteId = process.env.SITE_ID || 'site';
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);

@@ -62,7 +62,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   const setHubSetting = (key, value) => {
     try {
       db.prepare(`INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
-    } catch {}
+    } catch (e) { console.warn('[hub.setting_upsert]', { key }, e.message); }
   };
   router.post('/api/hub/pull-backups-now', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
     if (backupPullInProgress) {
@@ -466,7 +466,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_sites
         WHERE 1=1${sitesFilter.sql}
       `).all(...sitesFilter.params);
-    } catch {}
+    } catch (e) { console.warn('[hub.dashboard.sites_query]', e.message); }
     const sites = allSites;
 
     // ── KPI rollup (one query, in-JS pivot) ─────────────────────────────
@@ -1837,7 +1837,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             resourceName: `JTI bundle ${year}-${String(month).padStart(2, '0')}`,
             details: `Bundle stream failed: ${err.message}`, status: 'failure',
           });
-        } catch {}
+        } catch (auditErr) { console.warn('[hub.jti_bundle.audit_failure]', { year, month }, auditErr.message); }
       },
     });
 
@@ -1850,7 +1850,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           resourceName: outcome.filename,
           details: `Downloaded JTI bundle for ${year}-${String(month).padStart(2, '0')} — ${outcome.archives.length} sites: ${outcome.archives.map((a) => a.site_id).join(', ')}`,
         });
-      } catch {}
+      } catch (e) { console.warn('[hub.jti_bundle.audit_success]', { year, month }, e.message); }
       return; // response is streaming; do not write further status/body
     }
 
@@ -1867,7 +1867,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: `Bundle refused (${outcome.code}): ${outcome.message}`,
         status: 'failure',
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.jti_bundle.audit_refused]', { year, month, code: outcome.code }, e.message); }
     res.status(statusCode).json({
       ok: false,
       code: outcome.code,
@@ -2112,12 +2112,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_backup_integrity WHERE site_id = ? GROUP BY filename
       `).all(siteId);
       integrityMap = new Map(rows.map(r => [r.filename, r]));
-    } catch {}
+    } catch (e) { console.warn('[hub.snapshots.integrity_query]', { siteId }, e.message); }
 
     const snapshots = dbFiles.map((dbFile) => {
       const fullDb = path.join(dir, dbFile);
       let dbStat = null;
-      try { dbStat = statSync(fullDb); } catch {}
+      try { dbStat = statSync(fullDb); } catch (e) { if (e.code !== 'ENOENT') console.warn('[hub.snapshots.db_stat]', { fullDb }, e.message); }
       // Match the timestamp suffix to find the companion previews zip.
       // .db filename: cardoso-<siteId>-YYYY-MM-DD-HH-MM-SS.db
       // zip filename: bat-previews-<siteId>-YYYY-MM-DD-HH-MM-SS.zip
@@ -2339,7 +2339,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const stream = createReadStream(filePath);
     stream.on('error', (err) => {
       console.error('[hub.restore-fetch] stream error:', err.message);
-      try { res.destroy(err); } catch {}
+      try { res.destroy(err); } catch (e) { console.warn('[hub.restore_fetch.res_destroy]', e.message); }
     });
     stream.pipe(res);
   });
@@ -2376,7 +2376,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           email_attempted: sanitizeForLog(email),
           ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
-      } catch {}
+      } catch {} // eslint-disable-line no-empty -- logError wrapper; auth_failed warn is best-effort
       return null;
     }
     const ok = await bcrypt.compare(password, user.password_hash);
@@ -2386,7 +2386,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           email_attempted: sanitizeForLog(email),
           ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
-      } catch {}
+      } catch {} // eslint-disable-line no-empty -- logError wrapper; auth_failed warn is best-effort
       return null;
     }
     if (user.role !== 'admin') return null;
@@ -2425,7 +2425,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const snapshots = dbFiles.map((dbFile) => {
         const fullDb = path.join(dir, dbFile);
         let dbStat = null;
-        try { dbStat = statSync(fullDb); } catch {}
+        try { dbStat = statSync(fullDb); } catch (e) { if (e.code !== 'ENOENT') console.warn('[hub.dr.list_snapshots.db_stat]', { fullDb }, e.message); }
         const tsMatch = dbFile.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
         const ts = tsMatch ? tsMatch[1] : null;
         const findCompanion = (list) => (ts ? list.find((f) => f.includes(ts)) : null) || null;
@@ -2462,7 +2462,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         status: 'success',
         userOverride: { email: user.email, full_name: user.full_name },
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.dr.list_sites.audit]', e.message); }
 
     res.json({ sites: result });
   });
@@ -2551,7 +2551,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         },
       });
     } finally {
-      try { snap.close(); } catch {}
+      try { snap.close(); } catch (e) { console.warn('[hub.dr.snapshot_meta.close]', e.message); }
     }
   });
 
@@ -2592,7 +2592,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           status,
           userOverride: { email: user.email, full_name: user.full_name },
         });
-      } catch {}
+      } catch (e) { console.warn('[hub.dr.fetch.audit]', { siteId, filename, status }, e.message); }
     };
     res.on('finish', () => writeAudit('success'));
     res.on('close', () => { if (!res.writableFinished) writeAudit('failure'); });
@@ -2617,9 +2617,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     stream.on('data', (chunk) => { bytesStreamed += chunk.length; });
     stream.on('error', (err) => {
       console.error('[hub.dr.fetch] stream error:', err.message);
-      try { logError('hub.dr.fetch', err, { siteId, filename }); } catch {}
+      try { logError('hub.dr.fetch', err, { siteId, filename }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log
       writeAudit('failure', { error: err.message });
-      try { res.destroy(err); } catch {}
+      try { res.destroy(err); } catch (e) { console.warn('[hub.dr.fetch.res_destroy]', { siteId, filename }, e.message); }
     });
     stream.pipe(res);
   });
@@ -2659,7 +2659,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         status: 'success',
         userOverride: { email: user.email, full_name: user.full_name },
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.dr.site_url_update.audit]', { siteId: site.id }, e.message); }
 
     res.json({ ok: true, site_id: site.id, old_url: oldUrl, new_url });
   });
@@ -3064,7 +3064,7 @@ export function createReceiveUsersRouter() {
     } catch (err) {
       // Clean up staging on download failure — don't leave orphaned
       // partial files on disk.
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (cleanupErr) { console.warn('[site.restore.staging_cleanup_after_download_fail]', { stagingDir }, cleanupErr.message); }
       return res.status(502).json({
         ok: false,
         error: `Failed to download restore artifacts from hub: ${err.message}`,
@@ -3077,7 +3077,7 @@ export function createReceiveUsersRouter() {
     // pick up. We DON'T await it — the script runs detached and we'd
     // be killed mid-flight when the service stops.
     if (process.platform !== 'win32') {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (e) { console.warn('[site.restore.staging_cleanup_non_windows]', { stagingDir }, e.message); }
       return res.status(400).json({
         ok: false,
         error: 'Restore is only supported on Windows site installs (apply-restore.ps1 is PowerShell).',
@@ -3086,7 +3086,7 @@ export function createReceiveUsersRouter() {
 
     const applyScript = pathModule.join(appDir, 'scripts', 'apply-restore.ps1');
     if (!fsModule.existsSync(applyScript)) {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (e) { console.warn('[site.restore.staging_cleanup_no_script]', { stagingDir, applyScript }, e.message); }
       return res.status(500).json({
         ok: false,
         error: `Restore script missing at ${applyScript} — site needs to upgrade to a release that ships the restore mechanism.`,
@@ -3119,8 +3119,8 @@ export function createReceiveUsersRouter() {
       const taskName = `CardosoRestore-${restore_id}`;
       await launchViaTaskScheduler(taskName, wrapper);
     } catch (err) {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
-      try { logError('site.restore.task_scheduler', err, { restore_id }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (cleanupErr) { console.warn('[site.restore.staging_cleanup_after_task_fail]', { stagingDir }, cleanupErr.message); }
+      try { logError('site.restore.task_scheduler', err, { restore_id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       return res.status(500).json({
         ok: false,
         error: `Failed to schedule apply-restore task: ${err.message}`,

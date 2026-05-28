@@ -502,7 +502,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     } catch (err) {
       const friendly = describeSqlError(err, { op: 'invoice lookup' });
       console.error('[customer-by-invoice/sage] error:', friendly);
-      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice, friendly }); } catch {}
+      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
       res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });
@@ -576,7 +576,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     } catch (err) {
       const friendly = describeSqlError(err, { op: 'invoice amount lookup' });
       console.error('[customer-by-invoice-amount/sage] error:', friendly);
-      try { logError('customer.amount_lookup', err, { amount: req.query.amount, friendly }); } catch {}
+      try { logError('customer.amount_lookup', err, { amount: req.query.amount, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
       res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });

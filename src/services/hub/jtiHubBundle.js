@@ -225,12 +225,12 @@ export function streamArchiveBundle({ db, sites, periodYear, periodMonth, res, o
 
   const zip = new ZipArchive({ zlib: { level: 9 } });
   zip.on('error', (err) => {
-    try { if (typeof onError === 'function') onError(err); } catch {}
+    try { if (typeof onError === 'function') onError(err); } catch (e) { console.warn('[jti.bundle.zip_error_cb]', e.message); }
     // res is already a streaming response; the only thing we can do
     // here is destroy the underlying socket so the client sees the
     // download as failed instead of receiving a half-truncated ZIP
     // that decompresses to corrupt files.
-    try { res.destroy(err); } catch {}
+    try { res.destroy(err); } catch (e) { console.warn('[jti.bundle.res_destroy_on_zip_error]', e.message); }
   });
   zip.pipe(res);
 
@@ -283,8 +283,8 @@ export function streamArchiveBundle({ db, sites, periodYear, periodMonth, res, o
   }
 
   zip.finalize().catch((err) => {
-    try { if (typeof onError === 'function') onError(err); } catch {}
-    try { res.destroy(err); } catch {}
+    try { if (typeof onError === 'function') onError(err); } catch (e) { console.warn('[jti.bundle.finalize_error_cb]', e.message); }
+    try { res.destroy(err); } catch (e) { console.warn('[jti.bundle.res_destroy_on_finalize_error]', e.message); }
   });
 
   return {

@@ -24,7 +24,8 @@
     "src/lib/useColorScheme.js",
     "src/lib/useColumnWidths.js",
     "src/lib/utils.js",
-    "src/utils/index.ts"
+    "src/utils/index.ts",
+    "src/api/apiClient.js"
   ],
   "exclude": ["node_modules", "dist"]
 }

@@ -625,7 +625,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
       // Abort any in-flight request — its result would land on an empty
       // input box and repopulate stale suggestions.
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort of stale typeahead fetch; controller may already be settled
         abortRef.current = null;
       }
       setSuggestions([]);
@@ -643,7 +643,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
     // controller stays attached to `abortRef` so a later cancel target
     // (empty input, unmount) can find it.
     if (abortRef.current) {
-      try { abortRef.current.abort(); } catch {}
+      try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort of previous in-flight typeahead fetch
     }
     const controller = new AbortController();
     abortRef.current = controller;
@@ -694,7 +694,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
     // repopulate the just-cleared box.
     if (!query.trim()) {
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort on empty input; controller may already be settled
         abortRef.current = null;
       }
       setSuggestions([]);
@@ -718,7 +718,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
   useEffect(() => {
     return () => {
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort on unmount; controller may already be settled
         abortRef.current = null;
       }
     };

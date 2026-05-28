@@ -367,7 +367,7 @@ async function generatePdf({ doc, autoTable, depot, priceList, rows, commodityLa
   const drawLetterhead = () => {
     // Logo (or text fallback)
     if (logoDataUrl) {
-      try { doc.addImage(logoDataUrl, "PNG", M.left, M.top, 60, 24); } catch {}
+      try { doc.addImage(logoDataUrl, "PNG", M.left, M.top, 60, 24); } catch (e) { console.warn('[priceList.pdf.logo]', e.message); }
     } else {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(28);

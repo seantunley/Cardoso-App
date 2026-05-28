@@ -158,14 +158,14 @@ export async function pushArchiveToHub({
     recordFailure(db, archive, msg);
     if (archive.hub_push_attempts < VERBOSE_LOG_ATTEMPT_CAP) {
       console.error(`[jti-push] archive #${archive.id} → hub: ${msg}`);
-      try { logError('jti.hub_push', err, { archiveId: archive.id, url: targetUrl }); } catch {}
+      try { logError('jti.hub_push', err, { archiveId: archive.id, url: targetUrl }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to console and recordFailure above
     }
     return { archiveId: archive.id, status: 'failed', error: msg };
   }
 
   if (!response.ok) {
     let body = '';
-    try { body = await response.text(); } catch {}
+    try { body = await response.text(); } catch {} // eslint-disable-line no-empty -- response body parse fallback; empty body is the documented contract
     const msg = `Hub returned HTTP ${response.status}${body ? `: ${truncate(body, 300)}` : ''}`;
     recordFailure(db, archive, msg);
     if (archive.hub_push_attempts < VERBOSE_LOG_ATTEMPT_CAP) {

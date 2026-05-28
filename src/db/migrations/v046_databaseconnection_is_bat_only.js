@@ -19,6 +19,6 @@ export default {
           const row = db.prepare("SELECT value FROM bat_settings WHERE key = 'sage_connection_id'").get();
           const id = row?.value ? parseInt(row.value, 10) : null;
           if (id) db.prepare("UPDATE databaseconnection SET is_bat_only = 1 WHERE id = ?").run(id);
-        } catch {}
+        } catch (e) { console.error('[migration.v046.auto_mark_bat_only]', e.message); }
       },
     };

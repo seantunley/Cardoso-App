@@ -93,6 +93,6 @@ export default {
               END
             `);
           }
-        } catch {}
+        } catch (e) { console.error('[migration.v047.hub_records_mirror]', e.message); }
       },
     };

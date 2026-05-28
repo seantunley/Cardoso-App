@@ -124,7 +124,7 @@ export function pruneOldRows() {
         .run(cutoff);
       summary.push({ table, deleted: result.changes, kept_days: keepDays });
     } catch (err) {
-      try { logError(`retention.${table}`, err, { table, kept_days: keepDays }); } catch {}
+      try { logError(`retention.${table}`, err, { table, kept_days: keepDays }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still push the error into the summary below
       summary.push({ table, error: err instanceof Error ? err.message : String(err), kept_days: keepDays });
     }
   }

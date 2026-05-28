@@ -75,7 +75,7 @@ export default function HubJti() {
       const r = await fetch(`/api/hub/jti/archives/${id}/download`, { credentials: 'include' });
       if (!r.ok) {
         let message = `HTTP ${r.status}`;
-        try { message = (await r.json()).error || message; } catch {}
+        try { message = (await r.json()).error || message; } catch {} // eslint-disable-line no-empty -- error-body parse fallback; default HTTP message is the documented contract
         throw new Error(message);
       }
       const blob = await r.blob();

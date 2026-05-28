@@ -101,7 +101,7 @@ function PerReconResetTool({ embedded = false }) {
       .then(async (r) => {
         if (!r.ok) {
           let detail = `HTTP ${r.status}`;
-          try { detail = (await r.json()).error || detail; } catch {}
+          try { detail = (await r.json()).error || detail; } catch {} // eslint-disable-line no-empty -- error-body parse fallback; default HTTP detail is the documented contract
           throw new Error(detail);
         }
         return r.json();

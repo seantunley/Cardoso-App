@@ -144,7 +144,7 @@ export async function verifyLatestBackup() {
     console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(counts)})`);
     return { ok: true, file: latest.name, ageHours, counts };
   } finally {
-    try { backupDb.close(); } catch {}
+    try { backupDb.close(); } catch (e) { console.warn('[scheduler.backup_verify.close]', e.message); }
   }
 }
 
@@ -258,13 +258,13 @@ export async function runLocalBackup() {
     const parsedKeep = parseInt(process.env.BACKUP_KEEP_COUNT, 10);
     const keep = Number.isFinite(parsedKeep) && parsedKeep >= 0 ? parsedKeep : 6;
     files.slice(keep).forEach((f) => {
-      try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
+      try { unlinkSync(path.join(backupDir, f.name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: f.name }, e.message); }
       // Also drop the sibling .previews/ snapshot directory if present.
       // Hardlinked files keep the underlying inode alive as long as any
       // other snapshot (or the live previews dir) still references them,
       // so this rm only frees disk if every other reference is also gone.
       const siblingPreviews = path.join(backupDir, f.name.replace(/\.db$/, '.previews'));
-      try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (_) {}
+      try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (e) { console.warn('[scheduler.backup.prune_previews]', { siblingPreviews }, e.message); }
     });
     if (files.length > keep) {
       console.log(`[backup] Pruned ${files.length - keep} old backup(s) and sibling preview snapshots, keeping ${keep}`);
@@ -355,7 +355,7 @@ async function runBatIntegritySweep() {
         failed_check_ids: ['integrity_check_crashed'],
         error: err?.message || String(err),
       });
-      try { logError('bat.integrity.crash', err, { reconciliation_id: r.id }); } catch {}
+      try { logError('bat.integrity.crash', err, { reconciliation_id: r.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already pushed to failures[] above
     }
   }
   const summary = { total: recons.length, passing, failing, skipped, failures };
@@ -381,7 +381,7 @@ function track(name, fn, contextFn, opts) {
     // since those usually have their own dedicated logging upstream
     // (e.g. credit-logic-sync writes to credit_logic_state.last_error).
     console.error(`[${name}] failed:`, err.message);
-    try { logError(`scheduler.${name}`, err); } catch {}
+    try { logError(`scheduler.${name}`, err); } catch {} // eslint-disable-line no-empty -- logError wrapper inside scheduler tracker; mirror failure already logged to console above
   });
 }
 
@@ -514,10 +514,10 @@ export function startSchedulers() {
               { url: probe.url, status: probe.status },
               'warn',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; probe failure already recorded via probe.error/status
         }
       } catch (err) {
-        try { logError('hub.probe', err, { phase: 'unhandled' }); } catch {}
+        try { logError('hub.probe', err, { phase: 'unhandled' }); } catch {} // eslint-disable-line no-empty -- logError wrapper inside scheduler boot; cannot recurse
       }
     }, 5000);
 
@@ -776,22 +776,22 @@ export function gracefulShutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  for (const task of cronTasks) { try { task.stop(); } catch {} }
-  for (const interval of intervals) { try { clearInterval(interval); } catch {} }
+  for (const task of cronTasks) { try { task.stop(); } catch (e) { console.warn('[scheduler.shutdown.task_stop]', e.message); } }
+  for (const interval of intervals) { try { clearInterval(interval); } catch (e) { console.warn('[scheduler.shutdown.clear_interval]', e.message); } }
 
   if (serverRef) {
     serverRef.close(() => {
-      try { db.exec('PRAGMA optimize'); } catch {}
-      try { db.close(); } catch {}
+      try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[scheduler.shutdown.pragma_optimize]', e.message); }
+      try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.db_close]', e.message); }
       process.exit(0);
     });
 
     setTimeout(() => {
-      try { db.close(); } catch {}
+      try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.forced_db_close]', e.message); }
       process.exit(1);
     }, 5000);
   } else {
-    try { db.close(); } catch {}
+    try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.no_server_db_close]', e.message); }
     process.exit(0);
   }
 }

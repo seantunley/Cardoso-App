@@ -151,7 +151,7 @@ export function archiveJtiExport({ db, archive, archiveRoot = ARCHIVE_ROOT }) {
     return select.get(id);
   } catch (err) {
     if (writtenFilePath) {
-      try { fs.unlinkSync(writtenFilePath); } catch {}
+      try { fs.unlinkSync(writtenFilePath); } catch (e) { console.warn('[jti.archive.cleanup_unlink]', { writtenFilePath }, e.message); }
     }
     throw err;
   }

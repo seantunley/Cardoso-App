@@ -24,7 +24,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
         parsedLocalFields = typeof record.local_fields === "string"
           ? JSON.parse(record.local_fields || "{}")
           : record.local_fields || {};
-      } catch {}
+      } catch {} // eslint-disable-line no-empty -- JSON parse fallback; empty object is the documented contract
 
       setFormData({
         customer_name: record.customer_name || "",
@@ -84,7 +84,7 @@ export default function RecordEditModal({ open, onClose, record, onSave }) {
       existingLocalFields = typeof record.local_fields === "string"
         ? JSON.parse(record.local_fields || "{}")
         : record.local_fields || {};
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- JSON parse fallback; empty object is the documented contract
 
     const updatedLocalFields = { ...existingLocalFields, ...dynamicChanges };
 

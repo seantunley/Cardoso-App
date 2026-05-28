@@ -285,7 +285,7 @@ if (IS_PRODUCTION) {
 startSchedulers();
 recoverAbandonedSyncs();
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, (...args) => {
-  try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {}
+  try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; shutdown continues regardless
   gracefulShutdown(...args);
 }));
 // Process-level safety nets — anything that escapes a callback or promise
@@ -293,11 +293,11 @@ recoverAbandonedSyncs();
 // "uncaught error at Y".
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT]', err.message);
-  try { logError('system.uncaught', err); } catch {}
+  try { logError('system.uncaught', err); } catch {} // eslint-disable-line no-empty -- logError wrapper inside process-level safety net; cannot recurse here
 });
 process.on('unhandledRejection', (err) => {
   console.error('[UNHANDLED]', err?.message || err);
-  try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {}
+  try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {} // eslint-disable-line no-empty -- logError wrapper inside process-level safety net; cannot recurse here
 });
 // BIND_ADDRESS controls which network interface the server listens on.
 //   '0.0.0.0' (default) — all interfaces; LAN clients can reach the app
@@ -325,12 +325,12 @@ ensureSeedUsers().then(() => {
         node: process.version,
         env: process.env.NODE_ENV || 'development',
       }, 'info');
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; boot continues regardless
   }));
   // Resume any paused BAT OCR extractions from a previous run
   resumeExtractionWorker();
 }).catch((error) => {
   console.error('Failed to seed users:', error);
-  try { logError('system.boot', error, { phase: 'ensureSeedUsers' }); } catch {}
+  try { logError('system.boot', error, { phase: 'ensureSeedUsers' }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still exit(1) below
   process.exit(1);
 });

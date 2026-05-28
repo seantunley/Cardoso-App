@@ -114,7 +114,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       });
     } catch (error) {
       console.error(`Login error (phase=${phase}):`, error);
-      try { logError('auth.login', error, { email: req.body?.email, phase }); } catch {}
+      try { logError('auth.login', error, { email: req.body?.email, phase }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: `Login failed during ${phase}` });
     }
   });
@@ -180,7 +180,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       res.json({ success: true, user: withSessionExpiry(req, sanitizeUser(user)) });
     } catch (err) {
       console.error('[hub-token-login] error:', err);
-      try { logError('auth.hub_token_login', err); } catch {}
+      try { logError('auth.hub_token_login', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Hub login failed' });
     }
   });
@@ -260,7 +260,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       req.session.cookie.maxAge = MAX_AGE_MS;
       req.session.save((err) => {
         if (err) {
-          try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+          try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
           return res.status(500).json({ error: 'Failed to extend session' });
         }
         const expires = req.session?.cookie?.expires
@@ -269,7 +269,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         res.json({ success: true, session_expires_at: expires });
       });
     } catch (err) {
-      try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+      try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Failed to extend session' });
     }
   });

@@ -637,7 +637,7 @@ export default function CustomerLookup({
         try {
           const ch = typeof e.changes === 'string' ? JSON.parse(e.changes) : (e.changes || {});
           new_value = ch.flag_color || ch.to || null;
-        } catch {}
+        } catch {} // eslint-disable-line no-empty -- JSON parse fallback; null new_value is the documented contract
         return { action: 'flag_changed', new_value };
       });
     const activeLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;

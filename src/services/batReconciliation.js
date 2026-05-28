@@ -150,7 +150,7 @@ export async function getSagePool() {
   // Re-open pool if the config source changed under us, or if the cached pool
   // is no longer connected (idle timeout, network blip via Tailscale, etc.)
   if (pool && (poolConfigKey !== loaded.key || pool.connected === false || pool.connecting === false && !pool.connected)) {
-    try { await pool.close(); } catch {}
+    try { await pool.close(); } catch {} // eslint-disable-line no-empty -- best-effort close of stale pool; we're discarding it anyway
     pool = null;
   }
 
@@ -162,7 +162,7 @@ export async function getSagePool() {
     // A Sage pool failure stalls every BAT operation that needs Sage data
     // (week-status, credit notes, dashboards). Surface it in System Log so
     // a remote operator doesn't have to ssh in to diagnose.
-    try { logError('bat.sage.pool', err, { source: loaded.source }); } catch {}
+    try { logError('bat.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;
   }
   poolConfigKey = loaded.key;
@@ -177,20 +177,20 @@ async function runSageQuery(sqlText) {
   } catch (err) {
     if (/Connection is closed|ECONNRESET|ETIMEDOUT|EPIPE/i.test(err.message || '')) {
       console.log('[bat-sage] Pool dropped, reopening and retrying once');
-      try { logError('bat.sage.query', err, { phase: 'pool_dropped_retrying' }, 'info'); } catch {}
-      try { await p.close(); } catch {}
+      try { logError('bat.sage.query', err, { phase: 'pool_dropped_retrying' }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; retry continues regardless
+      try { await p.close(); } catch {} // eslint-disable-line no-empty -- pool is already dead; closing is best-effort cleanup
       pool = null;
       p = await getSagePool();
       return await p.request().query(sqlText);
     }
-    try { logError('bat.sage.query', err); } catch {}
+    try { logError('bat.sage.query', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;
   }
 }
 
 export async function resetSagePool() {
   if (pool) {
-    try { await pool.close(); } catch {}
+    try { await pool.close(); } catch {} // eslint-disable-line no-empty -- best-effort close during pool reset
   }
   pool = null;
   poolConfigKey = null;
@@ -238,7 +238,7 @@ export async function probeSageHealth() {
     // Don't logError on every probe failure — that floods the System Log
     // when Sage is offline. Log only the FIRST failure of a streak.
     if (_sageHealthState.consecutiveFailures === 1) {
-      try { logError('bat.sage.health_probe', err, { phase: 'first_failure' }, 'warn'); } catch {}
+      try { logError('bat.sage.health_probe', err, { phase: 'first_failure' }, 'warn'); } catch {} // eslint-disable-line no-empty -- logError wrapper; probe state tracking continues regardless
     }
     // Reset the cached pool on every probe failure so the next probe
     // opens a fresh connection from scratch. Without this, the
@@ -250,7 +250,7 @@ export async function probeSageHealth() {
     // Connection" in Settings to nuke the cached pool. Self-heal here
     // removes that workaround: the next probe (60s later, or the next
     // BAT op, whichever comes first) opens a brand-new pool.
-    try { await resetSagePool(); } catch {}
+    try { await resetSagePool(); } catch (e) { console.warn('[bat.sage.health_probe.reset_pool]', e.message); }
     return _sageHealthState;
   }
 }
@@ -670,7 +670,7 @@ function setSageCacheMeta(key, value) {
   } catch (e) {
     // Persist as System Log entry rather than just stderr — operator
     // needs to see this when triaging "why is the cache always stale".
-    try { logError('bat.sage_cache.meta_write', e, { key }); } catch {}
+    try { logError('bat.sage_cache.meta_write', e, { key }); } catch {} // eslint-disable-line no-empty -- logError wrapper; cache meta write already failed silently above
   }
 }
 
@@ -1131,7 +1131,7 @@ export function getReconciliation(id) {
       recon.sage_pricing  = cached.pricing;
       recon.sage_total    = cached.total;
     }
-  } catch {}
+  } catch (e) { console.warn('[bat.recon.load_sage_cache]', { reconId: recon.id, year: recon.year, week: recon.week_number }, e.message); }
 
   // Fee comparison
   recon.feeComparison = buildFeeComparison(recon);
@@ -1185,7 +1185,7 @@ export function getReconciliation(id) {
               },
               'warn',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; integrity check result already stored on recon
         } else if (prevKey !== undefined && prevKey !== null) {
           // Recovered from a known-failing state — leave an info
           // breadcrumb so the operator can correlate "when did the
@@ -1197,7 +1197,7 @@ export function getReconciliation(id) {
               { reconciliation_id: id, week_number: recon.week_number, year: recon.year, previously_failed_check_ids: prevKey.split(',') },
               'info',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; recovery breadcrumb is best-effort
         }
       }
     }
@@ -1213,7 +1213,7 @@ export function getReconciliation(id) {
     const crashKey = `__crash__:${err?.message || 'unknown'}`;
     if (_integrityLastState.get(id) !== crashKey) {
       _integrityLastState.set(id, crashKey);
-      try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {}
+      try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; crash recorded as integrity_check_crashed above
     }
   }
 
@@ -1788,8 +1788,8 @@ export function clearOcrHalt({ reconId = null } = {}) {
   }
   setOcrPaused(false);
   let resumed = false;
-  try { resumeExtractionWorker(); resumed = true; } catch {}
-  try { logError('bat.ocr.halt_cleared', new Error('Operator cleared regex auto-halt'), { reconciliation_id: reconId, resumed }, 'info'); } catch {}
+  try { resumeExtractionWorker(); resumed = true; } catch (e) { console.warn('[bat.ocr.halt_cleared.resume_worker]', { reconId }, e.message); }
+  try { logError('bat.ocr.halt_cleared', new Error('Operator cleared regex auto-halt'), { reconciliation_id: reconId, resumed }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; halt-clear continues regardless
   return { cleared: true, resumed };
 }
 
@@ -2029,7 +2029,7 @@ async function runGoogleVisionRetry(reconId, rows) {
         { reconciliation_id: reconId, row_count: rows?.length || 0 },
         'warn',
       );
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; recordReconciliationError still fires below
     recordReconciliationError(reconId, msg);
     return;
   }
@@ -2047,7 +2047,7 @@ async function runGoogleVisionRetry(reconId, rows) {
         reconciliation_id: reconId,
         row_count: rows?.length || 0,
       });
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; recordReconciliationError still fires below
     recordReconciliationError(reconId, `Google Vision retry crashed: ${err.message}`);
   }
 }
@@ -2182,7 +2182,7 @@ export function setOcrPaused(v) {
   }
   try {
     logError('bat-ocr.pause', new Error(next ? 'OCR worker paused' : 'OCR worker resumed'), { paused: next }, 'info');
-  } catch {}
+  } catch {} // eslint-disable-line no-empty -- logError wrapper; pause state already mutated above
 }
 
 function startExtractionWorker(reconId) {
@@ -2196,7 +2196,7 @@ function startExtractionWorker(reconId) {
   }
   workerRunning = true;
   workerReconId = reconId;
-  try { logError('bat-ocr.worker', new Error(`Worker started for reconciliation ${reconId}`), { reconciliation_id: reconId }, 'info'); } catch {}
+  try { logError('bat-ocr.worker', new Error(`Worker started for reconciliation ${reconId}`), { reconciliation_id: reconId }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; worker boot info breadcrumb is best-effort
 
   processQueue(reconId).catch(err => {
     // logError mirrors to stderr internally so the previous
@@ -2217,7 +2217,7 @@ function startExtractionWorker(reconId) {
         if (pendingRow?.c > 0) stopReason = `stopped with ${pendingRow.c} pending`;
       }
       logError('bat-ocr.worker', new Error(`Worker stopped (${stopReason}) for reconciliation ${reconId}`), { reconciliation_id: reconId, stop_reason: stopReason }, 'info');
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; worker stop breadcrumb is best-effort
     workerRunning = false;
     workerReconId = null;
 
@@ -2253,11 +2253,11 @@ function startExtractionWorker(reconId) {
               { from: reconId, to: nextPending.reconciliation_id, phase: 'auto_handoff' },
               'info',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; auto-handoff still proceeds via setImmediate below
           setImmediate(() => startExtractionWorker(nextPending.reconciliation_id));
         }
       } catch (err) {
-        try { logError('bat-ocr.worker', err, { phase: 'auto_handoff', from: reconId }); } catch {}
+        try { logError('bat-ocr.worker', err, { phase: 'auto_handoff', from: reconId }); } catch {} // eslint-disable-line no-empty -- logError wrapper inside finally; cannot recurse
       }
     }
   });
@@ -2339,7 +2339,7 @@ async function runOcrSelfTest() {
         { ready_in_ms: elapsedMs, platform: process.platform, node_version: process.version },
         'info',
       );
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; self-test info breadcrumb is best-effort
   } catch (err) {
     const elapsedMs = Date.now() - startedAt;
     try {
@@ -2353,10 +2353,10 @@ async function runOcrSelfTest() {
           hint: 'OCR worker thread can not spawn or initialise. Native module corrupt, AV-quarantined, or Node version mismatch.',
         },
       );
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; self-test failure already in err
   } finally {
     if (lane) {
-      try { await lane.terminate(); } catch {}
+      try { await lane.terminate(); } catch (e) { console.warn('[bat.ocr.self_test.lane_terminate]', e.message); }
     }
   }
 }
@@ -2517,7 +2517,7 @@ class OcrLane {
       if (msg.type === 'progress') {
         const slot = this.pending.get(msg.id);
         if (slot && slot.onProgress) {
-          try { slot.onProgress(msg.stage); } catch {}
+          try { slot.onProgress(msg.stage); } catch (e) { console.warn('[bat.ocr.lane.onProgress_cb]', { msgId: msg.id, stage: msg.stage }, e.message); }
         }
         return;
       }
@@ -2546,7 +2546,7 @@ class OcrLane {
               // stream with intentional skips.
               cooldown: !!msg.cooldown,
             });
-          } catch {}
+          } catch (e) { console.warn('[bat.ocr.lane.onEngineError_cb]', { msgId: msg.id, engine: msg.engine }, e.message); }
         }
         return;
       }
@@ -2569,7 +2569,7 @@ class OcrLane {
               textLength: msg.text_length,
               textPreview: msg.text_preview,
             });
-          } catch {}
+          } catch (e) { console.warn('[bat.ocr.lane.onEngineNoMatch_cb]', { msgId: msg.id, engine: msg.engine }, e.message); }
         }
         return;
       }
@@ -2605,7 +2605,7 @@ class OcrLane {
       this.pending.clear();
     };
     this.worker.on('error', (err) => {
-      try { logError('bat.ocr.worker_thread', err, { phase: 'error' }); } catch {}
+      try { logError('bat.ocr.worker_thread', err, { phase: 'error' }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failAll still fires
       failAll(err);
     });
     this.worker.on('exit', (code) => {
@@ -2613,7 +2613,7 @@ class OcrLane {
       // terminate() leaves slots stranded otherwise.
       const err = new Error(`OCR worker exited (code=${code})`);
       if (code !== 0) {
-        try { logError('bat.ocr.worker_thread', err, { phase: 'exit', code }); } catch {}
+        try { logError('bat.ocr.worker_thread', err, { phase: 'exit', code }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failAll still fires
       }
       failAll(err);
     });
@@ -2640,7 +2640,7 @@ class OcrLane {
           // extraction inside may still finish. We mark this lane dead so it
           // gets recreated rather than reused with a stuck call.
           this.dead = true;
-          try { this.worker.terminate(); } catch {}
+          try { this.worker.terminate(); } catch (e) { console.warn('[bat.ocr.lane.timeout_terminate]', e.message); }
           // Same structured shape as the worker-side timeouts, so
           // classification works identically whether the timeout fired
           // inside the worker (worker.code='OCR_TIMEOUT') or because
@@ -2671,7 +2671,7 @@ class OcrLane {
   }
 
   async terminate() {
-    try { this.worker.postMessage({ type: 'shutdown' }); } catch {}
+    try { this.worker.postMessage({ type: 'shutdown' }); } catch (e) { console.warn('[bat.ocr.lane.shutdown_post]', e.message); }
     // Give the worker a moment to flush its Tesseract handle, then force-kill.
     await new Promise(r => setTimeout(r, 500));
     // Race Node's worker.terminate() against a 3s hard cap.
@@ -2741,7 +2741,7 @@ function getDynamicPoisonInvoices(reconId) {
     // shape changed unexpectedly.
     try {
       logError('bat.ocr.poison_query_failed', err, { reconciliation_id: reconId });
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; falling back to empty blacklist
     return [];
   }
 }
@@ -2907,7 +2907,7 @@ async function processQueue(reconId) {
               { reconciliation_id: reconId, attempt, max_attempts: MAX_ATTEMPTS, context: contextReason },
               'info',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; lane recovery success continues regardless
         }
         return true;
       } catch (e) {
@@ -2924,7 +2924,7 @@ async function processQueue(reconId) {
               { reconciliation_id: reconId, attempt, max_attempts: MAX_ATTEMPTS, retry_in_ms: backoffMs, context: contextReason },
               'warn',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; backoff retry still proceeds
           await new Promise((r) => setTimeout(r, backoffMs));
         }
       }
@@ -2936,18 +2936,18 @@ async function processQueue(reconId) {
         lastErr,
         { reconciliation_id: reconId, attempts_exhausted: MAX_ATTEMPTS, context: contextReason },
       );
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; reconciliation error still recorded below
     try {
       recordReconciliationError(
         reconId,
         `OCR lane crashed after ${MAX_ATTEMPTS} retries: ${lastErr?.message || 'unknown'}`,
       );
-    } catch {}
+    } catch (e) { console.warn('[bat.ocr.lane_recreate.record_recon_error]', { reconId }, e.message); }
     return false;
   }
 
   async function recycleLane(lane, reason) {
-    try { await lane.worker.terminate(); } catch {}
+    try { await lane.worker.terminate(); } catch (e) { console.warn('[bat.ocr.recycle_lane.terminate]', { reconId, reason }, e.message); }
     // ONLY the worker recreation goes inside the try/catch that decides
     // whether the lane retires. Observability (`logError`) is wrapped in
     // its own try/catch so a transient error_log write failure can't
@@ -2972,7 +2972,7 @@ async function processQueue(reconId) {
         },
         'info',
       );
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; recycle success continues regardless
     return true;
   }
 
@@ -2997,7 +2997,7 @@ async function processQueue(reconId) {
             { reconciliation_id: reconId, extraction_id: row.id, store_name: row.store_name, elapsed_seconds: Math.floor(elapsed / 1000) },
             'info',
           );
-        } catch {}
+        } catch {} // eslint-disable-line no-empty -- logError wrapper; slow-row info breadcrumb is best-effort
       }
 
       // Backstop watchdog. The lane's internal PDF_TIMEOUT (120s) should
@@ -3025,8 +3025,8 @@ async function processQueue(reconId) {
               lane_dead_before: !!row.lane?.worker?.dead,
             },
           );
-        } catch {}
-        try { row.lane?.worker?.terminate(); } catch {}
+        } catch {} // eslint-disable-line no-empty -- logError wrapper; we still attempt to force-terminate below
+        try { row.lane?.worker?.terminate(); } catch (e) { console.warn('[bat.ocr.watchdog_kill.terminate]', { reconId, rowId: row.id }, e.message); }
       }
     }
   }, 30_000);
@@ -3100,7 +3100,7 @@ async function processQueue(reconId) {
             },
             'error',
           );
-        } catch {}
+        } catch {} // eslint-disable-line no-empty -- logError wrapper inside hard-exit gate; process.exit is the load-bearing action below
         // Give logError + downstream alert eval a moment to flush. The
         // sync better-sqlite3 INSERT inside logError lands immediately,
         // but we want any async observers (SSE listeners, alert engine)
@@ -3214,7 +3214,7 @@ async function processQueue(reconId) {
               'error',
             );
           } catch (e) { console.error('[bat-ocr.extract_row]', { reconId, phase: 'regex_streak_halt_log', extractionId: o.extraction_id }, e.message); }
-          try { recordReconciliationError(reconId, haltMsg); } catch {}
+          try { recordReconciliationError(reconId, haltMsg); } catch (e) { console.warn('[bat.ocr.regex_streak_halt.record_recon_error]', { reconId }, e.message); }
           // Reset so a future resume gets a fresh window.
           cascadeExhaustedStreak = 0;
         }
@@ -3250,7 +3250,7 @@ async function processQueue(reconId) {
         try {
           updateExtraction.run(null, 'failed', null, skipMsg.slice(0, 1000), next.id);
         } catch (writeErr) {
-          try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: 'wedged-url skip' }); } catch {}
+          try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: 'wedged-url skip' }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failed update is already in writeErr
         }
         try {
           logError(
@@ -3363,7 +3363,7 @@ async function processQueue(reconId) {
                     },
                   );
                 }
-              } catch {}
+              } catch {} // eslint-disable-line no-empty -- logError wrapper inside engine_error cb; cascade continues
             },
             // Engine returned text but produced no usable invoice. The
             // text_preview field shows the first 200-300 chars so an
@@ -3388,7 +3388,7 @@ async function processQueue(reconId) {
                   },
                   'info',
                 );
-              } catch {}
+              } catch {} // eslint-disable-line no-empty -- logError wrapper inside engine_no_match cb; cascade continues
             },
           );
           const invoiceNumber = result?.invoice ?? null;
@@ -3423,7 +3423,7 @@ async function processQueue(reconId) {
                 },
                 'info',
               );
-            } catch {}
+            } catch {} // eslint-disable-line no-empty -- logError wrapper; match success already persisted via updateExtraction above
           } else {
             updateExtraction.run(null, 'not_found', previewPath, engineError, next.id);
             console.log(`[bat-ocr] id=${next.id} — not found${engineError ? ` (engine issue: ${engineError})` : ''}${traceSource ? ` [reason: ${traceSource}]` : ''}`);
@@ -3464,7 +3464,7 @@ async function processQueue(reconId) {
               lane_dead: !!lane.worker?.dead,
               last_stage: stuckStage,
             });
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; row failure already in err and console above
           // Pause-aware row handling. If the operator paused mid-run,
           // in-flight rows whose extract is racing toward an extract_total
           // timeout aren't really "broken" — the user just wanted to stop.
@@ -3505,14 +3505,14 @@ async function processQueue(reconId) {
             try {
               const candidate = path.join(previewDir, `${next.id}.jpg`);
               if (fs.existsSync(candidate)) salvagedPreview = `/api/bat/preview/${next.id}.jpg`;
-            } catch {}
+            } catch (e) { console.warn('[bat.ocr.salvage_preview_check]', { rowId: next.id }, e.message); }
             try {
               updateExtraction.run(null, 'failed', salvagedPreview, String(err.message || 'Unknown error').slice(0, 1000), next.id);
             } catch (writeErr) {
               // If the row UPDATE itself fails, we MUST surface that — otherwise
               // the lane silently fails to mark the row 'failed' and processQueue
               // never advances.
-              try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {}
+              try { logError('bat.ocr.row_update', writeErr, { extraction_id: next.id, original_err: err.message }); } catch {} // eslint-disable-line no-empty -- logError wrapper; row-write failure is now lost-only (already unrecoverable)
             }
             recordReconciliationError(reconId, `Extraction id=${next.id}: ${err.message}`);
             // 'noop' so the in-order drain pointer advances. An exception
@@ -3565,7 +3565,7 @@ async function processQueue(reconId) {
                   { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
                   'warn',
                 );
-              } catch {}
+              } catch {} // eslint-disable-line no-empty -- logError wrapper; URL still added to wedgedUrls above
             } else if (next.pdf_url) {
               // Lane died in a non-render stage (or stage attribution
               // was lost). Don't blacklist the URL — but log the lane
@@ -3588,9 +3588,9 @@ async function processQueue(reconId) {
                   { reconciliation_id: reconId, extraction_id: next.id, store_name: next.store_name, pdf_url: next.pdf_url, last_stage: stuckStage },
                   'info',
                 );
-              } catch {}
+              } catch {} // eslint-disable-line no-empty -- logError wrapper; lane-death info breadcrumb is best-effort
             }
-            try { await lane.worker.terminate(); } catch {}
+            try { await lane.worker.terminate(); } catch (e) { console.warn('[bat.ocr.dead_lane_terminate]', { reconId, rowId: next.id }, e.message); }
             // tryLaneRecovery does its own retry-with-backoff and
             // already calls logError + recordReconciliationError on
             // exhaustion, so we just check the boolean return.
@@ -3661,7 +3661,7 @@ async function processQueue(reconId) {
     const msg = `OCR run ended with ${stillPending} row${stillPending === 1 ? '' : 's'} still pending — all lanes retired. Check the System Log for bat.ocr.lane_recreate / bat.ocr.watchdog_kill entries.`;
     db.prepare("UPDATE bat_reconciliations SET status = 'error', last_error = ?, last_error_at = CURRENT_TIMESTAMP WHERE id = ?")
       .run(msg, reconId);
-    try { logError('bat.ocr.run_incomplete', new Error(msg), { reconciliation_id: reconId, pending: stillPending }); } catch {}
+    try { logError('bat.ocr.run_incomplete', new Error(msg), { reconciliation_id: reconId, pending: stillPending }); } catch {} // eslint-disable-line no-empty -- logError wrapper; recon already marked error above
     emitExtractionUpdate(reconId);
     return;
   }
@@ -3735,7 +3735,7 @@ function recordReconciliationError(reconId, message) {
   if (!reconId || !message) return;
   // Mirror to the global error_log so off-site operators can see it in the
   // System Log page without needing to drill into a specific reconciliation.
-  try { logError('bat.recon', new Error(String(message)), { reconciliation_id: reconId }); } catch {}
+  try { logError('bat.recon', new Error(String(message)), { reconciliation_id: reconId }); } catch {} // eslint-disable-line no-empty -- logError wrapper; reconciliation update still persists below
   try {
     db.prepare(
       "UPDATE bat_reconciliations SET last_error = ?, last_error_at = datetime('now') WHERE id = ?"
@@ -3872,7 +3872,7 @@ export function getDashboardData(year) {
       FROM bat_reconciliations ${yearWhere}
     `).get(...yearArg);
     totalSupplier = row?.s || 0;
-  } catch {}
+  } catch (e) { console.warn('[bat.yearSummary.totalSupplier]', { scoped, yearArg }, e.message); }
   // totalSage = sum of all Sage credit notes for the chosen year (or all-time
   // if "All" picked). Bypasses bat_reconciliations entirely so weeks without
   // an uploaded supplier sheet still count. Uses per-fee summing to mirror
@@ -3891,7 +3891,7 @@ export function getDashboardData(year) {
          FROM bat_sage_week_cache`;
     const row = db.prepare(sql).get(...yearArg);
     totalSage = row?.s || 0;
-  } catch {}
+  } catch (e) { console.warn('[bat.yearSummary.totalSage]', { scoped, yearArg }, e.message); }
   const totalVariance = totalSupplier - totalSage;
 
   let totalExceptionsCount = 0, totalExceptionsAmount = 0;
@@ -3936,7 +3936,7 @@ export function getDashboardData(year) {
       if (raw.length < g.reason.length) g.reason = raw;
     }
     exceptionsByReason = [...grouped.values()].sort((a, b) => b.amount - a.amount);
-  } catch {}
+  } catch (e) { console.warn('[bat.yearSummary.exceptions]', { scoped, yearArg }, e.message); }
 
   return {
     summary: { totalSupplier, totalSage, totalVariance, totalReconciliations: reconciliations.length, totalExceptionsCount, totalExceptionsAmount, exceptionsByReason },
@@ -3959,7 +3959,7 @@ export function cancelCardosoInvoiceGeneration() {
   if (!_activeGenerate) return { ok: true, status: 'not_running' };
   const prev = _activeGenerate;
   prev.cancelled = true;
-  try { prev.request?.cancel(); } catch {}
+  try { prev.request?.cancel(); } catch (e) { console.warn('[bat.cancelCardosoInvoiceGeneration.request_cancel]', e.message); }
   // Release the lock immediately so a new Generate can start. Any in-flight
   // SQL/aggregation from the old call still runs to completion in the background
   // but its cleanup paths short-circuit on cancelled=true.
@@ -4117,7 +4117,7 @@ export async function generateCardosoInvoicesFromSage({ fromDate, toDate, mode =
   const storeResult = storeCardosoInvoices(null, storeShape, sourceLabel, mode);
   // Auto-rerun the supplier match so the dashboard reflects the new invoices
   let matching = null;
-  try { matching = matchCardosoToSupplierService({ db, reconId: null }); } catch {}
+  try { matching = matchCardosoToSupplierService({ db, reconId: null }); } catch (e) { console.warn('[bat.generateCardosoInvoices.rerun_match]', e.message); }
 
   _activeGenerate = null;
   return {
