@@ -28,6 +28,7 @@ import ReconciliationSettingsTab from "@/components/settings/tabs/Reconciliation
 import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
 import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
+import SageCorrectionsTab from "@/components/settings/tabs/SageCorrectionsTab";
 
 // Section/Row — tiny layout helpers used (only) by TlsTab. Kept here and
 // re-exported (rather than moved to a _shared file) per the issue brief.
@@ -75,6 +76,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
     hubMode && isAdmin && { id: "network", label: "Network" },
     isAdmin && { id: "reconciliation", label: "Reconciliation" },
     isAdmin && { id: "accounting", label: "Accounting" },
+    !hubMode && isAdmin && { id: "sagecorrections", label: "Sage Corrections" },
   ].filter(Boolean);
 
   const [activeTab, setActiveTab] = useState(tabs[0]?.id ?? "autoflag");
@@ -117,6 +119,7 @@ export default function SettingsPanel({ open, onClose, hubMode }) {
               {activeTab === "network" && <NtopngTab />}
               {activeTab === "reconciliation" && <ReconciliationSettingsTab />}
               {activeTab === "accounting" && <AccountingTab />}
+              {activeTab === "sagecorrections" && <SageCorrectionsTab />}
             </TabsContent>
           </div>
         </Tabs>
