@@ -245,11 +245,17 @@ export default function Inventory() {
     return [...seen].sort();
   }, [allRows, EXCLUDED_COMMODITIES]);
   const rows = useMemo(() => {
+    const isBelowCost = (r) => {
+      const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
+      const cost = parseFloat(String(r.last_cost || '').replace(/[^0-9.-]/g, ''));
+      return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+    };
     const filtered = allRows
       .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
       .filter(r => !EXCLUDED_COMMODITIES.has(String(r.commodity ?? '').trim()))
       .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
-      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
+      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter)
+      .filter(r => !highlightBelowCost || isBelowCost(r));
     return [...filtered].sort((a, b) => {
       let va, vb;
       const numFields = ["qty_on_hand", "last_cost", "price", "inventory_value"];
@@ -263,7 +269,7 @@ export default function Inventory() {
         return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       }
     });
-  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
+  }, [allRows, hideZeroQty, highlightBelowCost, priceListFilter, commodityFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -535,11 +541,7 @@ export default function Inventory() {
           <h1 className="text-lg font-bold">Inventory</h1>
           <p className="text-xs text-gray-600">
             Printed: {new Date().toLocaleString("en-ZA")} ·{' '}
-            {(highlightBelowCost ? rows.filter(r => {
-              const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
-              const cost = parseFloat(String(r.last_cost || '').replace(/[^0-9.-]/g, ''));
-              return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
-            }).length : rows.length)} item{rows.length !== 1 ? "s" : ""}
+            {rows.length} item{rows.length !== 1 ? "s" : ""}
             {highlightBelowCost && ' · Below-cost only'}
             {activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''} applied`}
             <br />
@@ -598,11 +600,7 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
     const cost = parseFloat(String(row.last_cost || '').replace(/[^0-9.-]/g, ''));
     return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
   };
-
-  // When the "Highlight below cost" toggle is on, the print should only
-  // include those rows (treat the toggle as a hard filter for print scope —
-  // on screen it stays a visual highlight).
-  const printRows = highlightBelowCost ? rows.filter(isBelowCost) : rows;
+  const printRows = rows;
 
   return (
     <div className="inv-print-only hidden print-table-shell rounded-xl border border-border bg-card overflow-hidden">
