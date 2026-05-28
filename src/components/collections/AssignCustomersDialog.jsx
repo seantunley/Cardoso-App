@@ -85,12 +85,13 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div className="relative">
               <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or number…" className="pl-8" />
+              <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or number…" title="Server-side search against customer name or Sage account number (datarecord.customer_name / customer_number)" className="pl-8" />
             </div>
             <select
               value={salesRep}
               onChange={(e) => setSalesRep(e.target.value)}
-              className="h-9 rounded-md border border-border bg-card px-3 text-sm text-foreground"
+              title="Filter candidates by their Sage sales-rep code (ARCUS.CODESLSP) — only reps with overdue customers are listed."
+              className="h-9 rounded-md border border-border bg-card px-3 text-sm text-foreground cursor-help"
             >
               <option value="all">All sales reps</option>
               {(reps.data || []).map(r => <option key={r} value={r}>{r}</option>)}
@@ -104,6 +105,7 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
                 type="number"
                 step="100"
                 min="0"
+                title="Only show customers whose current outstanding balance (datarecord.outstanding_balance) is at least this many rand."
                 className="pl-10"
               />
             </div>
@@ -116,6 +118,7 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
                 type="number"
                 step="1"
                 min="0"
+                title="Only show customers whose oldest unpaid invoice is at least this many days old (today − datarecord.last_unpaid_invoice_1_date)."
                 className="pl-8"
               />
             </div>
@@ -136,11 +139,12 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
                     <input type="checkbox"
                       checked={candidates.data?.length > 0 && selected.size === candidates.data.length}
                       onChange={toggleAll}
+                      title="Toggle every candidate row that isn't already on another worklist"
                     />
                   </th>
-                  <th className="px-2 py-1.5 text-left text-xs uppercase tracking-wide text-muted-foreground">Customer</th>
-                  <th className="px-2 py-1.5 text-left text-xs uppercase tracking-wide text-muted-foreground">Rep</th>
-                  <th className="px-2 py-1.5 text-right text-xs uppercase tracking-wide text-muted-foreground">Outstanding</th>
+                  <th className="px-2 py-1.5 text-left text-xs uppercase tracking-wide text-muted-foreground cursor-help" title="Customer name and Sage account number (datarecord.customer_name / customer_number)">Customer</th>
+                  <th className="px-2 py-1.5 text-left text-xs uppercase tracking-wide text-muted-foreground cursor-help" title="Customer's assigned sales rep (ARCUS.CODESLSP)">Rep</th>
+                  <th className="px-2 py-1.5 text-right text-xs uppercase tracking-wide text-muted-foreground cursor-help" title="Latest outstanding balance from Sage (datarecord.outstanding_balance)">Outstanding</th>
                 </tr>
               </thead>
               <tbody>
@@ -196,6 +200,7 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
               type="button"
               onClick={toggleAll}
               disabled={!selectable.length}
+              title="Toggle selection for every candidate row that isn't already on another worklist"
               className="text-amber-400 hover:text-amber-300 disabled:opacity-50 font-semibold"
             >
               {selected.size === selectable.length && selectable.length > 0
@@ -206,7 +211,7 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
         </div>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>Cancel</Button>
-          <Button onClick={() => assign.mutate()} disabled={selected.size === 0 || assign.isPending}>
+          <Button onClick={() => assign.mutate()} disabled={selected.size === 0 || assign.isPending} title="Insert one collection_assignments row per selected customer with status='active'. Each insertion is logged to audit_log.">
             Assign {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </DialogFooter>

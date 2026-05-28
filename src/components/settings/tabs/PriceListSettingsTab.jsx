@@ -106,6 +106,7 @@ export default function PriceListSettingsTab() {
             onChange={(e) => setPattern(e.target.value)}
             placeholder="Pattern (e.g. JT*, 4000-4999, 9999)"
             maxLength={50}
+            title="Item-code pattern stored in pricing_exclusions. Matched against ICITEM.ITEMNO when the Price List page renders."
             className="flex-1 h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground font-mono focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <input
@@ -114,11 +115,13 @@ export default function PriceListSettingsTab() {
             onChange={(e) => setNote(e.target.value)}
             placeholder="Note (optional — e.g. internal stock codes)"
             maxLength={200}
+            title="Free-text note shown in the exclusions list — handy for documenting why a pattern was added."
             className="flex-1 h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
           <button
             type="submit"
             disabled={!pattern.trim() || addMutation.isPending}
+            title="Insert the pattern into pricing_exclusions. Takes effect immediately on the Price List page. Logged to audit_log."
             className="inline-flex items-center justify-center gap-1.5 rounded-md bg-foreground text-background px-3 py-1.5 text-sm font-medium hover:opacity-90 disabled:opacity-50 shrink-0"
           >
             {addMutation.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
@@ -149,9 +152,9 @@ export default function PriceListSettingsTab() {
             <table className="w-full text-sm">
               <thead className="border-b border-border bg-muted/30">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Pattern</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Note</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Added by</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Stored pattern (pricing_exclusions.pattern) — wildcard, numeric range, or exact item code">Pattern</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Operator note attached when the exclusion was added (pricing_exclusions.note)">Note</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Username of the admin who created the row (pricing_exclusions.created_by)">Added by</th>
                   <th className="px-3 py-2 w-10"></th>
                 </tr>
               </thead>
@@ -167,7 +170,7 @@ export default function PriceListSettingsTab() {
                         onClick={() => deleteMutation.mutate(e.id)}
                         disabled={deleteMutation.isPending}
                         className="inline-flex items-center justify-center w-7 h-7 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 disabled:opacity-50"
-                        title="Remove exclusion"
+                        title="Delete the pattern from pricing_exclusions. Hidden items reappear immediately on the Price List page. Logged to audit_log."
                       >
                         <X className="w-3.5 h-3.5" />
                       </button>

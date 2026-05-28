@@ -209,7 +209,8 @@ export default function PriceList() {
             value={priceList}
             onChange={(e) => setPriceList(e.target.value)}
             disabled={lists.isLoading}
-            className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
+            title="Sage price-list code (ICPRCP.PRICELIST). 'STD' is the master list; others are customer-tier specific."
+            className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground cursor-help"
           >
             {(lists.data?.lists || []).map((l) => (
               <option key={l.code} value={l.code}>
@@ -224,7 +225,8 @@ export default function PriceList() {
           <select
             value={commodity}
             onChange={(e) => setCommodity(e.target.value)}
-            className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
+            title="Filter by commodity classification (ICITEM.COMMODIM): 1=Sweets, 2=Cigarettes, 3=Tobacco, 4=Mixed"
+            className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground cursor-help"
           >
             <option value="all">All</option>
             {Object.entries(COMMODITY_LABELS).map(([code, label]) => (
@@ -243,7 +245,8 @@ export default function PriceList() {
             <select
               value={supplier}
               onChange={(e) => setSupplier(e.target.value)}
-              className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground min-w-[260px]"
+              title="Filter by primary vendor — derived from the most recent stock_receipt PO per item. Items never received via PO are excluded from any specific supplier filter."
+              className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground min-w-[260px] cursor-help"
             >
               <option value="all">All</option>
               {(suppliers.data?.suppliers || []).map((s) => (
@@ -260,6 +263,7 @@ export default function PriceList() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search item number or description…"
+            title="Filter the visible rows by item number or description (case-insensitive substring match). Does not affect the underlying Sage query."
             className="w-full h-8 pl-8 pr-3 rounded-full border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
           />
         </div>
@@ -277,6 +281,7 @@ export default function PriceList() {
           <button
             onClick={handlePrint}
             disabled={!filteredRows.length}
+            title="Open the generated PDF in a new tab with the browser print dialog ready — letterhead matches the depot profile."
             className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
           >
             <Printer className="h-3.5 w-3.5" /> Print
@@ -284,6 +289,7 @@ export default function PriceList() {
           <button
             onClick={handlePdf}
             disabled={!filteredRows.length || generatingPdf}
+            title="Save the customer-facing PDF to disk. Filename includes price list, commodity, supplier filter, and today's date."
             className="flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-400 px-3 py-1.5 text-xs hover:bg-amber-500/25 transition-colors disabled:opacity-50"
           >
             {generatingPdf ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <FileDown className="h-3.5 w-3.5" />}
@@ -312,11 +318,11 @@ export default function PriceList() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
                 <tr>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Item</th>
-                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Description</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Commodity</th>
-                  <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">UOM</th>
-                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Price (R)</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Sage item number (ICITEM.ITEMNO)">Item</th>
+                  <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Item description from ICITEM.DESC">Description</th>
+                  <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Commodity classification from ICITEM.COMMODIM (1=Sweets, 2=Cigarettes, 3=Tobacco, 4=Mixed)">Commodity</th>
+                  <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Unit of measure for the price row (ICPRCP.UNIT)">UOM</th>
+                  <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Selling price in ZAR for the selected price list (ICPRCP.BASEPRICE)">Price (R)</th>
                 </tr>
               </thead>
               <tbody>

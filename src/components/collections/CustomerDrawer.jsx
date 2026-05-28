@@ -98,7 +98,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">Note</label>
               <div className="flex gap-2">
-                <Input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Quick note…" className="flex-1" />
+                <Input value={noteText} onChange={(e) => setNoteText(e.target.value)} placeholder="Quick note…" className="flex-1" title="Free-text note saved as a collection_activity row (kind='note'). Visible in the timeline below." />
                 <Button
                   onClick={() => {
                     if (!noteText.trim()) return;
@@ -106,6 +106,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
                     setNoteText("");
                   }}
                   disabled={!noteText.trim() || addActivity.isPending}
+                  title="Insert a collection_activity row with kind='note'. Recorded against the current user and assignment. Logged to audit_log."
                 >Add</Button>
               </div>
             </div>
@@ -113,7 +114,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">Contact outcome</label>
               <div className="flex gap-2">
-                <Input value={contactedNote} onChange={(e) => setContactedNote(e.target.value)} placeholder="Called — spoke to Jane…" className="flex-1" />
+                <Input value={contactedNote} onChange={(e) => setContactedNote(e.target.value)} placeholder="Called — spoke to Jane…" className="flex-1" title="Outcome description saved to collection_activity.notes for kind='contacted'. Optional." />
                 <Button
                   variant="secondary"
                   onClick={() => {
@@ -121,6 +122,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
                     setContactedNote("");
                   }}
                   disabled={addActivity.isPending}
+                  title="Insert a collection_activity row with kind='contacted' and update assignment.last_action_at. Logged to audit_log."
                 ><PhoneCall className="h-4 w-4 mr-1" />Log</Button>
               </div>
             </div>
@@ -128,10 +130,10 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
             <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3 space-y-2">
               <label className="text-xs font-semibold uppercase tracking-wider text-amber-300">Record a promise</label>
               <div className="grid grid-cols-2 gap-2">
-                <Input value={promiseAmount} onChange={(e) => setPromiseAmount(e.target.value)} placeholder="Amount" type="number" />
-                <Input value={promiseDate} onChange={(e) => setPromiseDate(e.target.value)} type="date" />
+                <Input value={promiseAmount} onChange={(e) => setPromiseAmount(e.target.value)} placeholder="Amount" type="number" title="Promised rand amount (collection_activity.amount). Used to surface broken promises when the date passes without payment." />
+                <Input value={promiseDate} onChange={(e) => setPromiseDate(e.target.value)} type="date" title="Date the customer promised payment by (collection_activity.promise_date). Drives the broken-promise indicator." />
               </div>
-              <Input value={promiseNote} onChange={(e) => setPromiseNote(e.target.value)} placeholder="Optional note" />
+              <Input value={promiseNote} onChange={(e) => setPromiseNote(e.target.value)} placeholder="Optional note" title="Free-text context stored on collection_activity.notes for the promise entry." />
               <Button
                 className="w-full"
                 onClick={() => {
@@ -145,17 +147,19 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
                   setPromiseAmount(""); setPromiseDate(""); setPromiseNote("");
                 }}
                 disabled={(!promiseAmount && !promiseDate) || addActivity.isPending}
+                title="Insert a collection_activity row with kind='promise_made' containing the amount and promise_date. Logged to audit_log."
               ><CalendarClock className="h-4 w-4 mr-1" />Record promise</Button>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs text-muted-foreground">Follow up on</label>
               <div className="flex gap-2">
-                <Input value={followup} onChange={(e) => setFollowup(e.target.value)} type="date" className="flex-1" />
+                <Input value={followup} onChange={(e) => setFollowup(e.target.value)} type="date" className="flex-1" title="Next time you intend to chase this customer. Updates collection_assignments.next_followup_date and drives the 'overdue' indicator on the worklist." />
                 <Button
                   variant="secondary"
                   onClick={() => setFollowupMut.mutate(followup || null)}
                   disabled={setFollowupMut.isPending}
+                  title="Save the chosen follow-up date to collection_assignments.next_followup_date. Logged to audit_log."
                 >Save</Button>
               </div>
             </div>

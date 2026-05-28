@@ -25,10 +25,11 @@ async function apiPost(url, body) {
   return data;
 }
 
-function FilterPill({ active, onClick, children }) {
+function FilterPill({ active, onClick, children, title }) {
   return (
     <button
       onClick={onClick}
+      title={title}
       className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
         active
           ? "border-amber-500 bg-amber-500/15 text-amber-400"
@@ -156,7 +157,8 @@ export default function StockReceipts() {
           <select
             value={siteFilter}
             onChange={(e) => setSiteFilter(e.target.value)}
-            className="h-9 rounded-full border border-border bg-card px-3 text-xs text-foreground"
+            title="Restrict the list to receipts from one site. 'All Sites' aggregates stock_receipt_line rows from every depot."
+            className="h-9 rounded-full border border-border bg-card px-3 text-xs text-foreground cursor-help"
           >
             <option value="all">All Sites</option>
             {(sitesQuery.data?.sites || []).map((s) => (
@@ -172,11 +174,12 @@ export default function StockReceipts() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search receipt number, item…"
+            title="Server-side search on receipt number, item number, or item description (stock_receipt / stock_receipt_line)."
             className="w-full h-9 pl-8 pr-3 rounded-full border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
           />
         </div>
 
-        <FilterPill active={missingOnly} onClick={() => setMissingOnly((v) => !v)}>
+        <FilterPill active={missingOnly} onClick={() => setMissingOnly((v) => !v)} title="Show only receipt lines with no stock_receipt_expiry rows yet — the operator's expiry-capture worklist.">
           {missingOnly ? "Missing expiry only" : "All lines"}
         </FilterPill>
 
@@ -231,15 +234,15 @@ export default function StockReceipts() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
                 <tr>
-                  {siteFilter === "all" && <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Site</th>}
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Receipt</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Date</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Item</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Description</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase">Qty Rcvd</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Expiry Date</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase">Expiry Qty</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Entered By</th>
+                  {siteFilter === "all" && <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Owning depot for the row. Visible only when 'All Sites' is selected.">Site</th>}
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Sage PO receipt number (stock_receipt.receipt_number)">Receipt</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Date the goods were received (stock_receipt.receipt_date)">Date</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Sage item number (stock_receipt_line.item_number)">Item</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Item description captured at receipt time">Description</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase cursor-help" title="Quantity received on this line (stock_receipt_line.qty_received)">Qty Rcvd</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Captured expiry date (stock_receipt_expiry.expiry_date) — 'None' when no entry has been added">Expiry Date</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase cursor-help" title="Quantity tied to this expiry date (stock_receipt_expiry.qty_at_expiry)">Expiry Qty</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="User who captured the expiry entry (stock_receipt_expiry.entered_by)">Entered By</th>
                 </tr>
               </thead>
               <tbody>
@@ -280,12 +283,12 @@ export default function StockReceipts() {
               <table className="w-full text-xs">
                 <thead className="sticky top-0 z-10 bg-card border-b border-border">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Receipt</th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Date</th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Item</th>
-                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase">Description</th>
-                    <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase">Qty</th>
-                    <th className="px-3 py-2 text-center font-medium text-muted-foreground uppercase">Expiry</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Sage PO receipt number (stock_receipt.receipt_number)">Receipt</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Date the goods were received (stock_receipt.receipt_date)">Date</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Sage item number (stock_receipt_line.item_number)">Item</th>
+                    <th className="px-3 py-2 text-left font-medium text-muted-foreground uppercase cursor-help" title="Item description captured at receipt time">Description</th>
+                    <th className="px-3 py-2 text-right font-medium text-muted-foreground uppercase cursor-help" title="Quantity received on this line (stock_receipt_line.qty_received)">Qty</th>
+                    <th className="px-3 py-2 text-center font-medium text-muted-foreground uppercase cursor-help" title="Number of stock_receipt_expiry rows captured against this line. 'None' = no expiry recorded yet.">Expiry</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -388,6 +391,7 @@ export default function StockReceipts() {
                       type="date"
                       value={newDate}
                       onChange={(e) => setNewDate(e.target.value)}
+                      title="Expiry date printed on the goods. Saved to stock_receipt_expiry.expiry_date."
                       className="w-full h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
                     />
                     <div className="grid grid-cols-2 gap-2">
@@ -395,18 +399,21 @@ export default function StockReceipts() {
                         value={newQty}
                         onChange={(e) => setNewQty(e.target.value)}
                         placeholder="Qty at expiry"
+                        title="Units tied to this expiry date. Defaults to the line's qty_received; override when a line has multiple expiries."
                         className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
                       />
                       <input
                         value={newNotes}
                         onChange={(e) => setNewNotes(e.target.value)}
                         placeholder="Notes (optional)"
+                        title="Free-text note saved on stock_receipt_expiry.notes (e.g. batch number)"
                         className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground placeholder:text-muted-foreground"
                       />
                     </div>
                     <button
                       disabled={!newDate || addExpiryMutation.isPending}
                       onClick={() => addExpiryMutation.mutate()}
+                      title="Insert a stock_receipt_expiry row against the selected receipt line. Recorded against the current user. Logged to audit_log."
                       className="flex items-center justify-center gap-1.5 h-9 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-xs font-medium transition-colors disabled:opacity-50"
                     >
                       {addExpiryMutation.isPending ? (

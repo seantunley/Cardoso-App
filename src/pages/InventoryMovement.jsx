@@ -102,6 +102,7 @@ function PeriodSelector({ from, to, onChange }) {
           <button
             key={p.label}
             onClick={() => onChange(range)}
+            title={`Set the date range to ${range.from} → ${range.to} (the ${p.label.toLowerCase()} window). Drives the OESHDT shipment query.`}
             className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
               active
                 ? "border-amber-500 bg-amber-500/15 text-amber-400"
@@ -125,6 +126,7 @@ function PeriodSelector({ from, to, onChange }) {
           onChange={(e) => e.target.value && onChange({ from: e.target.value, to })}
           className="bg-transparent border-none outline-none text-xs tabular-nums cursor-pointer [color-scheme:dark]"
           aria-label="From date"
+          title="Start of the analysis window (inclusive). Drives the OESHDT shipment query for Top Movers and trend."
         />
         <span className="opacity-50">–</span>
         <input
@@ -134,6 +136,7 @@ function PeriodSelector({ from, to, onChange }) {
           onChange={(e) => e.target.value && onChange({ from, to: e.target.value })}
           className="bg-transparent border-none outline-none text-xs tabular-nums cursor-pointer [color-scheme:dark]"
           aria-label="To date"
+          title="End of the analysis window (inclusive). Drives the OESHDT shipment query for Top Movers and trend."
         />
       </div>
     </div>
@@ -417,10 +420,16 @@ export default function InventoryMovement() {
           <div className="flex gap-1 rounded-xl border border-border p-1 bg-card">
             {tabs.map((t) => {
               const Icon = t.icon;
+              const tipMap = {
+                topMovers: "Rank items by shipped qty over the selected date range. Sourced from OESHDT shipment history via the sales cache.",
+                deadStock: "Show on-hand items with no sales activity within the cutoff window. Capital tied up = qty_on_hand × ICITEM.LAST_COST.",
+                forecast: "Reorder-point and demand projections per item, computed from the rolling sales cache. Site-only — hubs receive precomputed rows.",
+              };
               return (
                 <button
                   key={t.id}
                   onClick={() => { setTab(t.id); setSelectedItem(null); setSelectedSiteId(null); }}
+                  title={tipMap[t.id]}
                   className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors ${
                     tab === t.id ? "bg-amber-500/15 text-amber-400 border border-amber-500/30" : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -438,7 +447,8 @@ export default function InventoryMovement() {
               <select
                 value={siteFilter}
                 onChange={(e) => setSiteFilter(e.target.value)}
-                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
+                title="Restrict the report to one site. 'All Sites' aggregates movement_sales_cache rows across every depot."
+                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground cursor-help"
               >
                 <option value="all">All Sites (Combined)</option>
                 {(sitesQuery.data?.sites || []).map((s) => (
@@ -453,7 +463,8 @@ export default function InventoryMovement() {
             <select
               value={commodity}
               onChange={(e) => setCommodity(e.target.value)}
-              className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
+              title="Filter by ICITEM.COMMODIM classification (1=Sweets, 2=Cigarettes, 3=Tobacco, 4=Mixed)."
+              className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground cursor-help"
             >
               <option value="all">All</option>
               {(commodities.data?.commodities || []).map((c) => (
@@ -472,7 +483,8 @@ export default function InventoryMovement() {
               <select
                 value={supplier}
                 onChange={(e) => setSupplier(e.target.value)}
-                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground min-w-[260px]"
+                title="Filter by primary vendor — derived from the most recent stock_receipt PO per item. Items never received via PO sync are excluded from any specific supplier filter."
+                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground min-w-[260px] cursor-help"
               >
                 <option value="all">All</option>
                 {(suppliers.data?.suppliers || []).map((s) => (
@@ -490,6 +502,7 @@ export default function InventoryMovement() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search item number or description…"
+              title="Client-side filter on item number or description — applied after the Sage query, doesn't affect ranking."
               className="w-full h-8 pl-8 pr-3 rounded-full border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
             />
           </div>
@@ -529,6 +542,7 @@ export default function InventoryMovement() {
               <button
                 key={opt.value}
                 onClick={() => setThreshold(opt.value)}
+                title={`Show items with no shipments in the last ${opt.label}. Cutoff is calculated from today.`}
                 className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
                   threshold === opt.value
                     ? "border-red-500 bg-red-500/15 text-red-400"
@@ -600,11 +614,11 @@ export default function InventoryMovement() {
               <table className="w-full text-xs">
                 <thead className="border-b border-border bg-card">
                   <tr>
-                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Month</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Qty Sold</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Revenue</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Orders</th>
-                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Avg Qty/Order</th>
+                    <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase cursor-help" title="Calendar month bucket (YYYY-MM)">Month</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Total quantity shipped in the month (movement_sales_cache.qty_sold)">Qty Sold</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Total revenue for the month in ZAR (movement_sales_cache.revenue)">Revenue</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Number of distinct sales orders containing this item (movement_sales_cache.order_count)">Orders</th>
+                    <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Mean order size = Qty Sold ÷ Orders (rounded)">Avg Qty/Order</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -656,16 +670,16 @@ export default function InventoryMovement() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-card border-b border-border">
                     <tr>
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase w-8">#</th>
-                      <SortHeader label="Item" field="item_number" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" />
-                      <SortHeader label="Description" field="item_description" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" />
-                      {hubMode && siteFilter === "all" && <SortHeader label="Site" field="site_name" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" />}
-                      <SortHeader label="Qty Sold" field="total_qty_sold" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
-                      <SortHeader label="Revenue" field="total_revenue" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
-                      <SortHeader label="Orders" field="total_orders" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
-                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Avg/Order</th>
-                      <SortHeader label="On Hand" field="qty_on_hand" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" />
-                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Last Sale</th>
+                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase w-8 cursor-help" title="Rank in the current sort order">#</th>
+                      <SortHeader label="Item" field="item_number" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" tooltip="Sage item number (ICITEM.ITEMNO). Click to sort." />
+                      <SortHeader label="Description" field="item_description" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" tooltip="Item description (ICITEM.DESC). Click to sort." />
+                      {hubMode && siteFilter === "all" && <SortHeader label="Site" field="site_name" current={sortField} dir={sortDir} onSort={handleSort} className="text-left" tooltip="Owning depot for the row. Hub-only column when All Sites is selected." />}
+                      <SortHeader label="Qty Sold" field="total_qty_sold" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" tooltip="Sum of qty shipped in the selected window (movement_sales_cache.qty_sold)" />
+                      <SortHeader label="Revenue" field="total_revenue" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" tooltip="Sum of revenue in ZAR in the selected window (movement_sales_cache.revenue)" />
+                      <SortHeader label="Orders" field="total_orders" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" tooltip="Distinct order count across the window (movement_sales_cache.order_count)" />
+                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Mean order size = Qty Sold ÷ Orders (rounded)">Avg/Order</th>
+                      <SortHeader label="On Hand" field="qty_on_hand" current={sortField} dir={sortDir} onSort={handleSort} className="text-right" tooltip="Current qty on hand from Sage inventoryrecord" />
+                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Date of the most recent OESHDT shipment for this item (movement_sales_cache.last_sale_date)">Last Sale</th>
                       <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase"></th>
                     </tr>
                   </thead>
@@ -730,15 +744,15 @@ export default function InventoryMovement() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-card border-b border-border">
                     <tr>
-                      <SortHeader label="Item" field="item_number" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" />
-                      <SortHeader label="Description" field="item_description" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" />
-                      {hubMode && siteFilter === "all" && <SortHeader label="Site" field="site_name" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" />}
-                      <SortHeader label="On Hand" field="qty_on_hand" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" />
-                      <SortHeader label="Last Cost" field="last_cost" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" />
-                      <SortHeader label="Capital Tied Up" field="capital_tied_up" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" />
-                      <SortHeader label="Days Since Sale" field="days_since_sale" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" />
-                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Last Sale</th>
-                      <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase">Age</th>
+                      <SortHeader label="Item" field="item_number" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" tooltip="Sage item number (ICITEM.ITEMNO). Click to sort." />
+                      <SortHeader label="Description" field="item_description" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" tooltip="Item description (ICITEM.DESC). Click to sort." />
+                      {hubMode && siteFilter === "all" && <SortHeader label="Site" field="site_name" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-left" tooltip="Owning depot for the row. Hub-only column when All Sites is selected." />}
+                      <SortHeader label="On Hand" field="qty_on_hand" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" tooltip="Current qty on hand from Sage inventoryrecord — the money still sitting on shelves" />
+                      <SortHeader label="Last Cost" field="last_cost" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" tooltip="Last cost in ZAR per unit (ICITEM.LAST_COST)" />
+                      <SortHeader label="Capital Tied Up" field="capital_tied_up" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" tooltip="qty_on_hand × ICITEM.LAST_COST — value at cost of the unsold stock" />
+                      <SortHeader label="Days Since Sale" field="days_since_sale" current={deadSortField} dir={deadSortDir} onSort={handleDeadSort} className="text-right" tooltip="Days between today and the most recent OESHDT shipment date. 999999 = never sold." />
+                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase cursor-help" title="Date of the most recent shipment (movement_sales_cache.last_sale_date) — 'never' if absent">Last Sale</th>
+                      <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase cursor-help" title="Bucketed age — green ≤30d, amber ≤90d, red >90d, 'Never sold' for no history">Age</th>
                     </tr>
                   </thead>
                   <tbody>

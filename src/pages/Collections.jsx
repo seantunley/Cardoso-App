@@ -110,7 +110,7 @@ export default function Collections() {
           <aside className="space-y-3 print:hidden">
             <div className="flex items-center justify-between">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Worklists</h2>
-              <Button size="sm" variant="ghost" onClick={() => setOpenNew(true)}>
+              <Button size="sm" variant="ghost" onClick={() => setOpenNew(true)} title="Create a new collections worklist. You become the owner. Logged to audit_log.">
                 <Plus className="h-3.5 w-3.5 mr-1" />New
               </Button>
             </div>
@@ -127,6 +127,7 @@ export default function Collections() {
                   <button
                     key={w.id}
                     onClick={() => { setSelectedWorklistId(w.id); setDrawerAssignment(null); }}
+                    title={`Open the "${w.name}" worklist (owner: ${w.owner_name || w.owner_email || "Unassigned"}). Shows ${w.active_count} active assignments.`}
                     className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
                       active
                         ? "border-amber-500/40 bg-amber-500/10"
@@ -142,9 +143,9 @@ export default function Collections() {
                       <span className="truncate">{w.owner_name || w.owner_email || "Unassigned"}</span>
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-[10px]">
-                      <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-0.5">{w.active_count} active</span>
+                      <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-0.5" title="Number of collection_assignments rows with status='active' on this worklist">{w.active_count} active</span>
                       {w.collected_count > 0 && (
-                        <span className="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5">{w.collected_count} collected</span>
+                        <span className="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5" title="Number of collection_assignments auto-closed to status='collected' once the customer's outstanding balance fell to zero">{w.collected_count} collected</span>
                       )}
                     </div>
                   </button>
@@ -172,11 +173,11 @@ export default function Collections() {
                   </div>
                   <div className="flex items-center gap-2 flex-wrap print:hidden">
                     {(isOwner || isAdmin) && (
-                      <Button size="sm" onClick={() => setOpenAssign(true)}>
+                      <Button size="sm" onClick={() => setOpenAssign(true)} title="Pick customers with outstanding balances and add them to this worklist. Each insert is logged to audit_log.">
                         <ListPlus className="h-3.5 w-3.5 mr-1" />Assign customers
                       </Button>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => window.print()} disabled={filteredAssignments.length === 0}>
+                    <Button size="sm" variant="outline" onClick={() => window.print()} disabled={filteredAssignments.length === 0} title="Print the visible assignment list via the browser print dialog (filters and search are preserved).">
                       <Printer className="h-3.5 w-3.5 mr-1" />Print
                     </Button>
                   </div>
@@ -189,22 +190,31 @@ export default function Collections() {
                 <div className="flex flex-wrap items-center gap-2 print:hidden">
                   <Filter className="h-4 w-4 text-amber-400" />
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status:</span>
-                  {["active", "collected", "escalated", "all"].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setStatusFilter(s)}
-                      className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                        statusFilter === s
-                          ? "border-amber-500 bg-amber-500/15 text-amber-300"
-                          : "border-border bg-card text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {ASSIGNMENT_STATUS_META[s]?.label || (s === "all" ? "All" : s)}
-                    </button>
-                  ))}
+                  {["active", "collected", "escalated", "all"].map((s) => {
+                    const tipMap = {
+                      active: "Show open assignments (collection_assignments.status='active')",
+                      collected: "Show assignments auto-closed when the customer's balance dropped to zero (status='collected')",
+                      escalated: "Show assignments manually flagged for management attention (status='escalated')",
+                      all: "Show every assignment on this worklist regardless of status",
+                    };
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setStatusFilter(s)}
+                        title={tipMap[s]}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          statusFilter === s
+                            ? "border-amber-500 bg-amber-500/15 text-amber-300"
+                            : "border-border bg-card text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {ASSIGNMENT_STATUS_META[s]?.label || (s === "all" ? "All" : s)}
+                      </button>
+                    );
+                  })}
                   <div className="relative flex-1 max-w-xs ml-auto">
                     <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} placeholder="Filter customers…" className="pl-8 h-8" />
+                    <Input value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} placeholder="Filter customers…" title="Client-side filter on customer name, customer number, or sales rep — narrows the visible rows without re-querying." className="pl-8 h-8" />
                   </div>
                 </div>
 
@@ -223,12 +233,12 @@ export default function Collections() {
                   <table className="w-full text-sm">
                     <thead className="bg-muted/30 border-b border-border">
                       <tr>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Customer</th>
-                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Rep</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Outstanding</th>
-                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Status</th>
-                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide">Follow-up</th>
-                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Last action</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Customer name and Sage account number (ARCUS.NAMECUST / IDCUST)">Customer</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Sales rep currently assigned to the customer (ARCUS.CODESLSP)">Rep</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Latest outstanding balance synced from Sage (datarecord.outstanding_balance)">Outstanding</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="collection_assignments.status — active, collected (auto when balance hits 0), or escalated">Status</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Next promised contact date (collection_assignments.next_followup_date). Amber when overdue.">Follow-up</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Timestamp of the most recent collection_activity row for this assignment">Last action</th>
                       </tr>
                     </thead>
                     <tbody>

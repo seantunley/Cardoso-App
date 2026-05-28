@@ -161,16 +161,17 @@ export default function SageCorrectionsTab() {
             type="number"
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value, 10) || new Date().getFullYear())}
+            title="Calendar year of the BAT credit note batches to scan in Sage (CSAPDP.DOCDATE)."
             className="w-24 h-9"
           />
         </div>
-        <Button onClick={scan} disabled={loading} size="sm">
+        <Button onClick={scan} disabled={loading} size="sm" title="Read CSAPDP credit-note lines for the selected year and flag rows with missing week numbers or unknown fee types.">
           {loading ? <RefreshCw className="h-4 w-4 animate-spin mr-1.5" /> : <Search className="h-4 w-4 mr-1.5" />}
           Scan Sage
         </Button>
         {lines.length > 0 && (
           <>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
+            <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" title="Toggle visibility of lines that already parse correctly. Default view hides OK rows.">
               <input type="checkbox" checked={showAll} onChange={(e) => setShowAll(e.target.checked)} className="rounded" />
               Show all lines ({lines.length})
             </label>
@@ -178,6 +179,7 @@ export default function SageCorrectionsTab() {
               placeholder="Filter by batch, description, amount…"
               value={searchFilter}
               onChange={(e) => setSearchFilter(e.target.value)}
+              title="Client-side filter on batch number, batch/line description, or amount — narrows the visible rows without re-querying Sage."
               className="h-9 w-64"
             />
           </>
@@ -210,16 +212,16 @@ export default function SageCorrectionsTab() {
             <table className="w-full text-xs">
               <thead className="sticky top-0 z-10 bg-card border-b border-border">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Batch</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Batch Description</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Status</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Document</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Doc Date</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Line Description</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Week</th>
-                  <th className="px-3 py-2 text-left font-medium text-muted-foreground">Fee Type</th>
-                  <th className="px-3 py-2 text-right font-medium text-muted-foreground">Amount</th>
-                  <th className="px-3 py-2 text-center font-medium text-muted-foreground">Status</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Sage AP batch number (CSAPDB.BATCHID)">Batch</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Batch description from CSAPDB.BTCHDESC — usually the BAT month tag">Batch Description</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Batch posting status (CSAPDB.BTCHSTTS) — 0 open, 1 ready, 3 posted, 4 deleted">Status</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Sage credit-note document number (CSAPDP.CNTBTCH/CNTITEM key)">Document</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Document date on the credit note (CSAPDP.DOCDATE)">Doc Date</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Line description text we parse for the week number and fee type (CSAPDP.TEXTDESC)">Line Description</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground cursor-help" title="Week number extracted from the line description by the parser. Blank = NO_WEEK problem.">Week</th>
+                  <th className="px-3 py-2 text-left font-medium text-muted-foreground cursor-help" title="Fee category derived from the line description (DELIVERY, RETURN, etc.). OTHER = BAD_FEE_TYPE problem.">Fee Type</th>
+                  <th className="px-3 py-2 text-right font-medium text-muted-foreground cursor-help" title="Line amount in ZAR (CSAPDP.AMOUNT)">Amount</th>
+                  <th className="px-3 py-2 text-center font-medium text-muted-foreground cursor-help" title="Parser verdict: OK, NO_WEEK, BAD_FEE_TYPE, or SPELLING">Status</th>
                   <th className="px-3 py-2 text-center font-medium text-muted-foreground"></th>
                 </tr>
               </thead>
@@ -254,7 +256,7 @@ export default function SageCorrectionsTab() {
                         <button
                           onClick={() => startEdit(line)}
                           className="text-muted-foreground hover:text-foreground transition-colors"
-                          title="Edit description"
+                          title="Open the editor to rewrite CSAPDP.TEXTDESC for this line. Requires admin password and writes directly to Sage."
                         >
                           <Pencil className="h-3.5 w-3.5" />
                         </button>
@@ -293,6 +295,7 @@ export default function SageCorrectionsTab() {
                 className="font-mono"
                 placeholder="e.g. DELIVERY FEE WEEK 13 - BAT"
                 autoFocus
+                title="Replacement text for CSAPDP.TEXTDESC. Must include a week number and a known fee type — the live preview below shows the parser's interpretation."
               />
             </div>
           </div>
@@ -328,10 +331,11 @@ export default function SageCorrectionsTab() {
               disabled={!preview?.isValid || previewLoading}
               size="sm"
               className="bg-amber-600 hover:bg-amber-700 text-white"
+              title="Open the admin-password confirmation dialog before writing the new description to the Sage CSAPDP row."
             >
               Apply Correction
             </Button>
-            <Button onClick={cancelEdit} variant="ghost" size="sm">Cancel</Button>
+            <Button onClick={cancelEdit} variant="ghost" size="sm" title="Discard the edit without writing anything to Sage.">Cancel</Button>
           </div>
         </div>
       )}
@@ -389,16 +393,18 @@ export default function SageCorrectionsTab() {
               placeholder="Admin password"
               autoFocus
               onKeyDown={(e) => { if (e.key === "Enter" && password) applyCorrection(); }}
+              title="Re-enter your account password. The server re-verifies it before issuing the Sage UPDATE."
             />
             {passwordError && <p className="text-red-400 text-xs mt-1">{passwordError}</p>}
           </div>
 
           <div className="flex justify-end gap-2">
-            <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={applying}>Cancel</Button>
+            <Button variant="ghost" onClick={() => setConfirmOpen(false)} disabled={applying} title="Close the dialog without writing to Sage.">Cancel</Button>
             <Button
               onClick={applyCorrection}
               disabled={!password || applying}
               className="bg-red-600 hover:bg-red-700 text-white"
+              title="Run the UPDATE against CSAPDP.TEXTDESC for this line. Cannot be undone from this app. Logged to audit_log."
             >
               {applying ? <RefreshCw className="h-4 w-4 animate-spin mr-1.5" /> : <ShieldAlert className="h-4 w-4 mr-1.5" />}
               Confirm Write to Sage

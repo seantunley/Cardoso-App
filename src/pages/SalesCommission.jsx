@@ -288,30 +288,33 @@ export default function SalesCommission() {
       >
         <div className="flex flex-col">
           <label className="text-xs text-muted-foreground mb-1">From</label>
-          <div className="relative">
+          <div className="relative" title="Start of the commission period (inclusive). Operator's monthly cycle is the 24th of the previous month.">
             <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <input
               type="date"
               value={from}
               onChange={(e) => setFrom(e.target.value)}
+              title="Start of the commission period (inclusive). Operator's monthly cycle is the 24th of the previous month."
               className="pl-7 pr-2 py-1.5 bg-background border border-border rounded-md text-sm"
             />
           </div>
         </div>
         <div className="flex flex-col">
           <label className="text-xs text-muted-foreground mb-1">To</label>
-          <div className="relative">
+          <div className="relative" title="End of the commission period (inclusive). Operator's monthly cycle ends the 23rd of the current month.">
             <Calendar className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
             <input
               type="date"
               value={to}
               onChange={(e) => setTo(e.target.value)}
+              title="End of the commission period (inclusive). Operator's monthly cycle ends the 23rd of the current month."
               className="pl-7 pr-2 py-1.5 bg-background border border-border rounded-md text-sm"
             />
           </div>
         </div>
         <button
           type="submit"
+          title="Pull the commission report from Sage for the selected period"
           className="rounded-md bg-amber-500 text-black hover:bg-amber-400 px-4 py-1.5 text-sm font-medium"
           disabled={report.isFetching}
         >
@@ -324,6 +327,7 @@ export default function SalesCommission() {
             type="button"
             onClick={() => exportExcel.mutate()}
             disabled={!data || exportExcel.isPending}
+            title="Download the current report as an Excel workbook — same two-section layout as the legacy operator spreadsheet"
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card hover:bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
           >
             <FileSpreadsheet className="w-3.5 h-3.5" />
@@ -333,6 +337,7 @@ export default function SalesCommission() {
             type="button"
             onClick={() => exportPdf.mutate()}
             disabled={!data || exportPdf.isPending}
+            title="Download the current report as a PDF with the depot heading"
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card hover:bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground disabled:opacity-50"
           >
             <Download className="w-3.5 h-3.5" />
@@ -360,12 +365,12 @@ export default function SalesCommission() {
             title="Period figures"
             sectionHeader={null}
             columns={[
-              { label: "Sales Person", className: "text-left font-semibold", get: (r) => r.sales_rep },
-              { label: "Sweet Sales", className: "text-right tabular-nums", get: (r) => formatRand(r.sweet_sales) },
-              { label: "Credits", className: "text-right tabular-nums", get: (r) => formatRand(r.sweet_credits) },
-              { label: "Net Sweets", className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.net_sweets) },
-              { label: "Customer Payment Total", className: "text-right tabular-nums", get: (r) => formatRand(r.customer_payments) },
-              { label: "Cig + Tob Base", className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.cig_tob_base) },
+              { label: "Sales Person", className: "text-left font-semibold", get: (r) => r.sales_rep, tooltip: "Sage sales-person code on the original invoice (OESHDT.SALESPER) — sticky, not the customer's current rep" },
+              { label: "Sweet Sales", className: "text-right tabular-nums", get: (r) => formatRand(r.sweet_sales), tooltip: "Sum of OESHDT.FAMTSALES on items where ICITEM.COMMODIM = '1' (sweets) for the period" },
+              { label: "Credits", className: "text-right tabular-nums", get: (r) => formatRand(r.sweet_credits), tooltip: "Sum of OESHDT.FRETSALES (returns) on sweets for the period" },
+              { label: "Net Sweets", className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.net_sweets), tooltip: "Sweet Sales minus Credits — the commission base for the Sweets rate" },
+              { label: "Customer Payment Total", className: "text-right tabular-nums", get: (r) => formatRand(r.customer_payments), tooltip: "AR receipts (AROBP PY-prefixed) per rep, VAT-stripped via the configured VAT rate" },
+              { label: "Cig + Tob Base", className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.cig_tob_base), tooltip: "Customer Payment Total minus Net Sweets — the commission base for the Cig+Tob rate" },
             ]}
             reps={reps}
             totalRow={totals && [
@@ -384,13 +389,13 @@ export default function SalesCommission() {
               </div>
             }
             columns={[
-              { label: "Sales Person", className: "text-left font-semibold", get: (r) => r.sales_rep },
-              { label: "Net Sweets", className: "text-right tabular-nums", get: (r) => formatRand(r.net_sweets) },
-              { label: `Sweets ${formatPct(settings?.sweets_rate)}`, className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.sweet_commission) },
-              { label: `Reference ${formatPct(settings?.reference_rate)}`, className: "text-right tabular-nums text-muted-foreground", get: (r) => formatRand(r.reference_commission) },
-              { label: "Cig + Tob Base", className: "text-right tabular-nums", get: (r) => formatRand(r.cig_tob_base) },
-              { label: `Cig+Tob ${formatPct(settings?.cigtob_rate)}`, className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.cigtob_commission) },
-              { label: "Total Commission", className: "text-right tabular-nums font-semibold text-emerald-300", get: (r) => formatRand(r.total_commission) },
+              { label: "Sales Person", className: "text-left font-semibold", get: (r) => r.sales_rep, tooltip: "Sage sales-person code (OESHDT.SALESPER)" },
+              { label: "Net Sweets", className: "text-right tabular-nums", get: (r) => formatRand(r.net_sweets), tooltip: "Same Net Sweets as the period figures table — repeated for clarity" },
+              { label: `Sweets ${formatPct(settings?.sweets_rate)}`, className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.sweet_commission), tooltip: "Net Sweets × the Sweets rate from Settings → Commission" },
+              { label: `Reference ${formatPct(settings?.reference_rate)}`, className: "text-right tabular-nums text-muted-foreground", get: (r) => formatRand(r.reference_commission), tooltip: "Alternative-rate comparison column from the legacy operator spreadsheet — not part of the payout" },
+              { label: "Cig + Tob Base", className: "text-right tabular-nums", get: (r) => formatRand(r.cig_tob_base), tooltip: "Same Cig + Tob Base as the period figures table — repeated for clarity" },
+              { label: `Cig+Tob ${formatPct(settings?.cigtob_rate)}`, className: "text-right tabular-nums text-amber-300", get: (r) => formatRand(r.cigtob_commission), tooltip: "Cig + Tob Base × the Cig+Tob rate from Settings → Commission" },
+              { label: "Total Commission", className: "text-right tabular-nums font-semibold text-emerald-300", get: (r) => formatRand(r.total_commission), tooltip: "Sweets commission + Cig+Tob commission. Reference is excluded." },
             ]}
             reps={reps}
             totalRow={totals && [
@@ -484,12 +489,12 @@ function ArchivesPanel({ archives, loading, error, isAdmin, onRunNow, runNowPend
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border bg-card">
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Period</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Date range</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Generated</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Source</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">Hub push</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide">Download</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="The calendar month this archive belongs to (cycle runs 24th → 23rd)">Period</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Inclusive start and end dates of the report (YYYY-MM-DD)">Date range</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="When this archive was generated (local time)">Generated</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="scheduled = month-end cron run; manual = operator triggered via Run now">Source</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Outcome of the site→hub PDF upload. Pending/failed rows are retried automatically every 15 minutes.">Hub push</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Stream the archived PDF back to your browser">Download</th>
               </tr>
             </thead>
             <tbody>
@@ -576,7 +581,11 @@ function ReportTable({ title, sectionHeader, columns, reps, totalRow }) {
           <thead>
             <tr className="border-b border-border bg-card">
               {columns.map((c) => (
-                <th key={c.label} className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide ${c.className.includes("text-left") ? "text-left" : "text-right"}`}>
+                <th
+                  key={c.label}
+                  title={c.tooltip || undefined}
+                  className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wide ${c.className.includes("text-left") ? "text-left" : "text-right"} ${c.tooltip ? "cursor-help" : ""}`}
+                >
                   {c.label}
                 </th>
               ))}

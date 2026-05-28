@@ -131,13 +131,14 @@ export default function CommissionSettingsTab() {
 function RateField({ label, hint, value, onChange }) {
   return (
     <div>
-      <label className="text-sm font-medium block mb-1">{label}</label>
+      <label className="text-sm font-medium block mb-1 cursor-help" title={hint || undefined}>{label}</label>
       <div className="relative w-40">
         <input
           type="text"
           inputMode="decimal"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          title={hint || undefined}
           className="w-full pl-2 pr-8 py-1.5 bg-background border border-border rounded-md text-sm tabular-nums"
           placeholder="0.0"
         />

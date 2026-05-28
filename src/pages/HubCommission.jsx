@@ -184,10 +184,14 @@ export default function HubCommission() {
               <table className="w-full text-sm border-collapse">
                 <thead>
                   <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    <th className="py-2 pr-4 sticky left-0 bg-card">Period</th>
-                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4 sticky left-0 bg-card cursor-help" title="Calendar month the commission archives belong to (24th → 23rd cycle)">Period</th>
+                    <th className="py-2 pr-4 cursor-help" title="Completeness: green when all expected sites have reported for the period; amber if any are still missing">Status</th>
                     {expectedSites.map((s) => (
-                      <th key={s.id} className="py-2 px-3 text-left whitespace-nowrap">
+                      <th
+                        key={s.id}
+                        className="py-2 px-3 text-left whitespace-nowrap cursor-help"
+                        title={`Per-month PDF reported by site ${s.name || s.id}. Click a cell to download.`}
+                      >
                         {s.name || s.id}
                       </th>
                     ))}
