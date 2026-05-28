@@ -115,7 +115,7 @@ export default function Operations() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-8">
+      <div className="px-6 py-5 space-y-8">
         <div className="border-b border-border pb-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
             § Operations

@@ -4,6 +4,68 @@ import { getSagePool } from '../batReconciliation.js';
 const TEXTDESC_MAX_LEN = 60;
 const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
 
+// Plain Wagner-Fischer Levenshtein distance — used to spot typos like
+// WEK → WEEK or FE → FEE. Inputs are short single words; no need for
+// the row-only memory optimisation.
+function levenshtein(a, b) {
+  if (a === b) return 0;
+  if (!a.length) return b.length;
+  if (!b.length) return a.length;
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+// Detect a misspelled WEEK keyword: any 3-6 letter word followed by a
+// 1-2 digit number, where the word is within edit-distance 2 of WEEK.
+// "WEK 12", "WEAK 12", "WEEEK 12" → all caught. Returns the canonical
+// "WEEK <N>" suggestion, or null if no typo is found.
+function detectWeekTypo(text) {
+  const upper = (text || '').toUpperCase();
+  const re = /\b([A-Z]{3,6})\s+(\d{1,2})\b/g;
+  let m;
+  while ((m = re.exec(upper)) !== null) {
+    const word = m[1];
+    if (word === 'WEEK') return null; // canonical is already present
+    const d = levenshtein(word, 'WEEK');
+    if (d > 0 && d <= 2) {
+      return { actual: word, suggestion: `WEEK ${m[2]}` };
+    }
+  }
+  return null;
+}
+
+// Detect a misspelled FEE/ADJ keyword. For a valid prefix line, the
+// second word should be FEE (DELIVERY/DISCOUNT) or ADJ (PRICING/PRICE).
+// "DELIVERY FE WEEK 12" → typo of FEE. Returns null when the second
+// word is already canonical or too far from canonical to be a typo.
+function detectKeywordTypo(text, feeType) {
+  const expected = (feeType || '').split(' ')[1]; // 'FEE' or 'ADJ'
+  if (!expected) return null;
+  const upper = (text || '').toUpperCase();
+  const tokens = upper.split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return null;
+  // Find any token that IS the expected keyword anywhere in the line —
+  // if present, there's no typo to fix.
+  if (tokens.includes(expected)) return null;
+  // Otherwise check token #2 (immediately after the prefix) for a typo
+  const actual = tokens[1];
+  if (actual.length < 2 || actual.length > 4) return null;
+  const d = levenshtein(actual, expected);
+  if (d > 0 && d <= 1) {
+    return { actual, suggestion: expected };
+  }
+  return null;
+}
+
 export function parseDescription(text) {
   const problems = [];
   if (!text || !text.trim()) {
@@ -77,6 +139,11 @@ export async function queryProblematicLines(year) {
         LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
         WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
           AND YEAR(CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE)) = @year
+          -- Purchases Clearing Account lines are the auto-generated AP
+          -- offsets, not the human-typed fee descriptions we need to
+          -- correct. They will always score as 'OTHER' / 'BAD_FEE_TYPE'
+          -- but they are not actually problems — drop them at source.
+          AND LTRIM(RTRIM(d.TEXTDESC)) NOT LIKE '%Purchases Clearing Account%'
       )
       SELECT
         CNTBTCH   AS batch_number,
@@ -101,19 +168,51 @@ export async function queryProblematicLines(year) {
         AMTDISTHC AS line_amount,
         CASE
           WHEN desc_week IS NULL THEN 'NO_WEEK'
-          WHEN fee_type = 'OTHER' THEN 'BAD_FEE_TYPE'
           ELSE 'OK'
         END AS problem_type
       FROM all_bat_lines
-      ORDER BY
-        CASE
-          WHEN desc_week IS NULL THEN 0
-          WHEN fee_type = 'OTHER' THEN 1
-          ELSE 2
-        END,
-        CNTBTCH, CNTITEM, CNTLINE
+      -- Drop lines whose fee type couldn't be classified (anything not
+      -- DELIVERY / DISCOUNT / PRICING / PRICE). These are typically
+      -- system-generated AP offsets, not human-typed fees we can correct.
+      WHERE fee_type <> 'OTHER'
+      ORDER BY CNTBTCH, CNTITEM, CNTLINE
     `);
-  return result.recordset || [];
+
+  // Post-process to catch spelling mistakes that SQL alone can't see:
+  //   - NO_WEEK rows where the line actually has "WEREK 12" / "WEK 12" etc.
+  //     → reclassify as SPELLING with the canonical "WEEK <N>" suggestion.
+  //   - OK rows where the second word is a typo of FEE or ADJ
+  //     (e.g. "DELIVERY FE WEEK 12") → reclassify as SPELLING.
+  // These previously slipped through and broke BAT reconciliation matching
+  // because the canonical regex never hit.
+  const PROBLEM_RANK = { SPELLING: 0, NO_WEEK: 1, OK: 2 };
+  const lines = (result.recordset || []).map(row => {
+    if (row.problem_type === 'NO_WEEK') {
+      const typo = detectWeekTypo(row.line_description);
+      if (typo) {
+        return { ...row, problem_type: 'SPELLING', spelling_kind: 'WEEK', spelling_actual: typo.actual, suggestion: typo.suggestion };
+      }
+      return row;
+    }
+    if (row.problem_type === 'OK') {
+      const typo = detectKeywordTypo(row.line_description, row.fee_type);
+      if (typo) {
+        return { ...row, problem_type: 'SPELLING', spelling_kind: 'KEYWORD', spelling_actual: typo.actual, suggestion: typo.suggestion };
+      }
+    }
+    return row;
+  });
+
+  lines.sort((a, b) => {
+    const ra = PROBLEM_RANK[a.problem_type] ?? 3;
+    const rb = PROBLEM_RANK[b.problem_type] ?? 3;
+    if (ra !== rb) return ra - rb;
+    if (a.batch_number !== b.batch_number) return a.batch_number - b.batch_number;
+    if (a.item_number !== b.item_number) return a.item_number - b.item_number;
+    return a.line_number - b.line_number;
+  });
+
+  return lines;
 }
 
 export async function readCurrentDescription(batchNumber, itemNumber, lineNumber) {

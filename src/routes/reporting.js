@@ -20,6 +20,7 @@ import { pagination } from '../lib/httpParams.js';
 import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/batReconciliation.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
+import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -367,19 +368,30 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/top-balances?limit=30
   router.get('/api/top-balances', requireAuth, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    // Cap raised from 200 → 10000 so the Customer Balances page can
+    // request its full dataset in one fetch (no client-side pagination
+    // — it scrolls in place like the Inventory list).
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 10000);
     const isHub = process.env.HUB_MODE === 'true';
     const siteFilter = String(req.query.site || 'all').trim();
     const ageBucket = String(req.query.ageBucket || 'all').trim();
     const salesRepFilter = String(req.query.salesRep || 'all').trim();
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
+    const lastPurchaseDays = Math.max(parseInt(req.query.lastPurchaseDays, 10) || 0, 0);
+    const dormantOnly = ['1', 'true', 'yes', 'on'].includes(String(req.query.dormantOnly || '').toLowerCase());
 
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
     // sales_rep can come from JSON blobs (data / local_fields) so we always
     // filter it in JS after hydrateSalesRepAndAccountType has run.
-    // Same goes for age bucket / invoice-match (need parsed invoices).
-    const needsInMemoryFilter = ageBucket !== 'all' || hideInvoiceMatchesBalance || salesRepFilter !== 'all';
+    // Same goes for age bucket / invoice-match / last-purchase / dormant
+    // (need parsed invoices and computed credit verdicts).
+    const needsInMemoryFilter =
+      ageBucket !== 'all' ||
+      hideInvoiceMatchesBalance ||
+      salesRepFilter !== 'all' ||
+      lastPurchaseDays > 0 ||
+      dormantOnly;
 
     try {
       let sites = [];
@@ -449,20 +461,20 @@ export function createReportingRouter({ requireAuth }) {
         ).all(SITE_NAME, balanceAmountGt).map(r => r.site_name).filter(Boolean);
 
         const fetchSql = needsInMemoryFilter
-          ? `SELECT customer_number, customer_name, sales_rep, account_type,
+          ? `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
                     flag_color, flag_reason, auto_flagged, terms,
-                    data, local_fields,
+                    local_fields,
                     ? AS site_name
              FROM datarecord
              WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
                AND outstanding_balance != '0'
                AND outstanding_balance_num > ?
              ORDER BY outstanding_balance_num DESC`
-          : `SELECT customer_number, customer_name, sales_rep, account_type,
+          : `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
                     flag_color, flag_reason, auto_flagged, terms,
-                    data, local_fields,
+                    local_fields,
                     ? AS site_name,
                     COUNT(*) OVER() AS _total_count,
                     SUM(outstanding_balance_num) OVER() AS _total_sum
@@ -482,17 +494,52 @@ export function createReportingRouter({ requireAuth }) {
         }
         allRecords = rawRows
           .map(hydrateSalesRepAndAccountType)
-          .map(expandDataRecord);
+          .map(expandDataRecord)
+          .map((row) => {
+            // Compute credit verdict once on the server so the client can
+            // skip the per-row useMemo on every parent re-render.
+            try {
+              const { verdict, score } = analyseInvoiceCredit([row], [], null);
+              row.credit_verdict = verdict;
+              row.credit_score = score;
+            } catch (err) {
+              console.error('[balances.credit_verdict] compute failed for', {
+                id: row?.id,
+                customer_number: row?.customer_number,
+              }, err.message);
+            }
+            return row;
+          });
       }
 
       // ── In-memory pagination path (age bucket / invoice-match / sales rep active) ──
       let recordsForPage;
       let pageTotalOutstanding;
       if (needsInMemoryFilter) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const filtered = allRecords.filter((row) => {
           if (!matchesAgeBucket(row, ageBucket)) return false;
           if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
           if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
+          // "Haven't bought in N+ days" — uses the last invoice date.
+          // Customers with no date on record fail the filter, since we
+          // can't prove they've bought recently.
+          if (lastPurchaseDays > 0) {
+            const dt = parseBalanceDate(row.LastInvoiceDate ?? row.last_invoice_date ?? row.last_unpaid_invoice_1_date);
+            if (!dt) return false;
+            const days = Math.floor((today - dt) / 86400000);
+            if (days < lastPurchaseDays) return false;
+          }
+          // Dormant — derived from analyseInvoiceCredit. Uses default
+          // credit-logic config; the verdict is stable enough for a
+          // filter (it only swings between adjacent buckets at edges).
+          if (dormantOnly) {
+            try {
+              const v = analyseInvoiceCredit([row], [], null).verdict;
+              if (v !== 'dormant') return false;
+            } catch { return false; }
+          }
           return true;
         });
         total = filtered.length;
@@ -606,7 +653,7 @@ export function createReportingRouter({ requireAuth }) {
           `SELECT customer_number, customer_name, sales_rep, account_type, terms,
                   outstanding_balance, unpaid_invoices,
                   flag_color, flag_reason, auto_flagged,
-                  data, local_fields,
+                  local_fields,
                   ? AS site_name
            FROM datarecord
            WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''

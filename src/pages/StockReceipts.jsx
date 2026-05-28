@@ -125,6 +125,16 @@ export default function StockReceipts() {
     }
   }, [selectedRow, selectedLineId, receiptLines.isLoading]);
 
+  // Default the qty-at-expiry input to the line's received qty when a
+  // new line is picked. Operators usually enter one expiry per line at
+  // the full received quantity; splitting across multiple expiry dates
+  // is the exception, not the rule.
+  useEffect(() => {
+    if (selectedLineId && selectedRow?.qty_received != null) {
+      setNewQty(String(selectedRow.qty_received));
+    }
+  }, [selectedLineId, selectedRow?.qty_received]);
+
   return (
     <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
       {/* Header */}
@@ -146,7 +156,7 @@ export default function StockReceipts() {
           <select
             value={siteFilter}
             onChange={(e) => setSiteFilter(e.target.value)}
-            className="h-9 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+            className="h-9 rounded-full border border-border bg-card px-3 text-xs text-foreground"
           >
             <option value="all">All Sites</option>
             {(sitesQuery.data?.sites || []).map((s) => (
@@ -162,7 +172,7 @@ export default function StockReceipts() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search receipt number, item…"
-            className="w-full h-9 pl-8 pr-3 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
+            className="w-full h-9 pl-8 pr-3 rounded-full border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
           />
         </div>
 
@@ -176,7 +186,7 @@ export default function StockReceipts() {
             <button
               onClick={() => syncMutation.mutate()}
               disabled={syncMutation.isPending}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+              className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
               Sync from Sage

@@ -7,6 +7,7 @@ import {
   getItemTrend,
   getDeadStock,
   getCommodities,
+  getSuppliers,
   getItemTransactions,
   getItemStats,
 } from '../services/inventoryMovement.js';
@@ -30,11 +31,16 @@ function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
   // Sales are always grouped per (site_id, item_number) — each site
   // holds physical stock independently, so collapsing would pair
   // multi-site sales totals with one arbitrary site's inventory row.
+  // Hub stores monthly aggregates only — accept YYYY-MM-DD from the
+  // day-precision selector but slice to YYYY-MM to match hub_inventory_sales.period.
+  const fromMo = from ? from.slice(0, 7) : from;
+  const toMo = to ? to.slice(0, 7) : to;
+
   let scWhere = 'WHERE 1=1';
   const scParams = [];
   if (siteId) { scWhere += ' AND sc.site_id = ?'; scParams.push(siteId); }
-  if (from) { scWhere += ' AND sc.period >= ?'; scParams.push(from); }
-  if (to) { scWhere += ' AND sc.period <= ?'; scParams.push(to); }
+  if (fromMo) { scWhere += ' AND sc.period >= ?'; scParams.push(fromMo); }
+  if (toMo) { scWhere += ' AND sc.period <= ?'; scParams.push(toMo); }
 
   // When a commodity filter is active, use INNER JOIN so only items
   // matching that commodity appear in the results. Without a filter,
@@ -89,11 +95,13 @@ function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
 }
 
 function hubItemTrend({ itemNumber, from, to, siteId }) {
+  const fromMo = from ? from.slice(0, 7) : from;
+  const toMo = to ? to.slice(0, 7) : to;
   let where = 'WHERE sc.item_number = ?';
   const params = [itemNumber];
   if (siteId) { where += ' AND sc.site_id = ?'; params.push(siteId); }
-  if (from) { where += ' AND sc.period >= ?'; params.push(from); }
-  if (to) { where += ' AND sc.period <= ?'; params.push(to); }
+  if (fromMo) { where += ' AND sc.period >= ?'; params.push(fromMo); }
+  if (toMo) { where += ' AND sc.period <= ?'; params.push(toMo); }
 
   return db.prepare(`
     SELECT
@@ -178,11 +186,11 @@ function hubSites() {
 
 export function createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
-  const guard = [requireAuth, requirePermission('can_access_inventory')];
+  const guard = [requireAuth, requirePermission('can_access_inventory_movement')];
 
   router.get('/api/inventory-movement/top-movers', ...guard, (req, res) => {
     try {
-      const { from, to, limit, commodity, site_id } = req.query;
+      const { from, to, limit, commodity, site_id, supplier } = req.query;
       const rows = isHub()
         ? hubTopMovers({
             from: from || undefined, to: to || undefined,
@@ -194,6 +202,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
             from: from || undefined, to: to || undefined,
             limit: Math.max(1, parseInt(limit, 10) || 50),
             commodity: commodity && commodity !== 'all' ? commodity : undefined,
+            supplier: supplier && supplier !== 'all' ? supplier : undefined,
           });
       res.json({ rows });
     } catch (err) {
@@ -219,7 +228,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
 
   router.get('/api/inventory-movement/dead-stock', ...guard, (req, res) => {
     try {
-      const { threshold, minValue, limit, commodity, site_id } = req.query;
+      const { threshold, minValue, limit, commodity, site_id, supplier } = req.query;
       const rows = isHub()
         ? hubDeadStock({
             thresholdDays: Math.max(1, parseInt(threshold, 10) || 90),
@@ -233,6 +242,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
             minValue: parseFloat(minValue) || 0,
             limit: Math.max(1, parseInt(limit, 10) || 100),
             commodity: commodity && commodity !== 'all' ? commodity : undefined,
+            supplier: supplier && supplier !== 'all' ? supplier : undefined,
           });
       res.json({ rows });
     } catch (err) {
@@ -249,7 +259,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     }
   });
 
-  router.post('/api/inventory-movement/sync', requireAuth, requirePermission('can_access_inventory'), async (req, res) => {
+  router.post('/api/inventory-movement/sync', requireAuth, requirePermission('can_access_inventory_movement'), async (req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly — data comes from sites during ETL sync.' });
     try {
       const result = await syncSalesFromSage();
@@ -263,6 +273,17 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.get('/api/inventory-movement/commodities', ...guard, (_req, res) => {
     try {
       res.json({ commodities: isHub() ? hubCommodities() : getCommodities() });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/suppliers', ...guard, (_req, res) => {
+    try {
+      // Hub doesn't have local stock_receipt rows; suppliers list is
+      // site-only for now. Empty array is a clean signal to the UI to
+      // hide the filter dropdown.
+      res.json({ suppliers: isHub() ? [] : getSuppliers() });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -307,13 +328,14 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.get('/api/inventory-movement/forecast', ...guard, (req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Forecast is only available on site installs.' });
     try {
-      const { sort, dir, abc, limit, commodity } = req.query;
+      const { sort, dir, abc, limit, commodity, supplier } = req.query;
       const rows = getForecastList({
         sortField: sort || 'days_of_stock',
         sortDir: dir || 'asc',
         abcFilter: abc || 'all',
         limit: Math.max(1, parseInt(limit, 10) || 200),
         commodity: commodity && commodity !== 'all' ? commodity : undefined,
+        supplier: supplier && supplier !== 'all' ? supplier : undefined,
       });
       res.json({ rows });
     } catch (err) {

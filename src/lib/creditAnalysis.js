@@ -1,4 +1,4 @@
-import { DEFAULT_CREDIT_LOGIC_CONFIG, normaliseCreditLogicConfig } from "./creditLogic";
+import { DEFAULT_CREDIT_LOGIC_CONFIG, normaliseCreditLogicConfig } from "./creditLogic.js";
 
 function parseAmount(value) {
   if (!value || String(value).trim() === "") return 0;

@@ -7,22 +7,28 @@ import { logAudit } from '../lib/audit.js';
 // this via the stock_receipt_settings table (same pattern as the JTI
 // SQL override). The query must return columns aliased exactly as shown
 // — the sync logic maps by name.
+//
+// Tables: PORCPH1 (receipt header) joined to PORCPL (receipt lines) on
+// the RCPHSEQ surrogate key. Note this is RCP*, not POPOR* — POPOR*
+// are the Purchase Order tables (orders placed), PORCP* are the actual
+// goods received against those POs which is what stock-expiry tracks.
 export const DEFAULT_RECEIPT_SQL = `
   SELECT
     LTRIM(RTRIM(h.RCPNUMBER))  AS receipt_number,
     LTRIM(RTRIM(h.VDCODE))     AS supplier_code,
     LTRIM(RTRIM(h.VDNAME))     AS supplier_name,
-    h.DTRCPDATE                AS receipt_date_int,
-    d.RCPLINE                  AS line_no,
-    LTRIM(RTRIM(d.ITEMNO))     AS item_number,
-    LTRIM(RTRIM(d.ITEMDESC))   AS item_description,
-    d.RQRECEIVED               AS qty_received,
-    LTRIM(RTRIM(d.RCPUNIT))    AS uom,
-    d.RCPCOST                  AS unit_cost
-  FROM POPORH1 h
-  INNER JOIN POPORL d ON d.RCPNUMBER = h.RCPNUMBER
-  WHERE h.DTRCPDATE BETWEEN @from AND @to
-  ORDER BY h.DTRCPDATE DESC, h.RCPNUMBER, d.RCPLINE
+    h.DATE                     AS receipt_date_int,
+    l.RCPLSEQ                  AS line_no,
+    LTRIM(RTRIM(l.ITEMNO))     AS item_number,
+    LTRIM(RTRIM(l.ITEMDESC))   AS item_description,
+    l.RQRECEIVED               AS qty_received,
+    LTRIM(RTRIM(l.RCPUNIT))    AS uom,
+    l.UNITCOST                 AS unit_cost
+  FROM PORCPH1 h
+  INNER JOIN PORCPL l ON l.RCPHSEQ = h.RCPHSEQ
+  WHERE h.DATE BETWEEN @from AND @to
+    AND l.RQRECEIVED > 0
+  ORDER BY h.DATE DESC, h.RCPNUMBER, l.RCPLSEQ
 `;
 
 function toYyyymmdd(d) {
@@ -155,9 +161,15 @@ export function getSyncMeta() {
   }
 }
 
+// Expiry tracking only applies to the Sweets commodity ('1') — cigarettes
+// and tobacco don't carry a perishable shelf life that requires per-batch
+// expiry capture. Items without an inventoryrecord row (so unknown
+// commodity) are excluded.
+const SWEETS_COMMODITY = '1';
+
 export function listReceiptLines({ search, missingExpiry, limit = 200 }) {
-  const where = [];
-  const params = [];
+  const where = ['ic.commodity = ?'];
+  const params = [SWEETS_COMMODITY];
   if (search) {
     where.push('(sr.receipt_number LIKE ? OR srl.item_number LIKE ? OR srl.item_description LIKE ?)');
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
@@ -165,7 +177,7 @@ export function listReceiptLines({ search, missingExpiry, limit = 200 }) {
   if (missingExpiry) {
     where.push('COALESCE(e.expiry_count, 0) = 0');
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const whereSql = `WHERE ${where.join(' AND ')}`;
   const safeLimit = Math.max(1, Math.min(limit, 1000));
   params.push(safeLimit);
 
@@ -177,6 +189,12 @@ export function listReceiptLines({ search, missingExpiry, limit = 200 }) {
       COALESCE(e.expiry_count, 0) AS expiry_count
     FROM stock_receipt_line srl
     JOIN stock_receipt sr ON sr.id = srl.receipt_id
+    INNER JOIN (
+      SELECT TRIM(item_number) AS item_number,
+             TRIM(commodity) AS commodity,
+             ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
+      FROM inventoryrecord
+    ) ic ON ic.item_number = srl.item_number AND ic.rn = 1
     LEFT JOIN (
       SELECT receipt_line_id, COUNT(*) AS expiry_count
       FROM stock_receipt_line_expiry

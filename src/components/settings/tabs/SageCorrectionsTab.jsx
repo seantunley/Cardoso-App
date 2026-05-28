@@ -9,6 +9,7 @@ import { AlertTriangle, Search, Check, X, Pencil, ShieldAlert, RefreshCw } from 
 function ProblemBadge({ type }) {
   if (type === "NO_WEEK") return <Badge className="bg-red-500/15 text-red-400 border-red-500/30 text-[10px]">No Week</Badge>;
   if (type === "BAD_FEE_TYPE") return <Badge className="bg-amber-500/15 text-amber-400 border-amber-500/30 text-[10px]">Bad Fee Type</Badge>;
+  if (type === "SPELLING") return <Badge className="bg-purple-500/15 text-purple-400 border-purple-500/30 text-[10px]">Spelling</Badge>;
   return <Badge className="bg-emerald-500/15 text-emerald-400 border-emerald-500/30 text-[10px]">OK</Badge>;
 }
 

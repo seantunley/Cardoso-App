@@ -630,6 +630,17 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       );
     }
 
+    // Collections balance-delta hook — runs after every sync round to
+    // detect payments and auto-collect zero-balance assignments.
+    // Wrapped in try/catch so a Collections-side error never breaks the
+    // import flow itself.
+    try {
+      const { processCollectionBalanceDelta } = await import('./collectionsService.js');
+      processCollectionBalanceDelta();
+    } catch (err) {
+      console.error('[collections-sync] post-sync hook failed:', err.message);
+    }
+
     return {
       success: true,
       message: `Import completed - ${importedCount} records added`,

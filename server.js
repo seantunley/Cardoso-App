@@ -31,6 +31,8 @@ import { createJtiRouter } from './src/routes/jti.js';
 import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
 import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
 import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
+import { createPricingRouter } from './src/routes/pricing.js';
+import { createDepotProfileRouter } from './src/routes/depotProfile.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -231,6 +233,12 @@ app.use(createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermis
 // internally gates write operations (sync, add-expiry) to site-only;
 // hub gets read-only list endpoints querying hub_stock_receipt_expiry.
 app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
+
+// ── Price List (Sage ICPRICP per-unit prices) ──
+app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));
+
+// ── Depot profile (letterhead details for customer-facing documents) ──
+app.use(createDepotProfileRouter({ db, requireAuth, requireAdmin }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();

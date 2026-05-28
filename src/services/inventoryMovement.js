@@ -35,7 +35,7 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
           LTRIM(RTRIM(OESHDT.ITEM))         AS item_number,
           FORMAT(CAST(CAST(OESHDT.TRANDATE AS VARCHAR(8)) AS DATE), 'yyyy-MM') AS period,
           SUM(OESHDT.QTYSOLD)               AS qty_sold,
-          SUM(OESHDT.QTYSOLD * OESHDT.UNITPRC) AS revenue,
+          SUM(OESHDT.FAMTSALES)             AS revenue,
           COUNT(*)                           AS order_count,
           MAX(OESHDT.TRANDATE)              AS last_sale_int
         FROM OESHDT
@@ -57,8 +57,8 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
           LTRIM(RTRIM(OESHDT.CUSTOMER))     AS customer_code,
           LTRIM(RTRIM(ARCUS.NAMECUST))      AS customer_name,
           OESHDT.QTYSOLD                    AS qty_sold,
-          OESHDT.UNITPRC                    AS unit_price,
-          OESHDT.QTYSOLD * OESHDT.UNITPRC   AS line_amount
+          CASE WHEN OESHDT.QTYSOLD > 0 THEN OESHDT.FAMTSALES / OESHDT.QTYSOLD ELSE NULL END AS unit_price,
+          OESHDT.FAMTSALES                  AS line_amount
         FROM OESHDT
         INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
         LEFT JOIN ARCUS ON OESHDT.CUSTOMER = ARCUS.IDCUST
@@ -150,18 +150,41 @@ export function getSyncMeta() {
   return db.prepare('SELECT * FROM inventory_sales_sync_meta WHERE id = 1').get() || {};
 }
 
-export function getTopMovers({ from, to, limit = 50, commodity } = {}) {
-  let scWhere = 'WHERE 1=1';
+export function getTopMovers({ from, to, limit = 50, commodity, supplier } = {}) {
+  // Aggregate from inventory_sales_transactions (per-day rows) so any
+  // date range works — including a single week. The from/to inputs are
+  // YYYY-MM-DD; YYYY-MM is accepted for backwards compat and expanded
+  // to the first/last day of that month.
+  const expandFrom = (v) => v && v.length === 7 ? `${v}-01` : v;
+  const expandTo = (v) => {
+    if (!v) return v;
+    if (v.length !== 7) return v;
+    const [y, m] = v.split('-').map(Number);
+    const last = new Date(y, m, 0).getDate();
+    return `${v}-${String(last).padStart(2, '0')}`;
+  };
+  const fromDate = expandFrom(from);
+  const toDate = expandTo(to);
+
+  let txnWhere = 'WHERE 1=1';
   const params = [];
-  if (from) { scWhere += ' AND sc.period >= ?'; params.push(from); }
-  if (to) { scWhere += ' AND sc.period <= ?'; params.push(to); }
+  if (fromDate) { txnWhere += ' AND t.transaction_date >= ?'; params.push(fromDate); }
+  if (toDate) { txnWhere += ' AND t.transaction_date <= ?'; params.push(toDate); }
 
   // When a commodity filter is active, use INNER JOIN so only items
   // matching that commodity appear. Without a filter, LEFT JOIN
   // preserves items that have sales data but no inventory record.
   let irFilter = '';
   const joinType = commodity ? 'INNER JOIN' : 'LEFT JOIN';
-  if (commodity) { irFilter = 'WHERE commodity = ?'; params.push(commodity); }
+  if (commodity) { irFilter = 'WHERE TRIM(commodity) = ?'; params.push(commodity); }
+
+  // Supplier filter — INNER JOIN against the latest-supplier subquery
+  // and constrain. When no supplier is chosen, omit the join entirely
+  // so items without receipt history still appear.
+  const supplierJoin = supplier
+    ? `INNER JOIN (${LATEST_SUPPLIER_SQL}) sp ON sp.item_number = agg.item_number AND sp.supplier_name = ?`
+    : '';
+  if (supplier) params.push(supplier);
 
   params.push(limit);
 
@@ -180,32 +203,45 @@ export function getTopMovers({ from, to, limit = 50, commodity } = {}) {
       agg.last_sale_date
     FROM (
       SELECT
-        sc.item_number,
-        SUM(sc.qty_sold)          AS total_qty_sold,
-        SUM(sc.revenue)           AS total_revenue,
-        SUM(sc.order_count)       AS total_orders,
-        MAX(sc.last_sale_date)    AS last_sale_date
-      FROM inventory_sales_cache sc
-      ${scWhere}
-      GROUP BY sc.item_number
+        t.item_number,
+        SUM(t.qty_sold)              AS total_qty_sold,
+        SUM(t.line_amount)           AS total_revenue,
+        COUNT(*)                     AS total_orders,
+        MAX(t.transaction_date)      AS last_sale_date
+      FROM inventory_sales_transactions t
+      ${txnWhere}
+      GROUP BY t.item_number
     ) agg
     ${joinType} (
-      SELECT item_number,
-             item_description, commodity, qty_on_hand, last_cost, price, stocking_uom,
-             ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+      SELECT TRIM(item_number)      AS item_number,
+             TRIM(item_description) AS item_description,
+             TRIM(commodity)        AS commodity,
+             TRIM(qty_on_hand)      AS qty_on_hand,
+             TRIM(last_cost)        AS last_cost,
+             TRIM(price)            AS price,
+             TRIM(stocking_uom)     AS stocking_uom,
+             ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
       FROM inventoryrecord
       ${irFilter}
     ) ir ON ir.item_number = agg.item_number AND ir.rn = 1
+    ${supplierJoin}
     ORDER BY agg.total_qty_sold DESC
     LIMIT ?
   `).all(...params);
 }
 
 export function getItemTrend({ itemNumber, from, to } = {}) {
+  // Accept YYYY-MM-DD (from the day-precision selector) and slice to
+  // YYYY-MM so the monthly-cache filter still matches. YYYY-MM passes
+  // through unchanged.
+  const monthOf = (v) => v ? v.slice(0, 7) : v;
+  const fromMo = monthOf(from);
+  const toMo = monthOf(to);
+
   let where = 'WHERE sc.item_number = ?';
   const params = [itemNumber];
-  if (from) { where += ' AND sc.period >= ?'; params.push(from); }
-  if (to) { where += ' AND sc.period <= ?'; params.push(to); }
+  if (fromMo) { where += ' AND sc.period >= ?'; params.push(fromMo); }
+  if (toMo) { where += ' AND sc.period <= ?'; params.push(toMo); }
 
   return db.prepare(`
     SELECT
@@ -220,17 +256,22 @@ export function getItemTrend({ itemNumber, from, to } = {}) {
   `).all(...params);
 }
 
-export function getDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity } = {}) {
+export function getDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity, supplier } = {}) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - thresholdDays);
   const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
 
-  let commodityFilter = '';
-  const params = [cutoff, minValue, limit];
-  if (commodity) {
-    commodityFilter = 'AND ir.commodity = ?';
-    params.splice(2, 0, commodity);
-  }
+  // Placeholders in the SQL appear in this order: supplier (in JOIN),
+  // cutoff, minValue, commodity (in WHERE), limit. Push them to match.
+  const params = [];
+  const supplierJoin = supplier
+    ? `INNER JOIN (${LATEST_SUPPLIER_SQL}) sp ON sp.item_number = ir.item_number AND sp.supplier_name = ?`
+    : '';
+  if (supplier) params.push(supplier);
+  params.push(cutoff, minValue);
+  const commodityFilter = commodity ? 'AND ir.commodity = ?' : '';
+  if (commodity) params.push(commodity);
+  params.push(limit);
 
   return db.prepare(`
     SELECT
@@ -248,10 +289,16 @@ export function getDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, co
       END AS days_since_sale,
       ROUND(ir.qty_num * ir.cost_num, 2) AS capital_tied_up
     FROM (
-      SELECT item_number, item_description, commodity, qty_on_hand, last_cost, price, stocking_uom,
+      SELECT TRIM(item_number) AS item_number,
+             TRIM(item_description) AS item_description,
+             TRIM(commodity) AS commodity,
+             TRIM(qty_on_hand) AS qty_on_hand,
+             TRIM(last_cost) AS last_cost,
+             TRIM(price) AS price,
+             TRIM(stocking_uom) AS stocking_uom,
              CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL) AS qty_num,
              CAST(REPLACE(REPLACE(COALESCE(last_cost, '0'), ',', ''), ' ', '') AS REAL) AS cost_num,
-             ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+             ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
       FROM inventoryrecord
     ) ir
     LEFT JOIN (
@@ -259,6 +306,7 @@ export function getDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, co
       FROM inventory_sales_cache
       GROUP BY item_number
     ) sale ON sale.item_number = ir.item_number
+    ${supplierJoin}
     WHERE ir.rn = 1
       AND ir.qty_num > 0
       AND (sale.last_sale_date IS NULL OR sale.last_sale_date < ?)
@@ -271,9 +319,39 @@ export function getDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, co
 
 export function getCommodities() {
   return db.prepare(
-    "SELECT DISTINCT commodity FROM inventoryrecord WHERE commodity IS NOT NULL AND TRIM(commodity) != '' ORDER BY commodity"
+    "SELECT DISTINCT TRIM(commodity) AS commodity FROM inventoryrecord WHERE commodity IS NOT NULL AND TRIM(commodity) != '' ORDER BY 1"
   ).all().map(r => r.commodity);
 }
+
+// Distinct supplier names sourced from Sage PO receipts. Used to populate
+// the supplier filter dropdown on Top Movers and Dead Stock. Only suppliers
+// that have actually shipped at least one item (qty > 0) are returned, so
+// dropdowns don't fill up with stale or test vendor rows.
+export function getSuppliers() {
+  return db.prepare(`
+    SELECT DISTINCT TRIM(sr.supplier_name) AS supplier_name
+    FROM stock_receipt sr
+    JOIN stock_receipt_line srl ON srl.receipt_id = sr.id
+    WHERE sr.supplier_name IS NOT NULL
+      AND TRIM(sr.supplier_name) != ''
+    ORDER BY 1
+  `).all().map(r => r.supplier_name);
+}
+
+// Latest supplier per item, derived from the most recent receipt date.
+// Pulled into its own helper because both Top Movers and Dead Stock need
+// the same definition; if we ever switch to "preferred supplier" from
+// Sage ICITEM directly, this is the one place to change.
+const LATEST_SUPPLIER_SQL = `
+  SELECT item_number, supplier_name FROM (
+    SELECT TRIM(srl.item_number) AS item_number,
+           TRIM(sr.supplier_name) AS supplier_name,
+           ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
+    FROM stock_receipt_line srl
+    JOIN stock_receipt sr ON sr.id = srl.receipt_id
+    WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
+  ) WHERE rn = 1
+`;
 
 export function getItemTransactions({ itemNumber, from, to, limit = 500 }) {
   let where = 'WHERE t.item_number = ?';

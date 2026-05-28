@@ -1007,7 +1007,7 @@ export default function Reconciliation() {
 
             {/* Week status block */}
             {weekStatus && (
-              <div className="grid gap-4 sm:grid-cols-3 stagger-in">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-in">
                 <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
                   <div
                     className="absolute left-0 right-0 bottom-0 h-[2px]"
@@ -1019,6 +1019,28 @@ export default function Reconciliation() {
                     </div>
                     <div className="font-display text-5xl leading-none text-foreground tabular-nums">
                       {weekStatus.currentWeek}
+                    </div>
+                  </div>
+                </div>
+                {/* Latest uploaded reconciliation — how current the supplier
+                    file is. Excludes synthetic marked-zero entries; this
+                    is "the most recent week we actually have a file for". */}
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
+                  <div
+                    className="absolute left-0 right-0 bottom-0 h-[2px]"
+                    style={{
+                      background: weekStatus.latestReconWeek != null ? 'hsl(210 80% 55%)' : 'hsl(var(--muted-foreground))',
+                      boxShadow: weekStatus.latestReconWeek != null ? '0 0 12px hsla(210,80%,55%,0.3)' : 'none',
+                    }}
+                  />
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2">
+                      Latest Recon Uploaded
+                    </div>
+                    <div className="font-display text-5xl leading-none tabular-nums" style={{ color: weekStatus.latestReconWeek != null ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))' }}>
+                      {weekStatus.latestReconWeek != null
+                        ? `W${weekStatus.latestReconWeek}/${weekStatus.latestReconYear}`
+                        : '—'}
                     </div>
                   </div>
                 </div>

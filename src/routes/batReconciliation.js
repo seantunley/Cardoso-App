@@ -718,6 +718,19 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       FROM bat_reconciliations
     `).all();
 
+    // Latest week with a real uploaded reconciliation (excluding the
+    // synthetic marked_zero rows). Surfaced as a dashboard tile so the
+    // operator can see at a glance how current their supplier file is.
+    const latestRecon = db.prepare(`
+      SELECT year, week_number
+      FROM bat_reconciliations
+      WHERE COALESCE(marked_zero, 0) = 0
+      ORDER BY year DESC, week_number DESC
+      LIMIT 1
+    `).get();
+    const latestReconWeek = latestRecon?.week_number ?? null;
+    const latestReconYear = latestRecon?.year ?? null;
+
     // Merge into one comparison list keyed by (year, week_number)
     const merged = new Map();
     const keyOf = (y, w) => `${y}/${w}`;
@@ -757,6 +770,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
 
     res.json({
       currentWeek, lastWeekPaid, lastWeekPaidYear,
+      latestReconWeek, latestReconYear,
       sagePaidWeeks, sageWeekTotals, weekComparison, missingWeeks, sageError,
       cacheRefreshedAt: cacheMeta.last_refreshed_at || null,
       cacheChangeSummary: cacheMeta.last_change_summary ? JSON.parse(cacheMeta.last_change_summary) : null,

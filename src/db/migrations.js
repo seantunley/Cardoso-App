@@ -2406,6 +2406,167 @@ function buildMigrations(db) {
         db.prepare(`UPDATE "user" SET can_access_stock_receipt_expiry = 1 WHERE role = 'admin'`).run();
       },
     },
+    {
+      version: 76,
+      name: 'split_inventory_movement_permission',
+      up() {
+        // Inventory Movement (sales velocity, dead stock, forecasting)
+        // was previously gated by can_access_inventory — the same flag
+        // controlling read-only browse of inventoryrecord. Splitting it
+        // out so operations leads who own forecasting / ordering can be
+        // granted access independently of general inventory browsing.
+        // Existing inventory users keep access to preserve current behaviour.
+        ensureColumn(db, 'user', 'can_access_inventory_movement', 'INTEGER DEFAULT 0');
+        db.prepare(`UPDATE "user" SET can_access_inventory_movement = 1 WHERE can_access_inventory = 1 OR role = 'admin'`).run();
+      },
+    },
+    {
+      version: 77,
+      name: 'add_price_list_permission',
+      up() {
+        // Price List module reads from Sage ICPRICP per-unit prices.
+        // Separated from the generic Inventory permission so a sales
+        // rep who only needs catalogue access can be granted exactly
+        // that without seeing stock levels, costs, or dead stock.
+        ensureColumn(db, 'user', 'can_access_price_list', 'INTEGER DEFAULT 0');
+        db.prepare(`UPDATE "user" SET can_access_price_list = 1 WHERE role = 'admin'`).run();
+      },
+    },
+    {
+      version: 78,
+      name: 'depot_profile',
+      up() {
+        // Customer-facing documents (price lists, statements, eventually
+        // invoices) need a single source of truth for the depot's legal
+        // header details. Single-row table because there's exactly one
+        // depot identity per site install — no need for key-value
+        // gymnastics. id is fixed at 1 by the CHECK constraint.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS depot_profile (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            name TEXT,
+            address_line1 TEXT,
+            address_line2 TEXT,
+            city TEXT,
+            postal_code TEXT,
+            phone TEXT,
+            email TEXT,
+            vat_number TEXT,
+            registration_number TEXT,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+          );
+          INSERT OR IGNORE INTO depot_profile (id, name) VALUES (1, 'Cardoso Depots');
+        `);
+      },
+    },
+    {
+      version: 80,
+      name: 'collections_worklists_v1',
+      up() {
+        // Phase 1 of the Collections rebuild — adds worklists, per-customer
+        // assignments, and an append-only activity log. The existing
+        // collections table is left alone for now (its status/notes fields
+        // become legacy after Phase 2 routes ship; for migration safety
+        // they remain readable until the UI is fully cut over).
+        //
+        // Customers join a worklist only via a deliberate assignment.
+        // Sync hooks can mutate an assignment's status to 'collected'
+        // when the customer's balance reaches zero — see services/
+        // collectionsSync.js — but never create assignments.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS collection_worklist (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            owner_user_id INTEGER REFERENCES "user"(id) ON DELETE SET NULL,
+            description TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            created_by_user_id INTEGER REFERENCES "user"(id) ON DELETE SET NULL,
+            archived_at TEXT
+          );
+          CREATE INDEX IF NOT EXISTS idx_collection_worklist_owner
+            ON collection_worklist(owner_user_id) WHERE archived_at IS NULL;
+
+          -- Status values:
+          --   active       — currently being worked
+          --   collected    — auto-set when balance reaches zero
+          --   escalated    — manual: handed to legal / external collector
+          --   written_off  — manual: bad debt accepted
+          --   closed       — manual: any other close reason (e.g. duplicate)
+          CREATE TABLE IF NOT EXISTS collection_assignment (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            worklist_id INTEGER NOT NULL REFERENCES collection_worklist(id) ON DELETE CASCADE,
+            customer_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            assigned_at TEXT DEFAULT (datetime('now')),
+            assigned_by_user_id INTEGER REFERENCES "user"(id) ON DELETE SET NULL,
+            closed_at TEXT,
+            closed_reason TEXT,
+            next_followup_date TEXT,
+            opening_balance REAL,
+            -- Last-known balance from sync — used by the auto-detect hook
+            -- to spot a balance drop without scanning the whole datarecord.
+            last_known_balance REAL,
+            last_sync_at TEXT,
+            UNIQUE(worklist_id, customer_id)
+          );
+          CREATE INDEX IF NOT EXISTS idx_collection_assignment_customer
+            ON collection_assignment(customer_id);
+          CREATE INDEX IF NOT EXISTS idx_collection_assignment_worklist_status
+            ON collection_assignment(worklist_id, status);
+          CREATE INDEX IF NOT EXISTS idx_collection_assignment_followup
+            ON collection_assignment(next_followup_date)
+            WHERE status = 'active' AND next_followup_date IS NOT NULL;
+
+          -- Append-only event log. Kinds:
+          --   note              — free-text note (no transition)
+          --   contacted         — rep made contact (call/email/visit)
+          --   promise_made      — rep recorded a promised payment
+          --   promise_kept      — auto/manual: a promise materialised
+          --   promise_broken    — auto/manual: promise date passed unpaid
+          --   payment_received  — Sage shows a balance drop (auto from sync)
+          --   status_changed    — manual status flip (escalated/written_off/closed/reopened)
+          CREATE TABLE IF NOT EXISTS collection_activity (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            customer_id TEXT NOT NULL,
+            assignment_id INTEGER REFERENCES collection_assignment(id) ON DELETE SET NULL,
+            user_id INTEGER REFERENCES "user"(id) ON DELETE SET NULL,
+            kind TEXT NOT NULL,
+            at TEXT DEFAULT (datetime('now')),
+            amount REAL,
+            promise_date TEXT,
+            previous_balance REAL,
+            new_balance REAL,
+            notes TEXT,
+            source TEXT DEFAULT 'manual'
+          );
+          CREATE INDEX IF NOT EXISTS idx_collection_activity_customer
+            ON collection_activity(customer_id, at DESC);
+          CREATE INDEX IF NOT EXISTS idx_collection_activity_assignment
+            ON collection_activity(assignment_id, at DESC);
+          CREATE INDEX IF NOT EXISTS idx_collection_activity_kind
+            ON collection_activity(kind, at DESC);
+        `);
+      },
+    },
+    {
+      version: 79,
+      name: 'price_list_exclusions',
+      up() {
+        // Item-code patterns to exclude from the customer-facing price
+        // list. Pattern uses `*` as a wildcard (converted to SQL LIKE %
+        // at filter time). Examples: "4000*", "JT*", "9999" (exact).
+        // Stored once globally — applies to every price list.
+        db.exec(`
+          CREATE TABLE IF NOT EXISTS price_list_exclusions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pattern TEXT NOT NULL UNIQUE,
+            note TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT
+          );
+        `);
+      },
+    },
   ];
 }
 

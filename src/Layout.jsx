@@ -4,6 +4,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   KeyRound,
   Sun,
   Moon,
@@ -72,6 +73,15 @@ const IconInventoryMovement = ({ className, style }) => (
     <rect x="10" y="6" width="3" height="12" rx="0.5" fill="#fb923c" opacity="0.85"/>
     <rect x="14" y="2" width="3" height="16" rx="0.5" fill="#f97316"/>
     <line x1="3" y1="13" x2="16" y2="3" stroke="#fdba74" strokeWidth="1" strokeDasharray="2 1" opacity="0.6"/>
+  </svg>
+);
+
+const IconPriceList = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <path d="M2.5 9.5 L9.5 2.5 L17.5 2.5 L17.5 10.5 L10.5 17.5 L2.5 9.5 Z" fill="#fb923c" opacity="0.85" stroke="#f97316" strokeWidth="0.6"/>
+    <circle cx="13.5" cy="6.5" r="1.3" fill="#fdba74"/>
+    <line x1="6" y1="11" x2="12" y2="11" stroke="#fff" strokeWidth="0.8" opacity="0.7"/>
+    <line x1="6.5" y1="13" x2="11.5" y2="13" stroke="#fff" strokeWidth="0.8" opacity="0.5"/>
   </svg>
 );
 
@@ -296,33 +306,42 @@ const SettingsPanel = lazy(() => import("@/components/settings/SettingsPanel"));
 const APP_VERSION = "2026.3.9";
 
 const navItems = [
-  { name: "Customer Management", icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true },
+  { name: "Customer Search",     icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true, group: "Customers" },
   // Same icon as the site-mode entry above so the sidebar looks
   // identical regardless of install mode — operator sees one
-  // consistent "Customer Management" affordance whether they're on
-  // a site or the hub.
-  { name: "Customer Management", icon: IconCustomerSearch,        page: "HubDashboard",     hubOnly: true },
-  { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances" },
-  { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true },
-  { name: "Inventory",           icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory" },
-  { name: "Inventory Movement",  icon: IconInventoryMovement,     page: "InventoryMovement", permission: "can_access_inventory" },
-  { name: "Stock Expiry",        icon: IconStockExpiry,           page: "StockReceipts",    permission: "can_access_stock_receipt_expiry" },
-  { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices" },
-  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true },
-  { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true },
-  { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true },
-  { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true },
-  { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true },
-  { name: "Reconciliation",      icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true },
-  { name: "JTI",                 icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true },
-  { name: "JTI",                 icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true },
-  { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports" },
+  // consistent "Customer Search" affordance whether they're on a
+  // site or the hub.
+  { name: "Customer Search",     icon: IconCustomerSearch,        page: "HubDashboard",     hubOnly: true,                        group: "Customers" },
+  { name: "Customer Balances",   icon: IconCustomerBalances,      page: "CustomerBalances", permission: "can_access_customer_balances", group: "Customers" },
+  { name: "Collections",         icon: IconCollections,           page: "Collections",      permission: "can_access_collections", siteOnly: true, group: "Customers" },
+  { name: "Inventory List",      icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory", group: "Inventory" },
+  { name: "Inventory Movement",  icon: IconInventoryMovement,     page: "InventoryMovement", permission: "can_access_inventory_movement", group: "Inventory" },
+  { name: "Stock Expiry",        icon: IconStockExpiry,           page: "StockReceipts",    permission: "can_access_stock_receipt_expiry", group: "Inventory" },
+  { name: "Price List",          icon: IconPriceList,             page: "PriceList",        permission: "can_access_price_list", group: "Inventory" },
+  { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true, group: "BAT and JTI" },
+  { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true, group: "BAT and JTI" },
+  { name: "JTI Monthly Reports", icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true, group: "BAT and JTI" },
+  { name: "JTI Monthly Reports", icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true, group: "BAT and JTI" },
+  { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
+  { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true, group: "Hub" },
+  { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Hub" },
+  { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true, group: "Hub" },
+  { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
+  { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },
   // Operations — admin-only home for background job runs, system errors,
   // deploys, and (in hub mode) per-site sync log. Same admin gating as
   // Credit Debug — hidden from the sidebar for non-admins; the page also
   // self-guards so direct URL access shows a clear "admin only" message.
-  { name: "Operations",          icon: IconOperations,            page: "Operations",       adminOnly: true },
+  { name: "Operations",          icon: IconOperations,            page: "Operations",       adminOnly: true,                    group: "System" },
 ];
+
+// Render order for groups in the expanded sidebar. Each group becomes a
+// collapsible section header with the items underneath. Groups whose
+// items are all hidden (by hub/site mode or permissions) collapse away.
+const NAV_GROUP_ORDER = ["Customers", "Inventory", "BAT and JTI", "Reports", "Hub", "System"];
+
+// localStorage key for which groups the operator has collapsed.
+const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v1";
 
 export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed]       = useState(true);
@@ -330,6 +349,25 @@ export default function Layout({ children, currentPageName }) {
   const [hubMode, setHubMode]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState(null);
+
+  // Sidebar group open/closed state. Initialised from localStorage so the
+  // operator's preference survives reloads. A group is "collapsed" when
+  // its name is present in the set; default is all-open.
+  const [collapsedGroups, setCollapsedGroups] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY) || "[]");
+      return new Set(Array.isArray(stored) ? stored : []);
+    } catch { return new Set(); }
+  });
+  const toggleGroup = (name) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      try { localStorage.setItem(NAV_COLLAPSED_GROUPS_KEY, JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus]   = useState({
     currentVersion: APP_VERSION,
@@ -400,6 +438,18 @@ export default function Layout({ children, currentPageName }) {
       clearInterval(timer);
     };
   }, [currentUser, hubMode, isAdmin]);
+
+  // Other pages dispatch "open-settings" with an optional tab id to
+  // jump straight to a specific section (e.g. the Price List page links
+  // to its exclusions tab). Detail: { tab?: string }.
+  useEffect(() => {
+    const handler = (e) => {
+      setSettingsInitialTab(e?.detail?.tab || null);
+      setSettingsOpen(true);
+    };
+    window.addEventListener("open-settings", handler);
+    return () => window.removeEventListener("open-settings", handler);
+  }, []);
 
   // Sage health poll — site mode only, only for users who can see BAT
   // (otherwise we'd be making a permission-gated API call that 403s on
@@ -509,30 +559,30 @@ export default function Layout({ children, currentPageName }) {
       >
         {/* ── Brand block ── */}
         <div className="px-3 pt-6 pb-5" style={{ borderBottom: "1px solid hsl(var(--sidebar-border))" }}>
-          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "gap-3")}>
-            {/* Signature phosphor square */}
-            <div
-              className="shrink-0"
-              style={{
-                width: "22px",
-                height: "22px",
-                background: "var(--phosphor)",
-                boxShadow: "0 0 20px hsla(33, 95%, 55%, 0.5)",
-              }}
-            />
-            <div
-              className={cn(
-                "min-w-0 overflow-hidden transition-all duration-200 ease-out",
-                isCollapsed ? "w-0 opacity-0" : "w-full opacity-100"
-              )}
-            >
-              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-[hsl(var(--sidebar-foreground))/0.6] whitespace-nowrap">
-                Cardoso Cigarettes
-              </div>
-              <div className="font-display text-lg leading-tight text-[hsl(var(--sidebar-foreground))] whitespace-nowrap">
-                Ledger
-              </div>
-            </div>
+          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "justify-start")}>
+            {isCollapsed ? (
+              // Icon-only sidebar: keep the signature phosphor square so
+              // the brand is still recognisable at a glance.
+              <div
+                className="shrink-0"
+                style={{
+                  width: "22px",
+                  height: "22px",
+                  background: "var(--phosphor)",
+                  boxShadow: "0 0 20px hsla(33, 95%, 55%, 0.5)",
+                }}
+              />
+            ) : (
+              // Expanded: orange Cardoso Depots wordmark on the dark
+              // sidebar background. Source PNG is recoloured at build
+              // time by scripts/recolor-logo.mjs.
+              <img
+                src="/cardoso-logo-orange.png"
+                alt="Cardoso Depots"
+                className="block w-full max-w-[160px] h-auto select-none"
+                draggable={false}
+              />
+            )}
           </div>
           {currentUser && !isCollapsed && (
             <div className="mt-6 space-y-1">
@@ -562,8 +612,11 @@ export default function Layout({ children, currentPageName }) {
               § Navigation
             </div>
           )}
-          <div className={cn("space-y-0.5", isCollapsed && "flex flex-col items-center w-full")}>
-            {visibleNavItems.map((item) => {
+          {(() => {
+            // Render a single nav item — shared between the collapsed
+            // (icon-only) view and the expanded grouped view so styling
+            // stays in lockstep.
+            const renderItem = (item) => {
               const isActive = currentPageName === item.page;
               const showAttention = item.page === "HubBackups" && backupAttention;
               return (
@@ -584,7 +637,6 @@ export default function Layout({ children, currentPageName }) {
                   onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.color = "hsl(var(--sidebar-foreground))"; }}
                   onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.65)"; }}
                 >
-                  {/* Phosphor active indicator — left bar */}
                   {isActive && (
                     <span
                       className="absolute left-0 top-1 bottom-1 w-[2px]"
@@ -617,8 +669,67 @@ export default function Layout({ children, currentPageName }) {
                   </span>
                 </Link>
               );
-            })}
-          </div>
+            };
+
+            // Collapsed (icon-only) view — render the flat list. Group
+            // headers don't make sense without space for labels.
+            if (isCollapsed) {
+              return (
+                <div className="space-y-0.5 flex flex-col items-center w-full">
+                  {visibleNavItems.map(renderItem)}
+                </div>
+              );
+            }
+
+            // Expanded view — group items under collapsible headers in
+            // the predefined order. Auto-expand the group containing the
+            // current page so the operator never lands on a hidden link.
+            const grouped = new Map(NAV_GROUP_ORDER.map(g => [g, []]));
+            const ungrouped = [];
+            for (const it of visibleNavItems) {
+              const g = it.group;
+              if (g && grouped.has(g)) grouped.get(g).push(it);
+              else ungrouped.push(it);
+            }
+            return (
+              <div className="space-y-1.5">
+                {NAV_GROUP_ORDER.map(groupName => {
+                  const items = grouped.get(groupName) || [];
+                  if (items.length === 0) return null;
+                  const activeInGroup = items.some(it => it.page === currentPageName);
+                  const collapsed = collapsedGroups.has(groupName) && !activeInGroup;
+                  return (
+                    <div key={groupName}>
+                      <button
+                        type="button"
+                        onClick={() => toggleGroup(groupName)}
+                        className="w-full flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
+                        style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.7)"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.45)"; }}
+                      >
+                        <span>{groupName}</span>
+                        <ChevronDown
+                          className="h-3 w-3 transition-transform duration-150"
+                          style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
+                        />
+                      </button>
+                      {!collapsed && (
+                        <div className="space-y-0.5 mt-0.5">
+                          {items.map(renderItem)}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {ungrouped.length > 0 && (
+                  <div className="space-y-0.5 pt-1">
+                    {ungrouped.map(renderItem)}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
         </nav>
         <div
           className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "space-y-0 p-3")}
@@ -808,8 +919,9 @@ export default function Layout({ children, currentPageName }) {
         <Suspense fallback={null}>
           <SettingsPanel
             open={settingsOpen}
-            onClose={() => setSettingsOpen(false)}
+            onClose={() => { setSettingsOpen(false); setSettingsInitialTab(null); }}
             hubMode={hubMode}
+            initialTab={settingsInitialTab}
           />
         </Suspense>
       )}

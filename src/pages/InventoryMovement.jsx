@@ -66,31 +66,37 @@ function AgeBadge({ days }) {
 }
 
 function PeriodSelector({ from, to, onChange }) {
+  const isoDay = (d) => d.toISOString().slice(0, 10);
   const presets = [
-    { label: "Last 3 months", months: 3 },
-    { label: "Last 6 months", months: 6 },
-    { label: "YTD", months: 0 },
+    { label: "Last 7 days", days: 7 },
+    { label: "Last 30 days", days: 30 },
+    { label: "Last 90 days", days: 90 },
+    { label: "YTD", ytd: true },
     { label: "Last 12 months", months: 12 },
   ];
-  const getRange = (months) => {
+  const getRange = (p) => {
     const now = new Date();
-    const curMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    if (months === 0) {
-      return { from: `${now.getFullYear()}-01`, to: curMonth };
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    if (p.ytd) {
+      return { from: isoDay(new Date(now.getFullYear(), 0, 1)), to: isoDay(today) };
     }
-    // "Last N months" = the N months before the current one.
-    // E.g. in May, "Last 3 months" = Feb–Apr (months 2,3,4), not Feb–May.
-    const fromDate = new Date(now.getFullYear(), now.getMonth() - months, 1);
-    const toDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    return {
-      from: `${fromDate.getFullYear()}-${String(fromDate.getMonth() + 1).padStart(2, '0')}`,
-      to: `${toDate.getFullYear()}-${String(toDate.getMonth() + 1).padStart(2, '0')}`,
-    };
+    if (p.months) {
+      const d = new Date(now.getFullYear(), now.getMonth() - p.months, now.getDate());
+      return { from: isoDay(d), to: isoDay(today) };
+    }
+    // "Last N days" = the N days ending yesterday (today excluded — partial day skews totals)
+    const yesterday = new Date(today); yesterday.setDate(today.getDate() - 1);
+    const fromD = new Date(yesterday); fromD.setDate(yesterday.getDate() - (p.days - 1));
+    return { from: isoDay(fromD), to: isoDay(yesterday) };
   };
+  const anyPresetActive = presets.some((p) => {
+    const r = getRange(p);
+    return r.from === from && r.to === to;
+  });
   return (
     <div className="flex items-center gap-2 flex-wrap">
       {presets.map((p) => {
-        const range = getRange(p.months);
+        const range = getRange(p);
         const active = from === range.from && to === range.to;
         return (
           <button
@@ -106,21 +112,66 @@ function PeriodSelector({ from, to, onChange }) {
           </button>
         );
       })}
+      <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+        !anyPresetActive
+          ? "border-amber-500 bg-amber-500/15 text-amber-400"
+          : "border-border bg-card text-muted-foreground"
+      }`}>
+        <span className="opacity-70">Custom</span>
+        <input
+          type="date"
+          value={from}
+          max={to}
+          onChange={(e) => e.target.value && onChange({ from: e.target.value, to })}
+          className="bg-transparent border-none outline-none text-xs tabular-nums cursor-pointer [color-scheme:dark]"
+          aria-label="From date"
+        />
+        <span className="opacity-50">–</span>
+        <input
+          type="date"
+          value={to}
+          min={from}
+          onChange={(e) => e.target.value && onChange({ from, to: e.target.value })}
+          className="bg-transparent border-none outline-none text-xs tabular-nums cursor-pointer [color-scheme:dark]"
+          aria-label="To date"
+        />
+      </div>
     </div>
   );
 }
 
-function SortHeader({ label, field, current, dir, onSort, className = "" }) {
+function SortHeader({ label, field, current, dir, onSort, className = "", tooltip }) {
   const active = current === field;
+  const labelNode = tooltip ? (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">{label}</span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs text-xs leading-relaxed">{tooltip}</TooltipContent>
+    </Tooltip>
+  ) : label;
   return (
     <th
       onClick={() => onSort(field)}
       className={`px-3 py-2 text-xs font-medium uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors ${className} ${active ? "text-foreground" : "text-muted-foreground"}`}
     >
       <span className="inline-flex items-center gap-1">
-        {label}
+        {labelNode}
         {active ? (dir === "asc" ? " ↑" : " ↓") : <ArrowUpDown className="h-3 w-3 opacity-30" />}
       </span>
+    </th>
+  );
+}
+
+function HeaderWithTip({ label, tooltip, className = "" }) {
+  return (
+    <th className={`px-3 py-2 text-xs font-medium text-muted-foreground uppercase ${className}`}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-2">{label}</span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs text-xs leading-relaxed">{tooltip}</TooltipContent>
+      </Tooltip>
     </th>
   );
 }
@@ -132,11 +183,13 @@ export default function InventoryMovement() {
   const [siteFilter, setSiteFilter] = useState("all");
 
   const now = new Date();
-  const defaultFrom = `${now.getFullYear()}-01`;
-  const defaultTo = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  const iso = (d) => d.toISOString().slice(0, 10);
+  const defaultFrom = iso(new Date(now.getFullYear(), 0, 1));
+  const defaultTo = iso(now);
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(defaultTo);
   const [commodity, setCommodity] = useState("all");
+  const [supplier, setSupplier] = useState("all");
   const [threshold, setThreshold] = useState(90);
 
   const [sortField, setSortField] = useState("total_qty_sold");
@@ -175,11 +228,18 @@ export default function InventoryMovement() {
     staleTime: 300_000,
   });
 
+  const suppliers = useQuery({
+    queryKey: ["inv-movement-suppliers"],
+    queryFn: () => apiFetch("/api/inventory-movement/suppliers"),
+    staleTime: 300_000,
+  });
+
   const topMovers = useQuery({
-    queryKey: ["inv-movement-top", from, to, commodity, siteFilter],
+    queryKey: ["inv-movement-top", from, to, commodity, supplier, siteFilter],
     queryFn: () => {
       const params = new URLSearchParams({ from, to, limit: "200" });
       if (commodity !== "all") params.set("commodity", commodity);
+      if (supplier !== "all") params.set("supplier", supplier);
       if (siteFilter !== "all") params.set("site_id", siteFilter);
       return apiFetch(`/api/inventory-movement/top-movers?${params}`);
     },
@@ -188,10 +248,11 @@ export default function InventoryMovement() {
   });
 
   const deadStock = useQuery({
-    queryKey: ["inv-movement-dead", threshold, commodity, siteFilter],
+    queryKey: ["inv-movement-dead", threshold, commodity, supplier, siteFilter],
     queryFn: () => {
       const params = new URLSearchParams({ threshold: String(threshold), limit: "500" });
       if (commodity !== "all") params.set("commodity", commodity);
+      if (supplier !== "all") params.set("supplier", supplier);
       if (siteFilter !== "all") params.set("site_id", siteFilter);
       return apiFetch(`/api/inventory-movement/dead-stock?${params}`);
     },
@@ -274,11 +335,12 @@ export default function InventoryMovement() {
   const [abcFilter, setAbcFilter] = useState("all");
 
   const forecast = useQuery({
-    queryKey: ["inv-movement-forecast", forecastSort, forecastDir, abcFilter, commodity],
+    queryKey: ["inv-movement-forecast", forecastSort, forecastDir, abcFilter, commodity, supplier],
     queryFn: () => {
       const params = new URLSearchParams({ sort: forecastSort, dir: forecastDir, limit: "300" });
       if (abcFilter !== "all") params.set("abc", abcFilter);
       if (commodity !== "all") params.set("commodity", commodity);
+      if (supplier !== "all") params.set("supplier", supplier);
       return apiFetch(`/api/inventory-movement/forecast?${params}`);
     },
     enabled: tab === "forecast" && !hubMode,
@@ -376,7 +438,7 @@ export default function InventoryMovement() {
               <select
                 value={siteFilter}
                 onChange={(e) => setSiteFilter(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
               >
                 <option value="all">All Sites (Combined)</option>
                 {(sitesQuery.data?.sites || []).map((s) => (
@@ -391,7 +453,7 @@ export default function InventoryMovement() {
             <select
               value={commodity}
               onChange={(e) => setCommodity(e.target.value)}
-              className="h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+              className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground"
             >
               <option value="all">All</option>
               {(commodities.data?.commodities || []).map((c) => (
@@ -399,6 +461,26 @@ export default function InventoryMovement() {
               ))}
             </select>
           </div>
+
+          {/* Supplier — sourced from latest Sage PO receipt per item.
+              Items never received via PO sync will not appear under any
+              supplier (use the All option to see them). Hidden when there
+              are no suppliers yet (e.g. before the first Stock Receipt sync). */}
+          {(suppliers.data?.suppliers || []).length > 0 && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-muted-foreground">Supplier</label>
+              <select
+                value={supplier}
+                onChange={(e) => setSupplier(e.target.value)}
+                className="h-8 rounded-full border border-border bg-card px-3 text-xs text-foreground min-w-[260px]"
+              >
+                <option value="all">All</option>
+                {(suppliers.data?.suppliers || []).map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Search */}
           <div className="relative flex-1 max-w-xs">
@@ -408,7 +490,7 @@ export default function InventoryMovement() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search item number or description…"
-              className="w-full h-8 pl-8 pr-3 rounded-lg border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
+              className="w-full h-8 pl-8 pr-3 rounded-full border border-border bg-card text-xs text-foreground placeholder:text-muted-foreground"
             />
           </div>
 
@@ -419,7 +501,7 @@ export default function InventoryMovement() {
               <button
                 onClick={() => syncMutation.mutate()}
                 disabled={syncMutation.isPending}
-                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                 Sync from Sage
@@ -441,7 +523,7 @@ export default function InventoryMovement() {
 
         {/* Threshold for dead stock */}
         {tab === "deadStock" && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <label className="text-xs text-muted-foreground">No sales in the last</label>
             {THRESHOLD_OPTIONS.map((opt) => (
               <button
@@ -456,6 +538,33 @@ export default function InventoryMovement() {
                 {opt.label}
               </button>
             ))}
+            {(() => {
+              const isCustom = !THRESHOLD_OPTIONS.some(o => o.value === threshold);
+              const cutoffISO = new Date(Date.now() - threshold * 86400000).toISOString().slice(0, 10);
+              const todayISO = new Date().toISOString().slice(0, 10);
+              return (
+                <div className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+                  isCustom
+                    ? "border-red-500 bg-red-500/15 text-red-400"
+                    : "border-border bg-card text-muted-foreground"
+                }`}>
+                  <span className="opacity-70">Since</span>
+                  <input
+                    type="date"
+                    value={cutoffISO}
+                    max={todayISO}
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const days = Math.max(1, Math.round((Date.now() - new Date(e.target.value).getTime()) / 86400000));
+                      setThreshold(days);
+                    }}
+                    className="bg-transparent border-none outline-none text-xs tabular-nums cursor-pointer [color-scheme:dark]"
+                    aria-label="Cutoff date — items with no sales since this date"
+                  />
+                  {isCustom && <span className="opacity-60">({threshold}d)</span>}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
@@ -506,7 +615,7 @@ export default function InventoryMovement() {
                       <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.revenue)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">{r.order_count}</td>
                       <td className="px-3 py-2 text-right tabular-nums">
-                        {r.order_count > 0 ? (r.qty_sold / r.order_count).toFixed(1) : "—"}
+                        {r.order_count > 0 ? Math.round(r.qty_sold / r.order_count) : "—"}
                       </td>
                     </tr>
                   ))}
@@ -571,7 +680,7 @@ export default function InventoryMovement() {
                         <td className="px-3 py-2 text-right tabular-nums">{formatCurrency(r.total_revenue)}</td>
                         <td className="px-3 py-2 text-right tabular-nums">{r.total_orders}</td>
                         <td className="px-3 py-2 text-right tabular-nums">
-                          {r.total_orders > 0 ? (r.total_qty_sold / r.total_orders).toFixed(1) : "—"}
+                          {r.total_orders > 0 ? Math.round(r.total_qty_sold / r.total_orders) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums">{formatNum(r.qty_on_hand)}</td>
                         <td className="px-3 py-2 text-right whitespace-nowrap text-muted-foreground">{r.last_sale_date || "—"}</td>
@@ -686,7 +795,7 @@ export default function InventoryMovement() {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => window.print()}
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                 >
                   <Printer className="h-3.5 w-3.5" />
                   Print
@@ -719,16 +828,26 @@ export default function InventoryMovement() {
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-card border-b border-border">
                     <tr>
-                      <SortHeader label="Item" field="item_number" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-left" />
-                      <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase">Description</th>
-                      <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase">ABC</th>
-                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">On Hand</th>
-                      <SortHeader label="Daily Demand" field="avg_daily_demand" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right" />
-                      <SortHeader label="Adj Demand/Mo" field="adjusted_demand" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right" />
-                      <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase">Season</th>
-                      <SortHeader label="Reorder Pt" field="reorder_point" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right" />
-                      <SortHeader label="Days of Stock" field="days_of_stock" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right" />
-                      <SortHeader label="Order Qty" field="suggested_order_qty" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right" />
+                      <SortHeader label="Item" field="item_number" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-left"
+                        tooltip="Sage item number. Trimmed of trailing spaces to match the sales cache." />
+                      <HeaderWithTip label="Description" className="text-left"
+                        tooltip="Item description from Sage inventoryrecord (most recent variant per item)." />
+                      <HeaderWithTip label="ABC" className="text-center"
+                        tooltip="Pareto class by revenue over all months on file. A = items covering the top 80% of revenue, B = next 15%, C = remaining 5%. Used for prioritising stock attention." />
+                      <HeaderWithTip label="On Hand" className="text-right"
+                        tooltip="Current qty on hand from Sage inventoryrecord. Where an item has multiple location rows, the highest qty wins." />
+                      <SortHeader label="Daily Demand" field="avg_daily_demand" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
+                        tooltip="Historical reference: total qty ÷ (months × 30). Plain average across the whole window, not used to drive the order calc. Compare against Adj Demand/Mo to spot trend changes." />
+                      <SortHeader label="Adj Demand/Mo" field="adjusted_demand" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
+                        tooltip="What the model expects you to sell THIS month. = WMA3 × Seasonality. WMA3 is a weighted average of the last 3 complete months (weights 3-2-1, most recent first). The current partial month is excluded." />
+                      <HeaderWithTip label="Season" className="text-right"
+                        tooltip="Seasonality index for the current calendar month. = avg(qty for this month-of-year across history) ÷ avg(all months). 1.00 = no seasonal effect; >1 = busier than average; <1 = quieter. Defaults to 1.00 if there's less than 12 months of history. Clamped to [0.10, 5.00]." />
+                      <SortHeader label="Reorder Pt" field="reorder_point" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
+                        tooltip="When On Hand drops to this number, place an order today. = (daily demand × lead time days) + safety stock. Lead time and service level come from Forecast Settings." />
+                      <SortHeader label="Days of Stock" field="days_of_stock" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
+                        tooltip="Runway at the current sell rate. = On Hand ÷ daily demand. Colour coding: red <7d, amber <14d, yellow <30d, green ≥30d. Anything below your lead time is a stockout risk." />
+                      <SortHeader label="Order Qty" field="suggested_order_qty" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
+                        tooltip="Suggested order size to cover one order cycle plus variability. = (daily demand × order cycle days) + safety stock − On Hand. Bumped up to the per-item minimum order qty if set. Order cycle days comes from Forecast Settings." />
                     </tr>
                   </thead>
                   <tbody>

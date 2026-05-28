@@ -1,7 +1,10 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback, memo } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { useQuery } from "@tanstack/react-query";
-import { Filter, Scale } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Filter, Scale, X } from "lucide-react";
+import SummaryTile from "@/components/shared/SummaryTile";
+import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import { analyseInvoiceCredit, CREDIT_BADGE_META } from "@/lib/creditAnalysis";
 import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -108,7 +111,14 @@ function ResizeHandle({ id, startResize, resetColumn }) {
 
 // ── Credit analysis (shared with CustomerLookup) ─────────────────────────
 function CreditBadge({ row, creditLogicConfig }) {
-  const result = useMemo(() => analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG), [row, creditLogicConfig]);
+  // Prefer the server-computed verdict on row.credit_verdict (added by the
+  // /api/top-balances route) — saves running analyseInvoiceCredit per row
+  // on every parent re-render. Falls back to local compute for rows that
+  // pre-date the server addition (e.g. hub-mode, older caches).
+  const result = useMemo(() => {
+    if (row?.credit_verdict) return { verdict: row.credit_verdict, score: row.credit_score };
+    return analyseInvoiceCredit([row], [], creditLogicConfig || DEFAULT_CREDIT_LOGIC_CONFIG);
+  }, [row, creditLogicConfig]);
   const meta = CREDIT_BADGE_META[result.verdict] || CREDIT_BADGE_META.caution;
 
   return (
@@ -123,7 +133,78 @@ function CreditBadge({ row, creditLogicConfig }) {
   );
 }
 
-const PAGE_SIZE = 50;
+// React.memo'd row — virtualisation already trims DOM count, but each
+// visible row was still re-rendering on every parent state change
+// (filters, sort, hover). With stable props from React Query, memo
+// skips the row body's reconciliation when only unrelated state moves.
+//
+// Rows have variable height (invoice/receipt cells render 1-3 lines), so
+// we accept a measureRef from the virtualizer for accurate spacer math.
+const CustomerBalancesRow = memo(function CustomerBalancesRow({
+  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
+}) {
+  const amount = parseAmount(row.outstanding_balance);
+  return (
+    <tr
+      ref={measureRef}
+      data-index={idx}
+      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
+    >
+      <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
+      <td className="px-2 py-1 pr-3">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 w-[88px] shrink-0">
+            <FlagDot color={row.flag_color} reason={row.flag_reason} />
+            {getVisibleAccountType(row.account_type) && (
+              <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
+                {getVisibleAccountType(row.account_type)}
+              </span>
+            )}
+          </div>
+          <span className={`font-medium truncate ${isTop ? "text-amber-400" : "text-foreground"}`}>
+            {row.customer_name || "—"}
+          </span>
+          {assignment && (
+            <span
+              className="ml-auto shrink-0 inline-flex items-center rounded-full border border-amber-500/40 bg-amber-500/15 text-amber-300 px-1.5 py-0.5 text-[10px] font-medium"
+              title={`On "${assignment.worklist_name}" — assigned to ${assignment.owner_name || "unassigned"}`}
+            >
+              Assigned: {assignment.owner_name || "—"}
+            </span>
+          )}
+        </div>
+      </td>
+      <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>
+      <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || "—"}</td>
+      <td className="px-2 py-1 text-xs text-muted-foreground">{row.sales_rep || "—"}</td>
+      <td className="px-2 py-1 text-xs">
+        <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
+        {row.last_unpaid_invoice_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}
+        {row.last_unpaid_invoice_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_unpaid_invoice_1_date}</div>}
+      </td>
+      <td className="px-2 py-1 text-xs">
+        <div className="font-mono text-foreground leading-tight">{row.last_receipt_1 || "—"}</div>
+        {row.last_receipt_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_receipt_1_amount)}</div>}
+        {row.last_receipt_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_receipt_1_date}</div>}
+      </td>
+      <td className="px-2 py-1 text-right">
+        <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
+          R {formatAmount(amount)}
+        </span>
+      </td>
+      <td className="px-2 py-1 text-center">
+        <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
+      </td>
+    </tr>
+  );
+});
+
+// One-shot fetch — Customer Balances has at most a few thousand rows
+// (one per customer with a balance), well within what an HTML table
+// renders comfortably without virtualisation. The page scrolls inside
+// the table container so the operator sees every customer in a single
+// continuous list.
+const PAGE_SIZE = 5000;
 
 function getVisibleAccountType(accountType) {
   const value = String(accountType || "").trim().toUpperCase();
@@ -316,7 +397,7 @@ function AgeBucketPill({ active, onClick, children, value }) {
   );
 }
 
-async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }) {
+async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -325,6 +406,8 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFi
   if (ageBucket && ageBucket !== "all") params.set("ageBucket", ageBucket);
   if (salesRepFilter && salesRepFilter !== "all") params.set("salesRep", salesRepFilter);
   if (hideInvoiceMatchesBalance) params.set("hideInvoiceMatchesBalance", "1");
+  if (lastPurchaseDays && lastPurchaseDays !== "all") params.set("lastPurchaseDays", String(lastPurchaseDays));
+  if (dormantOnly) params.set("dormantOnly", "1");
 
   const res = await fetch(`/api/top-balances?${params.toString()}`, { credentials: "include" });
   if (!res.ok) {
@@ -349,7 +432,7 @@ async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFi
   return data;
 }
 
-async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }) {
+async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
   const firstPage = await fetchTopBalances({
     page: 1,
     limit: 200,
@@ -357,6 +440,8 @@ async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hide
     ageBucket,
     salesRepFilter,
     hideInvoiceMatchesBalance,
+    lastPurchaseDays,
+    dormantOnly,
   });
 
   if ((firstPage?.totalPages ?? 1) <= 1) return firstPage;
@@ -370,6 +455,8 @@ async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hide
       ageBucket,
       salesRepFilter,
       hideInvoiceMatchesBalance,
+      lastPurchaseDays,
+      dormantOnly,
     });
     allRecords.push(...(pageData.records ?? []));
   }
@@ -401,6 +488,16 @@ export default function CustomerBalances() {
   const [siteFilter, setSiteFilter] = useState("all");
   const [ageBucket, setAgeBucket] = useState("all");
   const [salesRepFilter, setSalesRepFilter] = useState("all");
+  // Client-side page filters (applied to the current page only — server
+  // pagination / totals remain authoritative). lastPurchaseDays: "all"
+  // or a string number of days ("30", "60", "90", "180", "365").
+  const [lastPurchaseDays, setLastPurchaseDays] = useState("all");
+  const [dormantOnly, setDormantOnly] = useState(false);
+  // Controlled <details> open state so the filter panel stays put
+  // across React re-renders (refetches, sort clicks, etc.) — without
+  // this, native <details> gets unmounted by conditional rendering and
+  // snaps back to closed every time the data changes.
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
   const tableContainerRef = useRef(null);
   const { widths: colWidths, setWidths: setColWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
@@ -435,17 +532,32 @@ export default function CustomerBalances() {
   }, []);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance],
-    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
     staleTime: 60_000,
     keepPreviousData: true,
+  });
+
+  // Live map of customer_id → { worklist_name, owner_name } so rows
+  // can show an "Assigned to X" chip when the customer is on someone's
+  // Collections worklist. Cheap query (one small map), polled every
+  // minute so chips update if Collections changes.
+  const { data: collectionAssignments } = useQuery({
+    queryKey: ["customer-assignments-map"],
+    queryFn: async () => {
+      const r = await fetch("/api/collections/customer-assignments", { credentials: "include" });
+      if (!r.ok) return {};
+      const d = await r.json().catch(() => ({}));
+      return d.assignments || {};
+    },
+    staleTime: 60_000,
   });
 
   const totalRecords = data?.total ?? 0;
 
   const { data: printData } = useQuery({
-    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance],
-    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance }),
+    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
+    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
     staleTime: 60_000,
     keepPreviousData: true,
     enabled: totalRecords > PAGE_SIZE,
@@ -508,6 +620,16 @@ export default function CustomerBalances() {
     const raw = data?.records ?? [];
     return sortRows(raw);
   }, [data?.records, sortField, sortDir, creditScores]);
+
+  // Row virtualization — rendering 5,000 <tr>s at once paints slow and
+  // makes scroll janky. The virtualizer keeps only ~30 visible rows in the
+  // DOM and uses two spacer <tr>s to preserve scroll height + sort stability.
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => tableContainerRef.current,
+    estimateSize: () => 44,
+    overscan: 10,
+  });
 
   const printRows = useMemo(() => {
     const raw = printData?.records ?? data?.records ?? [];
@@ -623,7 +745,7 @@ export default function CustomerBalances() {
 
       {/* ── Screen UI ── */}
       <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
-        <div className="max-w-[1600px] mx-auto">
+        <div>
           {/* Header */}
           <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 pb-5 border-b border-border">
             <div>
@@ -686,45 +808,86 @@ export default function CustomerBalances() {
             </div>
           </div>
 
-          {/* Filters */}
+          {/* Filters — collapsible. The <details> element gives us a
+              native toggle with no extra state plumbing; the summary
+              row keeps a quick "active filters" indicator visible even
+              when the panel is closed. */}
           {!isLoading && !isError && (
-            <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 cb-no-print">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                <div className="flex min-w-0 flex-1 flex-col gap-3">
-                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                    <Filter className="h-4 w-4 text-amber-400" />
-                    Filters
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Age buckets</div>
-                    <div className="flex flex-wrap gap-2">
-                      {AGE_BUCKETS.map((bucket) => (
-                        <AgeBucketPill
-                          key={bucket.value}
-                          value={bucket.value}
-                          active={ageBucket === bucket.value}
-                          onClick={() => {
-                            setAgeBucket(bucket.value);
-                            setPage(1);
-                          }}
-                        >
-                          {bucket.label}
-                        </AgeBucketPill>
-                      ))}
-                    </div>
+            <CollapsibleFilterBar
+              open={filtersOpen}
+              onOpenChange={setFiltersOpen}
+              className="mb-4 cb-no-print"
+              chips={[
+                ageBucket !== "all" && { key: "age",   label: activeAgeBucketLabel,                onClear: () => setAgeBucket("all") },
+                lastPurchaseDays !== "all" && { key: "last", label: `Last purchase ${lastPurchaseDays}+ days`, onClear: () => setLastPurchaseDays("all") },
+                dormantOnly && { key: "dormant", label: "Dormant only", onClear: () => setDormantOnly(false) },
+                siteFilter !== "all" && { key: "site", label: siteFilter, onClear: () => setSiteFilter("all") },
+                salesRepFilter !== "all" && { key: "rep",  label: `Rep ${salesRepFilter}`, onClear: () => setSalesRepFilter("all") },
+                hideInvoiceMatchesBalance && { key: "hide", label: "Hide invoice = balance", onClear: () => setHideInvoiceMatchesBalance(false) },
+              ].filter(Boolean)}
+              onClearAll={() => {
+                setAgeBucket("all");
+                setLastPurchaseDays("all");
+                setDormantOnly(false);
+                setSiteFilter("all");
+                setSalesRepFilter("all");
+                setHideInvoiceMatchesBalance(false);
+              }}
+            >
+              {/* All pill-style filters stack as labelled rows so the
+                  layout reads top-to-bottom and nothing sits stranded
+                  on the right edge. Dropdowns + toggles share a row at
+                  the bottom. */}
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Age buckets</div>
+                  <div className="flex flex-wrap gap-2">
+                    {AGE_BUCKETS.map((bucket) => (
+                      <AgeBucketPill
+                        key={bucket.value}
+                        value={bucket.value}
+                        active={ageBucket === bucket.value}
+                        onClick={() => { setAgeBucket(bucket.value); setPage(1); }}
+                      >
+                        {bucket.label}
+                      </AgeBucketPill>
+                    ))}
                   </div>
                 </div>
 
-                <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[260px]">
+                <div className="space-y-1.5">
+                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Last purchase</div>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      { value: "all",  label: "All" },
+                      { value: "30",   label: "30+ days" },
+                      { value: "60",   label: "60+ days" },
+                      { value: "90",   label: "90+ days" },
+                      { value: "180",  label: "180+ days" },
+                      { value: "365",  label: "1+ year" },
+                    ].map((opt) => (
+                      <AgeBucketPill
+                        key={opt.value}
+                        value={opt.value}
+                        active={lastPurchaseDays === opt.value}
+                        onClick={() => { setLastPurchaseDays(opt.value); setPage(1); }}
+                      >
+                        {opt.label}
+                      </AgeBucketPill>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Dropdowns + toggles share the last row. Wraps cleanly
+                    on narrow screens. */}
+                <div className="flex flex-wrap items-end gap-3 pt-1">
                   {sites.length > 1 && (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1.5 min-w-[180px]">
                       <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Site</label>
                       <select
                         value={siteFilter}
                         onChange={(e) => { setSiteFilter(e.target.value); setPage(1); }}
                         style={{ colorScheme }}
-                        className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       >
                         <option value="all">All sites</option>
                         {sites.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -733,13 +896,13 @@ export default function CustomerBalances() {
                   )}
 
                   {salesReps.length > 0 && (
-                    <div className="flex flex-col gap-2">
+                    <div className="flex flex-col gap-1.5 min-w-[180px]">
                       <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Sales rep</label>
                       <select
                         value={salesRepFilter}
                         onChange={(e) => { setSalesRepFilter(e.target.value); setPage(1); }}
                         style={{ colorScheme }}
-                        className="min-h-[42px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                        className="h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
                       >
                         <option value="all">All reps</option>
                         {salesReps.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -747,33 +910,35 @@ export default function CustomerBalances() {
                     </div>
                   )}
 
-                  <FilterToggle
-                    active={hideInvoiceMatchesBalance}
-                    onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}
-                    tooltip="Hide customers where the latest invoice amount equals their outstanding balance"
-                  >
-                    {hideInvoiceMatchesBalance ? "⊘ " : ""}Last Invoice = Outstanding Balance
-                  </FilterToggle>
+                  <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    <FilterToggle
+                      active={dormantOnly}
+                      onClick={() => { setDormantOnly((v) => !v); setPage(1); }}
+                      tooltip="Show only customers whose credit verdict is 'dormant' (no recent activity)"
+                    >
+                      {dormantOnly ? "⊘ " : ""}Dormant only
+                    </FilterToggle>
+                    <FilterToggle
+                      active={hideInvoiceMatchesBalance}
+                      onClick={() => { setHideInvoiceMatchesBalance((v) => !v); setPage(1); }}
+                      tooltip="Hide customers where the latest invoice amount equals their outstanding balance"
+                    >
+                      {hideInvoiceMatchesBalance ? "⊘ " : ""}Hide invoice = balance
+                    </FilterToggle>
+                  </div>
                 </div>
-              </div>
-            </div>
+            </CollapsibleFilterBar>
           )}
 
-          {/* Summary */}
+          {/* Summary tile — uses shared SummaryTile so layout matches
+              Inventory and Collections. Half-width grid for visual
+              consistency across the inventory modules and customer pages. */}
           {rows.length > 0 && (
-            <div className="mb-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-xl border border-border bg-card px-4 py-3">
-                <div className="text-sm text-muted-foreground">
-                  Total outstanding ({totalRecords} customer{totalRecords !== 1 ? "s" : ""}
-                  {siteFilter !== "all" ? ` · ${siteFilter}` : ""}
-                  {ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})
-                </div>
-                <div className="mt-1 text-lg font-bold text-foreground">R {formatAmount(filteredGrandTotal)}</div>
-              </div>
-              <div className="rounded-xl border border-border bg-card px-4 py-3">
-                <div className="text-sm text-muted-foreground">Current page total ({rows.length} shown)</div>
-                <div className="mt-1 text-lg font-bold text-foreground">R {formatAmount(currentPageTotal)}</div>
-              </div>
+            <div className="mb-4 grid gap-4 md:grid-cols-2">
+              <SummaryTile
+                label={`Total outstanding (${totalRecords} customer${totalRecords !== 1 ? "s" : ""}${siteFilter !== "all" ? ` · ${siteFilter}` : ""}${ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})`}
+                value={`R ${formatAmount(filteredGrandTotal)}`}
+              />
             </div>
           )}
 
@@ -831,7 +996,7 @@ export default function CustomerBalances() {
                 <thead className="sticky top-0 z-20">
                   <tr className="border-b border-border bg-card">
                     <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide">#<ResizeHandle id="idx" startResize={startResize} resetColumn={resetColumn} /></th>
-                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer Name<SortArrow field="customer_name" /></span><ResizeHandle id="name" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_name")} className="relative py-1.5 pr-3 pl-[98px] text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer Name<SortArrow field="customer_name" /></span><ResizeHandle id="name" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer trading name — click to sort</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_number")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer ID<SortArrow field="customer_number" /></span><ResizeHandle id="custId" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer account number — click to sort (numeric-aware)</TooltipContent></Tooltip>
                     <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Site</span><ResizeHandle id="site" startResize={startResize} resetColumn={resetColumn} /></th>
                     <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Sales Rep</span><ResizeHandle id="rep" startResize={startResize} resetColumn={resetColumn} /></th>
@@ -842,53 +1007,40 @@ export default function CustomerBalances() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row, idx) => {
-                    const amount = parseAmount(row.outstanding_balance);
-                    const globalIdx = (currentPage - 1) * PAGE_SIZE + idx;
-                    const isTop  = globalIdx === 0;
+                  {(() => {
+                    const virtualItems = rowVirtualizer.getVirtualItems();
+                    const totalHeight = rowVirtualizer.getTotalSize();
+                    const paddingTop = virtualItems.length > 0 ? virtualItems[0].start : 0;
+                    const paddingBottom = virtualItems.length > 0
+                      ? totalHeight - virtualItems[virtualItems.length - 1].end
+                      : 0;
                     return (
-                      <tr
-                        key={`${row.customer_number}-${row.site_name}-${idx}`}
-                        className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
-                      >
-                        <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
-                        <td className="px-2 py-1">
-                          <div className="flex items-center gap-1.5">
-                            <FlagDot color={row.flag_color} reason={row.flag_reason} />
-                            {getVisibleAccountType(row.account_type) && (
-                              <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium ${getAccountTypePillClasses(row.account_type)}`}>
-                                {getVisibleAccountType(row.account_type)}
-                              </span>
-                            )}
-                            <span className={`font-medium ${isTop ? "text-amber-400" : "text-foreground"}`}>
-                              {row.customer_name || "—"}
-                            </span>
-                          </div>
-                        </td>
-                        <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>
-                        <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || "—"}</td>
-                        <td className="px-2 py-1 text-xs text-muted-foreground">{row.sales_rep || "—"}</td>
-                        <td className="px-2 py-1 text-xs">
-                          <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
-                          {row.last_unpaid_invoice_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}
-                          {row.last_unpaid_invoice_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_unpaid_invoice_1_date}</div>}
-                        </td>
-                        <td className="px-2 py-1 text-xs">
-                          <div className="font-mono text-foreground leading-tight">{row.last_receipt_1 || "—"}</div>
-                          {row.last_receipt_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_receipt_1_amount)}</div>}
-                          {row.last_receipt_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_receipt_1_date}</div>}
-                        </td>
-                        <td className="px-2 py-1 text-right">
-                          <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
-                            R {formatAmount(amount)}
-                          </span>
-                        </td>
-                        <td className="px-2 py-1 text-center">
-                          <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
-                        </td>
-                      </tr>
+                      <>
+                        {paddingTop > 0 && <tr aria-hidden="true"><td colSpan={9} style={{ height: paddingTop, padding: 0, border: 0 }} /></tr>}
+                        {virtualItems.map((v) => {
+                          const idx = v.index;
+                          const row = rows[idx];
+                          if (!row) return null;
+                          const globalIdx = (currentPage - 1) * PAGE_SIZE + idx;
+                          const isTop  = globalIdx === 0;
+                          const assignment = collectionAssignments?.[String(row.id ?? row.customer_id)];
+                          return (
+                            <CustomerBalancesRow
+                              key={`${row.customer_number}-${row.site_name}-${idx}`}
+                              row={row}
+                              idx={idx}
+                              globalIdx={globalIdx}
+                              isTop={isTop}
+                              creditLogicConfig={creditLogicConfig}
+                              assignment={assignment}
+                              measureRef={rowVirtualizer.measureElement}
+                            />
+                          );
+                        })}
+                        {paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={9} style={{ height: paddingBottom, padding: 0, border: 0 }} /></tr>}
+                      </>
                     );
-                  })}
+                  })()}
                 </tbody>
               </table>
                 );
@@ -896,59 +1048,8 @@ export default function CustomerBalances() {
             </div>
           )}
 
-          {/* Pagination */}
-          {!isLoading && !isError && totalPages > 1 && (
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <button
-                onClick={() => setPage(1)}
-                disabled={currentPage <= 1}
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                title="First page"
-              >
-                First
-              </button>
-              <button
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage <= 1}
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Prev
-              </button>
-              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <span>Page</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={totalPages}
-                  key={currentPage}
-                  defaultValue={currentPage}
-                  onBlur={(e) => {
-                    const v = parseInt(e.target.value, 10);
-                    if (Number.isFinite(v) && v >= 1 && v <= totalPages) setPage(v);
-                    else e.target.value = currentPage;
-                  }}
-                  onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
-                  className="w-14 h-7 rounded border border-border bg-card px-1.5 text-center text-xs text-foreground tabular-nums"
-                />
-                <span>of {totalPages}</span>
-              </div>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage >= totalPages}
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                Next
-              </button>
-              <button
-                onClick={() => setPage(totalPages)}
-                disabled={currentPage >= totalPages}
-                className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Last page"
-              >
-                Last
-              </button>
-            </div>
-          )}
+          {/* Pagination removed — the table now scrolls in place and
+              renders the full result set (capped at PAGE_SIZE=5000). */}
         </div>
       </div>
     </>

@@ -27,7 +27,7 @@ export function computeAllForecasts() {
   const items = db.prepare(`
     SELECT DISTINCT sc.item_number
     FROM inventory_sales_cache sc
-    INNER JOIN inventoryrecord ir ON ir.item_number = sc.item_number
+    INNER JOIN inventoryrecord ir ON TRIM(ir.item_number) = sc.item_number
   `).all();
 
   const allMonthly = db.prepare(`
@@ -105,7 +105,7 @@ export function computeAllForecasts() {
   const inventoryMap = new Map();
   try {
     const invRows = db.prepare(`
-      SELECT item_number,
+      SELECT TRIM(item_number) AS item_number,
              CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL) AS qty_on_hand
       FROM inventoryrecord
     `).all();
@@ -259,11 +259,27 @@ function computeSeasonality(months, targetMonth) {
 function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
 function round1(v) { return v != null ? Math.round(v * 10) / 10 : null; }
 
-export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', abcFilter, limit = 200, commodity }) {
+export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', abcFilter, limit = 200, commodity, supplier }) {
   let where = 'WHERE 1=1';
   const params = [];
   if (abcFilter && abcFilter !== 'all') { where += ' AND f.abc_class = ?'; params.push(abcFilter); }
   if (commodity && commodity !== 'all') { where += ' AND ir.commodity = ?'; params.push(commodity); }
+
+  // Supplier filter — same latest-receipt definition used by Top Movers
+  // and Dead Stock. INNER JOIN drops items that have never been received.
+  const supplierJoin = supplier && supplier !== 'all'
+    ? `INNER JOIN (
+        SELECT item_number, supplier_name FROM (
+          SELECT TRIM(srl.item_number) AS item_number,
+                 TRIM(sr.supplier_name) AS supplier_name,
+                 ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
+          FROM stock_receipt_line srl
+          JOIN stock_receipt sr ON sr.id = srl.receipt_id
+          WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
+        ) WHERE rn = 1
+      ) sp ON sp.item_number = f.item_number AND sp.supplier_name = ?`
+    : '';
+  if (supplier && supplier !== 'all') params.push(supplier);
 
   const safeLimit = Math.max(1, Math.min(limit, 1000));
   params.push(safeLimit);
@@ -282,10 +298,15 @@ export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', 
       ir.price
     FROM inventory_forecast f
     LEFT JOIN (
-      SELECT item_number, item_description, commodity, qty_on_hand, price,
-             ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+      SELECT TRIM(item_number) AS item_number,
+             TRIM(item_description) AS item_description,
+             TRIM(commodity) AS commodity,
+             qty_on_hand,
+             TRIM(price) AS price,
+             ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
       FROM inventoryrecord
     ) ir ON ir.item_number = f.item_number AND ir.rn = 1
+    ${supplierJoin}
     ${where}
     ORDER BY ${col} ${dir} ${nulls}
     LIMIT ?

@@ -354,12 +354,12 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const info = db.prepare(`
         INSERT INTO "user" (
           email, full_name, role, password_hash, is_active, must_change_password,
-          can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+          can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list, can_access_network_devices,
           can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
           can_access_records, can_access_reports, can_access_connections, can_access_reconciliation, can_access_hub_reconciliation, can_access_settings,
           can_access_jti, can_access_stock_receipt_expiry,
           can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         email.trim().toLowerCase(),
         full_name,
@@ -371,6 +371,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         defaults.can_access_customer_balances !== false ? 1 : 0,
         defaults.can_access_collections !== false ? 1 : 0,
         defaults.can_access_inventory !== false ? 1 : 0,
+        defaults.can_access_inventory_movement ? 1 : 0,
+        defaults.can_access_price_list ? 1 : 0,
         defaults.can_access_network_devices ? 1 : 0,
         defaults.can_access_hub_metrics ? 1 : 0,
         defaults.can_access_hub_backups ? 1 : 0,
@@ -414,6 +416,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_customer_balances',
       'can_access_collections',
       'can_access_inventory',
+      'can_access_inventory_movement',
+      'can_access_price_list',
       'can_access_network_devices',
       'can_access_hub_metrics',
       'can_access_hub_backups',
@@ -538,6 +542,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_customer_balances',
       'can_access_collections',
       'can_access_inventory',
+      'can_access_inventory_movement',
+      'can_access_price_list',
       'can_access_network_devices',
       'can_access_hub_metrics',
       'can_access_hub_backups',
