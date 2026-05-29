@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Settings,
   LogOut,
@@ -351,6 +351,7 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import CommandPalette from "@/components/CommandPalette";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
@@ -409,9 +410,11 @@ const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "
 const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v2";
 
 export default function Layout({ children, currentPageName }) {
+  const navigate = useNavigate();
   const [isCollapsed, setIsCollapsed]       = useState(true);
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const [hubMode, setHubMode]               = useState(false);
+  const [cmdOpen, setCmdOpen]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState(null);
@@ -653,22 +656,8 @@ export default function Layout({ children, currentPageName }) {
               />
             )}
           </div>
-          {currentUser && !isCollapsed && (
-            <div className="mt-6 space-y-1">
-              <p
-                className="truncate font-mono text-[10px] uppercase tracking-[0.2em]"
-                style={{ color: "hsla(var(--sidebar-foreground), 0.5)" }}
-              >
-                Operator
-              </p>
-              <p className="truncate text-xs font-medium text-[hsl(var(--sidebar-foreground))]">
-                {currentUser.full_name || "User"}
-              </p>
-              <p className="truncate font-mono text-[10px]" style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}>
-                {currentUser.email}
-              </p>
-            </div>
-          )}
+          {/* Operator identity now lives in the bottom account menu (see footer
+              dropdown), so the duplicate top block was removed. */}
         </div>
 
         {/* ── Nav items — terminal list with phosphor left-bar on active ── */}
@@ -997,6 +986,14 @@ export default function Layout({ children, currentPageName }) {
           />
         </Suspense>
       )}
+
+      {/* Cmd/Ctrl-K command palette — jump to any permitted page/report. */}
+      <CommandPalette
+        open={cmdOpen}
+        onOpenChange={setCmdOpen}
+        items={visibleNavItems}
+        onSelect={(it) => navigate(`/${it.page}`)}
+      />
 
       {showBuildDiagnostics && (
         <div className="fixed inset-0 z-[1002] flex items-center justify-center bg-background/60 px-6 backdrop-blur-sm">
