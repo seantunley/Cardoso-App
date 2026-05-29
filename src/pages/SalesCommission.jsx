@@ -454,7 +454,7 @@ function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
       <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
         <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
           <Receipt className="w-4 h-4 text-amber-400" />
-          Not yet eligible — sweets invoices outstanding
+          Unpaid sweets invoices in period — tracking
         </h2>
         {totals && (
           <div className="text-xs text-muted-foreground tabular-nums">
@@ -462,15 +462,16 @@ function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
             <span className="mx-2">·</span>
             net sweets {formatRand(totals.total_net_sweets)}
             <span className="mx-2">·</span>
-            pending Sweets {formatPct(sweetsRate)} = {formatRand(totals.pending_sweet_commission)}
+            Sweets commission at risk = {formatRand(totals.at_risk_sweet_commission)}
           </div>
         )}
       </div>
 
       <div className="text-xs text-muted-foreground px-4 py-2 border-b border-border/60">
-        These invoices are inside the period but the customer hasn't paid yet, so they don't
-        count toward this report's commission. They'll roll into a future period once
-        settled.
+        These invoices ARE counted in the commission totals above. They're listed here
+        because the customer hasn't paid yet — if any of these are still unpaid by the
+        next commission period, the commission paid on them should be clawed back from
+        that rep's next payout.
       </div>
 
       <div className="divide-y divide-border">
@@ -490,11 +491,11 @@ function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
                 <span className="text-muted-foreground" title={`Total outstanding from these invoices`}>
                   Outstanding <span className="text-foreground">{formatRand(rep.total_outstanding)}</span>
                 </span>
-                <span className="text-amber-300">
-                  Pending {formatPct(sweetsRate)} = {formatRand(rep.pending_sweet_commission)}
+                <span className="text-amber-300" title="Sweets commission already paid on these invoices — at risk of clawback if still unpaid by next period">
+                  Sweets {formatPct(sweetsRate)} at risk = {formatRand(rep.at_risk_sweet_commission)}
                 </span>
-                <span className="text-muted-foreground" title="Reference commission these would yield once paid">
-                  Ref {formatPct(referenceRate)} = {formatRand(rep.pending_reference_commission)}
+                <span className="text-muted-foreground" title="Reference commission slice from these invoices">
+                  Ref {formatPct(referenceRate)} = {formatRand(rep.at_risk_reference_commission)}
                 </span>
               </div>
             </summary>

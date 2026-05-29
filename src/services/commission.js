@@ -101,11 +101,11 @@ export function updateCommissionSettings({
 // Override SQL MUST keep these param names or the runtime bind step
 // will fail.
 //
-// Sales SQL joins AROBL on the invoice number + customer and filters
-// to SWPAID = 1 — sweets only count for commission when the customer
-// has actually paid. Sweets invoices still outstanding go into the
-// unpaid query below and surface as the "Not yet eligible" section
-// on the report (so the rep can see what's pending).
+// Sales SQL counts every sweets invoice in the period regardless of
+// payment status — sweets commission is earned when the invoice is
+// raised, not when the customer pays. The separate unpaid-invoices
+// query below is informational only (a tracking report alongside the
+// commission totals, not a filter on them).
 
 export const DEFAULT_COMMISSION_SALES_SQL = `
 SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
@@ -114,12 +114,8 @@ SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
 FROM OESHDT
 INNER JOIN ICITMV ON OESHDT.ITEM = ICITMV.ITEMNO
 INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-INNER JOIN AROBL ar
-  ON LTRIM(RTRIM(ar.IDINVC))  = LTRIM(RTRIM(OESHDT.TRANNUM))
- AND LTRIM(RTRIM(ar.IDCUST)) = LTRIM(RTRIM(OESHDT.CUSTOMER))
 WHERE OESHDT.TRANDATE BETWEEN @from AND @to
   AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
-  AND ar.SWPAID = 1
 GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, '')))
 `.trim();
 
@@ -136,9 +132,10 @@ GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
 `.trim();
 
 // Per-invoice list of sweets invoices in the period that haven't been
-// fully paid (AROBL.SWPAID = 0). Rendered as a "Not yet eligible"
-// section on the report, collapsible per sales rep, so the operator
-// can see what's pending without breaking the commission totals.
+// fully paid (AROBL.SWPAID = 0). Informational tracking report shown
+// alongside the commission totals — NOT a filter on them. The
+// commission report counts every sweets invoice in the period; this
+// list just surfaces which of those are still outstanding from AR.
 export const DEFAULT_COMMISSION_UNPAID_SQL = `
 SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
        LTRIM(RTRIM(OESHDT.TRANNUM))              AS invoice_number,
@@ -323,11 +320,12 @@ export async function buildCommissionReport({ from, to }) {
         invoice_count: invoices.length,
         total_net_sweets,
         total_outstanding,
-        // What this rep would earn on top once these clear — purely the
-        // sweets portion since cig/tob is already on customer_payments
-        // and isn't impacted by AR aging.
-        pending_sweet_commission: total_net_sweets * settings.sweets_rate,
-        pending_reference_commission: total_net_sweets * settings.reference_rate,
+        // Slice of the rep's commission (Sweets + Reference) attributable
+        // to these still-unpaid invoices. The commission itself has
+        // already been counted in the headline table — this is purely
+        // a "what's tied up in AR" view for follow-up purposes.
+        at_risk_sweet_commission: total_net_sweets * settings.sweets_rate,
+        at_risk_reference_commission: total_net_sweets * settings.reference_rate,
         invoices,
       };
     })
