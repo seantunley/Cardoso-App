@@ -218,7 +218,7 @@ function CustomerTrends() {
         <div className="space-y-6">
           <PeriodChart
             title="Record Volume"
-            subtitle={`Showing ${period} totals — sourced from datarecord.updated_date`}
+            subtitle={`${period === "weekly" ? "Weekly" : "Monthly"} customer record count`}
             data={recordVolume}
             siteName={siteName}
           />
@@ -413,7 +413,7 @@ function InventoryTrends() {
         <div className="space-y-6">
           <YearChart
             title="Sales Velocity"
-            subtitle="Units sold per month — SUM(qty_sold) on inventory_sales_cache"
+            subtitle="Units sold per month"
             data={qtyPoints}
             yearKeys={qtyKeys}
             yearList={yearList}
@@ -421,7 +421,7 @@ function InventoryTrends() {
           />
           <YearChart
             title="Sales Revenue"
-            subtitle="Revenue per month — SUM(revenue) on inventory_sales_cache"
+            subtitle="Revenue per month"
             data={revPoints}
             yearKeys={qtyKeys}
             yearList={yearList}
@@ -429,7 +429,7 @@ function InventoryTrends() {
           />
           <YearChart
             title="Order Count"
-            subtitle="Number of orders per month — SUM(order_count) on inventory_sales_cache"
+            subtitle="Orders per month"
             data={orderPoints}
             yearKeys={qtyKeys}
             yearList={yearList}

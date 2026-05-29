@@ -252,7 +252,7 @@ function CustomerTrends({ siteId }) {
         <div className="space-y-6">
           <ChartCard
             title="Record Volume"
-            subtitle={`Showing ${period} totals per site — sourced from hub_records.updated_date`}
+            subtitle={`${period === "weekly" ? "Weekly" : "Monthly"} customer record count per site`}
             data={recordVolume}
             sites={sites}
           />
@@ -484,7 +484,7 @@ function InventoryTrends({ siteId }) {
         <div className="space-y-6">
           <YearChart
             title="Sales Velocity"
-            subtitle="Units sold per month — SUM(qty_sold) on hub_inventory_sales, summed across sites"
+            subtitle="Units sold per month, totalled across every site"
             data={qtyPoints}
             yearKeys={qtyKeys}
             yearList={yearList}
@@ -492,7 +492,7 @@ function InventoryTrends({ siteId }) {
           />
           <YearChart
             title="Sales Revenue"
-            subtitle="Revenue per month — SUM(revenue) on hub_inventory_sales, summed across sites"
+            subtitle="Revenue per month, totalled across every site"
             data={revPoints}
             yearKeys={qtyKeys}
             yearList={yearList}
@@ -500,7 +500,7 @@ function InventoryTrends({ siteId }) {
           />
           <YearChart
             title="Order Count"
-            subtitle="Number of orders per month — SUM(order_count) on hub_inventory_sales, summed across sites"
+            subtitle="Orders per month, totalled across every site"
             data={orderPoints}
             yearKeys={qtyKeys}
             yearList={yearList}
