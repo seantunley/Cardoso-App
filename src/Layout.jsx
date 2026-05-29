@@ -229,6 +229,18 @@ const IconTrends = ({ className, style }) => (
 // Reconciliation — phosphor pulse cutting through stacked ledger rows.
 // Teal rows = static records; amber waveform = live matching across them.
 // Reports — stacked report sheets with a colourful bar-chart popping forward.
+// Creditors — building with R inside, two-toned to distinguish from Commission.
+const IconCreditors = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <rect x="3.5" y="4" width="13" height="13" rx="1" fill="#7c3aed" opacity="0.18" stroke="#7c3aed" strokeWidth="0.9"/>
+    <line x1="3.5" y1="7"  x2="16.5" y2="7"  stroke="#a78bfa" strokeWidth="0.7"/>
+    <rect x="5.5" y="9"  width="2" height="2" rx="0.3" fill="#a78bfa"/>
+    <rect x="9"   y="9"  width="2" height="2" rx="0.3" fill="#a78bfa"/>
+    <rect x="12.5" y="9" width="2" height="2" rx="0.3" fill="#a78bfa"/>
+    <text x="10" y="16" fontSize="5" fontFamily="ui-monospace, monospace" fontWeight="bold" fill="#c4b5fd" textAnchor="middle">R</text>
+  </svg>
+);
+
 const IconCommission = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
     {/* Receipt / pay slip */}
@@ -342,6 +354,8 @@ const navItems = [
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Infrastructure" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true,  group: "Reports" },
   { name: "Trends",              icon: IconTrends,                page: "Trends",           permission: "can_access_reports",     siteOnly: true, group: "Reports" },
+  { name: "Creditor Summary",    icon: IconCreditors,             page: "CreditorSummary",  permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
+  { name: "Creditor Search",     icon: IconCreditors,             page: "CreditorSearch",   permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },
   // Operations — admin-only home for background job runs, system errors,
@@ -354,7 +368,7 @@ const navItems = [
 // Render order for groups in the expanded sidebar. Each group becomes a
 // collapsible section header with the items underneath. Groups whose
 // items are all hidden (by hub/site mode or permissions) collapse away.
-const NAV_GROUP_ORDER = ["Customers", "Inventory", "BAT and JTI", "Reports", "Infrastructure", "System"];
+const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Infrastructure", "System"];
 
 // localStorage key for which groups the operator has collapsed.
 // v2: reset all operators to fully-expanded sidebar groups (user request

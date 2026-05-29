@@ -74,6 +74,8 @@ const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
 const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
 const HubCommission = React.lazy(() => import('./pages/HubCommission'));
 const Trends = React.lazy(() => import('./pages/Trends'));
+const CreditorSummary = React.lazy(() => import('./pages/CreditorSummary'));
+const CreditorSearch = React.lazy(() => import('./pages/CreditorSearch'));
 
 
 export const PAGES = {
@@ -105,6 +107,8 @@ export const PAGES = {
     "StockReceipts": StockReceipts,
     "SalesCommission": SalesCommission,
     "HubCommission": HubCommission,
+    "CreditorSummary": CreditorSummary,
+    "CreditorSearch": CreditorSearch,
 }
 
 export const pagesConfig = {
