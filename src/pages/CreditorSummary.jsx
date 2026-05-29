@@ -4,10 +4,60 @@
 //
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
+
+const COL_WIDTHS_KEY = "creditorSummary.columnWidths.v1";
+const COL_DEFAULTS = {
+  vendor_code: 110, vendor_name: 360, terms: 100,
+  last_receipt_date: 120, last_payment_date: 120,
+  ytd_receipt_count: 110, outstanding_amount: 150,
+};
+const MIN_COL = 60;
+
+function useColWidths() {
+  const [widths, setWidths] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
+      return { ...COL_DEFAULTS, ...saved };
+    } catch { return COL_DEFAULTS; }
+  });
+  const widthsRef = useRef(widths);
+  const writeRef = useRef(null);
+  useEffect(() => {
+    widthsRef.current = widths;
+    if (writeRef.current) clearTimeout(writeRef.current);
+    writeRef.current = setTimeout(() => {
+      try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- localStorage quota errors are non-fatal
+    }, 200);
+    return () => { if (writeRef.current) clearTimeout(writeRef.current); };
+  }, [widths]);
+  const startResize = useCallback((id) => (e) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = widthsRef.current[id] ?? COL_DEFAULTS[id] ?? 100;
+    const onMove = (ev) => {
+      const next = Math.max(MIN_COL, startW + (ev.clientX - startX));
+      setWidths((w) => ({ ...w, [id]: next }));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }, []);
+  const resetCol = useCallback((id) => {
+    setWidths((w) => ({ ...w, [id]: COL_DEFAULTS[id] ?? 100 }));
+  }, []);
+  return { widths, startResize, resetCol };
+}
 
 function fmtR(v) {
   const n = Number(v) || 0;
@@ -45,13 +95,13 @@ async function triggerSync() {
 }
 
 const COLUMNS = [
-  { key: "vendor_code",        label: "Code",          width: "110px",  align: "left",  format: (v) => v },
-  { key: "vendor_name",        label: "Vendor",        width: "auto",   align: "left",  format: (v) => v || "—" },
-  { key: "terms",              label: "Terms",         width: "100px",  align: "left",  format: (v) => v || "—" },
-  { key: "last_receipt_date",  label: "Last receipt",  width: "120px",  align: "left",  format: fmtDate },
-  { key: "last_payment_date",  label: "Last payment",  width: "120px",  align: "left",  format: fmtDate },
-  { key: "ytd_receipt_count",  label: "YTD receipts",  width: "110px",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  { key: "outstanding_amount", label: "Outstanding",   width: "150px",  align: "right", format: (v) => `R ${fmtR(v)}` },
+  { key: "vendor_code",        label: "Code",          align: "left",  format: (v) => v },
+  { key: "vendor_name",        label: "Vendor",        align: "left",  format: (v) => v || "—" },
+  { key: "terms",              label: "Terms",         align: "left",  format: (v) => v || "—" },
+  { key: "last_receipt_date",  label: "Last receipt",  align: "left",  format: fmtDate },
+  { key: "last_payment_date",  label: "Last payment",  align: "left",  format: fmtDate },
+  { key: "ytd_receipt_count",  label: "YTD receipts",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
+  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v) => `R ${fmtR(v)}` },
 ];
 
 export default function CreditorSummary() {
@@ -62,6 +112,7 @@ export default function CreditorSummary() {
   const [sortKey, setSortKey] = useState("outstanding_amount");
   const [sortDir, setSortDir] = useState("desc");
   const [syncing, setSyncing] = useState(false);
+  const { widths, startResize, resetCol } = useColWidths();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["creditors", search, activeOnly, includeZero],
@@ -210,18 +261,32 @@ export default function CreditorSummary() {
         {!isLoading && !error && rows.length > 0 && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="overflow-auto max-h-[70vh]">
-              <table className="w-full text-sm">
+              <table className="text-sm" style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}>
+                <colgroup>
+                  {COLUMNS.map((c) => (
+                    <col key={c.key} style={{ width: `${widths[c.key]}px` }} />
+                  ))}
+                </colgroup>
                 <thead className="sticky top-0 bg-card z-10">
                   <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
                     {COLUMNS.map((c) => (
                       <th
                         key={c.key}
-                        style={{ width: c.width, minWidth: c.width === "auto" ? "200px" : c.width }}
-                        className={`px-3 py-2 cursor-pointer hover:text-foreground ${c.align === "right" ? "text-right" : "text-left"}`}
+                        className={`px-3 py-2 cursor-pointer hover:text-foreground select-none relative ${c.align === "right" ? "text-right" : "text-left"}`}
                         onClick={() => toggleSort(c.key)}
                         title={`Sort by ${c.label}`}
                       >
-                        {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                        <span className="truncate inline-block max-w-full align-middle">
+                          {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
+                        </span>
+                        <span
+                          onMouseDown={startResize(c.key)}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetCol(c.key); }}
+                          onClick={(e) => e.stopPropagation()}
+                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/50 active:bg-accent z-20"
+                          title="Drag to resize · double-click to reset"
+                          style={{ touchAction: "none" }}
+                        />
                       </th>
                     ))}
                   </tr>
@@ -232,7 +297,8 @@ export default function CreditorSummary() {
                       {COLUMNS.map((c) => (
                         <td
                           key={c.key}
-                          className={`px-3 py-1.5 tabular-nums ${c.align === "right" ? "text-right" : "text-left"} ${c.key === "vendor_code" ? "font-mono text-xs" : ""}`}
+                          className={`px-3 py-1.5 tabular-nums truncate ${c.align === "right" ? "text-right" : "text-left"} ${c.key === "vendor_code" ? "font-mono text-xs" : ""}`}
+                          title={String(r[c.key] ?? "")}
                         >
                           {c.format(r[c.key])}
                         </td>
