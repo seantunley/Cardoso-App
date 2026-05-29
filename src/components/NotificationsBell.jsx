@@ -10,12 +10,16 @@ import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { apiGet } from "@/components/collections/utils";
 
 export default function NotificationsBell({ collapsed }) {
   const navigate = useNavigate();
+  // Same key + fetcher as SageHealthPanel so they share one cache entry and
+  // one request/min. On error, data is undefined → the bell simply shows no
+  // issues (the panel surfaces the error).
   const { data } = useQuery({
-    queryKey: ["sage-health"], // shared cache key with SageHealthPanel
-    queryFn: () => fetch("/api/system/sage-health", { credentials: "include" }).then((r) => (r.ok ? r.json() : null)),
+    queryKey: ["sage-health"],
+    queryFn: () => apiGet("/api/system/sage-health"),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });

@@ -35,7 +35,25 @@ const fmtMetric = (key, v) => (METRIC_UNIT[key] === 'rand' ? rZA(v) : METRIC_UNI
 const OPERATORS = { gt: (a, b) => a > b, gte: (a, b) => a >= b, lt: (a, b) => a < b, lte: (a, b) => a <= b };
 const OP_LABEL = { gt: '>', gte: '≥', lt: '<', lte: '≤' };
 
+// Short-lived cache. Insights aren't real-time — recomputing the full detector
+// suite (a full inventory scan, several sales-cache scans, the transactions
+// scan and dead-stock) on every dashboard/Insights load is wasteful. Cache for
+// a few minutes; rule edits invalidate it so changes show immediately.
+let _cache = null;
+let _cacheAt = 0;
+const INSIGHTS_TTL_MS = 5 * 60 * 1000;
+function invalidateInsightsCache() { _cache = null; }
+
 export function computeInsights() {
+  const now = Date.now();
+  if (_cache && now - _cacheAt < INSIGHTS_TTL_MS) return _cache;
+  const result = buildInsights();
+  _cache = result;
+  _cacheAt = now;
+  return result;
+}
+
+function buildInsights() {
   if (process.env.HUB_MODE === 'true') {
     return { generated_at: new Date().toISOString(), hub_mode: true, insights: [], metrics: {} };
   }
@@ -139,14 +157,18 @@ export function computeInsights() {
 
   // 4. At-risk customers: spend in last 30 days vs the prior 30 -------------
   detect('at-risk-customers', () => {
+    // Compare the bare transaction_date column against precomputed cutoff
+    // strings so SQLite can use idx_inv_txn_date — wrapping the column in
+    // date() would force a full table scan of the (large) transactions table.
+    const { d30, d60 } = db.prepare("SELECT date(now_local(), '-30 days') AS d30, date(now_local(), '-60 days') AS d60").get();
     const rows = db.prepare(`
       SELECT customer_code, MAX(customer_name) AS customer_name,
-             SUM(CASE WHEN date(transaction_date) >= date(now_local(), '-30 days') THEN COALESCE(line_amount,0) ELSE 0 END) AS recent,
-             SUM(CASE WHEN date(transaction_date) >= date(now_local(), '-60 days') AND date(transaction_date) < date(now_local(), '-30 days') THEN COALESCE(line_amount,0) ELSE 0 END) AS prior
+             SUM(CASE WHEN transaction_date >= @d30 THEN COALESCE(line_amount,0) ELSE 0 END) AS recent,
+             SUM(CASE WHEN transaction_date >= @d60 AND transaction_date < @d30 THEN COALESCE(line_amount,0) ELSE 0 END) AS prior
       FROM inventory_sales_transactions
-      WHERE date(transaction_date) >= date(now_local(), '-60 days') AND customer_code IS NOT NULL AND customer_code != ''
+      WHERE transaction_date >= @d60 AND customer_code IS NOT NULL AND customer_code != ''
       GROUP BY customer_code HAVING prior >= 2000
-    `).all();
+    `).all({ d30, d60 });
     const dropped = rows.filter((r) => r.recent <= r.prior * 0.5).sort((a, b) => (b.prior - b.recent) - (a.prior - a.recent));
     metrics.at_risk_customer_count = dropped.length;
     if (dropped.length === 0) return;
@@ -231,6 +253,7 @@ export function createRule(body, createdBy) {
     INSERT INTO insight_rules (name, metric, operator, threshold, severity, category, created_by)
     VALUES (@name, @metric, @operator, @threshold, @severity, @category, @createdBy)
   `).run({ ...r, createdBy: createdBy || null });
+  invalidateInsightsCache();
   return db.prepare('SELECT * FROM insight_rules WHERE id = ?').get(info.lastInsertRowid);
 }
 
@@ -248,9 +271,12 @@ export function updateRule(id, body) {
         severity=@severity, category=@category, enabled=@enabled, updated_at = now_local() WHERE id=@id
     `).run({ ...r, enabled, id });
   }
+  invalidateInsightsCache();
   return db.prepare('SELECT * FROM insight_rules WHERE id = ?').get(id);
 }
 
 export function deleteRule(id) {
-  return db.prepare('DELETE FROM insight_rules WHERE id = ?').run(id).changes;
+  const changes = db.prepare('DELETE FROM insight_rules WHERE id = ?').run(id).changes;
+  invalidateInsightsCache();
+  return changes;
 }
