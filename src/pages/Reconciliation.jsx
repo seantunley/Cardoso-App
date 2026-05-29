@@ -910,7 +910,6 @@ export default function Reconciliation() {
                 </button>
               )}
               {view === 'detail' && <span className="text-border">·</span>}
-              § BAT Reconciliation
               <SageStatusPill />
             </div>
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">

@@ -200,7 +200,7 @@ export default function PriceList() {
           and other module pages (mono eyebrow → display title with
           phosphor emphasis → sentence-length subtitle). */}
       <div className="border-b border-border pb-5 mb-5 print:hidden">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Price List</div>
+
         <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
           The <em className="text-phosphor">catalogue</em>, ready to send.
         </h1>

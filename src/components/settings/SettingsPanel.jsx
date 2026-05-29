@@ -161,9 +161,7 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
     <Dialog open={open} onOpenChange={v => { if (!v) onClose(); }}>
       <DialogContent className="max-w-6xl w-full h-[100dvh] sm:h-[88vh] flex flex-col p-0 gap-0 overflow-hidden">
         <DialogHeader className="px-6 pt-6 pb-4 border-b border-border shrink-0">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-2">
-            § Settings
-          </div>
+
           <DialogTitle className="font-display text-4xl leading-tight tracking-tight text-foreground">
             Configure the <em className="text-phosphor">ledger</em>.
           </DialogTitle>

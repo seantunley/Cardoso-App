@@ -39,7 +39,7 @@ export default function HubSyncLog() {
     <div className="max-w-6xl mx-auto px-8 py-10 space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Sync Log</div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             Every <em className="text-phosphor">event</em>.
           </h1>

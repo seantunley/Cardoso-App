@@ -238,9 +238,7 @@ export default function Login() {
 
         {/* Hero quote */}
         <div className="relative z-10 max-w-xl">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent mb-8">
-            § 01 · Access
-          </div>
+
           <h1 className="font-display text-6xl xl:text-7xl leading-[0.95] tracking-tight">
             Every <em className="text-phosphor">rand</em>,
             <br />

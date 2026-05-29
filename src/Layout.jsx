@@ -632,7 +632,7 @@ export default function Layout({ children, currentPageName }) {
       >
         {/* ── Brand block ── */}
         <div className="px-3 pt-6 pb-5" style={{ borderBottom: "1px solid hsl(var(--sidebar-border))" }}>
-          <div className={cn("flex items-center", isCollapsed ? "justify-center" : "justify-start")}>
+          <div className={cn("flex items-center gap-2", isCollapsed ? "justify-center" : "justify-between")}>
             {isCollapsed ? (
               // Icon-only sidebar: keep the signature phosphor square so
               // the brand is still recognisable at a glance.
@@ -652,9 +652,20 @@ export default function Layout({ children, currentPageName }) {
               <img
                 src="/cardoso-logo-orange.png"
                 alt="Cardoso Depots"
-                className="block w-full max-w-[160px] h-auto select-none"
+                className="block max-w-[150px] h-auto select-none"
                 draggable={false}
               />
+            )}
+            {!isCollapsed && (
+              <button
+                type="button"
+                onClick={() => setIsCollapsed(true)}
+                title="Collapse sidebar"
+                aria-label="Collapse sidebar"
+                className="shrink-0 rounded-md p-1.5 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
             )}
           </div>
           {/* Operator identity now lives in the bottom account menu (see footer
@@ -663,14 +674,6 @@ export default function Layout({ children, currentPageName }) {
 
         {/* ── Nav items — terminal list with phosphor left-bar on active ── */}
         <nav className={cn("flex-1 overflow-y-auto", isCollapsed ? "py-3 px-1 flex flex-col items-center" : "py-3 px-3")}>
-          {!isCollapsed && (
-            <div
-              className="px-2 pb-2 mb-1 font-mono text-[9px] uppercase tracking-[0.25em]"
-              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
-            >
-              § Navigation
-            </div>
-          )}
           {(() => {
             // Render a single nav item — shared between the collapsed
             // (icon-only) view and the expanded grouped view so styling
@@ -895,14 +898,6 @@ export default function Layout({ children, currentPageName }) {
                 className="shrink-0 rounded-md p-2 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
               >
                 {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setIsCollapsed(true)}
-                title="Collapse sidebar"
-                className="shrink-0 rounded-md p-2 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
-              >
-                <ChevronLeft className="h-4 w-4" />
               </button>
             </div>
           )}

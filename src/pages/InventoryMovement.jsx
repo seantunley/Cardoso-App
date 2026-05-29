@@ -420,7 +420,7 @@ export default function InventoryMovement() {
       </div>
       {/* Header */}
       <div className="border-b border-border pb-5 mb-5 no-print">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Inventory Movement</div>
+
         <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
           What <em className="text-phosphor">moves</em>, what doesn't.
         </h1>

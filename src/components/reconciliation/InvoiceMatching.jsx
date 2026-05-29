@@ -441,9 +441,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       {/* Header */}
       <div className="flex items-baseline justify-between flex-wrap gap-4 pt-2">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Invoice register
-          </div>
+
           <h3 className="font-display text-3xl leading-tight text-foreground">
             Per-invoice <em className="text-muted-foreground">audit trail</em>.
           </h3>

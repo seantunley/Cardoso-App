@@ -140,9 +140,7 @@ export default function StockReceipts() {
     <div className="min-h-screen bg-background text-foreground px-6 pt-4 pb-6">
       {/* Header */}
       <div className="border-b border-border pb-5 mb-5">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-          § Stock Receipt Expiry
-        </div>
+
         <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
           Track what <em className="text-phosphor">expires</em>.
         </h1>

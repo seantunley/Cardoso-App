@@ -371,10 +371,7 @@ export default function Inventory() {
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
-              <Package className="w-3 h-3 text-accent" strokeWidth={1.5} />
-              § Stock
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Every <em className="text-phosphor">unit</em>.
             </h1>

@@ -175,7 +175,7 @@ export default function Users({ embedded = false }) {
     <div className="min-h-screen bg-background">
       <div className="max-w-5xl mx-auto px-8 py-10 space-y-6">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Access Control</div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             The <em className="text-phosphor">operators</em>.
           </h1>

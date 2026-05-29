@@ -393,9 +393,6 @@ export function ReportFrame({
     <div className="space-y-5">
       <div className="report-print-hide flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-0">
-          {sectionLabel && (
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-2">§ {sectionLabel}</div>
-          )}
           <h2 className="font-display text-3xl leading-tight text-foreground">
             {title}
           </h2>

@@ -181,7 +181,7 @@ export default function Records() {
         {/* Page header */}
         <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Records</div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Raw <em className="text-phosphor">data</em>.
             </h1>

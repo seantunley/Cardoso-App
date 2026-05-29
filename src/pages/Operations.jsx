@@ -130,9 +130,7 @@ export default function Operations() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="px-6 py-5 space-y-8">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Operations
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             What the system is <em className="text-phosphor">doing</em>.
           </h1>

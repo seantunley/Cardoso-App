@@ -5,9 +5,7 @@ export default function CustomerBalancesHeader({ subtitleParts, rowsEmpty, onPri
   return (
     <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8 pb-5 border-b border-border">
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-          § Financial
-        </div>
+
         <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
           Customer <em className="text-phosphor">balances</em>.
         </h1>

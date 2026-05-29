@@ -999,9 +999,7 @@ export default function HubDashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Hub Operations
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             All sites, <em className="text-phosphor">one view</em>.
           </h1>
@@ -1040,7 +1038,7 @@ export default function HubDashboard() {
       {/* Per-site cards */}
       {sites.length > 0 ? (
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-4">§ Sites · {sites.length}</div>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
             {sites.map(s => (
               <SiteCard
