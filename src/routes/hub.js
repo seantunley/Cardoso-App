@@ -602,6 +602,63 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/trends/inventory — monthly inventory trends per site.
+  // Two parallel signals over time, both sourced from hub_inventory_sales
+  // (the per-period rollup the site sync builds):
+  //   - total_qty_sold: units shipped per month per site
+  //   - total_revenue:  revenue per month per site
+  // Weekly bucketing isn't supported — hub_inventory_sales only carries
+  // YYYY-MM granularity (the site ETL aggregates into months at write
+  // time), so we always return monthly regardless of the query param.
+  router.get('/api/hub/trends/inventory', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const sinceParam = req.query.since ? String(req.query.since) : null;
+    if (sinceParam && !/^\d{4}-\d{2}$/.test(sinceParam)) {
+      return res.status(400).json({ error: 'since must be YYYY-MM' });
+    }
+    // Default window: last 12 calendar months including the current one.
+    const since = sinceParam || (() => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - 11);
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    })();
+
+    try {
+      const filter = siteFilterSql(req, res, 'his.site_id');
+      const rows = db.prepare(`
+        SELECT
+          his.period                              AS period,
+          his.site_id                             AS site_id,
+          COALESCE(hs.name, his.site_id)          AS site_name,
+          SUM(his.qty_sold)                       AS total_qty_sold,
+          SUM(his.revenue)                        AS total_revenue,
+          SUM(his.order_count)                    AS total_orders,
+          COUNT(DISTINCT his.item_number)         AS distinct_items
+        FROM hub_inventory_sales his
+        LEFT JOIN hub_sites hs ON hs.id = his.site_id
+        WHERE his.period >= ?
+          AND his.period IS NOT NULL${filter.sql}
+        GROUP BY his.period, his.site_id, hs.name
+        ORDER BY his.period ASC, his.site_id ASC
+      `).all(since, ...filter.params);
+
+      res.json({
+        period: 'monthly',
+        since,
+        data: rows.map((row) => ({
+          period: row.period,
+          site_id: row.site_id,
+          site_name: row.site_name,
+          total_qty_sold: Number(row.total_qty_sold) || 0,
+          total_revenue: Number(row.total_revenue) || 0,
+          total_orders: Number(row.total_orders) || 0,
+          distinct_items: Number(row.distinct_items) || 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/inventory
   // GET /api/hub/bat-summary — cross-site BAT reconciliation rollup. Joins
   // hub_bat_summary with hub_sites for the friendly site name + URL, computes
