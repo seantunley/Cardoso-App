@@ -24,6 +24,7 @@ import { pushPendingCommissionArchives } from './services/commission/commissionH
 import { registerJob } from './lib/scheduledJobs.js';
 import { syncSalesFromSage } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
+import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
 import { syncCreditorsFromSage } from './services/creditorSync.js';
 
 let scheduledSyncInProgress = false;
@@ -60,6 +61,9 @@ async function runScheduledSyncCycle() {
         console.error(`Scheduled sync failed for connection ${connection.id}:`, error.message);
       }
     }
+    // Customer/debtor data just changed — drop the insights cache so the next
+    // load recomputes against fresh balances (the nightly job warms it).
+    try { invalidateInsightsCache(); } catch { /* non-fatal */ }
   } catch (error) {
     console.error('Scheduled sync job failed:', error);
   } finally {
@@ -439,6 +443,9 @@ export function startSchedulers() {
       const t = cron.schedule('0 4 * * *', track('inventory-sales-sync', async () => {
         await syncSalesFromSage();
         computeAllForecasts();
+        // Warm the insights cache off the fresh data so the first morning load
+        // is instant. Guarded — a warm failure must not fail the sync job.
+        try { refreshInsights(); } catch (e) { console.warn('[insights.warm] failed:', e.message); }
       }));
       cronTasks.push(t);
       registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute' });

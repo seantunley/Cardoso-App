@@ -35,14 +35,17 @@ const fmtMetric = (key, v) => (METRIC_UNIT[key] === 'rand' ? rZA(v) : METRIC_UNI
 const OPERATORS = { gt: (a, b) => a > b, gte: (a, b) => a >= b, lt: (a, b) => a < b, lte: (a, b) => a <= b };
 const OP_LABEL = { gt: '>', gte: '≥', lt: '<', lte: '≤' };
 
-// Short-lived cache. Insights aren't real-time — recomputing the full detector
-// suite (a full inventory scan, several sales-cache scans, the transactions
-// scan and dead-stock) on every dashboard/Insights load is wasteful. Cache for
-// a few minutes; rule edits invalidate it so changes show immediately.
+// Invalidation-driven cache. Insights aren't real-time — recomputing the full
+// detector suite (a full inventory scan, several sales-cache scans, the
+// transactions scan and dead-stock) on every dashboard/Insights load is
+// wasteful. The cache is cleared whenever the underlying data changes (sync
+// jobs call invalidateInsightsCache; rule edits invalidate too) and warmed by
+// the nightly sync (refreshInsights), so the first morning load is instant.
+// A long TTL is just a safety net for any path that forgets to invalidate.
 let _cache = null;
 let _cacheAt = 0;
-const INSIGHTS_TTL_MS = 5 * 60 * 1000;
-function invalidateInsightsCache() { _cache = null; }
+const INSIGHTS_TTL_MS = 12 * 60 * 60 * 1000;
+export function invalidateInsightsCache() { _cache = null; }
 
 export function computeInsights() {
   const now = Date.now();
@@ -51,6 +54,14 @@ export function computeInsights() {
   _cache = result;
   _cacheAt = now;
   return result;
+}
+
+// Force a fresh compute and warm the cache. Called after the nightly sync so
+// the first dashboard/Insights load of the day is served from cache.
+export function refreshInsights() {
+  _cache = buildInsights();
+  _cacheAt = Date.now();
+  return _cache;
 }
 
 function buildInsights() {
