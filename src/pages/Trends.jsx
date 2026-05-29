@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2, ArrowUp, ArrowDown } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#f87171", "#4ade80"];
@@ -447,9 +447,16 @@ function MarginByCommodityChart() {
     queryFn: fetchMarginByCommodity,
     staleTime: 60_000,
   });
-  const commodityList = data?.commodity_list || [];
   const rows = data?.data || [];
-  const points = useMemo(() => pivotByPeriodAndCommodity(rows, commodityList, "margin_pct"), [rows, commodityList]);
+  const chartData = useMemo(
+    () => rows.map((r) => ({
+      commodity: COMMODITY_LABELS[r.commodity] || r.commodity,
+      margin_pct: r.margin_pct,
+      revenue: r.revenue,
+      cost: r.cost,
+    })),
+    [rows],
+  );
 
   if (isLoading) {
     return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
@@ -466,36 +473,37 @@ function MarginByCommodityChart() {
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-foreground">Margin by commodity</h2>
-        <p className="text-sm text-muted-foreground">Average margin % by commodity, per month</p>
+        <p className="text-sm text-muted-foreground">Trailing 12 months — average margin % per commodity</p>
         <p className="text-xs text-muted-foreground/70 mt-1">
-          Uses current cost against historical revenue — directional, not exact.
+          Uses current cost against the last 12 months of revenue. Negative bars mean current cost has overtaken what
+          you were selling it for.
         </p>
       </div>
       <div className="h-[360px] w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+          <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
-            <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
-            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => v.toFixed(1) + '%'} />
+            <XAxis dataKey="commodity" stroke="#94a3b8" fontSize={12} />
+            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => v.toFixed(0) + '%'} />
+            <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
             <Tooltip
               contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
-              formatter={(value) => [Number(value).toFixed(1) + '%', ""]}
+              formatter={(value, name) => {
+                if (name === "margin_pct") return [Number(value).toFixed(1) + '%', "Margin"];
+                return [value, name];
+              }}
+              labelFormatter={(label, payload) => {
+                const p = payload?.[0]?.payload;
+                if (!p) return label;
+                return `${label} — ${formatRand(p.revenue)} revenue · ${formatRand(p.cost)} cost`;
+              }}
             />
-            <Legend />
-            {commodityList.map((c, idx) => (
-              <Line
-                key={c}
-                type="monotone"
-                dataKey={c}
-                name={COMMODITY_LABELS[c] || c}
-                stroke={COLORS[idx % COLORS.length]}
-                strokeWidth={2.5}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-                connectNulls={false}
-              />
-            ))}
-          </LineChart>
+            <Bar dataKey="margin_pct" radius={[4, 4, 0, 0]}>
+              {chartData.map((entry, idx) => (
+                <Cell key={idx} fill={entry.margin_pct >= 0 ? "#34d399" : "#f87171"} />
+              ))}
+            </Bar>
+          </BarChart>
         </ResponsiveContainer>
       </div>
     </div>

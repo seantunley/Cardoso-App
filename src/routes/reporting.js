@@ -808,15 +808,18 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reports/trends/inventory/margin-by-commodity — site-mode
-  // weighted average margin per (period, commodity). Same caveat as the
-  // hub version: uses CURRENT last_cost against historical revenue, so
-  // it's directional, not exact.
+  // snapshot of trailing-12-month margin per commodity. One row per
+  // commodity, no per-period breakdown (see hub variant for rationale).
   router.get('/api/reports/trends/inventory/margin-by-commodity', requireAuth, (_req, res) => {
     try {
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+
       const rows = db.prepare(`
-        SELECT sc.period AS period,
-               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+        SELECT COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
                SUM(sc.revenue)  AS revenue,
+               SUM(sc.qty_sold) AS qty,
                SUM(sc.qty_sold * COALESCE(
                  CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
                )) AS extended_cost
@@ -827,23 +830,23 @@ export function createReportingRouter({ requireAuth }) {
           FROM inventoryrecord
           WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
         ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
-        WHERE sc.period IS NOT NULL
-        GROUP BY sc.period, commodity
-        ORDER BY sc.period ASC, commodity ASC
-      `).all();
-      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+        WHERE sc.period IS NOT NULL AND sc.period >= ?
+        GROUP BY commodity
+        ORDER BY revenue DESC
+      `).all(twelveStr);
+
       res.json({
         site_name: SITE_NAME,
-        commodity_list: commodityList,
-        note: 'Margin uses current last_cost against historical revenue — directional, not exact.',
+        window_from: twelveStr,
+        note: 'Trailing 12 months of revenue vs current last_cost.',
         data: rows.map(r => {
           const revenue = Number(r.revenue) || 0;
           const cost = Number(r.extended_cost) || 0;
           return {
-            period: r.period,
             commodity: r.commodity,
             revenue,
             cost,
+            qty: Number(r.qty) || 0,
             margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
           };
         }),

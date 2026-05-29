@@ -798,20 +798,26 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
-  // GET /api/hub/trends/inventory/margin-by-commodity — weighted average
-  // margin per (period, commodity). Uses CURRENT last_cost from hub_inventory
-  // applied against historical qty/revenue — directional (catches drift) but
-  // not exact (real margins moved with cost at the time of sale).
+  // GET /api/hub/trends/inventory/margin-by-commodity — snapshot of trailing-
+  // 12-month margin by commodity. One row per commodity (no per-period
+  // breakdown). Uses current last_cost vs trailing-12-month revenue/qty;
+  // a true historical margin trend would need cost snapshots that we
+  // don't have, so we deliberately don't trend this.
   router.get('/api/hub/trends/inventory/margin-by-commodity', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
     const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
     try {
       const sFilter = siteFilterSql(req, res, 'his.site_id');
       const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
       const extraParams = siteIdFilter ? [siteIdFilter] : [];
+
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+
       const rows = db.prepare(`
-        SELECT his.period AS period,
-               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+        SELECT COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
                SUM(his.revenue)  AS revenue,
+               SUM(his.qty_sold) AS qty,
                SUM(his.qty_sold * COALESCE(
                  CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
                )) AS extended_cost
@@ -822,23 +828,22 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           FROM hub_inventory
           WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
         ) ir ON ir.site_id = his.site_id AND ir.item_number = his.item_number AND ir.rn = 1
-        WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
-        GROUP BY his.period, commodity
-        ORDER BY his.period ASC, commodity ASC
-      `).all(...sFilter.params, ...extraParams);
+        WHERE his.period IS NOT NULL AND his.period >= ?${sFilter.sql}${sExtraWhere}
+        GROUP BY commodity
+        ORDER BY revenue DESC
+      `).all(twelveStr, ...sFilter.params, ...extraParams);
 
-      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
       res.json({
-        commodity_list: commodityList,
-        note: 'Margin uses current last_cost against historical revenue — directional, not exact.',
+        window_from: twelveStr,
+        note: 'Trailing 12 months of revenue vs current last_cost.',
         data: rows.map(r => {
           const revenue = Number(r.revenue) || 0;
           const cost = Number(r.extended_cost) || 0;
           return {
-            period: r.period,
             commodity: r.commodity,
             revenue,
             cost,
+            qty: Number(r.qty) || 0,
             margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
           };
         }),
