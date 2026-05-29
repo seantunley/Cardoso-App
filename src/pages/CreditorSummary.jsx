@@ -125,8 +125,8 @@ export default function CreditorSummary() {
   };
 
   return (
-    <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
-      <div className="mx-auto max-w-[1600px] space-y-6">
+    <div className="min-h-screen bg-background px-2 py-4 text-foreground sm:px-3">
+      <div className="space-y-6">
         <div className="border-b border-border pb-5 flex items-end justify-between gap-6">
           <div>
             <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Creditors</div>

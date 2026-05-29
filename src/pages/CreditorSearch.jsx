@@ -325,8 +325,8 @@ export default function CreditorSearch() {
   useEffect(() => { setTab("receipts"); }, [code]);
 
   return (
-    <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
-      <div className="mx-auto max-w-[1600px] space-y-6">
+    <div className="min-h-screen bg-background px-2 py-4 text-foreground sm:px-3">
+      <div className="space-y-6">
         <div className="border-b border-border pb-5">
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Creditors</div>
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
