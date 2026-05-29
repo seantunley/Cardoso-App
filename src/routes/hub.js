@@ -798,61 +798,6 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
-  // GET /api/hub/trends/inventory/margin-by-commodity — snapshot of trailing-
-  // 12-month margin by commodity. One row per commodity (no per-period
-  // breakdown). Uses current last_cost vs trailing-12-month revenue/qty;
-  // a true historical margin trend would need cost snapshots that we
-  // don't have, so we deliberately don't trend this.
-  router.get('/api/hub/trends/inventory/margin-by-commodity', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
-    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
-    try {
-      const sFilter = siteFilterSql(req, res, 'his.site_id');
-      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
-      const extraParams = siteIdFilter ? [siteIdFilter] : [];
-
-      const now = new Date();
-      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
-      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
-
-      const rows = db.prepare(`
-        SELECT COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
-               SUM(his.revenue)  AS revenue,
-               SUM(his.qty_sold) AS qty,
-               SUM(his.qty_sold * COALESCE(
-                 CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
-               )) AS extended_cost
-        FROM hub_inventory_sales his
-        JOIN (
-          SELECT site_id, item_number, commodity, last_cost,
-                 ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
-          FROM hub_inventory
-          WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
-        ) ir ON ir.site_id = his.site_id AND ir.item_number = his.item_number AND ir.rn = 1
-        WHERE his.period IS NOT NULL AND his.period >= ?${sFilter.sql}${sExtraWhere}
-        GROUP BY commodity
-        ORDER BY revenue DESC
-      `).all(twelveStr, ...sFilter.params, ...extraParams);
-
-      res.json({
-        window_from: twelveStr,
-        note: 'Trailing 12 months of revenue vs current last_cost.',
-        data: rows.map(r => {
-          const revenue = Number(r.revenue) || 0;
-          const cost = Number(r.extended_cost) || 0;
-          return {
-            commodity: r.commodity,
-            revenue,
-            cost,
-            qty: Number(r.qty) || 0,
-            margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
-          };
-        }),
-      });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // GET /api/hub/trends/inventory/dead-stock — for each of the last 24
   // months, count items in hub_inventory whose most-recent sale period
   // (ever) is older than the month minus 3 (i.e. no movement in the

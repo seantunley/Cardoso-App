@@ -807,56 +807,6 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
-  // GET /api/reports/trends/inventory/margin-by-commodity — site-mode
-  // snapshot of trailing-12-month margin per commodity. One row per
-  // commodity, no per-period breakdown (see hub variant for rationale).
-  router.get('/api/reports/trends/inventory/margin-by-commodity', requireAuth, (_req, res) => {
-    try {
-      const now = new Date();
-      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
-      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
-
-      const rows = db.prepare(`
-        SELECT COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
-               SUM(sc.revenue)  AS revenue,
-               SUM(sc.qty_sold) AS qty,
-               SUM(sc.qty_sold * COALESCE(
-                 CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
-               )) AS extended_cost
-        FROM inventory_sales_cache sc
-        JOIN (
-          SELECT item_number, commodity, last_cost,
-                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
-          FROM inventoryrecord
-          WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
-        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
-        WHERE sc.period IS NOT NULL AND sc.period >= ?
-        GROUP BY commodity
-        ORDER BY revenue DESC
-      `).all(twelveStr);
-
-      res.json({
-        site_name: SITE_NAME,
-        window_from: twelveStr,
-        note: 'Trailing 12 months of revenue vs current last_cost.',
-        data: rows.map(r => {
-          const revenue = Number(r.revenue) || 0;
-          const cost = Number(r.extended_cost) || 0;
-          return {
-            commodity: r.commodity,
-            revenue,
-            cost,
-            qty: Number(r.qty) || 0,
-            margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
-          };
-        }),
-      });
-    } catch (err) {
-      logError('reports.trends.inventory.margin_by_commodity', err);
-      res.status(500).json({ error: err.message });
-    }
-  });
-
   // GET /api/reports/trends/inventory/dead-stock — site-mode trailing-24-month
   // dead-stock trend. Same shape as hub: per month, count of SKUs in
   // inventoryrecord whose most-recent sale is older than the month minus 3.

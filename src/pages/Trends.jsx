@@ -7,7 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2, ArrowUp, ArrowDown } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
-  Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis,
+  CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from "recharts";
 
 const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#f87171", "#4ade80"];
@@ -36,12 +36,6 @@ async function fetchRevenueByCommodity() {
   const res = await fetch(`/api/reports/trends/inventory/revenue-by-commodity`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load revenue by commodity");
-  return data;
-}
-async function fetchMarginByCommodity() {
-  const res = await fetch(`/api/reports/trends/inventory/margin-by-commodity`, { credentials: "include" });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Failed to load margin by commodity");
   return data;
 }
 async function fetchDeadStock() {
@@ -441,75 +435,6 @@ function RevenueByCommodityChart() {
   );
 }
 
-function MarginByCommodityChart() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["trends-inventory-margin-by-commodity"],
-    queryFn: fetchMarginByCommodity,
-    staleTime: 60_000,
-  });
-  const rows = data?.data || [];
-  const chartData = useMemo(
-    () => rows.map((r) => ({
-      commodity: COMMODITY_LABELS[r.commodity] || r.commodity,
-      margin_pct: r.margin_pct,
-      revenue: r.revenue,
-      cost: r.cost,
-    })),
-    [rows],
-  );
-
-  if (isLoading) {
-    return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
-  }
-  if (error) return <ErrorBanner message={error.message} />;
-  if (rows.length === 0) {
-    return (
-      <EmptyState>
-        Margin by commodity appears once Inventory Movement → Sync has built at least one month of cache.
-      </EmptyState>
-    );
-  }
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="mb-4">
-        <h2 className="text-lg font-semibold text-foreground">Margin by commodity</h2>
-        <p className="text-sm text-muted-foreground">Trailing 12 months — average margin % per commodity</p>
-        <p className="text-xs text-muted-foreground/70 mt-1">
-          Uses current cost against the last 12 months of revenue. Negative bars mean current cost has overtaken what
-          you were selling it for.
-        </p>
-      </div>
-      <div className="h-[360px] w-full">
-        <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
-            <XAxis dataKey="commodity" stroke="#94a3b8" fontSize={12} />
-            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => v.toFixed(0) + '%'} />
-            <ReferenceLine y={0} stroke="#94a3b8" strokeDasharray="3 3" />
-            <Tooltip
-              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
-              formatter={(value, name) => {
-                if (name === "margin_pct") return [Number(value).toFixed(1) + '%', "Margin"];
-                return [value, name];
-              }}
-              labelFormatter={(label, payload) => {
-                const p = payload?.[0]?.payload;
-                if (!p) return label;
-                return `${label} — ${formatRand(p.revenue)} revenue · ${formatRand(p.cost)} cost`;
-              }}
-            />
-            <Bar dataKey="margin_pct" radius={[4, 4, 0, 0]}>
-              {chartData.map((entry, idx) => (
-                <Cell key={idx} fill={entry.margin_pct >= 0 ? "#34d399" : "#f87171"} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
 function DeadStockChart() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["trends-inventory-dead-stock"],
@@ -778,7 +703,6 @@ function InventoryTrends() {
 
           <TabsContent value="mix" className="space-y-6">
             <RevenueByCommodityChart />
-            <MarginByCommodityChart />
           </TabsContent>
 
           <TabsContent value="movement" className="space-y-6">
