@@ -207,6 +207,7 @@ export default function SalesCommission() {
     mutationFn: async () => {
       const { jsPDF } = await import("jspdf");
       const autoTable = (await import("jspdf-autotable")).default;
+      const { renderUnpaidPage, renderClawbackPage } = await import("@/services/commission/commissionPdfSections.js");
       const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "landscape" });
       const sweetsRate = settings?.sweets_rate ?? 0.015;
       const cigtobRate = settings?.cigtob_rate ?? 0.0017;
@@ -257,6 +258,16 @@ export default function SalesCommission() {
         ],
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [33, 33, 33] },
+      });
+      // Page 2: unpaid invoices. Page 3: clawback. Shared with the server PDF.
+      const prev = clawbackPreviousPeriod;
+      const prevLabel = prev?.fromDate && prev?.toDate ? `${prev.fromDate} → ${prev.toDate}` : "previous period";
+      renderUnpaidPage(doc, autoTable, {
+        depotName, periodLabel: `${submitted.from} to ${submitted.to}`,
+        unpaid: unpaidByRep, unpaidTotals, sweetsRate, refRate,
+      });
+      renderClawbackPage(doc, autoTable, {
+        depotName, prevLabel, clawback: clawbackByRep, clawbackTotals,
       });
       const prefix = depotBranch ? `${depotBranch} Commission` : "Commission";
       const fname = `${prefix} ${submitted.from} to ${submitted.to}.pdf`;

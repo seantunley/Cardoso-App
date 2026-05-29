@@ -7,6 +7,7 @@
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { renderUnpaidPage, renderClawbackPage } from './commissionPdfSections.js';
 
 function formatRand(n) {
   const v = Number.isFinite(Number(n)) ? Number(n) : 0;
@@ -83,6 +84,18 @@ export function buildCommissionPdf({ depotName, report }) {
     ],
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: [33, 33, 33] },
+  });
+
+  // Page 2: unpaid invoices in the period. Page 3: clawback from the previous
+  // period. Each is skipped (no blank page) when it has no rows.
+  const prev = report.clawback_previous_period;
+  const prevLabel = prev?.fromDate && prev?.toDate ? `${prev.fromDate} → ${prev.toDate}` : 'previous period';
+  renderUnpaidPage(doc, autoTable, {
+    depotName, periodLabel: `${report.from} to ${report.to}`,
+    unpaid: report.unpaid_invoices, unpaidTotals: report.unpaid_totals, sweetsRate, refRate,
+  });
+  renderClawbackPage(doc, autoTable, {
+    depotName, prevLabel, clawback: report.clawback, clawbackTotals: report.clawback_totals,
   });
 
   // jsPDF in Node returns the PDF via output('arraybuffer'); wrap in

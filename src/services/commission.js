@@ -483,12 +483,12 @@ export async function buildCommissionReport({ from, to }) {
     acc.invoice_count += r.invoice_count;
     acc.total_net_sweets += r.total_net_sweets;
     acc.total_outstanding += r.total_outstanding;
-    acc.pending_sweet_commission += r.pending_sweet_commission;
-    acc.pending_reference_commission += r.pending_reference_commission;
+    acc.at_risk_sweet_commission += r.at_risk_sweet_commission;
+    acc.at_risk_reference_commission += r.at_risk_reference_commission;
     return acc;
   }, {
     invoice_count: 0, total_net_sweets: 0, total_outstanding: 0,
-    pending_sweet_commission: 0, pending_reference_commission: 0,
+    at_risk_sweet_commission: 0, at_risk_reference_commission: 0,
   });
 
   // Clawback from the previous period — re-check Sage for the snapshot
