@@ -74,7 +74,10 @@ export function renderUnpaidPage(doc, autoTable, { depotName, periodLabel, unpai
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: DARK },
     columnStyles: { 0: { fontStyle: 'bold' }, ...moneyCols([1, 2, 3, 4, 5]) },
-    didParseCell: (d) => { if (d.section === 'body' && d.row.index === unpaid.length) d.cell.styles.fillColor = FOOT, d.cell.styles.textColor = 255; },
+    didParseCell: (d) => {
+      if (d.section === 'head' && d.column.index !== 0) d.cell.styles.halign = 'right';
+      if (d.section === 'body' && d.row.index === unpaid.length) { d.cell.styles.fillColor = FOOT; d.cell.styles.textColor = 255; }
+    },
   });
 
   // Per-invoice detail (grouped by rep via a leading Rep column)
@@ -96,6 +99,7 @@ export function renderUnpaidPage(doc, autoTable, { depotName, periodLabel, unpai
       styles: { fontSize: 7.5, cellPadding: 1.5 },
       headStyles: { fillColor: DARK },
       columnStyles: moneyCols([4, 5, 6]),
+      didParseCell: (d) => { if (d.section === 'head' && [4, 5, 6].includes(d.column.index)) d.cell.styles.halign = 'right'; },
     });
   }
 }
@@ -128,7 +132,10 @@ export function renderClawbackPage(doc, autoTable, { depotName, prevLabel, clawb
     styles: { fontSize: 8, cellPadding: 2 },
     headStyles: { fillColor: DARK },
     columnStyles: { 0: { fontStyle: 'bold' }, ...moneyCols([1, 2, 3, 4]) },
-    didParseCell: (d) => { if (d.section === 'body' && d.row.index === clawback.length) d.cell.styles.fillColor = FOOT, d.cell.styles.textColor = 255; },
+    didParseCell: (d) => {
+      if (d.section === 'head' && d.column.index !== 0) d.cell.styles.halign = 'right';
+      if (d.section === 'body' && d.row.index === clawback.length) { d.cell.styles.fillColor = FOOT; d.cell.styles.textColor = 255; }
+    },
   });
 
   // Per-invoice detail
@@ -152,6 +159,7 @@ export function renderClawbackPage(doc, autoTable, { depotName, prevLabel, clawb
       styles: { fontSize: 7.5, cellPadding: 1.5 },
       headStyles: { fillColor: DARK },
       columnStyles: moneyCols([4, 5, 6, 7]),
+      didParseCell: (d) => { if (d.section === 'head' && [4, 5, 6, 7].includes(d.column.index)) d.cell.styles.halign = 'right'; },
     });
   }
 }
