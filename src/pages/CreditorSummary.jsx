@@ -8,6 +8,57 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
+import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
+
+const BALANCE_BUCKETS = [
+  { value: "all",      label: "All" },
+  { value: "lt1k",     label: "< R1k",     test: (n) => n > 0 && n < 1_000 },
+  { value: "1k_10k",   label: "R1k–10k",   test: (n) => n >= 1_000 && n < 10_000 },
+  { value: "10k_50k",  label: "R10k–50k",  test: (n) => n >= 10_000 && n < 50_000 },
+  { value: "50k_250k", label: "R50k–250k", test: (n) => n >= 50_000 && n < 250_000 },
+  { value: "gt250k",   label: "> R250k",   test: (n) => n >= 250_000 },
+];
+
+const AGE_BUCKETS = [
+  { value: "all",   label: "All" },
+  { value: "30",    label: "30+ days" },
+  { value: "60",    label: "60+ days" },
+  { value: "90",    label: "90+ days" },
+  { value: "180",   label: "180+ days" },
+  { value: "365",   label: "1+ year" },
+  { value: "never", label: "Never" },
+];
+
+function ageInDays(dateStr) {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  if (!Number.isFinite(d.getTime())) return null;
+  return Math.floor((Date.now() - d.getTime()) / 86_400_000);
+}
+
+function ageMatches(bucket, dateStr) {
+  if (bucket === "all") return true;
+  const days = ageInDays(dateStr);
+  if (bucket === "never") return days === null;
+  if (days === null) return false;
+  return days >= Number(bucket);
+}
+
+function FilterPill({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-xs font-medium border transition-colors ${
+        active
+          ? "bg-amber-500/20 border-amber-500/40 text-amber-300"
+          : "border-border text-muted-foreground hover:text-foreground hover:border-foreground/30"
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
 
 const COL_WIDTHS_KEY = "creditorSummary.columnWidths.v1";
 const COL_DEFAULTS = {
@@ -68,6 +119,13 @@ function fmtDate(s) {
   return s;
 }
 
+// SQLite now writes via now_local() (registered in src/db/index.js)
+// which returns SAST regardless of host TZ — so we can render the
+// stored string directly.
+function fmtLocalSyncTime(iso) {
+  return iso || null;
+}
+
 async function fetchCreditors({ search, activeOnly, includeZero }) {
   const qs = new URLSearchParams();
   if (search) qs.set("search", search);
@@ -109,6 +167,10 @@ export default function CreditorSummary() {
   const [search, setSearch] = useState("");
   const [activeOnly, setActiveOnly] = useState(true);
   const [includeZero, setIncludeZero] = useState(false);
+  const [balanceBucket, setBalanceBucket] = useState("all");
+  const [lastReceiptAge, setLastReceiptAge] = useState("all");
+  const [lastPaymentAge, setLastPaymentAge] = useState("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState("outstanding_amount");
   const [sortDir, setSortDir] = useState("desc");
   const [syncing, setSyncing] = useState(false);
@@ -128,7 +190,14 @@ export default function CreditorSummary() {
   });
 
   const rows = useMemo(() => {
-    const src = data?.records || [];
+    let src = data?.records || [];
+    // Client-side filters layered on top of the server's search/active/zero.
+    if (balanceBucket !== "all") {
+      const bucket = BALANCE_BUCKETS.find((b) => b.value === balanceBucket);
+      if (bucket?.test) src = src.filter((r) => bucket.test(Number(r.outstanding_amount) || 0));
+    }
+    if (lastReceiptAge !== "all") src = src.filter((r) => ageMatches(lastReceiptAge, r.last_receipt_date));
+    if (lastPaymentAge !== "all") src = src.filter((r) => ageMatches(lastPaymentAge, r.last_payment_date));
     const sorted = [...src].sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
@@ -142,7 +211,7 @@ export default function CreditorSummary() {
       return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
     });
     return sorted;
-  }, [data, sortKey, sortDir]);
+  }, [data, sortKey, sortDir, balanceBucket, lastReceiptAge, lastPaymentAge]);
 
   const totals = useMemo(() => {
     const acc = { outstanding_amount: 0 };
@@ -185,7 +254,7 @@ export default function CreditorSummary() {
               Who you <em className="text-phosphor">owe</em>.
             </h1>
             <p className="text-sm text-muted-foreground mt-3">
-              Vendor activity for {new Date().getFullYear()} — receipts, POs, and payments year-to-date.
+              Vendors with outstanding balances, sortable and searchable.
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -198,8 +267,13 @@ export default function CreditorSummary() {
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "Syncing…" : "Sync from Sage"}
             </button>
-            <span className="text-[10px] uppercase tracking-wider text-muted-foreground" title="Last successful sync">
-              {meta?.last_synced_at ? `Last sync: ${meta.last_synced_at}` : "Never synced"}
+            <span
+              className="text-[10px] uppercase tracking-wider text-muted-foreground text-right"
+              title="Scheduled nightly at 04:30 (Operations page lists every job)"
+            >
+              {meta?.last_synced_at ? `Last sync: ${fmtLocalSyncTime(meta.last_synced_at)}` : "Never synced"}
+              <br />
+              <span className="opacity-70">Next: nightly 04:30</span>
             </span>
           </div>
         </div>
@@ -214,28 +288,89 @@ export default function CreditorSummary() {
               className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
-          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={activeOnly}
-              onChange={(e) => setActiveOnly(e.target.checked)}
-              className="rounded border-border"
-            />
-            Active vendors only
-          </label>
-          <label
-            className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
-            title="By default we hide vendors you currently owe nothing — tick to show everyone"
-          >
-            <input
-              type="checkbox"
-              checked={includeZero}
-              onChange={(e) => setIncludeZero(e.target.checked)}
-              className="rounded border-border"
-            />
-            Include zero balances
-          </label>
         </div>
+
+        <CollapsibleFilterBar
+          open={filtersOpen}
+          onOpenChange={setFiltersOpen}
+          chips={[
+            balanceBucket !== "all" && {
+              key: "bal", label: BALANCE_BUCKETS.find((b) => b.value === balanceBucket)?.label,
+              onClear: () => setBalanceBucket("all"),
+            },
+            lastReceiptAge !== "all" && {
+              key: "rcp", label: `Last receipt ${AGE_BUCKETS.find((a) => a.value === lastReceiptAge)?.label}`,
+              onClear: () => setLastReceiptAge("all"),
+            },
+            lastPaymentAge !== "all" && {
+              key: "pay", label: `Last payment ${AGE_BUCKETS.find((a) => a.value === lastPaymentAge)?.label}`,
+              onClear: () => setLastPaymentAge("all"),
+            },
+            !activeOnly && { key: "act", label: "Inactive included", onClear: () => setActiveOnly(true) },
+            includeZero && { key: "zero", label: "Zero balances included", onClear: () => setIncludeZero(false) },
+          ].filter(Boolean)}
+          onClearAll={() => {
+            setBalanceBucket("all");
+            setLastReceiptAge("all");
+            setLastPaymentAge("all");
+            setActiveOnly(true);
+            setIncludeZero(false);
+          }}
+        >
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Outstanding balance</div>
+            <div className="flex flex-wrap gap-2">
+              {BALANCE_BUCKETS.map((b) => (
+                <FilterPill key={b.value} active={balanceBucket === b.value} onClick={() => setBalanceBucket(b.value)}>
+                  {b.label}
+                </FilterPill>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Last receipt</div>
+            <div className="flex flex-wrap gap-2">
+              {AGE_BUCKETS.map((a) => (
+                <FilterPill key={a.value} active={lastReceiptAge === a.value} onClick={() => setLastReceiptAge(a.value)}>
+                  {a.label}
+                </FilterPill>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Last payment</div>
+            <div className="flex flex-wrap gap-2">
+              {AGE_BUCKETS.map((a) => (
+                <FilterPill key={a.value} active={lastPaymentAge === a.value} onClick={() => setLastPaymentAge(a.value)}>
+                  {a.label}
+                </FilterPill>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 pt-1">
+            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={activeOnly}
+                onChange={(e) => setActiveOnly(e.target.checked)}
+                className="rounded border-border"
+              />
+              Active vendors only
+            </label>
+            <label
+              className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
+              title="By default we hide vendors you currently owe nothing — tick to show everyone"
+            >
+              <input
+                type="checkbox"
+                checked={includeZero}
+                onChange={(e) => setIncludeZero(e.target.checked)}
+                className="rounded border-border"
+              />
+              Include zero balances
+            </label>
+          </div>
+        </CollapsibleFilterBar>
 
         <div className="grid grid-cols-1 sm:max-w-md gap-3">
           <SummaryTile label="Outstanding" value={`R ${fmtR(totals.outstanding_amount)}`} />

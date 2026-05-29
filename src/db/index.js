@@ -63,6 +63,29 @@ for (const [key, val] of PRAGMAS) {
   }
 }
 
+// ── Timezone-portable timestamp helper ────────────────────────────────────
+// SQLite's built-in `datetime('now')` returns UTC. Its `'localtime'`
+// modifier respects the host OS timezone — so a server moved between
+// hosts (or running in Docker) silently produces different timestamps.
+//
+// We hard-code Africa/Johannesburg (SAST, UTC+2) for ALL timestamps the
+// app writes, so behaviour is identical on every machine regardless of
+// system TZ. Code MUST call `now_local()` (registered below as a
+// SQLite user function) instead of `datetime('now')`.
+//
+// Usage in SQL:
+//   INSERT INTO foo (created_at) VALUES (now_local())
+//   UPDATE foo SET updated_at = now_local() WHERE id = ?
+//
+// Column DEFAULT CURRENT_TIMESTAMP is still UTC (it's a SQLite built-in,
+// can't be overridden) — every INSERT that relies on the default must
+// be migrated to set the column explicitly with now_local().
+const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
+db.function('now_local', () => {
+  const d = new Date(Date.now() + SAST_OFFSET_MS);
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+});
+
 console.log(`✅ SQLite database ready → ${dbPath}`);
 
 export default db;

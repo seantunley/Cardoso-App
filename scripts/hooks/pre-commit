@@ -12,11 +12,45 @@
 // Installed by scripts/install-git-hooks.mjs via npm's `prepare` lifecycle.
 
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import process from 'node:process';
 
 if (process.env.SKIP_LINT_HOOK === '1') {
   console.log('[pre-commit] SKIP_LINT_HOOK=1 — skipping lint');
   process.exit(0);
+}
+
+// Block any new bare datetime('now') in committed code. SQLite returns
+// UTC for this; the project standardised on now_local() (registered in
+// src/db/index.js) so timestamps are SAST regardless of host TZ.
+try {
+  const stagedAll = execSync('git diff --cached --name-only --diff-filter=ACMR', { encoding: 'utf8' })
+    .split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  const sqlFiles = stagedAll.filter((f) => /\.(js|jsx|mjs|cjs|ts|tsx|sql)$/.test(f) && !f.includes('scripts/hooks/'));
+  const offenders = [];
+  for (const f of sqlFiles) {
+    let body;
+    try { body = readFileSync(f, 'utf8'); } catch { continue; }
+    const lines = body.split(/\r?\n/);
+    lines.forEach((line, i) => {
+      // Allow inside comments (// or /* */) and inside obvious
+      // doc-strings. Cheap heuristic — strip leading //.
+      const stripped = line.replace(/^\s*\/\/.*$/, '').replace(/^\s*\*.*$/, '');
+      if (/datetime\(\s*'now'\s*\)/.test(stripped)) {
+        offenders.push(`${f}:${i + 1}  ${line.trim()}`);
+      }
+    });
+  }
+  if (offenders.length) {
+    console.error('\n[pre-commit] bare datetime(\'now\') found — SQLite stores UTC for this.');
+    console.error('  Use now_local() instead (SAST, host-TZ-independent — see src/db/index.js):');
+    for (const o of offenders) console.error('    ' + o);
+    console.error('\n  If you genuinely need UTC, add the line to scripts/hooks/pre-commit-allow.txt');
+    console.error('  or set SKIP_LINT_HOOK=1 to bypass once.\n');
+    process.exit(1);
+  }
+} catch (err) {
+  console.error('[pre-commit] datetime guard check failed (continuing):', err.message);
 }
 
 // Staged files only — touching only what's about to land keeps the hook

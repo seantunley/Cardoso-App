@@ -92,23 +92,23 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
 
   const upsertReceipt = db.prepare(`
     INSERT INTO stock_receipt (source_table, receipt_number, supplier_code, supplier_name, receipt_date, updated_date)
-    VALUES ('POPORH1', ?, ?, ?, ?, datetime('now'))
+    VALUES ('POPORH1', ?, ?, ?, ?, now_local())
     ON CONFLICT(site_id, source_table, receipt_number) DO UPDATE SET
       supplier_code = excluded.supplier_code,
       supplier_name = excluded.supplier_name,
       receipt_date = excluded.receipt_date,
-      updated_date = datetime('now')
+      updated_date = now_local()
   `);
 
   const upsertLine = db.prepare(`
     INSERT INTO stock_receipt_line (receipt_id, line_no, item_number, item_description, qty_received, uom, unit_cost, updated_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(receipt_id, line_no, item_number) DO UPDATE SET
       item_description = excluded.item_description,
       qty_received = excluded.qty_received,
       uom = excluded.uom,
       unit_cost = excluded.unit_cost,
-      updated_date = datetime('now')
+      updated_date = now_local()
   `);
 
   const getReceiptId = db.prepare(
@@ -149,8 +149,8 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
 
   try {
     db.prepare(`
-      INSERT INTO hub_settings (key, value) VALUES ('stock_receipt_last_synced', datetime('now'))
-      ON CONFLICT(key) DO UPDATE SET value = datetime('now')
+      INSERT INTO hub_settings (key, value) VALUES ('stock_receipt_last_synced', now_local())
+      ON CONFLICT(key) DO UPDATE SET value = now_local()
     `).run();
   } catch (err) {
     console.error('[stock-receipts] Failed to update sync timestamp:', err.message);

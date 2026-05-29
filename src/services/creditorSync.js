@@ -167,7 +167,7 @@ async function syncVendors(pool, settings) {
 
   const upsert = db.prepare(`
     INSERT INTO creditor (source_table, vendor_code, vendor_name, terms, contact, phone, email, is_active, synced_at)
-    VALUES ('APVEN', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ('APVEN', ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(source_table, vendor_code) DO UPDATE SET
       vendor_name = excluded.vendor_name,
       terms       = excluded.terms,
@@ -175,7 +175,7 @@ async function syncVendors(pool, settings) {
       phone       = excluded.phone,
       email       = excluded.email,
       is_active   = excluded.is_active,
-      synced_at   = datetime('now')
+      synced_at   = now_local()
   `);
 
   let upserted = 0;
@@ -208,7 +208,7 @@ async function syncApInvoices(pool, settings) {
       source_table, vendor_code, document_number, document_type,
       document_date, due_date, original_amount, outstanding_amount, reference, synced_at
     )
-    VALUES ('APOBL', ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ('APOBL', ?, ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(source_table, vendor_code, document_number) DO UPDATE SET
       document_type      = excluded.document_type,
       document_date      = excluded.document_date,
@@ -216,7 +216,7 @@ async function syncApInvoices(pool, settings) {
       original_amount    = excluded.original_amount,
       outstanding_amount = excluded.outstanding_amount,
       reference          = excluded.reference,
-      synced_at          = datetime('now')
+      synced_at          = now_local()
   `);
 
   let upserted = 0;
@@ -256,14 +256,14 @@ async function syncApPayments(pool, settings, fromInt, toInt) {
       source_table, vendor_code, payment_number, payment_date,
       payment_method, amount, reference, bank_code, synced_at
     )
-    VALUES ('APTCR', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ('APTCR', ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(source_table, vendor_code, payment_number) DO UPDATE SET
       payment_date   = excluded.payment_date,
       payment_method = excluded.payment_method,
       amount         = excluded.amount,
       reference      = excluded.reference,
       bank_code      = excluded.bank_code,
-      synced_at      = datetime('now')
+      synced_at      = now_local()
   `);
 
   let upserted = 0;
@@ -304,7 +304,7 @@ async function syncPos(pool, settings, fromInt, toInt) {
       source_table, po_number, vendor_code, vendor_name,
       po_date, expected_date, status, total_amount, synced_at
     )
-    VALUES ('POPORH1', ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    VALUES ('POPORH1', ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(source_table, po_number) DO UPDATE SET
       vendor_code   = excluded.vendor_code,
       vendor_name   = excluded.vendor_name,
@@ -312,7 +312,7 @@ async function syncPos(pool, settings, fromInt, toInt) {
       expected_date = excluded.expected_date,
       status        = excluded.status,
       total_amount  = excluded.total_amount,
-      synced_at     = datetime('now')
+      synced_at     = now_local()
   `);
 
   const getHeaderId = db.prepare(
@@ -433,7 +433,7 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
       .reduce((acc, s) => acc + (Number(s.rows) || 0) + (Number(s.headerRows) || 0) + (Number(s.lineRows) || 0), 0);
     db.prepare(`
       UPDATE creditor_sync_meta SET
-        last_synced_at = datetime('now'),
+        last_synced_at = now_local(),
         last_synced_to = ?,
         rows_synced    = ?
       WHERE id = 1

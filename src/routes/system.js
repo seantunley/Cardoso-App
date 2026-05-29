@@ -816,7 +816,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const before = db.prepare(`SELECT value FROM bat_settings WHERE key = 'hub_sync_url'`).get()?.value || null;
       if (raw) {
         const cleaned = raw.replace(/\/$/, '');
-        db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, datetime('now'))
+        db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, now_local())
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
           .run(cleaned);
       } else {

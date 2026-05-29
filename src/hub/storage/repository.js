@@ -173,7 +173,7 @@ export function createHubRepository(adapter) {
           adapter.prepare(`
             UPDATE hub_sites
             SET in_env = 0,
-                removed_from_env_at = COALESCE(removed_from_env_at, datetime('now'))
+                removed_from_env_at = COALESCE(removed_from_env_at, now_local())
             WHERE id NOT IN (${placeholders}) AND in_env = 1
           `).run(...incomingIds);
         }
