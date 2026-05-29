@@ -13,7 +13,7 @@ import {
 //
 // Rows have variable height (invoice/receipt cells render 1-3 lines), so
 // we accept a measureRef from the virtualizer for accurate spacer math.
-const CustomerBalancesRow = memo(function CustomerBalancesRow({
+const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void }} */ {
   row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
 }) {
   const amount = parseAmount(row.outstanding_balance);

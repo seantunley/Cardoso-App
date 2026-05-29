@@ -29,35 +29,35 @@ export default function Users({ embedded = false }) {
   const isHubMode = hubSites.length > 0;
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [editingPermissionsUser, setEditingPermissionsUser] = useState(null);
-  const [passwordUser, setPasswordUser] = useState(null);
-  const [editingUser, setEditingUser] = useState(null);
+  const [editingPermissionsUser, setEditingPermissionsUser] = useState(/** @type {import('@/types/api-rows').User | null} */ (null));
+  const [passwordUser, setPasswordUser] = useState(/** @type {import('@/types/api-rows').User | null} */ (null));
+  const [editingUser, setEditingUser] = useState(/** @type {import('@/types/api-rows').User | null} */ (null));
 
   const { data: users = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["users"],
-    queryFn: () => api.users.list(),
+    queryFn: () => /** @type {Promise<import('@/types/api-rows').User[]>} */ (api.users.list()),
     enabled: !!currentUser,
   });
 
   const createUserMutation = useMutation({
-    mutationFn: (d) => api.users.create({ email: d.email, full_name: d.full_name || "", role: d.role || "user", password: d.password }),
+    mutationFn: (/** @type {{ email: string, full_name?: string, role?: string, password: string }} */ d) => api.users.create({ email: d.email, full_name: d.full_name || "", role: d.role || "user", password: d.password }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setCreateModalOpen(false); toast.success("User created"); },
     onError: (e) => toast.error(e.message || "Failed to create user"),
   });
   const updatePermissionsMutation = useMutation({
-    mutationFn: ({ id, permissions }) => api.users.updatePermissions(id, permissions),
+    mutationFn: (/** @type {{ id: number, permissions: Record<string, boolean | 0 | 1> }} */ { id, permissions }) => api.users.updatePermissions(id, permissions),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["users"] }); setEditingPermissionsUser(null); toast.success("Permissions updated"); },
     onError: (e) => toast.error(e.message || "Failed"),
   });
   const updatePasswordMutation = useMutation({
-    mutationFn: ({ id, password }) => api.users.updatePassword(id, password),
+    mutationFn: (/** @type {{ id: number, password: string }} */ { id, password }) => api.users.updatePassword(id, password),
     onSuccess: () => { setPasswordUser(null); toast.success("Password updated"); },
     onError: (e) => toast.error(e.message || "Failed"),
   });
   const deleteUserMutation = useMutation({
-    mutationFn: (id) => api.users.delete(id),
+    mutationFn: (/** @type {number} */ id) => api.users.delete(id),
     onSuccess: (_, deletedId) => {
-      queryClient.setQueryData(["users"], (existing = []) => existing.filter((user) => user.id !== deletedId));
+      queryClient.setQueryData(["users"], (/** @type {import('@/types/api-rows').User[] | undefined} */ existing = []) => existing.filter((user) => user.id !== deletedId));
       queryClient.invalidateQueries({ queryKey: ["users"] });
       toast.success("User deleted");
     },
@@ -165,7 +165,7 @@ export default function Users({ embedded = false }) {
       <CreateLocalUserModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} onCreate={d => createUserMutation.mutateAsync(d)} isCreating={createUserMutation.isPending} />
       <UserPermissionsModal user={editingPermissionsUser} open={!!editingPermissionsUser} onClose={() => setEditingPermissionsUser(null)} onSave={(id, perms) => updatePermissionsMutation.mutateAsync({ id, permissions: perms })} isSaving={updatePermissionsMutation.isPending} />
       <ChangePasswordModal user={passwordUser} open={!!passwordUser} onClose={() => setPasswordUser(null)} onSave={(id, pw) => updatePasswordMutation.mutateAsync({ id, password: pw })} isSaving={updatePasswordMutation.isPending} />
-      <EditUserModal user={editingUser} open={!!editingUser} onClose={() => setEditingUser(null)} onSave={updated => { queryClient.setQueryData(["users"], old => old ? old.map(u => u.id === updated.id ? updated : u) : old); toast.success("User updated"); }} />
+      <EditUserModal user={editingUser} open={!!editingUser} onClose={() => setEditingUser(null)} onSave={(/** @type {import('@/types/api-rows').User} */ updated) => { queryClient.setQueryData(["users"], (/** @type {import('@/types/api-rows').User[] | undefined} */ old) => old ? old.map(u => u.id === updated.id ? updated : u) : old); toast.success("User updated"); }} isSaving={false} />
     </div>
   );
 

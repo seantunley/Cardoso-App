@@ -3,7 +3,16 @@
   "compilerOptions": {
     "noEmit": true,
     "types": ["node"],
-    "maxNodeModuleJsDepth": 0
+    "maxNodeModuleJsDepth": 0,
+
+    // noImplicitAny is off because tsc with checkJs:true pulls in every
+    // transitively-imported .jsx, and the React component layer is
+    // entirely untyped today. Disabling implicit-any keeps the goal
+    // narrow: catch SHAPE MISMATCHES between API responses (typed in
+    // src/types/api-rows.d.ts) and the pages that read them. Adopting
+    // implicit-any:true site-wide is a separate, bottom-up task
+    // (start at src/components/ui/) tracked in memory.
+    "noImplicitAny": false
   },
   "include": [
     "src/types/**/*.d.ts",
@@ -25,7 +34,12 @@
     "src/lib/useColumnWidths.js",
     "src/lib/utils.js",
     "src/utils/index.ts",
-    "src/api/apiClient.js"
+    "src/api/apiClient.js",
+    "src/pages/Users.jsx",
+    "src/pages/Collections.jsx",
+    "src/pages/CustomerBalances.jsx",
+    "src/pages/Inventory.jsx",
+    "src/pages/SalesCommission.jsx"
   ],
   "exclude": ["node_modules", "dist"]
 }

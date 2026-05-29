@@ -81,6 +81,7 @@ export function recordCleanSyncStreak() {
   }
 }
 
+/** @param {{ imported?: number, target?: string | number | null }} [opts] */
 export function cleanImportToastMessage({ imported = 0, target } = {}) {
   const streak = recordCleanSyncStreak();
   if (streak > 0 && streak % 3 === 0) {

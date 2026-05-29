@@ -3,6 +3,7 @@ import { parseAmount } from "./utils";
 // Fetch a single page of top balances. Used both for the on-screen
 // virtualised table (one page = PAGE_SIZE rows) and as a building block
 // for fetchAllTopBalances() below.
+/** @returns {Promise<import('@/types/api-rows').TopBalancesResponse>} */
 export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
   const params = new URLSearchParams({
     page: String(page),
@@ -28,6 +29,7 @@ export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, sal
       records: data,
       total: data.length,
       page,
+      limit,
       totalPages: 1,
       filteredTotalOutstanding: pageTotalOutstanding,
       pageTotalOutstanding,
@@ -41,6 +43,7 @@ export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, sal
 // Fetch every page sequentially so the print view sees the full set
 // (the screen view caps at PAGE_SIZE). Only triggered when totalRecords
 // exceeds PAGE_SIZE, gated by the printData useQuery's `enabled`.
+/** @returns {Promise<import('@/types/api-rows').TopBalancesResponse>} */
 export async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
   const firstPage = await fetchTopBalances({
     page: 1,

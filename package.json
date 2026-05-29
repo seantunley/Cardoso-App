@@ -19,7 +19,8 @@
     "hub:postgres:bootstrap": "node scripts/hub-postgres-bootstrap.mjs",
     "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs",
     "check:migrations": "node scripts/check-migration-versions.mjs",
-    "schema:dump": "node scripts/dump-schema-snapshot.mjs"
+    "schema:dump": "node scripts/dump-schema-snapshot.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

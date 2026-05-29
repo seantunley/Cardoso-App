@@ -118,7 +118,7 @@ export default function SalesCommission() {
       if (!r.ok) {
         let message = `HTTP ${r.status}`;
         try { message = (await r.json()).error || message; }
-        catch (e) { console.error("[salesCommission.archive_download_parse]", { id }, e.message); }
+        catch (e) { console.error("[salesCommission.archive_download_parse]", { id }, e instanceof Error ? e.message : String(e)); }
         throw new Error(message);
       }
       const blob = await r.blob();
@@ -134,7 +134,7 @@ export default function SalesCommission() {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
     } catch (err) {
-      toast.error(`Archive download failed: ${err.message}`);
+      toast.error(`Archive download failed: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -237,6 +237,7 @@ export default function SalesCommission() {
         columnStyles: { 0: { fontStyle: "bold" } },
       });
       autoTable(doc, {
+        // @ts-expect-error -- jspdf-autotable adds lastAutoTable at runtime
         startY: doc.lastAutoTable.finalY + 8,
         head: [["Sales Person", "Net Sweets", `Sweets ${formatPct(sweetsRate)}`, `Ref ${formatPct(refRate)}`, "Cig + Tob Base", `Cig+Tob ${formatPct(cigtobRate)}`, "Total"]],
         body: [

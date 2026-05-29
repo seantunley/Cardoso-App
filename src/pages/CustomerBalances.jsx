@@ -89,7 +89,7 @@ export default function CustomerBalances() {
     queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
     queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
     staleTime: 60_000,
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
   });
 
   // Live map of customer_id → { worklist_name, owner_name } so rows
@@ -113,7 +113,7 @@ export default function CustomerBalances() {
     queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
     queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
     staleTime: 60_000,
-    keepPreviousData: true,
+    placeholderData: (prev) => prev,
     enabled: totalRecords > PAGE_SIZE,
   });
 

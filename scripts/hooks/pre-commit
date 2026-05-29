@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+// Pre-commit hook — runs eslint on every staged JS/JSX/TS/TSX file.
+// The eslint config already enforces `no-empty: error` (which blocks the
+// silent-failure pattern we audited in 2026-05-28). Anything else the
+// project's eslint flags also blocks the commit; the assumption is the
+// repo's lint config is the source of truth for "what's mergeable".
+//
+// Cross-platform (Node, not bash) because the team works on Windows +
+// Linux. Skipped automatically when `SKIP_LINT_HOOK=1` is set, for the
+// rare case of a checkpoint commit while the lint pass is in flight.
+//
+// Installed by scripts/install-git-hooks.mjs via npm's `prepare` lifecycle.
+
+import { execSync } from 'node:child_process';
+import process from 'node:process';
+
+if (process.env.SKIP_LINT_HOOK === '1') {
+  console.log('[pre-commit] SKIP_LINT_HOOK=1 — skipping lint');
+  process.exit(0);
+}
+
+// Staged files only — touching only what's about to land keeps the hook
+// fast even on a 1000-file repo. `--diff-filter=ACMR` ignores deletions
+// and renames-to-self.
+let staged;
+try {
+  staged = execSync('git diff --cached --name-only --diff-filter=ACMR', { encoding: 'utf8' })
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => /\.(js|jsx|mjs|cjs|ts|tsx)$/.test(s));
+} catch (err) {
+  console.error('[pre-commit] failed to read staged files:', err.message);
+  process.exit(1);
+}
+
+if (staged.length === 0) {
+  process.exit(0);
+}
+
+// Pass staged file list to eslint directly so we lint exactly what's
+// being committed, not the whole tree. --no-error-on-unmatched-pattern
+// guards against rare cases where the file matched our regex but
+// eslint's ignore-rules drop it (e.g. dist/, node_modules/).
+console.log(`[pre-commit] linting ${staged.length} staged file${staged.length === 1 ? '' : 's'}…`);
+const args = ['eslint', '--quiet', '--no-error-on-unmatched-pattern', ...staged];
+
+try {
+  execSync(`npx ${args.join(' ')}`, { stdio: 'inherit' });
+} catch {
+  console.error('\n[pre-commit] lint failed — commit blocked. Fix the errors above,');
+  console.error('  or set SKIP_LINT_HOOK=1 to bypass (CI will still catch it).');
+  process.exit(1);
+}

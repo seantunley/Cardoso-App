@@ -25,7 +25,7 @@ export function useColumnWidths(containerRef) {
   // Debounce-flushed localStorage write — see comment in
   // src/lib/useColumnWidths.js. Avoids JSON.stringify + sync
   // localStorage.setItem at 60Hz during a column drag.
-  const writeTimerRef = useRef(null);
+  const writeTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
   useEffect(() => {
     widthsRef.current = widths;
     if (writeTimerRef.current) clearTimeout(writeTimerRef.current);

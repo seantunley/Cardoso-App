@@ -31,26 +31,23 @@ import { apiGet, parseAmount, formatCurrency, timeAgo } from "@/components/colle
 export default function Collections() {
   useColorScheme();
   const queryClient = useQueryClient();
-  const [selectedWorklistId, setSelectedWorklistId] = useState(null);
+  const [selectedWorklistId, setSelectedWorklistId] = useState(/** @type {number | null} */ (null));
   const [statusFilter, setStatusFilter] = useState("active");
   const [searchFilter, setSearchFilter] = useState("");
   const [openAssign, setOpenAssign] = useState(false);
   const [openNew, setOpenNew] = useState(false);
-  const [drawerAssignment, setDrawerAssignment] = useState(null);
+  const [drawerAssignment, setDrawerAssignment] = useState(/** @type {any} */ (null));
 
-  const me = useQuery({ queryKey: ["me"], queryFn: () => apiGet("/api/auth/me"), staleTime: 60_000 });
+  const me = useQuery({ queryKey: ["me"], queryFn: () => /** @type {Promise<{ id?: number, role?: string } | null>} */ (apiGet("/api/auth/me")), staleTime: 60_000 });
   const users = useQuery({
     queryKey: ["collection-users"],
-    queryFn: () => apiGet("/api/collections/assignable-users").then(d => d.users || []),
+    queryFn: () => /** @type {Promise<Array<{ id: number, email?: string, full_name?: string }>>} */ (apiGet("/api/collections/assignable-users").then(d => d.users || [])),
     staleTime: 300_000,
   });
   const worklists = useQuery({
     queryKey: ["worklists"],
-    queryFn: () => apiGet("/api/collections/worklists").then(d => d.worklists || []),
+    queryFn: () => /** @type {Promise<Array<import('@/types/api-rows').Worklist & { owner_email?: string, collected_count?: number }>>} */ (apiGet("/api/collections/worklists").then(d => d.worklists || [])),
     staleTime: 30_000,
-    onSuccess: (data) => {
-      if (selectedWorklistId == null && data?.length) setSelectedWorklistId(data[0].id);
-    },
   });
   // Auto-select first worklist when list arrives
   useEffect(() => {
@@ -61,8 +58,8 @@ export default function Collections() {
 
   const assignments = useQuery({
     queryKey: ["worklist-assignments", selectedWorklistId, statusFilter],
-    queryFn: () => apiGet(`/api/collections/worklists/${selectedWorklistId}/assignments?status=${statusFilter}`)
-      .then(d => d.assignments || []),
+    queryFn: () => /** @type {Promise<Array<import('@/types/api-rows').Assignment & { outstanding_balance_num?: number, last_action_at?: string }>>} */ (apiGet(`/api/collections/worklists/${selectedWorklistId}/assignments?status=${statusFilter}`)
+      .then(d => d.assignments || [])),
     enabled: !!selectedWorklistId,
     staleTime: 10_000,
   });
@@ -144,7 +141,7 @@ export default function Collections() {
                     </div>
                     <div className="mt-1 flex items-center gap-2 text-[10px]">
                       <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-0.5" title="Number of collection_assignments rows with status='active' on this worklist">{w.active_count} active</span>
-                      {w.collected_count > 0 && (
+                      {(w.collected_count ?? 0) > 0 && (
                         <span className="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5" title="Number of collection_assignments auto-closed to status='collected' once the customer's outstanding balance fell to zero">{w.collected_count} collected</span>
                       )}
                     </div>

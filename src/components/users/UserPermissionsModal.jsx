@@ -87,15 +87,15 @@ const permissionTabs = [
 const allPermissions = permissionTabs.flatMap(t => t.permissions);
 
 export default function UserPermissionsModal({ user, open, onClose, onSave, isSaving }) {
-  const [permissionState, setPermissionState] = useState({});
+  const [permissionState, setPermissionState] = useState(/** @type {Record<string, any>} */ ({}));
   const [activeTab, setActiveTab] = useState(permissionTabs[0].id);
   // "Why denied?" diagnostic — populated when the operator clicks the
   // help icon next to a permission. Maps key → { allowed, reason, source }
   // straight from GET /api/users/:id/permission-explain. Cleared whenever
   // the modal reopens so we never show stale info from a previous user.
-  const [explanations, setExplanations] = useState({});
+  const [explanations, setExplanations] = useState(/** @type {Record<string, { allowed: boolean, reason: string, source?: string }>} */ ({}));
   const [explainLoading, setExplainLoading] = useState(false);
-  const [explainError, setExplainError] = useState(null);
+  const [explainError, setExplainError] = useState(/** @type {string | null} */ (null));
 
   useEffect(() => {
     if (user) {
@@ -142,7 +142,7 @@ export default function UserPermissionsModal({ user, open, onClose, onSave, isSa
       const data = await res.json();
       setExplanations(data.permissions || {});
     } catch (err) {
-      setExplainError(err.message);
+      setExplainError(err instanceof Error ? err.message : String(err));
     } finally {
       setExplainLoading(false);
     }

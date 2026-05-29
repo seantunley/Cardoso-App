@@ -146,6 +146,16 @@ export interface TopBalancesResponse {
   /** Sum of outstanding_balance_num across the full filter. */
   total_outstanding?: number;
   sales_reps?: string[];
+  /** List of distinct site names for the site filter dropdown. */
+  sites?: string[];
+  /** List of distinct sales rep codes for the sales rep filter dropdown. */
+  salesReps?: string[];
+  /** Sum of outstanding_balance_num across just this response page. */
+  pageTotalOutstanding?: number;
+  /** Sum of outstanding_balance_num across the full filtered set. */
+  filteredTotalOutstanding?: number;
+  /** Operator-configured minimum balance threshold currently in effect. */
+  minBalanceThreshold?: number;
 }
 
 /** Standard "did the write succeed" response. */

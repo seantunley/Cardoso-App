@@ -27,6 +27,16 @@
 
 import { Filter, X } from "lucide-react";
 
+/**
+ * @param {{
+ *   open?: boolean,
+ *   onOpenChange?: (open: boolean) => void,
+ *   chips?: Array<{ key: string, label: any, onClear?: () => void }>,
+ *   onClearAll?: () => void,
+ *   className?: string,
+ *   children?: any,
+ * }} props
+ */
 export default function CollapsibleFilterBar({
   open,
   onOpenChange,

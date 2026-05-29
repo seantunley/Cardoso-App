@@ -32,7 +32,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
   useEffect(() => { setFollowup(assignment?.next_followup_date || ""); }, [assignment?.id]);
 
   const addActivity = useMutation({
-    mutationFn: (body) => apiSend(`/api/collections/customers/${customerId}/activity`, "POST", {
+    mutationFn: (/** @type {{ kind: string, notes?: string | null, amount?: number | null, promise_date?: string | null }} */ body) => apiSend(`/api/collections/customers/${customerId}/activity`, "POST", {
       assignment_id: assignment?.id, ...body,
     }),
     onSuccess: () => {
@@ -44,7 +44,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
   });
 
   const setStatus = useMutation({
-    mutationFn: ({ status, reason }) =>
+    mutationFn: (/** @type {{ status: string, reason: string }} */ { status, reason }) =>
       apiSend(`/api/collections/assignments/${assignment.id}/status`, "PUT", { status, reason }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["collection-activity", customerId] });
@@ -56,7 +56,7 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
   });
 
   const setFollowupMut = useMutation({
-    mutationFn: (date) => apiSend(`/api/collections/assignments/${assignment.id}/followup`, "PUT", { date }),
+    mutationFn: (/** @type {string | null} */ date) => apiSend(`/api/collections/assignments/${assignment.id}/followup`, "PUT", { date }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["worklist-assignments"] });
       onChange?.();

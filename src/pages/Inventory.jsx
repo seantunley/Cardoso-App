@@ -32,7 +32,7 @@ function useInvColumnWidths(containerRef) {
   // Debounce-flushed localStorage write — see comment in
   // src/lib/useColumnWidths.js. Avoids JSON.stringify + sync
   // localStorage.setItem at 60Hz during a column drag.
-  const writeTimerRef = useRef(null);
+  const writeTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
   useEffect(() => {
     widthsRef.current = widths;
     if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
@@ -456,13 +456,13 @@ export default function Inventory() {
           open={filtersOpen}
           onOpenChange={setFiltersOpen}
           className="mb-3 no-print inv-filter-bar"
-          chips={[
+          chips={/** @type {Array<{ key: string, label: any, onClear: () => void }>} */ ([
             commodityFilter !== "all" && { key: "commodity", label: COMMODITY_LABELS[commodityFilter] || commodityFilter, onClear: () => setCommodityFilter("all") },
             priceListFilter !== "all" && { key: "priceList", label: `Price list ${priceListFilter}`, onClear: () => setPriceListFilter("all") },
             hubMode && siteFilter !== "all" && { key: "site", label: (sites.find(s => s.id === siteFilter)?.name) || siteFilter, onClear: () => setSiteFilter("all") },
             hideZeroQty && { key: "hidezero", label: "Hide zero qty", onClear: () => setHideZeroQty(false) },
             highlightBelowCost && { key: "below", label: "Price ≤ cost only", onClear: () => setHighlightBelowCost(false) },
-          ].filter(Boolean)}
+          ].filter(Boolean))}
           onClearAll={clearAll}
         >
           <>
@@ -687,7 +687,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
   }
   // `relative` so the absolute-positioned ResizeHandle anchors correctly.
   const sh = "relative px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors";
-  const parentRef = useRef(null);
+  const parentRef = useRef(/** @type {HTMLDivElement | null} */ (null));
 
   const virtualizer = useVirtualizer({
     count: rows.length,

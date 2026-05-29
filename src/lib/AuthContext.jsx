@@ -1,7 +1,7 @@
 import React, { createContext, useState, useContext, useEffect } from "react";
 import { appParams } from "@/lib/app-params";
 
-const AuthContext = createContext();
+const AuthContext = createContext(/** @type {any} */ (null));
 
 // Apply theme to <html> and persist to localStorage so it survives page reload
 export function applyTheme(theme) {
@@ -34,13 +34,13 @@ async function readJsonResponse(res) {
 }
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(/** @type {any} */ (null));
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [forcePasswordChange, setForcePasswordChange] = useState(false);
   const [isLoadingAuth, setIsLoadingAuth] = useState(true);
   const [isLoadingPublicSettings, setIsLoadingPublicSettings] = useState(true);
-  const [authError, setAuthError] = useState(null);
-  const [appPublicSettings, setAppPublicSettings] = useState(null);
+  const [authError, setAuthError] = useState(/** @type {{ type: string, message: string } | null} */ (null));
+  const [appPublicSettings, setAppPublicSettings] = useState(/** @type {{ id: any, public_settings: Record<string, unknown> } | null} */ (null));
 
   useEffect(() => {
     checkAppState();
@@ -61,7 +61,7 @@ export const AuthProvider = ({ children }) => {
       console.error("checkAppState error:", error);
       setAuthError({
         type: "unknown",
-        message: error.message || "An unexpected error occurred",
+        message: (error instanceof Error ? error.message : String(error)) || "An unexpected error occurred",
       });
     }
   };
@@ -94,7 +94,7 @@ export const AuthProvider = ({ children }) => {
       setIsAuthenticated(false);
       setAuthError({
         type: "auth",
-        message: error.message || "Authentication check failed",
+        message: (error instanceof Error ? error.message : String(error)) || "Authentication check failed",
       });
     } finally {
       setIsLoadingAuth(false);
