@@ -441,6 +441,18 @@ export default function SalesCommission() {
   );
 }
 
+// Fixed-width, right-aligned metric cell (label over value) so the per-rep
+// summary numbers line up in columns across rows instead of as ragged inline
+// "label value" spans.
+function MetricCell({ label, value, tone = "text-foreground", title, width = "w-28" }) {
+  return (
+    <div className={`${width} shrink-0 text-right`} title={title}>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 leading-tight">{label}</div>
+      <div className={`tabular-nums ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
 // Unpaid invoices section — sweets invoices in the period that the
 // customer hasn't fully settled. Excluded from the commission totals
 // above, listed here so the rep can see what's pending. Collapsed by
@@ -493,19 +505,11 @@ function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
                   {rep.invoice_count} invoice{rep.invoice_count === 1 ? "" : "s"}
                 </span>
               </div>
-              <div className="flex items-center gap-6 text-xs tabular-nums">
-                <span className="text-muted-foreground">
-                  Net sweets <span className="text-foreground">{formatRand(rep.total_net_sweets)}</span>
-                </span>
-                <span className="text-muted-foreground" title={`Total outstanding from these invoices`}>
-                  Outstanding <span className="text-foreground">{formatRand(rep.total_outstanding)}</span>
-                </span>
-                <span className="text-amber-300" title="Sweets commission already paid on these invoices — at risk of clawback if still unpaid by next period">
-                  Sweets {formatPct(sweetsRate)} at risk = {formatRand(rep.at_risk_sweet_commission)}
-                </span>
-                <span className="text-muted-foreground" title="Reference commission slice from these invoices">
-                  Ref {formatPct(referenceRate)} = {formatRand(rep.at_risk_reference_commission)}
-                </span>
+              <div className="flex items-center gap-4 text-xs">
+                <MetricCell label="Net sweets" value={formatRand(rep.total_net_sweets)} />
+                <MetricCell label="Outstanding" value={formatRand(rep.total_outstanding)} width="w-32" title="Total outstanding from these invoices" />
+                <MetricCell label={`Sweets ${formatPct(sweetsRate)} at risk`} value={formatRand(rep.at_risk_sweet_commission)} tone="text-amber-300" title="Sweets commission already paid on these invoices — at risk of clawback if still unpaid by next period" />
+                <MetricCell label={`Ref ${formatPct(referenceRate)}`} value={formatRand(rep.at_risk_reference_commission)} title="Reference commission slice from these invoices" />
               </div>
             </summary>
             <div className="border-t border-border/60">
@@ -599,16 +603,10 @@ function ClawbackSection({ byRep, totals, previousPeriod }) {
                   {rep.invoice_count} invoice{rep.invoice_count === 1 ? "" : "s"}
                 </span>
               </div>
-              <div className="flex items-center gap-6 text-xs tabular-nums">
-                <span className="text-muted-foreground">
-                  Outstanding <span className="text-foreground">{formatRand(rep.total_outstanding)}</span>
-                </span>
-                <span className="text-red-300">
-                  Sweets clawback {formatRand(rep.total_sweet_commission_clawback)}
-                </span>
-                <span className="text-muted-foreground" title="Reference commission clawback at the prior-period rate">
-                  Ref clawback {formatRand(rep.total_reference_commission_clawback)}
-                </span>
+              <div className="flex items-center gap-4 text-xs">
+                <MetricCell label="Outstanding" value={formatRand(rep.total_outstanding)} width="w-32" />
+                <MetricCell label="Sweets clawback" value={formatRand(rep.total_sweet_commission_clawback)} tone="text-red-300" />
+                <MetricCell label="Ref clawback" value={formatRand(rep.total_reference_commission_clawback)} title="Reference commission clawback at the prior-period rate" />
               </div>
             </summary>
             <div className="border-t border-border/60">
