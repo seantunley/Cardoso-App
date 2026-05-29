@@ -24,6 +24,7 @@ import { pushPendingCommissionArchives } from './services/commission/commissionH
 import { registerJob } from './lib/scheduledJobs.js';
 import { syncSalesFromSage } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
+import { syncCreditorsFromSage } from './services/creditorSync.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -441,6 +442,18 @@ export function startSchedulers() {
       }));
       cronTasks.push(t);
       registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute' });
+    }
+
+    // Creditors — nightly Sage pull of APVEN + APOBL + APTCR + POPORH1
+    // into local creditor_* tables. Runs at 04:30, after inventory sync
+    // but before backup-verify (03:30) — wait, backup-verify is earlier
+    // so we just need a free slot before the morning workday. 04:30 is it.
+    {
+      const t = cron.schedule('30 4 * * *', track('creditors-sync', async () => {
+        await syncCreditorsFromSage();
+      }));
+      cronTasks.push(t);
+      registerJob({ name: 'creditors-sync', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'site', description: 'Nightly creditors sync from Sage APVEN/APOBL/APTCR/POPORH1' });
     }
   }
 

@@ -31,6 +31,7 @@ import { createJtiRouter } from './src/routes/jti.js';
 import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
 import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
 import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
+import { createCreditorRouter } from './src/routes/creditors.js';
 import { createPricingRouter } from './src/routes/pricing.js';
 import { createDepotProfileRouter } from './src/routes/depotProfile.js';
 import { createCommissionRouter } from './src/routes/commission.js';
@@ -234,6 +235,11 @@ app.use(createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermis
 // internally gates write operations (sync, add-expiry) to site-only;
 // hub gets read-only list endpoints querying hub_stock_receipt_expiry.
 app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
+
+// Creditors module — vendor master + AP transactions + POs synced
+// from Sage. Mounted on both modes; hub branches in the router itself
+// (read-only on hub once the ETL is wired).
+app.use(createCreditorRouter({ requireAuth, requirePermission }));
 
 // ── Price List (Sage ICPRICP per-unit prices) ──
 app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));
