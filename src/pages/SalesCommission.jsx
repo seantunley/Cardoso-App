@@ -142,6 +142,8 @@ export default function SalesCommission() {
   const reps = data?.reps || [];
   const totals = data?.totals;
   const settings = data?.settings;
+  const unpaidByRep = data?.unpaid_invoices || [];
+  const unpaidTotals = data?.unpaid_totals;
 
   const headerTitle = useMemo(() => {
     if (!submitted.from || !submitted.to) return "Commission Sales Report";
@@ -405,6 +407,13 @@ export default function SalesCommission() {
               formatRand(totals.cigtob_commission), formatRand(totals.total_commission),
             ]}
           />
+
+          <UnpaidInvoicesSection
+            byRep={unpaidByRep}
+            totals={unpaidTotals}
+            sweetsRate={settings?.sweets_rate}
+            referenceRate={settings?.reference_rate}
+          />
         </>
       )}
 
@@ -419,6 +428,108 @@ export default function SalesCommission() {
       />
 
       {isAdmin && <SqlOverridePanel />}
+    </div>
+  );
+}
+
+// Unpaid invoices section — sweets invoices in the period that the
+// customer hasn't fully settled. Excluded from the commission totals
+// above, listed here so the rep can see what's pending. Collapsed by
+// rep with a per-rep summary in the header; expanding reveals per-
+// invoice detail.
+function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
+  if (!byRep || byRep.length === 0) {
+    return null;
+  }
+
+  // Yyyymmdd int → display string.
+  const fmtDate = (n) => {
+    if (!n) return "—";
+    const s = String(n);
+    return /^\d{8}$/.test(s) ? s.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : s;
+  };
+
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden mb-4">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Receipt className="w-4 h-4 text-amber-400" />
+          Not yet eligible — sweets invoices outstanding
+        </h2>
+        {totals && (
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {totals.invoice_count} invoice{totals.invoice_count === 1 ? "" : "s"}
+            <span className="mx-2">·</span>
+            net sweets {formatRand(totals.total_net_sweets)}
+            <span className="mx-2">·</span>
+            pending Sweets {formatPct(sweetsRate)} = {formatRand(totals.pending_sweet_commission)}
+          </div>
+        )}
+      </div>
+
+      <div className="text-xs text-muted-foreground px-4 py-2 border-b border-border/60">
+        These invoices are inside the period but the customer hasn't paid yet, so they don't
+        count toward this report's commission. They'll roll into a future period once
+        settled.
+      </div>
+
+      <div className="divide-y divide-border">
+        {byRep.map((rep) => (
+          <details key={rep.sales_rep} className="group">
+            <summary className="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-4 hover:bg-muted/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="font-mono text-xs text-foreground">{rep.sales_rep}</span>
+                <span className="text-xs text-muted-foreground">
+                  {rep.invoice_count} invoice{rep.invoice_count === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex items-center gap-6 text-xs tabular-nums">
+                <span className="text-muted-foreground">
+                  Net sweets <span className="text-foreground">{formatRand(rep.total_net_sweets)}</span>
+                </span>
+                <span className="text-muted-foreground" title={`Total outstanding from these invoices`}>
+                  Outstanding <span className="text-foreground">{formatRand(rep.total_outstanding)}</span>
+                </span>
+                <span className="text-amber-300">
+                  Pending {formatPct(sweetsRate)} = {formatRand(rep.pending_sweet_commission)}
+                </span>
+                <span className="text-muted-foreground" title="Reference commission these would yield once paid">
+                  Ref {formatPct(referenceRate)} = {formatRand(rep.pending_reference_commission)}
+                </span>
+              </div>
+            </summary>
+            <div className="border-t border-border/60">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                    <th className="px-4 py-2 text-left">Invoice</th>
+                    <th className="px-4 py-2 text-left">Date</th>
+                    <th className="px-4 py-2 text-left">Customer</th>
+                    <th className="px-4 py-2 text-right">Net sweets</th>
+                    <th className="px-4 py-2 text-right">Invoice total</th>
+                    <th className="px-4 py-2 text-right">Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rep.invoices.map((inv) => (
+                    <tr key={inv.invoice_number} className="border-b border-border/40 last:border-0">
+                      <td className="px-4 py-1.5 font-mono text-xs">{inv.invoice_number}</td>
+                      <td className="px-4 py-1.5">{fmtDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-1.5">
+                        <span className="text-foreground">{inv.customer_name || "—"}</span>
+                        <span className="text-muted-foreground ml-2 font-mono text-xs">{inv.customer_code}</span>
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.net_sweet_amount)}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.original_amount)}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-amber-300">{formatRand(inv.outstanding_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        ))}
+      </div>
     </div>
   );
 }
@@ -672,14 +783,15 @@ function SqlOverridePanel() {
 
         <div className="px-4 py-3 space-y-4 text-sm">
           <p className="text-xs text-muted-foreground">
-            Two queries: <strong>Sales + Credits</strong> (OESHDT) and{" "}
-            <strong>Receipts</strong> (AROBP). Each can be overridden independently — leave blank to use the bundled default.
+            Three queries: <strong>Sales + Credits</strong> (OESHDT joined to AROBL, SWPAID=1),{" "}
+            <strong>Receipts</strong> (AROBP) and <strong>Unpaid invoices</strong> (OESHDT joined to AROBL, SWPAID=0 — sweets only).
+            Each can be overridden independently — leave blank to use the bundled default.
             Overrides must keep <code className="text-amber-400">@from</code>, <code className="text-amber-400">@to</code>, and (receipts only){" "}
             <code className="text-amber-400">@vat</code> parameters. SELECT/WITH only — no DML or DDL.
           </p>
 
           <SqlEditor
-            label="Sales + Credits query"
+            label="Sales + Credits query (paid only)"
             defaultSql={s.defaultSalesSql || ""}
             overrideSql={s.sales_query_override || ""}
             fieldKey="sales_query_override"
@@ -690,6 +802,13 @@ function SqlOverridePanel() {
             defaultSql={s.defaultReceiptsSql || ""}
             overrideSql={s.receipts_query_override || ""}
             fieldKey="receipts_query_override"
+            onSaved={() => queryClient.invalidateQueries({ queryKey: ["commission-settings"] })}
+          />
+          <SqlEditor
+            label="Unpaid invoices query"
+            defaultSql={s.defaultUnpaidSql || ""}
+            overrideSql={s.unpaid_query_override || ""}
+            fieldKey="unpaid_query_override"
             onSaved={() => queryClient.invalidateQueries({ queryKey: ["commission-settings"] })}
           />
         </div>

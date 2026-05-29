@@ -6,6 +6,7 @@ import {
   updateCommissionSettings,
   DEFAULT_COMMISSION_SALES_SQL,
   DEFAULT_COMMISSION_RECEIPTS_SQL,
+  DEFAULT_COMMISSION_UNPAID_SQL,
 } from '../services/commission.js';
 import {
   listCommissionArchives,
@@ -81,7 +82,7 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
       // SQL view is the admin-only "advanced" surface (same gate as
       // JTI's queryOverride). Strip the SQL fields on the way out.
       if (!isAdmin) {
-        const { sales_query_override, receipts_query_override, ...rest } = settings;
+        const { sales_query_override, receipts_query_override, unpaid_query_override, ...rest } = settings;
         return res.json({ ...rest });
       }
       const effectiveSalesSql = (settings.sales_query_override || '').trim().length > 0
@@ -90,12 +91,17 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
       const effectiveReceiptsSql = (settings.receipts_query_override || '').trim().length > 0
         ? settings.receipts_query_override
         : DEFAULT_COMMISSION_RECEIPTS_SQL;
+      const effectiveUnpaidSql = (settings.unpaid_query_override || '').trim().length > 0
+        ? settings.unpaid_query_override
+        : DEFAULT_COMMISSION_UNPAID_SQL;
       res.json({
         ...settings,
         defaultSalesSql: DEFAULT_COMMISSION_SALES_SQL,
         defaultReceiptsSql: DEFAULT_COMMISSION_RECEIPTS_SQL,
+        defaultUnpaidSql: DEFAULT_COMMISSION_UNPAID_SQL,
         effectiveSalesSql,
         effectiveReceiptsSql,
+        effectiveUnpaidSql,
       });
     } catch (err) {
       logError('commission.settings.get', err);
@@ -106,13 +112,13 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
   router.put('/api/commission/settings', ...settingsGuard, (req, res) => {
     const body = req.body || {};
     const { sweets_rate, cigtob_rate, reference_rate, vat_rate,
-            sales_query_override, receipts_query_override } = body;
+            sales_query_override, receipts_query_override, unpaid_query_override } = body;
     const isAdmin = req.currentUser?.role === 'admin';
 
     // Admin gate for the SQL override fields. Settings-permission
     // operators can still adjust rates from the same endpoint without
     // being blocked — only the SQL fields are restricted.
-    if ((sales_query_override !== undefined || receipts_query_override !== undefined) && !isAdmin) {
+    if ((sales_query_override !== undefined || receipts_query_override !== undefined || unpaid_query_override !== undefined) && !isAdmin) {
       return res.status(403).json({
         error: 'Editing the commission report SQL is restricted to admin users.',
       });
@@ -144,13 +150,19 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
       if (issue) return res.status(400).json({ error: `Receipts query: ${issue}` });
       checked.receipts_query_override = receipts_query_override;
     }
+    if (unpaid_query_override !== undefined) {
+      const issue = validateOverrideSql(unpaid_query_override, { expectedParams: ['from', 'to'] });
+      if (issue) return res.status(400).json({ error: `Unpaid query: ${issue}` });
+      checked.unpaid_query_override = unpaid_query_override;
+    }
 
     try {
       const before = getCommissionSettings();
       const updated = updateCommissionSettings({ ...checked, userId: req.currentUser?.id });
       const sqlChanged =
         (sales_query_override    !== undefined && before.sales_query_override    !== updated.sales_query_override) ||
-        (receipts_query_override !== undefined && before.receipts_query_override !== updated.receipts_query_override);
+        (receipts_query_override !== undefined && before.receipts_query_override !== updated.receipts_query_override) ||
+        (unpaid_query_override   !== undefined && before.unpaid_query_override   !== updated.unpaid_query_override);
       logAudit({
         req,
         action: 'commission.settings_update',
