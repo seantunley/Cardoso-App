@@ -229,7 +229,7 @@ const IconTrends = ({ className, style }) => (
 // Reconciliation — phosphor pulse cutting through stacked ledger rows.
 // Teal rows = static records; amber waveform = live matching across them.
 // Reports — stacked report sheets with a colourful bar-chart popping forward.
-// Creditors — building with R inside, two-toned to distinguish from Commission.
+// Creditor Summary — building with R inside, two-toned to distinguish from Commission.
 const IconCreditors = ({ className, style }) => (
   <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
     <rect x="3.5" y="4" width="13" height="13" rx="1" fill="#7c3aed" opacity="0.18" stroke="#7c3aed" strokeWidth="0.9"/>
@@ -238,6 +238,22 @@ const IconCreditors = ({ className, style }) => (
     <rect x="9"   y="9"  width="2" height="2" rx="0.3" fill="#a78bfa"/>
     <rect x="12.5" y="9" width="2" height="2" rx="0.3" fill="#a78bfa"/>
     <text x="10" y="16" fontSize="5" fontFamily="ui-monospace, monospace" fontWeight="bold" fill="#c4b5fd" textAnchor="middle">R</text>
+  </svg>
+);
+
+// Creditor Search — small building behind a magnifying glass.
+const IconCreditorSearch = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    {/* Small building behind */}
+    <rect x="2.5" y="3" width="9" height="9" rx="1" fill="#7c3aed" opacity="0.22" stroke="#7c3aed" strokeWidth="0.7"/>
+    <line x1="2.5" y1="5.2" x2="11.5" y2="5.2" stroke="#a78bfa" strokeWidth="0.5"/>
+    <rect x="3.8" y="6.5" width="1.4" height="1.4" rx="0.2" fill="#a78bfa"/>
+    <rect x="6"   y="6.5" width="1.4" height="1.4" rx="0.2" fill="#a78bfa"/>
+    <rect x="8.2" y="6.5" width="1.4" height="1.4" rx="0.2" fill="#a78bfa"/>
+    {/* Magnifying glass overlay (bottom-right) */}
+    <circle cx="12.5" cy="12.5" r="3.8" fill="#020817" stroke="#fbbf24" strokeWidth="1.1"/>
+    <circle cx="12.5" cy="12.5" r="2.4" fill="none" stroke="#fbbf24" strokeWidth="0.6" opacity="0.5"/>
+    <line x1="15.3" y1="15.3" x2="17.5" y2="17.5" stroke="#fbbf24" strokeWidth="1.4" strokeLinecap="round"/>
   </svg>
 );
 
@@ -354,7 +370,7 @@ const navItems = [
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Infrastructure" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true,  group: "Reports" },
   { name: "Trends",              icon: IconTrends,                page: "Trends",           permission: "can_access_reports",     siteOnly: true, group: "Reports" },
-  { name: "Creditor Search",     icon: IconCreditors,             page: "CreditorSearch",   permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
+  { name: "Creditor Search",     icon: IconCreditorSearch,        page: "CreditorSearch",   permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
   { name: "Creditor Summary",    icon: IconCreditors,             page: "CreditorSummary",  permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },

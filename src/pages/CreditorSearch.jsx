@@ -3,7 +3,7 @@
 // invoices (APOBL), payments (APTCR), and POs (POPORH1 + POPORL).
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, Search, Truck, FileText, Wallet, ClipboardList } from "lucide-react";
+import { Building2, Search, Truck, FileText, Wallet, ClipboardList, PackageCheck } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 function fmtR(v) {
@@ -130,33 +130,71 @@ function ReceiptsTab({ code }) {
     staleTime: 60_000,
   });
   const rows = data?.records || [];
+
+  // Group lines by receipt # so the operator sees one row per receipt
+  // and can drill into the line detail on demand. Preserves the API's
+  // ordering (date DESC, line ASC) by streaming into a Map.
+  const receipts = (() => {
+    const byNum = new Map();
+    for (const r of rows) {
+      if (!byNum.has(r.receipt_number)) {
+        byNum.set(r.receipt_number, {
+          receipt_number: r.receipt_number,
+          receipt_date: r.receipt_date,
+          lines: [],
+        });
+      }
+      byNum.get(r.receipt_number).lines.push(r);
+    }
+    return [...byNum.values()];
+  })();
+
   return (
     <TabContainer loading={isLoading} error={error?.message} empty={!isLoading && rows.length === 0 ? "No goods receipts found for this vendor." : null}>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2 text-left">Receipt #</th>
-            <th className="px-3 py-2 text-left">Date</th>
-            <th className="px-3 py-2 text-left">Item</th>
-            <th className="px-3 py-2 text-left">Description</th>
-            <th className="px-3 py-2 text-right">Qty</th>
-            <th className="px-3 py-2 text-left">UOM</th>
-            <th className="px-3 py-2 text-right">Unit cost</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.receipt_number}-${r.line_no}-${i}`} className="border-b border-border last:border-0">
-                <td className="px-3 py-1.5 font-mono text-xs">{r.receipt_number}</td>
-                <td className="px-3 py-1.5">{fmtDate(r.receipt_date)}</td>
-                <td className="px-3 py-1.5 font-mono text-xs">{r.item_number}</td>
-                <td className="px-3 py-1.5">{r.item_description || "—"}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(r.qty_received)}</td>
-                <td className="px-3 py-1.5">{r.uom || "—"}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(r.unit_cost)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="space-y-3">
+        {receipts.map((rcp) => {
+          const totalQty = rcp.lines.reduce((acc, l) => acc + (Number(l.qty_received) || 0), 0);
+          const totalCost = rcp.lines.reduce((acc, l) => acc + ((Number(l.qty_received) || 0) * (Number(l.unit_cost) || 0)), 0);
+          return (
+            <details key={rcp.receipt_number} className="rounded-xl border border-border bg-card overflow-hidden group">
+              <summary className="cursor-pointer px-4 py-3 flex items-center justify-between gap-4 list-none hover:bg-muted/30">
+                <div className="flex items-center gap-3 min-w-0">
+                  <PackageCheck className="h-4 w-4 text-muted-foreground" />
+                  <span className="font-mono text-sm">{rcp.receipt_number}</span>
+                  <span className="text-xs text-muted-foreground">{fmtDate(rcp.receipt_date)}</span>
+                </div>
+                <div className="text-right tabular-nums">
+                  <div className="text-sm">R {fmtR(totalCost)}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {rcp.lines.length} line{rcp.lines.length === 1 ? "" : "s"} · {fmtNum(totalQty)} units
+                  </div>
+                </div>
+              </summary>
+              <div className="border-t border-border">
+                <table className="w-full text-sm">
+                  <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-2 text-left">Item</th>
+                    <th className="px-3 py-2 text-left">Description</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-left">UOM</th>
+                    <th className="px-3 py-2 text-right">Unit cost</th>
+                  </tr></thead>
+                  <tbody>
+                    {rcp.lines.map((l, i) => (
+                      <tr key={`${rcp.receipt_number}-${l.line_no}-${i}`} className="border-b border-border last:border-0">
+                        <td className="px-3 py-1.5 font-mono text-xs">{l.item_number}</td>
+                        <td className="px-3 py-1.5">{l.item_description || "—"}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(l.qty_received)}</td>
+                        <td className="px-3 py-1.5">{l.uom || "—"}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(l.unit_cost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          );
+        })}
       </div>
     </TabContainer>
   );
