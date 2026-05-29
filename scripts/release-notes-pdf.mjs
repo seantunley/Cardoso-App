@@ -18,9 +18,10 @@ const RELEASES = {
   title: 'Product Update',
   date: '29 May 2026',
   intro:
-    'This update introduces a new Creditors module, richer inventory and sales ' +
-    'trend reporting, and improved sales-commission tracking — alongside a range ' +
-    'of refinements and fixes across the application.',
+    'A big update: a new Reporting Dashboard and proactive Insights feed, a new ' +
+    'Creditors module, reorder planning and richer inventory & sales reporting, ' +
+    'downloadable reports, faster navigation — plus improved sales-commission ' +
+    'tracking and a range of refinements and fixes across the application.',
   sections: [
     {
       label: 'NEW',
@@ -49,6 +50,36 @@ const RELEASES = {
             'across periods are reconciled automatically, keeping commission ' +
             'figures accurate.',
         },
+        {
+          title: 'Reporting dashboard',
+          body:
+            'A new at-a-glance home for reporting: headline figures and a ' +
+            'summary card for each report, plus a system-health strip that ' +
+            'shows whether your Sage data is current. Open any full report in ' +
+            'one click.',
+        },
+        {
+          title: 'Insights — automatic alerts',
+          body:
+            'The app now surfaces what needs attention on its own — falling ' +
+            'sales, customers buying less, dead stock building up, and large ' +
+            'debtor exposure — as a ranked feed. Administrators can add their ' +
+            'own rules (e.g. "alert me if revenue drops more than 10%").',
+        },
+        {
+          title: 'Reorder planning',
+          body:
+            'See exactly what to order and when: items at or below their ' +
+            'reorder point, grouped by supplier, with an exportable purchase ' +
+            'sheet. Click any item to view its sales trend and seasonality.',
+        },
+        {
+          title: 'Download reports as PDF or Excel',
+          body:
+            'Aged Debtors and Sales Rep Exposure can now be downloaded as a ' +
+            'polished PDF or an Excel workbook that matches your on-screen ' +
+            'filters — easy to share or file.',
+        },
       ],
     },
     {
@@ -73,6 +104,28 @@ const RELEASES = {
             'A new settings area lets administrators fine-tune how supplier ' +
             'data is retrieved and how much history is loaded.',
         },
+        {
+          title: 'Instant navigation & notifications',
+          body:
+            'Press Ctrl/Cmd-K to jump to any page or report instantly, and a ' +
+            'new notifications bell flags anything that needs attention from ' +
+            'anywhere in the app. The sidebar has also been tidied up.',
+        },
+        {
+          title: 'Shareable & saved report views',
+          body:
+            'Report filters are now kept in the page link, so a filtered view ' +
+            'can be bookmarked or shared — and you can save your favourite ' +
+            'views and jump back to them in one click.',
+        },
+        {
+          title: 'Faster, smoother screens',
+          body:
+            'Reports and dashboards load noticeably faster, show tidy loading ' +
+            'placeholders instead of blank screens, and offer a one-click ' +
+            'retry if something fails to load. Helpful tooltips have been added ' +
+            'throughout the new areas.',
+        },
       ],
     },
     {
@@ -91,6 +144,14 @@ const RELEASES = {
             'Resolved several issues that could cause errors when switching ' +
             'between views, and corrected balance and payment figures in a ' +
             'number of reports.',
+        },
+        {
+          title: 'Commission report accuracy',
+          body:
+            'The printed commission report now includes dedicated Unpaid ' +
+            'Invoices and Clawback pages. Clawback no longer treats returns / ' +
+            'credit notes as a credit to the rep, and the "commission at risk" ' +
+            'total now adds up correctly.',
         },
       ],
     },
