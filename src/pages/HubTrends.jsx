@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2 } from "lucide-react";
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -32,9 +32,8 @@ async function fetchCustomerTrends(period, siteId) {
   return data;
 }
 
-async function fetchInventoryTrends(years, siteId) {
+async function fetchInventoryTrends(siteId) {
   const qs = new URLSearchParams();
-  if (years) qs.set('years', String(years));
   if (siteId && siteId !== 'all') qs.set('site_id', siteId);
   const res = await fetch(`/api/hub/trends/inventory?${qs}`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
@@ -403,18 +402,28 @@ function pivotByMonthAndYear(rows, valueKey, visibleYears) {
 
 function InventoryTrends({ siteId }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["hub-trends-inventory", 3, siteId],
-    queryFn: () => fetchInventoryTrends(3, siteId),
+    queryKey: ["hub-trends-inventory", siteId],
+    queryFn: () => fetchInventoryTrends(siteId),
     staleTime: 60_000,
   });
   const rows = data?.data || [];
   const yearList = useMemo(
-    () => (data?.year_list || []).slice().sort((a, b) => b - a), // newest first
+    () => (data?.year_list || []).slice().sort((a, b) => b - a), // newest first for chip display
     [data?.year_list],
   );
   // Each year-chip is independently toggleable so an operator can compare
-  // any subset (e.g. 2024 vs 2026 with 2025 hidden). All-on by default.
+  // any subset (e.g. 2024 vs 2026 with 2025 hidden). Default: the 3 most
+  // recent years on, anything older starts hidden but is still toggleable.
+  // No year ever "falls off" — it just starts collapsed when there are >3.
   const [hiddenYears, setHiddenYears] = useState(/** @type {Set<number>} */ (new Set()));
+  // Apply the "newest-3-on" default exactly once when the year list
+  // first arrives — subsequent renders honour operator toggles.
+  const [defaultApplied, setDefaultApplied] = useState(false);
+  useEffect(() => {
+    if (defaultApplied || yearList.length === 0) return;
+    if (yearList.length > 3) setHiddenYears(new Set(yearList.slice(3)));
+    setDefaultApplied(true);
+  }, [yearList, defaultApplied]);
   const visibleYears = useMemo(
     () => yearList.filter((y) => !hiddenYears.has(y)).slice().sort((a, b) => a - b), // chart order: oldest first
     [yearList, hiddenYears],

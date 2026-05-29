@@ -617,19 +617,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // YYYY-MM granularity (the site ETL aggregates into months at write
   // time), so we always return monthly regardless of the query param.
   router.get('/api/hub/trends/inventory', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
-    // ?years=N — show the last N calendar years on a shared Jan-Dec axis
-    // so the operator can spot year-over-year patterns. Each year becomes
-    // its own line in the chart. Sites are summed inside the period —
-    // the per-site view lives on the existing Customer Trends tab; this
-    // one is intentionally year-over-year.
-    const yearsRaw = req.query.years ? Number(req.query.years) : 1;
-    const years = (Number.isInteger(yearsRaw) && yearsRaw >= 1 && yearsRaw <= 10) ? yearsRaw : 1;
-    const currentYear = new Date().getFullYear();
-    const fromYear = currentYear - (years - 1);
-    // Period strings in hub_inventory_sales are 'YYYY-MM' — string compare
-    // works for the lower bound because we only need to filter by year.
-    const since = `${fromYear}-01`;
-
+    // Return one row per (year, month) summed across sites on a shared
+    // Jan-Dec axis so the operator can spot seasonal patterns and growth.
+    // We deliberately enumerate every calendar year that has data — no
+    // rolling 3-year window. Years don't fall off as time passes; the
+    // per-year toggle chips in the UI let the operator narrow the
+    // comparison to whatever subset they care about today.
     const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
 
     try {
@@ -645,21 +638,18 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           SUM(his.order_count)                    AS total_orders,
           COUNT(DISTINCT his.item_number)         AS distinct_items
         FROM hub_inventory_sales his
-        WHERE his.period >= ?
-          AND his.period IS NOT NULL${filter.sql}${extraWhere}
+        WHERE his.period IS NOT NULL${filter.sql}${extraWhere}
         GROUP BY substr(his.period, 1, 4), substr(his.period, 6, 2)
         ORDER BY year ASC, month ASC
-      `).all(since, ...filter.params, ...extraParams);
+      `).all(...filter.params, ...extraParams);
 
-      // Enumerate every year in the requested window so a year with no
-      // data still appears in the legend (helpful for visual confirmation
-      // that "yes the data really is missing", not "the API is broken").
-      const yearList = [];
-      for (let y = fromYear; y <= currentYear; y++) yearList.push(y);
+      // year_list = every year present in the data (ascending). Stays
+      // accurate as new periods land — no manual maintenance required.
+      const yearSet = new Set(rows.map((r) => r.year));
+      const yearList = [...yearSet].sort((a, b) => a - b);
 
       res.json({
         period: 'monthly',
-        years,
         year_list: yearList,
         data: rows.map((row) => ({
           year: row.year,
