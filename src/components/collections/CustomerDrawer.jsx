@@ -179,8 +179,8 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
             )}
             {assignment.status === "active" && (
               <>
-                <Button variant="outline" size="sm" onClick={() => setStatus.mutate({ status: "escalated", reason: "Handed off" })}>Escalate</Button>
-                <Button variant="outline" size="sm" onClick={() => setStatus.mutate({ status: "written_off", reason: "Bad debt" })}>Write off</Button>
+                <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Escalate ${assignment.customer_name || "this customer"} (hand off)?`)) setStatus.mutate({ status: "escalated", reason: "Handed off" }); }}>Escalate</Button>
+                <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Write off ${assignment.customer_name || "this customer"} as bad debt? This marks the assignment written off.`)) setStatus.mutate({ status: "written_off", reason: "Bad debt" }); }}>Write off</Button>
                 <Button variant="outline" size="sm" onClick={() => setStatus.mutate({ status: "closed", reason: "Closed manually" })}>Close</Button>
               </>
             )}

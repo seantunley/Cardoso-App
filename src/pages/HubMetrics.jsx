@@ -335,7 +335,14 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
 
       {isError && (
         <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-          Failed to load machine health. Make sure you are logged in with access to Site Metrics.
+          <p>Failed to load machine health. Make sure you are logged in with access to Site Metrics.</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Retry
+          </button>
         </div>
       )}
 

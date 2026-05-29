@@ -980,6 +980,13 @@ export default function HubDashboard() {
         <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
         <p className="font-semibold text-foreground">Hub not available</p>
         <p className="text-sm text-muted-foreground mt-1">{error}</p>
+        <button
+          type="button"
+          onClick={() => fetchAll()}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          Retry
+        </button>
       </div>
     </div>
   );

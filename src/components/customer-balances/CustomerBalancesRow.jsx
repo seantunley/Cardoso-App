@@ -61,7 +61,10 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
         {row.last_receipt_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_receipt_1_date}</div>}
       </td>
       <td className="px-2 py-1 text-right">
-        <span className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}>
+        <span
+          className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}
+          title={amount > 10000 ? "High balance (over R10,000)" : amount > 0 ? "Outstanding balance" : "No balance"}
+        >
           R {formatAmount(amount)}
         </span>
       </td>

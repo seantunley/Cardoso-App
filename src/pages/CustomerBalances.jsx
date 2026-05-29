@@ -300,7 +300,14 @@ export default function CustomerBalances() {
           )}
           {isError && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-center text-sm text-red-400">
-              {error?.message || "Failed to load data"}
+              <p>{error?.message || "Failed to load data"}</p>
+              <button
+                type="button"
+                onClick={() => refetch()}
+                className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+              >
+                Retry
+              </button>
             </div>
           )}
           {!isLoading && !isError && rows.length === 0 && totalRecords === 0 && (

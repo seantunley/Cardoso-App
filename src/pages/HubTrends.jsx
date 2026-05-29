@@ -223,10 +223,19 @@ function LoadingSkeleton() {
   );
 }
 
-function ErrorBanner({ message }) {
+function ErrorBanner({ message, onRetry }) {
   return (
     <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-300">
-      {message || "Failed to load trends"}
+      <p>{message || "Failed to load trends"}</p>
+      {onRetry && (
+        <button
+          type="button"
+          onClick={() => onRetry()}
+          className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+        >
+          Retry
+        </button>
+      )}
     </div>
   );
 }
@@ -250,7 +259,7 @@ const formatQty = (v) => {
 
 function CustomerTrends({ siteId }) {
   const [period, setPeriod] = useState("weekly");
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-customer", period, siteId],
     queryFn: () => fetchCustomerTrends(period, siteId),
     staleTime: 60_000,
@@ -284,7 +293,7 @@ function CustomerTrends({ siteId }) {
       </div>
 
       {isLoading && <LoadingSkeleton />}
-      {!isLoading && error && <ErrorBanner message={error.message} />}
+      {!isLoading && error && <ErrorBanner message={error.message} onRetry={refetch} />}
       {!isLoading && !error && rows.length === 0 && (
         <EmptyState>
           Trends will appear once the hub has enough synced record history to bucket over time.
@@ -320,7 +329,7 @@ const SEASON_META = {
 };
 
 function SeasonalTopItems({ siteId }) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-inventory-seasonal", siteId],
     queryFn: () => fetchSeasonalTopItems(siteId),
     staleTime: 5 * 60_000,
@@ -335,7 +344,7 @@ function SeasonalTopItems({ siteId }) {
       </div>
     );
   }
-  if (error) return <ErrorBanner message={error.message} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={refetch} />;
   const seasons = data?.seasons || [];
   const months = data?.months || {};
   const buckets = data?.data || {};
@@ -443,7 +452,7 @@ function pivotByMonthAndYear(rows, valueKey, visibleYears) {
 }
 
 function RevenueByCommodityChart({ siteId }) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-inventory-revenue-by-commodity", siteId],
     queryFn: () => fetchRevenueByCommodity(siteId),
     staleTime: 60_000,
@@ -455,7 +464,7 @@ function RevenueByCommodityChart({ siteId }) {
   if (isLoading) {
     return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
   }
-  if (error) return <ErrorBanner message={error.message} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={refetch} />;
   if (rows.length === 0) {
     return (
       <EmptyState>
@@ -501,7 +510,7 @@ function RevenueByCommodityChart({ siteId }) {
 }
 
 function DeadStockChart({ siteId }) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-inventory-dead-stock", siteId],
     queryFn: () => fetchDeadStock(siteId),
     staleTime: 60_000,
@@ -511,7 +520,7 @@ function DeadStockChart({ siteId }) {
   if (isLoading) {
     return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
   }
-  if (error) return <ErrorBanner message={error.message} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={refetch} />;
   if (rows.length === 0) {
     return (
       <EmptyState>
@@ -602,7 +611,7 @@ function DeltaCell({ pct }) {
 }
 
 function TopMoversTable({ siteId }) {
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-inventory-top-movers", siteId],
     queryFn: () => fetchTopMovers(siteId),
     staleTime: 5 * 60_000,
@@ -612,7 +621,7 @@ function TopMoversTable({ siteId }) {
   if (isLoading) {
     return <div className="h-[460px] animate-pulse rounded-xl border border-border bg-card" />;
   }
-  if (error) return <ErrorBanner message={error.message} />;
+  if (error) return <ErrorBanner message={error.message} onRetry={refetch} />;
   if (rows.length === 0) {
     return (
       <EmptyState>
@@ -666,7 +675,7 @@ function TopMoversTable({ siteId }) {
 
 function InventoryTrends({ siteId }) {
   const [innerTab, setInnerTab] = useState("sales");
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["hub-trends-inventory", siteId],
     queryFn: () => fetchInventoryTrends(siteId),
     staleTime: 60_000,
@@ -738,7 +747,7 @@ function InventoryTrends({ siteId }) {
       </div>
 
       {isLoading && <LoadingSkeleton />}
-      {!isLoading && error && <ErrorBanner message={error.message} />}
+      {!isLoading && error && <ErrorBanner message={error.message} onRetry={refetch} />}
       {!isLoading && !error && rows.length === 0 && (
         <EmptyState>
           Inventory trends appear once a site syncs movement data

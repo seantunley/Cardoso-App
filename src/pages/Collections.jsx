@@ -274,7 +274,7 @@ export default function Collections() {
                               <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${meta.cls}`}>{meta.label}</span>
                             </td>
                             <td className={`px-3 py-2 text-center text-xs ${followupOverdue ? "text-amber-400 font-semibold" : "text-muted-foreground"}`}>
-                              {a.next_followup_date || "—"}
+                              {followupOverdue && a.next_followup_date ? `Overdue · ${a.next_followup_date}` : (a.next_followup_date || "—")}
                             </td>
                             <td className="px-3 py-2 text-right text-xs text-muted-foreground">{timeAgo(a.last_action_at)}</td>
                           </tr>
