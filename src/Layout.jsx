@@ -306,6 +306,15 @@ const IconDashboard = ({ className, style }) => (
   </svg>
 );
 
+// Insights icon — a lightbulb, for the proactive insights feed.
+const IconInsights = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <path d="M10 2.5a5 5 0 0 0-3 9v2.2c0 .4.3.8.8.8h4.4c.5 0 .8-.4.8-.8V11.5a5 5 0 0 0-3-9Z" fill="#f59e0b" opacity="0.9"/>
+    <rect x="7.6" y="15.2" width="4.8" height="1.5" rx="0.75" fill="#94a3b8"/>
+    <rect x="8.2" y="17" width="3.6" height="1.3" rx="0.65" fill="#64748b"/>
+  </svg>
+);
+
 // Operations icon — monitor/heartbeat metaphor. The Operations page is
 // "what's the system doing?" so the icon reads as a status display:
 // scope screen frame + pulse line + activity dots in indigo.
@@ -382,6 +391,7 @@ const navItems = [
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true, group: "BAT and JTI" },
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true, group: "BAT and JTI" },
   { name: "Reporting Dashboard", icon: IconDashboard,             page: "ReportingDashboard", permission: "can_access_reports", group: "Reports" },
+  { name: "Insights",            icon: IconInsights,              page: "Insights",         permission: "can_access_reports", group: "Reports" },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
   { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_commission", siteOnly: true, group: "Reports" },
   { name: "Sales Commission",    icon: IconCommission,            page: "HubCommission",    permission: "can_access_commission", hubOnly: true,  group: "Reports" },

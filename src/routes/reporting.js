@@ -2037,5 +2037,17 @@ export function createReportingRouter({ requireAuth }) {
     res.end(buffer);
   });
 
+  // GET /api/insights — proactive insights feed (rule-based detectors over the
+  // synced sales / inventory / debtor data). Site-mode; the hub returns empty.
+  router.get('/api/insights', requireAuth, async (req, res) => {
+    try {
+      const { computeInsights } = await import('../services/insights.js');
+      res.json(computeInsights());
+    } catch (err) {
+      console.error('[reporting] insights error:', err);
+      res.status(500).json({ error: 'Failed to compute insights' });
+    }
+  });
+
   return router;
 }

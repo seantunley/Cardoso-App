@@ -61,6 +61,7 @@ const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Records = React.lazy(() => import('./pages/Records'));
 const Reports = React.lazy(() => import('./pages/Reports'));
 const ReportingDashboard = React.lazy(() => import('./pages/ReportingDashboard'));
+const Insights = React.lazy(() => import('./pages/Insights'));
 const Users = React.lazy(() => import('./pages/Users'));
 const Inventory = React.lazy(() => import('./pages/Inventory'));
 const NetworkDevices = React.lazy(() => import('./pages/NetworkDevices'));
@@ -98,6 +99,7 @@ export const PAGES = {
     "Records": Records,
     "Reports": Reports,
     "ReportingDashboard": ReportingDashboard,
+    "Insights": Insights,
     "Users": Users,
     "CreditDebug": CreditDebug,
     "Reconciliation": Reconciliation,

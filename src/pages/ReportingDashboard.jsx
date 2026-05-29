@@ -6,7 +6,7 @@
 // and the shared report formatters/tiles so styling stays consistent.
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Wallet, Users, Boxes, BarChart3, ArrowRight, RefreshCw } from "lucide-react";
+import { Wallet, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb } from "lucide-react";
 import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
@@ -189,6 +189,36 @@ function InventoryValueCard() {
   );
 }
 
+// Compact strip linking to the full Insights feed; highlights the top item.
+function InsightsBanner() {
+  const navigate = useNavigate();
+  const { data } = useQuery({
+    queryKey: ["insights"],
+    queryFn: () => apiGet("/api/insights"),
+    staleTime: 60_000,
+  });
+  const insights = data?.insights || [];
+  if (insights.length === 0) return null;
+  const actionable = insights.filter((i) => i.severity === "high" || i.severity === "medium").length;
+  const top = insights[0];
+  return (
+    <button
+      type="button"
+      onClick={() => navigate("/Insights")}
+      className="mb-5 flex w-full items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-left transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+    >
+      <Lightbulb className="h-5 w-5 shrink-0 text-amber-500" />
+      <div className="min-w-0 flex-1">
+        <div className="text-sm font-medium text-foreground">
+          {actionable > 0 ? `${actionable} insight${actionable === 1 ? "" : "s"} need attention` : `${insights.length} insight${insights.length === 1 ? "" : "s"}`}
+        </div>
+        <div className="truncate text-xs text-muted-foreground">Top: {top.title}</div>
+      </div>
+      <ArrowRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function BatCard() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dash-bat-weekly"],
@@ -238,6 +268,8 @@ export default function ReportingDashboard() {
       <div className="mb-5">
         <SageHealthPanel />
       </div>
+
+      <InsightsBanner />
 
       {/* KPI tiles */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
