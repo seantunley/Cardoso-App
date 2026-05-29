@@ -11,6 +11,7 @@ import {
 } from "recharts";
 
 const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#f87171", "#4ade80"];
+const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 async function fetchCustomerTrends(period) {
@@ -425,7 +426,7 @@ function RevenueByCommodityChart() {
                 key={c}
                 type="monotone"
                 dataKey={c}
-                name={c}
+                name={COMMODITY_LABELS[c] || c}
                 stroke={COLORS[idx % COLORS.length]}
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
@@ -486,7 +487,7 @@ function MarginByCommodityChart() {
                 key={c}
                 type="monotone"
                 dataKey={c}
-                name={c}
+                name={COMMODITY_LABELS[c] || c}
                 stroke={COLORS[idx % COLORS.length]}
                 strokeWidth={2.5}
                 dot={{ r: 3 }}
@@ -641,7 +642,7 @@ function TopMoversTable() {
               <td className="px-3 py-1.5 text-foreground/90 truncate max-w-[260px]" title={row.item_description || ""}>
                 {row.item_description || "—"}
               </td>
-              <td className="px-3 py-1.5 text-foreground/80">{row.commodity || "—"}</td>
+              <td className="px-3 py-1.5 text-foreground/80">{COMMODITY_LABELS[row.commodity] || row.commodity || "—"}</td>
               <td className="px-3 py-1.5 text-right tabular-nums">{formatQty(row.this_year_qty)}</td>
               <td className="px-3 py-1.5 text-right"><DeltaCell pct={row.qty_delta_pct} /></td>
               <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">{formatRand(row.this_year_revenue)}</td>
