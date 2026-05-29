@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import ItemDetailModal from "@/components/inventory/ItemDetailModal";
 import ForecastSettingsModal from "@/components/inventory/ForecastSettingsModal";
 import ReorderPlanView from "@/components/inventory/ReorderPlanView";
+import EmptyState from "@/components/EmptyState";
 import { Settings } from "lucide-react";
 
 async function apiFetch(url) {
@@ -876,10 +877,11 @@ export default function InventoryMovement() {
             <QueryError error={forecast.error} label="forecast" />
           )}
           {forecastMode === "forecast" && !forecast.isLoading && !forecast.isError && forecastRows.length === 0 && (
-            <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-              <Package className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
-              No forecast data. Click "Recompute" after syncing sales data.
-            </div>
+            <EmptyState
+              icon={Package}
+              title="No forecast data"
+              message='Click "Recompute" after syncing sales data to generate the forecast.'
+            />
           )}
           {forecastMode === "forecast" && forecastRows.length > 0 && (
             <div className="rounded-xl border border-border bg-card overflow-hidden">

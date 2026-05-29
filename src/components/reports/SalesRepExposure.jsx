@@ -1,5 +1,7 @@
 import { useMemo, useState, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
   fmtR, fmtCompactR, fmtCount, downloadCsv, downloadReport, BarChart, Bar, Cell,
@@ -17,7 +19,16 @@ function fetchRepExposure(minBalance) {
 }
 
 export default function SalesRepExposure() {
-  const [minBalance, setMinBalance] = useState(3);
+  // Min-balance filter persisted in the URL (shareable + reload-safe).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const minBalance = Number(searchParams.get('min_balance') ?? 3);
+  const setMinBalance = (v) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v == null || String(v) === '3') next.delete('min_balance');
+      else next.set('min_balance', String(v));
+      return next;
+    }, { replace: true });
   const [expandedRep, setExpandedRep] = useState(null);
 
   const { data, isLoading, error } = useQuery({
@@ -57,10 +68,10 @@ export default function SalesRepExposure() {
   const stamp = () => new Date().toISOString().slice(0, 10);
   const handleExportPdf = () =>
     downloadReport(`/api/reports/rep-exposure/export?format=pdf&${exportQs()}`, `sales-rep-exposure-${stamp()}.pdf`)
-      .catch((e) => alert(`PDF export failed: ${e.message}`));
+      .catch((e) => toast.error("PDF export failed", { description: e.message }));
   const handleExportExcel = () =>
     downloadReport(`/api/reports/rep-exposure/export?format=xlsx&${exportQs()}`, `sales-rep-exposure-${stamp()}.xlsx`)
-      .catch((e) => alert(`Excel export failed: ${e.message}`));
+      .catch((e) => toast.error("Excel export failed", { description: e.message }));
 
   const generatedAt = data?.generated_at ? new Date(data.generated_at) : new Date();
   const generatedAtFmt = generatedAt.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });

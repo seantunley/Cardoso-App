@@ -260,6 +260,10 @@ export default function Collections() {
                         return (
                           <tr key={a.id}
                             onClick={() => setDrawerAssignment(a)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Open ${a.customer_name || "assignment"}`}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
                             className={`border-b border-border last:border-0 cursor-pointer transition-colors ${
                               drawerAssignment?.id === a.id ? "bg-amber-500/5" : "hover:bg-muted/30"
                             }`}

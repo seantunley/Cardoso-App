@@ -5,7 +5,9 @@
 // opens the shared item drill-down modal.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { RefreshCw, Package, FileSpreadsheet, AlertTriangle, ChevronRight } from "lucide-react";
+import EmptyState from "@/components/EmptyState";
 
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
@@ -60,7 +62,7 @@ export default function ReorderPlanView({ commodity, supplier, onRowClick }) {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      alert(`Export failed: ${e.message}`);
+      toast.error("Export failed", { description: e.message });
     }
   };
 
@@ -93,10 +95,11 @@ export default function ReorderPlanView({ commodity, supplier, onRowClick }) {
         </div>
       )}
       {!plan.isLoading && !plan.isError && rows.length === 0 && (
-        <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
-          <Package className="mx-auto mb-3 h-10 w-10" />
-          Nothing needs ordering right now. Recompute the forecast after syncing sales if this looks wrong.
-        </div>
+        <EmptyState
+          icon={Package}
+          title="Nothing to reorder"
+          message="No items are below their reorder point right now. Recompute the forecast after syncing sales if this looks wrong."
+        />
       )}
 
       {rows.length > 0 && (

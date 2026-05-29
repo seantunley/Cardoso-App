@@ -10,6 +10,7 @@ import { Wallet, Users, Boxes, BarChart3, ArrowRight, RefreshCw } from "lucide-r
 import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const BUCKET_META = [
   { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
@@ -43,6 +44,22 @@ function ReportCard({ icon: Icon, title, accent, to, children, query }) {
   );
 }
 
+// Skeleton placeholder while a card's data loads — feels faster than a
+// "Loading…" string and reserves the layout so cards don't jump on arrival.
+function CardSkeleton() {
+  return (
+    <div className="space-y-3">
+      <Skeleton className="h-8 w-2/3" />
+      <Skeleton className="h-3 w-1/2" />
+      <div className="space-y-1.5 pt-1">
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-3/4" />
+      </div>
+    </div>
+  );
+}
+
 function CardError({ error, onRetry }) {
   return (
     <div className="text-sm text-red-600 dark:text-red-400">
@@ -72,7 +89,7 @@ function AgedDebtorsCard() {
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CardSkeleton />
       ) : (
         <>
           <div className="mb-3">
@@ -111,7 +128,7 @@ function RepExposureCard() {
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CardSkeleton />
       ) : (
         <>
           <div className="mb-3">
@@ -147,7 +164,7 @@ function InventoryValueCard() {
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CardSkeleton />
       ) : (
         <>
           <div className="mb-3">
@@ -183,7 +200,7 @@ function BatCard() {
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <CardSkeleton />
       ) : (
         <>
           <div className="mb-3">
