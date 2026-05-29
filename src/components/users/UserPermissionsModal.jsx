@@ -26,6 +26,14 @@ const permissionTabs = [
     ],
   },
   {
+    id: "creditors",
+    label: "Creditors",
+    description: "Vendor / supplier pages",
+    permissions: [
+      { key: "can_access_creditors", label: "Creditors", description: "View vendor summary, AP transactions, POs, and goods receipts" },
+    ],
+  },
+  {
     id: "inventory",
     label: "Inventory",
     description: "Stock and movement modules",
