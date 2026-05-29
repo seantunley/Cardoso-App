@@ -24,6 +24,7 @@ function InsightCard({ insight, onOpen }) {
     <button
       type="button"
       onClick={() => insight.link && onOpen(insight.link)}
+      title={insight.link ? "Open the related page to act on this insight" : undefined}
       className={`flex w-full items-start gap-3 rounded-xl border ${s.ring} bg-card p-4 text-left transition-colors hover:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]`}
     >
       <s.Icon className={`mt-0.5 h-5 w-5 shrink-0 ${s.text}`} />
@@ -66,6 +67,7 @@ export default function Insights() {
               <button
                 type="button"
                 onClick={() => setRulesOpen(true)}
+                title="Create and manage your own threshold-based insight rules"
                 className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" /> Manage rules
@@ -74,6 +76,7 @@ export default function Insights() {
             <button
               type="button"
               onClick={() => refetch()}
+              title="Recompute insights from the latest data"
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh

@@ -88,23 +88,23 @@ export default function RulesModal({ open, onClose, onChanged }) {
               <span className="mb-1 block text-xs text-muted-foreground">Name</span>
               <input className={inputCls} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Revenue dropped sharply" />
             </label>
-            <label>
+            <label title="The business metric to watch. Computed from the latest synced data each time insights run.">
               <span className="mb-1 block text-xs text-muted-foreground">When this metric</span>
               <select className={inputCls} value={draft.metric} onChange={(e) => setDraft({ ...draft, metric: e.target.value })}>
                 {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
               </select>
             </label>
-            <label>
+            <label title="How to compare the metric against your threshold.">
               <span className="mb-1 block text-xs text-muted-foreground">Is</span>
               <select className={inputCls} value={draft.operator} onChange={(e) => setDraft({ ...draft, operator: e.target.value })}>
                 {OPERATORS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
             </label>
-            <label>
+            <label title="The value to compare against. For percentages use the number (e.g. -10 for a 10% drop); for Rand amounts use the full figure (e.g. 50000).">
               <span className="mb-1 block text-xs text-muted-foreground">Threshold</span>
               <input type="number" className={inputCls} value={draft.threshold} onChange={(e) => setDraft({ ...draft, threshold: e.target.value })} placeholder="e.g. -10 or 50000" />
             </label>
-            <label>
+            <label title="How prominently the insight card shows when this rule fires.">
               <span className="mb-1 block text-xs text-muted-foreground">Severity</span>
               <select className={inputCls} value={draft.severity} onChange={(e) => setDraft({ ...draft, severity: e.target.value })}>
                 {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}

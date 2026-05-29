@@ -42,6 +42,7 @@ export default function SavedViews() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
+          title="Save the current report and filters as a named view, or jump back to a saved one"
           className="inline-flex items-center gap-1.5 rounded-[12px] border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
         >
           <Star className="h-3.5 w-3.5" /> Saved views

@@ -801,12 +801,13 @@ export default function InventoryMovement() {
             <label className="text-xs text-muted-foreground">View</label>
             <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-0.5">
               {[
-                { id: "forecast", label: "Forecast" },
-                { id: "reorder", label: "Reorder Plan" },
+                { id: "forecast", label: "Forecast", title: "Per-item demand forecast, reorder points and days of stock" },
+                { id: "reorder", label: "Reorder Plan", title: "Items at or below reorder point, grouped by supplier and ready to order" },
               ].map((m) => (
                 <button
                   key={m.id}
                   onClick={() => setForecastMode(m.id)}
+                  title={m.title}
                   className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
                     forecastMode === m.id ? "bg-amber-500/15 text-amber-400" : "text-muted-foreground hover:text-foreground"
                   }`}
@@ -844,6 +845,7 @@ export default function InventoryMovement() {
             {isAdmin && (
               <button
                 onClick={() => setSettingsOpen(true)}
+                title="Adjust forecast parameters — lead time, order cycle, service level and minimum order qty"
                 className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
               >
                 <Settings className="h-3.5 w-3.5" />
@@ -962,6 +964,7 @@ export default function InventoryMovement() {
                             <button
                               type="button"
                               aria-label={`View details for ${r.item_number}`}
+                              title="View this item's sales trend and seasonality"
                               onClick={(e) => { e.stopPropagation(); setDetailItem(r); }}
                               className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500"
                             >

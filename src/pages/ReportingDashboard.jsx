@@ -34,6 +34,7 @@ function ReportCard({ icon: Icon, title, accent, to, children, query }) {
           <button
             type="button"
             onClick={() => navigate(query ? `${to}?report=${query}` : to)}
+            title={`Open the full ${title} report`}
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
             View report <ArrowRight className="h-3 w-3" />
@@ -205,6 +206,7 @@ function InsightsBanner() {
     <button
       type="button"
       onClick={() => navigate("/Insights")}
+      title="Open the Insights feed — automatically detected changes and risks across sales, customers, inventory and receivables"
       className="mb-5 flex w-full items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-left transition-colors hover:bg-amber-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
     >
       <Lightbulb className="h-5 w-5 shrink-0 text-amber-500" />
@@ -273,10 +275,10 @@ export default function ReportingDashboard() {
 
       {/* KPI tiles */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <SummaryTile label="Customers" value={(kpis?.total_records ?? 0).toLocaleString("en-ZA")} accent="var(--phosphor)" />
-        <SummaryTile label="Red flags" value={(flags.red ?? 0).toLocaleString("en-ZA")} accent="hsl(0 72% 50%)" />
-        <SummaryTile label="Orange flags" value={(flags.orange ?? 0).toLocaleString("en-ZA")} accent="hsl(33 95% 55%)" />
-        <SummaryTile label="Green flags" value={(flags.green ?? 0).toLocaleString("en-ZA")} accent="hsl(145 55% 45%)" />
+        <SummaryTile label="Customers" value={(kpis?.total_records ?? 0).toLocaleString("en-ZA")} accent="var(--phosphor)" title="Total customer records synced from Sage." />
+        <SummaryTile label="Red flags" value={(flags.red ?? 0).toLocaleString("en-ZA")} accent="hsl(0 72% 50%)" title="Customers auto-flagged red (highest credit risk)." />
+        <SummaryTile label="Orange flags" value={(flags.orange ?? 0).toLocaleString("en-ZA")} accent="hsl(33 95% 55%)" title="Customers auto-flagged orange (watch)." />
+        <SummaryTile label="Green flags" value={(flags.green ?? 0).toLocaleString("en-ZA")} accent="hsl(145 55% 45%)" title="Customers flagged green (in good standing)." />
       </div>
 
       {/* Report summary cards */}

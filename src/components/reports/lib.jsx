@@ -402,6 +402,7 @@ export function ReportFrame({
           {onExportCsv && (
             <button
               onClick={onExportCsv}
+              title="Download the on-screen rows as a CSV file"
               className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
               style={{ borderRadius: '12px' }}
             >
@@ -411,6 +412,7 @@ export function ReportFrame({
           {onExportExcel && (
             <button
               onClick={onExportExcel}
+              title="Download this report as a formatted Excel workbook (matches the current filters)"
               className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
               style={{ borderRadius: '12px' }}
             >
@@ -420,6 +422,7 @@ export function ReportFrame({
           {onExportPdf && (
             <button
               onClick={onExportPdf}
+              title="Download this report as a PDF (matches the current filters)"
               className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
               style={{ borderRadius: '12px' }}
             >
@@ -480,11 +483,12 @@ export function ChartCard({ title, sub, children, height = 260 }) {
 }
 
 // Summary tile, both screen and print friendly.
-export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big = false, width = '1fr' }) {
+export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big = false, width = '1fr', title }) {
   return (
     <div
       className="report-print-tile relative overflow-hidden bg-card p-4 min-h-[100px]"
       style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px', gridColumn: width }}
+      title={title}
     >
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"

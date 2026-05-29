@@ -31,13 +31,14 @@ function humanizeHours(hours) {
 }
 
 // One chip = one signal. tone drives the dot colour.
-function Chip({ tone, label, sub, active, onClick }) {
+function Chip({ tone, label, sub, active, onClick, title }) {
   const dot =
     tone === "critical" ? "bg-red-500" : tone === "warn" ? "bg-amber-500" : tone === "ok" ? "bg-emerald-500" : "bg-slate-400";
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-sm transition-colors ${
         active ? "border-primary bg-accent" : "border-border bg-background hover:bg-accent/50"
       }`}
@@ -99,6 +100,7 @@ export default function SageHealthPanel() {
               }
               active={openKey === "sage"}
               onClick={() => toggle("sage")}
+              title="Live connectivity to the Sage SQL server. Click for the last error and per-connection status."
             />
 
             {/* Per-source sync freshness */}
@@ -110,6 +112,7 @@ export default function SageHealthPanel() {
                 sub={humanizeHours(s.age_hours)}
                 active={openKey === `src:${s.key}`}
                 onClick={() => toggle(`src:${s.key}`)}
+                title={`When ${s.label.toLowerCase()} last synced from Sage. Amber if it hasn't synced in over 24 hours.`}
               />
             ))}
 
@@ -120,6 +123,7 @@ export default function SageHealthPanel() {
               sub={String(data?.errors24h ?? 0)}
               active={openKey === "errors"}
               onClick={() => toggle("errors")}
+              title="Errors logged in the last 24 hours. Click to see the most recent ones."
             />
 
             {/* Job failures (24h) */}
@@ -129,6 +133,7 @@ export default function SageHealthPanel() {
               sub={String(data?.jobFailures24h ?? 0)}
               active={openKey === "jobs"}
               onClick={() => toggle("jobs")}
+              title="Background job failures in the last 24 hours (syncs, backups, archives). Click for detail."
             />
 
             {/* Active alerts */}
@@ -138,6 +143,7 @@ export default function SageHealthPanel() {
               sub={String(data?.activeAlerts ?? 0)}
               active={openKey === "alerts"}
               onClick={() => toggle("alerts")}
+              title="Unresolved system alerts. Critical alerts turn this red."
             />
           </div>
 

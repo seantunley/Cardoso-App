@@ -74,6 +74,7 @@ export default function ReorderPlanView({ commodity, supplier, onRowClick }) {
         <button
           onClick={handleExport}
           disabled={!rows.length}
+          title="Download the reorder plan as a supplier-grouped Excel purchase sheet"
           className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
         >
           <FileSpreadsheet className="h-3.5 w-3.5" />
@@ -155,6 +156,7 @@ export default function ReorderPlanView({ commodity, supplier, onRowClick }) {
                             <button
                               type="button"
                               aria-label={`View details for ${r.item_number}`}
+                              title="View this item's sales trend and seasonality"
                               onClick={(e) => { e.stopPropagation(); onRowClick?.(r); }}
                               className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500"
                             >
