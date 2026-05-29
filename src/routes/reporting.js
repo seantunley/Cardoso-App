@@ -857,6 +857,8 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/reports/trends/inventory/dead-stock — site-mode trailing-24-month
   // dead-stock trend. Same shape as hub: per month, count of SKUs in
   // inventoryrecord whose most-recent sale is older than the month minus 3.
+  // Restricted to SKUs with current inventory_value > 0 so the count and
+  // value lines move together (see hub variant for rationale).
   router.get('/api/reports/trends/inventory/dead-stock', requireAuth, (_req, res) => {
     try {
       const itemRows = db.prepare(`
@@ -871,6 +873,7 @@ export function createReportingRouter({ requireAuth }) {
                ls.last_period
         FROM inventoryrecord ir
         LEFT JOIN last_sale ls ON ls.item_number = TRIM(ir.item_number)
+        WHERE COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
       `).all();
 
       const months = [];

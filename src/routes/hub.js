@@ -853,6 +853,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // (ever) is older than the month minus 3 (i.e. no movement in the
   // trailing quarter). dead_value = sum of inventory_value for those.
   //
+  // Restricted to SKUs with CURRENT inventory_value > 0 so the count
+  // and value lines move together — without this filter the value line
+  // sits at zero for early months because SKUs that went dead long
+  // ago have since been wound down to zero stock today.
+  //
   // Note: we don't have historical inventory snapshots, so the SKU set
   // is fixed at "today's hub_inventory." The trend is the count of those
   // SKUs that would have been considered dead at each past month.
@@ -877,7 +882,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
                ls.last_period
         FROM hub_inventory hi
         LEFT JOIN last_sale ls ON ls.site_id = hi.site_id AND ls.item_number = hi.item_number
-        WHERE 1=1${iFilter.sql}${iExtraWhere}
+        WHERE COALESCE(CAST(REPLACE(REPLACE(hi.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0${iFilter.sql}${iExtraWhere}
       `).all(...sFilter.params, ...extraParams, ...iFilter.params, ...extraParams);
 
       // Generate 24 trailing months (oldest first).

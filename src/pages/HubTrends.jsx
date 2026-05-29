@@ -593,7 +593,7 @@ function DeadStockChart({ siteId }) {
       <div className="mb-4">
         <h2 className="text-lg font-semibold text-foreground">Dead stock over time</h2>
         <p className="text-sm text-muted-foreground">
-          SKUs with no sales in the trailing 3 months (count and stock value)
+          SKUs you still hold (stock value &gt; 0) with no sales in the trailing 3 months
         </p>
       </div>
       <div className="h-[360px] w-full">
