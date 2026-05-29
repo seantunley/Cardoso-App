@@ -20,6 +20,7 @@ const STATUS_META = {
   warn: { label: "Attention", dot: "bg-amber-500", text: "text-amber-600 dark:text-amber-400", Icon: AlertTriangle },
   critical: { label: "Critical", dot: "bg-red-500", text: "text-red-600 dark:text-red-400", Icon: XCircle },
   loading: { label: "Loading…", dot: "bg-slate-400", text: "text-muted-foreground", Icon: RefreshCw },
+  unknown: { label: "Unavailable", dot: "bg-slate-400", text: "text-muted-foreground", Icon: AlertTriangle },
 };
 
 function humanizeHours(hours) {
@@ -57,7 +58,7 @@ export default function SageHealthPanel() {
     refetchInterval: 60_000,
   });
 
-  const statusKey = isLoading ? "loading" : data?.status || "ok";
+  const statusKey = error ? "unknown" : isLoading ? "loading" : data?.status || "ok";
   const meta = STATUS_META[statusKey] || STATUS_META.ok;
   const toggle = (key) => setOpenKey((k) => (k === key ? null : key));
 
