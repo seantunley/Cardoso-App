@@ -18,10 +18,11 @@ function fmtDate(s) {
   return s;
 }
 
-async function fetchCreditors({ search, activeOnly }) {
+async function fetchCreditors({ search, activeOnly, includeZero }) {
   const qs = new URLSearchParams();
   if (search) qs.set("search", search);
   if (activeOnly) qs.set("active_only", "true");
+  if (includeZero) qs.set("include_zero_balance", "true");
   const r = await fetch(`/api/creditors?${qs.toString()}`, { credentials: "include" });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
@@ -60,13 +61,14 @@ export default function CreditorSummary() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [activeOnly, setActiveOnly] = useState(true);
-  const [sortKey, setSortKey] = useState("ytd_paid");
+  const [includeZero, setIncludeZero] = useState(false);
+  const [sortKey, setSortKey] = useState("outstanding_amount");
   const [sortDir, setSortDir] = useState("desc");
   const [syncing, setSyncing] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["creditors", search, activeOnly],
-    queryFn: () => fetchCreditors({ search, activeOnly }),
+    queryKey: ["creditors", search, activeOnly, includeZero],
+    queryFn: () => fetchCreditors({ search, activeOnly, includeZero }),
     keepPreviousData: true,
     staleTime: 30_000,
   });
@@ -175,6 +177,18 @@ export default function CreditorSummary() {
               className="rounded border-border"
             />
             Active vendors only
+          </label>
+          <label
+            className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
+            title="By default we hide vendors you currently owe nothing — tick to show everyone"
+          >
+            <input
+              type="checkbox"
+              checked={includeZero}
+              onChange={(e) => setIncludeZero(e.target.checked)}
+              className="rounded border-border"
+            />
+            Include zero balances
           </label>
         </div>
 

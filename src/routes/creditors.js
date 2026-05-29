@@ -80,6 +80,10 @@ export function createCreditorRouter({ requireAuth, requirePermission }) {
       const year = String(new Date().getFullYear());
       const search = String(req.query.search || '').trim();
       const activeOnly = String(req.query.active_only || 'false') === 'true';
+      // Default: hide vendors with zero outstanding balance — the operator
+      // wants the summary focused on who they currently owe. Opt-out by
+      // passing ?include_zero_balance=true.
+      const includeZero = String(req.query.include_zero_balance || 'false') === 'true';
 
       const where = ['1=1'];
       const params = [];
@@ -88,6 +92,7 @@ export function createCreditorRouter({ requireAuth, requirePermission }) {
         params.push(`%${search}%`, `%${search}%`);
       }
       if (activeOnly) where.push('c.is_active = 1');
+      if (!includeZero) where.push('COALESCE(ob.outstanding, 0) <> 0');
 
       const rows = db.prepare(`
         SELECT

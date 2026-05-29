@@ -39,6 +39,9 @@ export const DEFAULT_AP_INVOICE_SQL = `
   WHERE AMTDUEHC <> 0
 `;
 
+// CNTPAYMENT is the count of invoice allocations applied to this cheque
+// (always >= 1 for a real payment row, NOT a "is-this-the-header" flag).
+// AMTRMITHC > 0 is enough to keep cheques (and exclude reversals).
 export const DEFAULT_AP_PAYMENT_SQL = `
   SELECT
     LTRIM(RTRIM(IDVEND))     AS vendor_code,
@@ -49,7 +52,7 @@ export const DEFAULT_AP_PAYMENT_SQL = `
     LTRIM(RTRIM(TXTRMITREF)) AS reference,
     LTRIM(RTRIM(IDBANK))     AS bank_code
   FROM APTCR
-  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMITHC > 0 AND CNTPAYMENT = 0
+  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMITHC > 0
 `;
 
 // POPORH1 has no STATUS column — derive an operator-friendly label from
