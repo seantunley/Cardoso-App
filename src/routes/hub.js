@@ -566,8 +566,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       ? "strftime('%Y-%m', hr.updated_date)"
       : "strftime('%Y-W%W', hr.updated_date)";
 
+    // Optional explicit single-site filter (the operator-facing
+    // dropdown on /trends). Stacks with the allow-list sql below.
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+
     try {
       const filter = siteFilterSql(req, res, 'hr.site_id');
+      const extraWhere = siteIdFilter ? ' AND hr.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
       const rows = db.prepare(`
         SELECT
           ${bucketExpr} AS period,
@@ -578,10 +584,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_records hr
         LEFT JOIN hub_sites hs ON hs.id = hr.site_id
         WHERE hr.updated_date >= ?
-          AND ${bucketExpr} IS NOT NULL${filter.sql}
+          AND ${bucketExpr} IS NOT NULL${filter.sql}${extraWhere}
         GROUP BY ${bucketExpr}, hr.site_id, hs.name
         ORDER BY ${bucketExpr} ASC, hr.site_id ASC
-      `).all(since, ...filter.params);
+      `).all(since, ...filter.params, ...extraParams);
 
       res.json({
         period,
@@ -611,43 +617,53 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // YYYY-MM granularity (the site ETL aggregates into months at write
   // time), so we always return monthly regardless of the query param.
   router.get('/api/hub/trends/inventory', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
-    const sinceParam = req.query.since ? String(req.query.since) : null;
-    if (sinceParam && !/^\d{4}-\d{2}$/.test(sinceParam)) {
-      return res.status(400).json({ error: 'since must be YYYY-MM' });
-    }
-    // Default window: last 12 calendar months including the current one.
-    const since = sinceParam || (() => {
-      const d = new Date();
-      d.setMonth(d.getMonth() - 11);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-    })();
+    // ?years=N — show the last N calendar years on a shared Jan-Dec axis
+    // so the operator can spot year-over-year patterns. Each year becomes
+    // its own line in the chart. Sites are summed inside the period —
+    // the per-site view lives on the existing Customer Trends tab; this
+    // one is intentionally year-over-year.
+    const yearsRaw = req.query.years ? Number(req.query.years) : 1;
+    const years = (Number.isInteger(yearsRaw) && yearsRaw >= 1 && yearsRaw <= 10) ? yearsRaw : 1;
+    const currentYear = new Date().getFullYear();
+    const fromYear = currentYear - (years - 1);
+    // Period strings in hub_inventory_sales are 'YYYY-MM' — string compare
+    // works for the lower bound because we only need to filter by year.
+    const since = `${fromYear}-01`;
+
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
 
     try {
       const filter = siteFilterSql(req, res, 'his.site_id');
+      const extraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
       const rows = db.prepare(`
         SELECT
-          his.period                              AS period,
-          his.site_id                             AS site_id,
-          COALESCE(hs.name, his.site_id)          AS site_name,
+          CAST(substr(his.period, 1, 4) AS INTEGER) AS year,
+          CAST(substr(his.period, 6, 2) AS INTEGER) AS month,
           SUM(his.qty_sold)                       AS total_qty_sold,
           SUM(his.revenue)                        AS total_revenue,
           SUM(his.order_count)                    AS total_orders,
           COUNT(DISTINCT his.item_number)         AS distinct_items
         FROM hub_inventory_sales his
-        LEFT JOIN hub_sites hs ON hs.id = his.site_id
         WHERE his.period >= ?
-          AND his.period IS NOT NULL${filter.sql}
-        GROUP BY his.period, his.site_id, hs.name
-        ORDER BY his.period ASC, his.site_id ASC
-      `).all(since, ...filter.params);
+          AND his.period IS NOT NULL${filter.sql}${extraWhere}
+        GROUP BY substr(his.period, 1, 4), substr(his.period, 6, 2)
+        ORDER BY year ASC, month ASC
+      `).all(since, ...filter.params, ...extraParams);
+
+      // Enumerate every year in the requested window so a year with no
+      // data still appears in the legend (helpful for visual confirmation
+      // that "yes the data really is missing", not "the API is broken").
+      const yearList = [];
+      for (let y = fromYear; y <= currentYear; y++) yearList.push(y);
 
       res.json({
         period: 'monthly',
-        since,
+        years,
+        year_list: yearList,
         data: rows.map((row) => ({
-          period: row.period,
-          site_id: row.site_id,
-          site_name: row.site_name,
+          year: row.year,
+          month: row.month,
           total_qty_sold: Number(row.total_qty_sold) || 0,
           total_revenue: Number(row.total_revenue) || 0,
           total_orders: Number(row.total_orders) || 0,
@@ -672,8 +688,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // it to a season label. Aggregate is global by default; ?site_id=... or
   // the operator's allowed-sites scope narrows it.
   router.get('/api/hub/trends/inventory/seasonal', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
     try {
       const filter = siteFilterSql(req, res, 'his.site_id');
+      const extraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
       const seasonalCase = `
         CASE substr(his.period, 6, 2)
           WHEN '12' THEN 'Summer' WHEN '01' THEN 'Summer' WHEN '02' THEN 'Summer'
@@ -691,7 +710,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             SUM(his.order_count) AS orders,
             COUNT(DISTINCT his.period) AS months_seen
           FROM hub_inventory_sales his
-          WHERE his.period IS NOT NULL${filter.sql}
+          WHERE his.period IS NOT NULL${filter.sql}${extraWhere}
           GROUP BY season, his.item_number
         ),
         ranked AS (
@@ -715,7 +734,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         ORDER BY
           CASE r.season WHEN 'Summer' THEN 1 WHEN 'Autumn' THEN 2 WHEN 'Winter' THEN 3 WHEN 'Spring' THEN 4 END,
           r.rn
-      `).all(...filter.params);
+      `).all(...filter.params, ...extraParams);
 
       // Bucket by season for the UI: client gets a tidy
       // { Summer: [...10 rows], Autumn: [...10], Winter: [...10], Spring: [...10] }.

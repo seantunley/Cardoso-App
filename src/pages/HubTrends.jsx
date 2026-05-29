@@ -16,22 +16,35 @@ import {
 
 const COLORS = ["#60a5fa", "#34d399", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#f87171", "#4ade80"];
 
-async function fetchCustomerTrends(period) {
-  const res = await fetch(`/api/hub/trends?period=${period}`, { credentials: "include" });
+async function fetchSites() {
+  const res = await fetch(`/api/hub/my-sites`, { credentials: "include" });
+  if (!res.ok) return [];
+  const json = await res.json().catch(() => []);
+  return Array.isArray(json) ? json : [];
+}
+
+async function fetchCustomerTrends(period, siteId) {
+  const qs = new URLSearchParams({ period });
+  if (siteId && siteId !== 'all') qs.set('site_id', siteId);
+  const res = await fetch(`/api/hub/trends?${qs}`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load customer trends");
   return data;
 }
 
-async function fetchInventoryTrends() {
-  const res = await fetch(`/api/hub/trends/inventory`, { credentials: "include" });
+async function fetchInventoryTrends(years, siteId) {
+  const qs = new URLSearchParams();
+  if (years) qs.set('years', String(years));
+  if (siteId && siteId !== 'all') qs.set('site_id', siteId);
+  const res = await fetch(`/api/hub/trends/inventory?${qs}`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load inventory trends");
   return data;
 }
 
-async function fetchSeasonalTopItems() {
-  const res = await fetch(`/api/hub/trends/inventory/seasonal`, { credentials: "include" });
+async function fetchSeasonalTopItems(siteId) {
+  const qs = siteId && siteId !== 'all' ? `?site_id=${encodeURIComponent(siteId)}` : '';
+  const res = await fetch(`/api/hub/trends/inventory/seasonal${qs}`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load seasonal trends");
   return data;
@@ -49,6 +62,51 @@ function pivotByPeriodAndSite(rows, valueKey) {
     return point;
   });
   return { sites, points };
+}
+
+function YearChart({ title, subtitle, data, yearKeys, yearList, valueFormatter }) {
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+        {subtitle ? <p className="text-sm text-muted-foreground">{subtitle}</p> : null}
+      </div>
+      <div className="h-[360px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
+            <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={valueFormatter} />
+            <Tooltip
+              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              formatter={(value) => [valueFormatter ? valueFormatter(value) : value, ""]}
+            />
+            <Legend />
+            {yearKeys.map((yk) => {
+              // Colour each year by its position in the OVERALL yearList
+              // (newest=0) so a year keeps the same colour even if other
+              // years are toggled off in between.
+              const idx = (yearList || []).findIndex((y) => String(y) === yk);
+              const colour = COLORS[(idx >= 0 ? idx : 0) % COLORS.length];
+              return (
+                <Line
+                  key={yk}
+                  type="monotone"
+                  dataKey={yk}
+                  name={yk}
+                  stroke={colour}
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                />
+              );
+            })}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
 }
 
 function ChartCard({ title, subtitle, data, sites, valueSuffix = "", valueDomain, valueFormatter }) {
@@ -149,11 +207,11 @@ const formatQty = (v) => {
   return String(n);
 };
 
-function CustomerTrends() {
+function CustomerTrends({ siteId }) {
   const [period, setPeriod] = useState("weekly");
   const { data, isLoading, error } = useQuery({
-    queryKey: ["hub-trends-customer", period],
-    queryFn: () => fetchCustomerTrends(period),
+    queryKey: ["hub-trends-customer", period, siteId],
+    queryFn: () => fetchCustomerTrends(period, siteId),
     staleTime: 60_000,
   });
   const rows = data?.data || [];
@@ -220,10 +278,10 @@ const SEASON_META = {
   Spring: { icon: Flower2,   color: "text-emerald-400", ring: "border-emerald-500/40", bg: "bg-emerald-500/5" },
 };
 
-function SeasonalTopItems() {
+function SeasonalTopItems({ siteId }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["hub-trends-inventory-seasonal"],
-    queryFn: () => fetchSeasonalTopItems(),
+    queryKey: ["hub-trends-inventory-seasonal", siteId],
+    queryFn: () => fetchSeasonalTopItems(siteId),
     staleTime: 5 * 60_000,
   });
 
@@ -323,25 +381,86 @@ function SeasonalTopItems() {
   );
 }
 
-function InventoryTrends() {
+const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+// Pivot the year/month rows from /api/hub/trends/inventory into the shape
+// recharts wants: one row per month, with each visible year as a column.
+// Hidden years are dropped from the column set so their lines vanish
+// without leaving a stray legend entry.
+function pivotByMonthAndYear(rows, valueKey, visibleYears) {
+  const yearSet = new Set(visibleYears);
+  const points = MONTH_LABELS.map((label, idx) => {
+    const point = { month: label };
+    for (const y of visibleYears) {
+      const row = rows.find((r) => r.year === y && r.month === idx + 1);
+      point[String(y)] = row?.[valueKey] ?? null;
+    }
+    return point;
+  });
+  const seriesKeys = visibleYears.map(String).filter((k) => yearSet.has(Number(k)));
+  return { seriesKeys, points };
+}
+
+function InventoryTrends({ siteId }) {
   const { data, isLoading, error } = useQuery({
-    queryKey: ["hub-trends-inventory"],
-    queryFn: () => fetchInventoryTrends(),
+    queryKey: ["hub-trends-inventory", 3, siteId],
+    queryFn: () => fetchInventoryTrends(3, siteId),
     staleTime: 60_000,
   });
   const rows = data?.data || [];
-  const { sites, points: qtyPoints } = useMemo(() => pivotByPeriodAndSite(rows, "total_qty_sold"), [rows]);
-  const { points: revPoints } = useMemo(() => pivotByPeriodAndSite(rows, "total_revenue"), [rows]);
-  const { points: orderPoints } = useMemo(() => pivotByPeriodAndSite(rows, "total_orders"), [rows]);
+  const yearList = useMemo(
+    () => (data?.year_list || []).slice().sort((a, b) => b - a), // newest first
+    [data?.year_list],
+  );
+  // Each year-chip is independently toggleable so an operator can compare
+  // any subset (e.g. 2024 vs 2026 with 2025 hidden). All-on by default.
+  const [hiddenYears, setHiddenYears] = useState(/** @type {Set<number>} */ (new Set()));
+  const visibleYears = useMemo(
+    () => yearList.filter((y) => !hiddenYears.has(y)).slice().sort((a, b) => a - b), // chart order: oldest first
+    [yearList, hiddenYears],
+  );
+  const { seriesKeys: qtyKeys, points: qtyPoints }   = useMemo(() => pivotByMonthAndYear(rows, "total_qty_sold", visibleYears), [rows, visibleYears]);
+  const { points: revPoints }   = useMemo(() => pivotByMonthAndYear(rows, "total_revenue", visibleYears),  [rows, visibleYears]);
+  const { points: orderPoints } = useMemo(() => pivotByMonthAndYear(rows, "total_orders",  visibleYears),  [rows, visibleYears]);
+
+  const toggleYear = (y) => {
+    setHiddenYears((prev) => {
+      const next = new Set(prev);
+      if (next.has(y)) next.delete(y);
+      else next.add(y);
+      return next;
+    });
+  };
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <div
-          className="inline-flex rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
-          title="Inventory sales velocity is bucketed monthly by the site ETL — weekly granularity isn't available"
-        >
-          Monthly (last 12 months)
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="text-xs text-muted-foreground" title="Each line is a calendar year on the same Jan-Dec axis — toggle the chips to compare years">
+          Year-over-year comparison
+        </div>
+        <div className="inline-flex flex-wrap gap-1.5 rounded-xl border border-border bg-card p-1">
+          {yearList.map((y, idx) => {
+            const isHidden = hiddenYears.has(y);
+            const color = COLORS[idx % COLORS.length];
+            return (
+              <button
+                key={y}
+                onClick={() => toggleYear(y)}
+                title={isHidden ? `Show ${y}` : `Hide ${y}`}
+                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  isHidden
+                    ? "text-muted-foreground/60 hover:text-foreground"
+                    : "bg-muted/40 text-foreground"
+                }`}
+              >
+                <span
+                  className="h-2.5 w-2.5 rounded-full transition-opacity"
+                  style={{ backgroundColor: color, opacity: isHidden ? 0.3 : 1 }}
+                />
+                {y}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -355,29 +474,32 @@ function InventoryTrends() {
       )}
       {!isLoading && !error && rows.length > 0 && (
         <div className="space-y-6">
-          <ChartCard
+          <YearChart
             title="Sales Velocity"
-            subtitle="Units sold per month per site — SUM(qty_sold) on hub_inventory_sales"
+            subtitle="Units sold per month — SUM(qty_sold) on hub_inventory_sales, summed across sites"
             data={qtyPoints}
-            sites={sites}
+            yearKeys={qtyKeys}
+            yearList={yearList}
             valueFormatter={formatQty}
           />
-          <ChartCard
+          <YearChart
             title="Sales Revenue"
-            subtitle="Revenue per month per site — SUM(revenue) on hub_inventory_sales"
+            subtitle="Revenue per month — SUM(revenue) on hub_inventory_sales, summed across sites"
             data={revPoints}
-            sites={sites}
+            yearKeys={qtyKeys}
+            yearList={yearList}
             valueFormatter={formatRand}
           />
-          <ChartCard
+          <YearChart
             title="Order Count"
-            subtitle="Number of orders per month per site — SUM(order_count) on hub_inventory_sales"
+            subtitle="Number of orders per month — SUM(order_count) on hub_inventory_sales, summed across sites"
             data={orderPoints}
-            sites={sites}
+            yearKeys={qtyKeys}
+            yearList={yearList}
             valueFormatter={formatQty}
           />
 
-          <SeasonalTopItems />
+          <SeasonalTopItems siteId={siteId} />
         </div>
       )}
     </>
@@ -386,6 +508,12 @@ function InventoryTrends() {
 
 export default function HubTrends() {
   const [tab, setTab] = useState("customers");
+  const [siteId, setSiteId] = useState("all");
+  const { data: sites = [] } = useQuery({
+    queryKey: ["hub-my-sites"],
+    queryFn: fetchSites,
+    staleTime: 5 * 60_000,
+  });
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
@@ -401,23 +529,57 @@ export default function HubTrends() {
         </div>
 
         <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="customers" title="Customer record-volume and flag-rate trends per site">
-              <Users className="w-4 h-4 mr-2" />
-              Customers
-            </TabsTrigger>
-            <TabsTrigger value="inventory" title="Sales velocity and revenue trends per site">
-              <Package className="w-4 h-4 mr-2" />
-              Inventory
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <TabsList className="inline-flex h-11 rounded-2xl border border-border bg-muted p-1 gap-1">
+              <TabsTrigger
+                value="customers"
+                title="Customer record-volume and flag-rate trends per site"
+                className="rounded-xl px-5 py-2 text-sm"
+              >
+                <Users className="w-4 h-4 mr-2" />
+                Customers
+              </TabsTrigger>
+              <TabsTrigger
+                value="inventory"
+                title="Sales velocity and revenue trends per site"
+                className="rounded-xl px-5 py-2 text-sm"
+              >
+                <Package className="w-4 h-4 mr-2" />
+                Inventory
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="inline-flex items-center gap-2">
+              <label
+                htmlFor="hub-trends-site-filter"
+                className="text-xs text-muted-foreground cursor-help"
+                title="Narrow every chart on this page to a single site, or aggregate across every site you can see"
+              >
+                Site
+              </label>
+              <select
+                id="hub-trends-site-filter"
+                value={siteId}
+                onChange={(e) => setSiteId(e.target.value)}
+                title="Filter Customer + Inventory trends to one site"
+                className="rounded-xl border border-border bg-card px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="all">All sites</option>
+                {sites.map((s) => (
+                  <option key={s.id || s.site_id} value={s.id || s.site_id}>
+                    {s.name || s.id || s.site_id}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
 
           <TabsContent value="customers" className="mt-4 space-y-4">
-            <CustomerTrends />
+            <CustomerTrends siteId={siteId} />
           </TabsContent>
 
           <TabsContent value="inventory" className="mt-4 space-y-4">
-            <InventoryTrends />
+            <InventoryTrends siteId={siteId} />
           </TabsContent>
         </Tabs>
       </div>
