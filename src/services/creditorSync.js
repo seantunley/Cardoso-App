@@ -8,15 +8,20 @@ import { logError } from '../lib/errorLog.js';
 // per source) — same pattern as stockReceipts and JTI. Column aliases
 // must match exactly because the upsert maps by name.
 
+// Column names below were verified directly against Sage 300 schema
+// via INFORMATION_SCHEMA.COLUMNS — not guessed. Operator can still
+// override any source through creditor_sync_settings if their Sage
+// install has been customised.
+
 export const DEFAULT_VENDOR_SQL = `
   SELECT
-    LTRIM(RTRIM(IDVEND))    AS vendor_code,
+    LTRIM(RTRIM(VENDORID))  AS vendor_code,
     LTRIM(RTRIM(VENDNAME))  AS vendor_name,
-    LTRIM(RTRIM(CODETERM))  AS terms,
+    LTRIM(RTRIM(TERMSCODE)) AS terms,
     LTRIM(RTRIM(NAMECTAC))  AS contact,
-    LTRIM(RTRIM(PHONECTAC)) AS phone,
+    LTRIM(RTRIM(TEXTPHON1)) AS phone,
     LTRIM(RTRIM(EMAIL1))    AS email,
-    CASE WHEN INACTIVE = 0 THEN 1 ELSE 0 END AS is_active
+    CASE WHEN SWACTV = 1 THEN 1 ELSE 0 END AS is_active
   FROM APVEN
 `;
 
@@ -24,38 +29,45 @@ export const DEFAULT_AP_INVOICE_SQL = `
   SELECT
     LTRIM(RTRIM(IDVEND))    AS vendor_code,
     LTRIM(RTRIM(IDINVC))    AS document_number,
-    LTRIM(RTRIM(IDDOCTYPE)) AS document_type,
+    CAST(IDTRXTYPE AS varchar(10)) AS document_type,
     DATEINVC                AS document_date_int,
-    DATEDUE                 AS due_date_int,
-    AMTGROSS                AS original_amount,
-    AMTBAL                  AS outstanding_amount,
-    LTRIM(RTRIM(IDOLREF))   AS reference
+    DATEINVCDU              AS due_date_int,
+    AMTINVCHC               AS original_amount,
+    AMTDUEHC                AS outstanding_amount,
+    LTRIM(RTRIM(IDPONBR))   AS reference
   FROM APOBL
-  WHERE AMTBAL <> 0
+  WHERE AMTDUEHC <> 0
 `;
 
 export const DEFAULT_AP_PAYMENT_SQL = `
   SELECT
-    LTRIM(RTRIM(IDVEND))    AS vendor_code,
-    LTRIM(RTRIM(PYMNUMBER)) AS payment_number,
-    DATERMIT                AS payment_date_int,
-    LTRIM(RTRIM(IDPAYMTYPE)) AS payment_method,
-    AMTRMIT                 AS amount,
-    LTRIM(RTRIM(IDRMIT))    AS reference,
-    LTRIM(RTRIM(CODEBANK))  AS bank_code
+    LTRIM(RTRIM(IDVEND))     AS vendor_code,
+    LTRIM(RTRIM(IDRMIT))     AS payment_number,
+    DATERMIT                 AS payment_date_int,
+    LTRIM(RTRIM(PAYMCODE))   AS payment_method,
+    AMTRMITHC                AS amount,
+    LTRIM(RTRIM(TXTRMITREF)) AS reference,
+    LTRIM(RTRIM(IDBANK))     AS bank_code
   FROM APTCR
-  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMIT > 0
+  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMITHC > 0 AND CNTPAYMENT = 0
 `;
 
+// POPORH1 has no STATUS column — derive an operator-friendly label from
+// ISCOMPLETE + ONHOLD. EXPARRIVAL is the expected arrival date.
+// DOCTOTAL is the PO grand total.
 export const DEFAULT_PO_HEADER_SQL = `
   SELECT
     LTRIM(RTRIM(PONUMBER))  AS po_number,
     LTRIM(RTRIM(VDCODE))    AS vendor_code,
     LTRIM(RTRIM(VDNAME))    AS vendor_name,
     DATE                    AS po_date_int,
-    EXARDATE                AS expected_date_int,
-    LTRIM(RTRIM(PORHSTATUS)) AS status,
-    ESTTOTAL                AS total_amount
+    EXPARRIVAL              AS expected_date_int,
+    CASE
+      WHEN ISCOMPLETE = 1 THEN 'COMPLETE'
+      WHEN ONHOLD     = 1 THEN 'ON HOLD'
+      ELSE 'OPEN'
+    END                     AS status,
+    DOCTOTAL                AS total_amount
   FROM POPORH1
   WHERE DATE BETWEEN @from AND @to
 `;
@@ -63,9 +75,9 @@ export const DEFAULT_PO_HEADER_SQL = `
 export const DEFAULT_PO_LINE_SQL = `
   SELECT
     LTRIM(RTRIM(h.PONUMBER))  AS po_number,
-    l.LINENUM                 AS line_no,
+    l.PORLSEQ                 AS line_no,
     LTRIM(RTRIM(l.ITEMNO))    AS item_number,
-    LTRIM(RTRIM(l.DESC))      AS item_description,
+    LTRIM(RTRIM(l.ITEMDESC))  AS item_description,
     l.OQORDERED               AS qty_ordered,
     l.OQRECEIVED              AS qty_received,
     l.UNITCOST                AS unit_cost,
