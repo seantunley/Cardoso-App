@@ -659,6 +659,96 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/trends/inventory/seasonal — top-10 items per South African
+  // season, aggregated across every year present in hub_inventory_sales.
+  //
+  // SA seasons (https://uni24.co.za/the-four-seasons-in-south-africa-summer-autumn-winter-and-spring/):
+  //   Summer: Dec, Jan, Feb
+  //   Autumn: Mar, Apr, May
+  //   Winter: Jun, Jul, Aug
+  //   Spring: Sep, Oct, Nov
+  //
+  // Pulls the substring '01'..'12' off `period` (stored YYYY-MM) and maps
+  // it to a season label. Aggregate is global by default; ?site_id=... or
+  // the operator's allowed-sites scope narrows it.
+  router.get('/api/hub/trends/inventory/seasonal', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    try {
+      const filter = siteFilterSql(req, res, 'his.site_id');
+      const seasonalCase = `
+        CASE substr(his.period, 6, 2)
+          WHEN '12' THEN 'Summer' WHEN '01' THEN 'Summer' WHEN '02' THEN 'Summer'
+          WHEN '03' THEN 'Autumn' WHEN '04' THEN 'Autumn' WHEN '05' THEN 'Autumn'
+          WHEN '06' THEN 'Winter' WHEN '07' THEN 'Winter' WHEN '08' THEN 'Winter'
+          WHEN '09' THEN 'Spring' WHEN '10' THEN 'Spring' WHEN '11' THEN 'Spring'
+        END`;
+      const rows = db.prepare(`
+        WITH seasonal AS (
+          SELECT
+            ${seasonalCase} AS season,
+            his.item_number AS item_number,
+            SUM(his.qty_sold)    AS qty_sold,
+            SUM(his.revenue)     AS revenue,
+            SUM(his.order_count) AS orders,
+            COUNT(DISTINCT his.period) AS months_seen
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${filter.sql}
+          GROUP BY season, his.item_number
+        ),
+        ranked AS (
+          SELECT s.*,
+                 ROW_NUMBER() OVER (PARTITION BY s.season ORDER BY s.qty_sold DESC) AS rn
+          FROM seasonal s
+          WHERE s.season IS NOT NULL
+        )
+        SELECT r.season, r.rn AS rank, r.item_number,
+               r.qty_sold, r.revenue, r.orders, r.months_seen,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT item_number,
+                 item_description,
+                 commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY synced_at DESC) AS rn
+          FROM hub_inventory
+        ) ir ON ir.item_number = r.item_number AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY
+          CASE r.season WHEN 'Summer' THEN 1 WHEN 'Autumn' THEN 2 WHEN 'Winter' THEN 3 WHEN 'Spring' THEN 4 END,
+          r.rn
+      `).all(...filter.params);
+
+      // Bucket by season for the UI: client gets a tidy
+      // { Summer: [...10 rows], Autumn: [...10], Winter: [...10], Spring: [...10] }.
+      const buckets = { Summer: [], Autumn: [], Winter: [], Spring: [] };
+      for (const row of rows) {
+        if (!buckets[row.season]) continue;
+        buckets[row.season].push({
+          rank: row.rank,
+          item_number: row.item_number,
+          item_description: row.item_description || null,
+          commodity: row.commodity || null,
+          qty_sold: Number(row.qty_sold) || 0,
+          revenue: Number(row.revenue) || 0,
+          orders: Number(row.orders) || 0,
+          months_seen: Number(row.months_seen) || 0,
+        });
+      }
+
+      res.json({
+        seasons: ['Summer', 'Autumn', 'Winter', 'Spring'],
+        months: {
+          Summer: ['Dec', 'Jan', 'Feb'],
+          Autumn: ['Mar', 'Apr', 'May'],
+          Winter: ['Jun', 'Jul', 'Aug'],
+          Spring: ['Sep', 'Oct', 'Nov'],
+        },
+        data: buckets,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/inventory
   // GET /api/hub/bat-summary — cross-site BAT reconciliation rollup. Joins
   // hub_bat_summary with hub_sites for the friendly site name + URL, computes

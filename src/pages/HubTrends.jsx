@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingUp, Users, Package } from "lucide-react";
+import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2 } from "lucide-react";
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -27,6 +27,13 @@ async function fetchInventoryTrends() {
   const res = await fetch(`/api/hub/trends/inventory`, { credentials: "include" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load inventory trends");
+  return data;
+}
+
+async function fetchSeasonalTopItems() {
+  const res = await fetch(`/api/hub/trends/inventory/seasonal`, { credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to load seasonal trends");
   return data;
 }
 
@@ -206,6 +213,116 @@ function CustomerTrends() {
   );
 }
 
+const SEASON_META = {
+  Summer: { icon: Sun,       color: "text-amber-400",   ring: "border-amber-500/40",   bg: "bg-amber-500/5"   },
+  Autumn: { icon: Leaf,      color: "text-orange-400",  ring: "border-orange-500/40",  bg: "bg-orange-500/5"  },
+  Winter: { icon: Snowflake, color: "text-sky-400",     ring: "border-sky-500/40",     bg: "bg-sky-500/5"     },
+  Spring: { icon: Flower2,   color: "text-emerald-400", ring: "border-emerald-500/40", bg: "bg-emerald-500/5" },
+};
+
+function SeasonalTopItems() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["hub-trends-inventory-seasonal"],
+    queryFn: () => fetchSeasonalTopItems(),
+    staleTime: 5 * 60_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="grid gap-4 lg:grid-cols-2">
+        {[0, 1, 2, 3].map((i) => (
+          <div key={i} className="h-[460px] animate-pulse rounded-xl border border-border bg-card" />
+        ))}
+      </div>
+    );
+  }
+  if (error) return <ErrorBanner message={error.message} />;
+  const seasons = data?.seasons || [];
+  const months = data?.months || {};
+  const buckets = data?.data || {};
+  const hasAny = seasons.some((s) => (buckets[s] || []).length > 0);
+  if (!hasAny) {
+    return (
+      <EmptyState>
+        Seasonal trends appear once a site has at least one full month of inventory sales
+        synced to the hub.
+      </EmptyState>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-baseline justify-between">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Top 10 items per season</h2>
+          <p className="text-sm text-muted-foreground">
+            Aggregated across every year in the hub. Sorted by units sold.
+          </p>
+        </div>
+        <span
+          className="text-xs text-muted-foreground"
+          title="Seasons as defined by the South African Weather Service / common SA usage. Sales are mapped from period (YYYY-MM) → month → season."
+        >
+          South African seasons
+        </span>
+      </div>
+      <div className="grid gap-4 lg:grid-cols-2">
+        {seasons.map((season) => {
+          const meta = SEASON_META[season] || {};
+          const Icon = meta.icon || Sun;
+          const items = buckets[season] || [];
+          return (
+            <div key={season} className={`rounded-xl border ${meta.ring || "border-border"} ${meta.bg || "bg-card"} overflow-hidden`}>
+              <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-card/60">
+                <div className="flex items-center gap-2">
+                  <Icon className={`w-5 h-5 ${meta.color || "text-foreground"}`} />
+                  <h3 className="text-base font-semibold text-foreground">{season}</h3>
+                </div>
+                <span
+                  className="text-[10px] uppercase tracking-wider text-muted-foreground"
+                  title={`${season} = ${(months[season] || []).join(', ')}`}
+                >
+                  {(months[season] || []).join(' · ')}
+                </span>
+              </div>
+              {items.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No sales recorded in {season} months yet.
+                </div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                      <th className="px-3 py-2 w-8 cursor-help" title="Rank within the season (1 = best-selling)">#</th>
+                      <th className="px-3 py-2 cursor-help" title="Sage item code">Item</th>
+                      <th className="px-3 py-2 cursor-help" title="Item description from hub_inventory (latest synced row)">Description</th>
+                      <th className="px-3 py-2 text-right cursor-help" title="Sum of units sold across every recorded year of this season">Qty</th>
+                      <th className="px-3 py-2 text-right cursor-help" title="Sum of revenue in ZAR across every recorded year of this season">Revenue</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {items.map((row) => (
+                      <tr key={row.item_number} className="border-b border-border last:border-0 hover:bg-muted/30">
+                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{row.rank}</td>
+                        <td className="px-3 py-1.5 font-mono text-xs text-foreground">{row.item_number}</td>
+                        <td className="px-3 py-1.5 text-foreground/90 truncate max-w-[260px]" title={row.item_description || ""}>
+                          {row.item_description || "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{formatQty(row.qty_sold)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">{formatRand(row.revenue)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function InventoryTrends() {
   const { data, isLoading, error } = useQuery({
     queryKey: ["hub-trends-inventory"],
@@ -259,6 +376,8 @@ function InventoryTrends() {
             sites={sites}
             valueFormatter={formatQty}
           />
+
+          <SeasonalTopItems />
         </div>
       )}
     </>
