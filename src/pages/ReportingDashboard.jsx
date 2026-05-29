@@ -11,6 +11,7 @@ import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
 import { Skeleton } from "@/components/ui/skeleton";
+import PageHeader from "@/components/PageHeader";
 
 const BUCKET_META = [
   { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
@@ -228,12 +229,11 @@ export default function ReportingDashboard() {
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground md:px-6">
-      <div className="mb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Reporting Dashboard</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Headline numbers across the business at a glance. Open any card for the full, filterable report.
-        </p>
-      </div>
+      <PageHeader
+        eyebrow="Reports"
+        title="Reporting Dashboard"
+        subtitle="Headline numbers across the business at a glance. Open any card for the full, filterable report."
+      />
 
       <div className="mb-5">
         <SageHealthPanel />

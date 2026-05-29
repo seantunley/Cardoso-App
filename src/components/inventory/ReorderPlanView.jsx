@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { RefreshCw, Package, FileSpreadsheet, AlertTriangle, ChevronRight } from "lucide-react";
 import EmptyState from "@/components/EmptyState";
+import { formatNum as fmtNum } from "@/lib/format";
 
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
@@ -17,8 +18,6 @@ async function apiFetch(url) {
   }
   return res.json();
 }
-
-const fmtNum = (v) => (v == null ? "—" : Number(v).toLocaleString("en-ZA", { maximumFractionDigits: 0 }));
 
 export default function ReorderPlanView({ commodity, supplier, onRowClick }) {
   const params = new URLSearchParams();

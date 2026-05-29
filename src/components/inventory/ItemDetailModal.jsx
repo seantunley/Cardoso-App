@@ -11,6 +11,7 @@ import {
 } from "recharts";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { CHART_PRIMARY, CHART_POSITIVE, CHART_WARN } from "@/lib/chartColors";
+import { formatNum as fmtNum } from "@/lib/format";
 
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
@@ -20,8 +21,6 @@ async function apiFetch(url) {
   }
   return res.json();
 }
-
-const fmtNum = (v) => (v == null ? "—" : Number(v).toLocaleString("en-ZA", { maximumFractionDigits: 0 }));
 
 function Stat({ label, value }) {
   return (

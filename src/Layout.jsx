@@ -352,6 +352,7 @@ import {
   DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import CommandPalette from "@/components/CommandPalette";
+import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
@@ -812,6 +813,7 @@ export default function Layout({ children, currentPageName }) {
                 collapsed
               />
               <SidebarButton onClick={() => setChangePasswordOpen(true)} icon={KeyRound} label="Password" collapsed />
+              <NotificationsBell collapsed />
               <SidebarButton onClick={() => logout(true)} icon={LogOut} label="Logout" collapsed />
               <SidebarButton onClick={() => setIsCollapsed(false)} icon={ChevronRight} label="Expand" collapsed />
             </>
@@ -879,6 +881,7 @@ export default function Layout({ children, currentPageName }) {
                   </DropdownMenuLabel>
                 </DropdownMenuContent>
               </DropdownMenu>
+              <NotificationsBell />
               <button
                 type="button"
                 onClick={() => {
