@@ -347,6 +347,10 @@ const IconReconciliation = ({ className, style }) => (
 );
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuTrigger, DropdownMenuContent,
+  DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
@@ -798,116 +802,118 @@ export default function Layout({ children, currentPageName }) {
           })()}
         </nav>
         <div
-          className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "space-y-0 p-3")}
+          className={cn(isCollapsed ? "p-1 flex flex-col items-center space-y-0.5" : "p-3")}
           style={{ borderTop: "1px solid hsl(var(--sidebar-border))" }}
         >
-          {!isCollapsed && (
-            <div
-              className="px-2 pb-2 font-mono text-[9px] uppercase tracking-[0.25em]"
-              style={{ color: "hsla(var(--sidebar-foreground), 0.4)" }}
-            >
-              § Controls
+          {isCollapsed ? (
+            <>
+              {canSeeSettings && (
+                <SidebarButton onClick={() => setSettingsOpen(true)} icon={Settings} label="Settings" collapsed />
+              )}
+              <SidebarButton
+                onClick={() => {
+                  const next = theme === 'dark' ? 'light' : 'dark';
+                  setTheme(next); applyTheme(next);
+                  fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
+                    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+                    .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
+                }}
+                icon={theme === 'dark' ? Sun : Moon}
+                label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
+                collapsed
+              />
+              <SidebarButton onClick={() => setChangePasswordOpen(true)} icon={KeyRound} label="Password" collapsed />
+              <SidebarButton onClick={() => logout(true)} icon={LogOut} label="Logout" collapsed />
+              <SidebarButton onClick={() => setIsCollapsed(false)} icon={ChevronRight} label="Expand" collapsed />
+            </>
+          ) : (
+            // Compact account menu: identity + low-frequency actions (Settings,
+            // Password, Logout, update install) collapse into one dropdown;
+            // theme + collapse stay as inline icon buttons. Build version moves
+            // to the trigger subtitle/tooltip + the menu footer (which keeps the
+            // 7-click build-diagnostics easter egg + admin update path).
+            <div className="flex items-center gap-1">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    className="flex flex-1 min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-[hsl(var(--sidebar-accent))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+                    title={versionStatus.updateAvailable ? `Update available: v${versionStatus.latestVersion}` : `Build v${versionStatus.currentVersion}`}
+                  >
+                    <span
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
+                      style={{ background: "hsla(33, 95%, 55%, 0.15)", color: "var(--phosphor)" }}
+                    >
+                      {(currentUser?.full_name || "U").trim().charAt(0).toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-xs font-medium text-[hsl(var(--sidebar-foreground))]">
+                        {currentUser?.full_name || "Account"}
+                      </span>
+                      <span className="block truncate font-mono text-[10px]" style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}>
+                        v{versionStatus.currentVersion}
+                      </span>
+                    </span>
+                    {versionStatus.updateAvailable && (
+                      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: "var(--phosphor)", boxShadow: "0 0 8px hsla(33,95%,55%,0.8)" }} />
+                    )}
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="start" className="w-56">
+                  <DropdownMenuLabel className="truncate">{currentUser?.email || "Signed in"}</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {canSeeSettings && (
+                    <DropdownMenuItem onClick={() => setSettingsOpen(true)}>
+                      <Settings className="mr-2 h-4 w-4" /> Settings
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem onClick={() => setChangePasswordOpen(true)}>
+                    <KeyRound className="mr-2 h-4 w-4" /> Change password
+                  </DropdownMenuItem>
+                  {versionStatus.updateAvailable && isAdmin && (
+                    <DropdownMenuItem
+                      onClick={() => { if (!updateInstalling && window.confirm(`Install update v${versionStatus.latestVersion} now? The app will update and restart.`)) confirmUpdate(); }}
+                    >
+                      <span className="text-[var(--phosphor)]">{updateInstalling ? "Installing update…" : `Install update v${versionStatus.latestVersion}`}</span>
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => logout(true)}>
+                    <LogOut className="mr-2 h-4 w-4" /> Logout
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel
+                    className="cursor-default font-mono text-[9px] tracking-[0.2em] text-muted-foreground"
+                    onClick={handleBuildBadgeClick}
+                  >
+                    Build v{versionStatus.currentVersion}
+                  </DropdownMenuLabel>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = theme === 'dark' ? 'light' : 'dark';
+                  setTheme(next); applyTheme(next);
+                  fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
+                    .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
+                    .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
+                }}
+                title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+                className="shrink-0 rounded-md p-2 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+              >
+                {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsCollapsed(true)}
+                title="Collapse sidebar"
+                className="shrink-0 rounded-md p-2 text-[hsla(var(--sidebar-foreground),0.7)] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-foreground))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)]"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
             </div>
           )}
-          {canSeeSettings && (
-            <SidebarButton
-              onClick={() => setSettingsOpen(true)}
-              icon={Settings}
-              label="Settings"
-              collapsed={isCollapsed}
-            />
-          )}
-
-          <SidebarButton
-            onClick={() => {
-              const next = theme === 'dark' ? 'light' : 'dark';
-              setTheme(next);
-              applyTheme(next);
-              fetch('/api/auth/me', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify({ theme_preference: next }) })
-                .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); })
-                .catch(err => { toast.error(`Couldn't save theme: ${err.message}`); reportClientError("Layout.themeSave", err); });
-            }}
-            icon={theme === 'dark' ? Sun : Moon}
-            label={theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-            collapsed={isCollapsed}
-          />
-
-          <SidebarButton
-            onClick={() => setChangePasswordOpen(true)}
-            icon={KeyRound}
-            label="Password"
-            collapsed={isCollapsed}
-          />
-
-          <SidebarButton
-            onClick={() => logout(true)}
-            icon={LogOut}
-            label="Logout"
-            collapsed={isCollapsed}
-          />
-
-          <SidebarButton
-            onClick={() => setIsCollapsed(!isCollapsed)}
-            icon={isCollapsed ? ChevronRight : ChevronLeft}
-            label="Collapse"
-            collapsed={isCollapsed}
-          />
-
-          <div className={cn("overflow-hidden transition-all duration-200 ease-out", isCollapsed ? "max-h-0 opacity-0" : "max-h-24 opacity-100")}>
-            <div
-              className={cn(
-                "mt-3 mx-1 px-2 py-1.5 transition-colors font-mono text-[9px] uppercase tracking-[0.2em]",
-                versionStatus.updateAvailable && isAdmin ? "cursor-pointer" : ""
-              )}
-              style={{
-                borderLeft: versionStatus.updateAvailable
-                  ? "2px solid var(--phosphor)"
-                  : "2px solid transparent",
-                color: versionStatus.updateAvailable
-                  ? "var(--phosphor)"
-                  : "hsla(var(--sidebar-foreground), 0.35)",
-                background: versionStatus.updateAvailable && isAdmin
-                  ? "hsla(33, 95%, 55%, 0.05)"
-                  : "transparent",
-              }}
-              title={
-                versionStatus.updateAvailable
-                  ? isAdmin
-                    ? updateInstalling
-                      ? "Installing update…"
-                      : `New: v${versionStatus.latestVersion} — click to install`
-                    : `New: v${versionStatus.latestVersion}`
-                  : `v${versionStatus.currentVersion} — shipped with care. Probably coffee.`
-              }
-              onClick={handleBuildBadgeClick}
-            >
-              <div className="flex items-center justify-between">
-                <span>Build</span>
-                <span className="tabular-nums" style={{ color: "hsla(var(--sidebar-foreground), 0.55)" }}>
-                  v{versionStatus.currentVersion}
-                </span>
-              </div>
-              {versionStatus.updateAvailable && (
-                updateInstalling
-                  ? <p className="mt-1 animate-pulse">Installing…</p>
-                  : showUpdateConfirm
-                  ? (
-                    <div className="mt-1.5 flex gap-1">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); confirmUpdate(); }}
-                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] border border-current hover:bg-current hover:text-[hsl(var(--sidebar-background))] transition-colors"
-                      >Install</button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setShowUpdateConfirm(false); }}
-                        className="flex-1 px-2 py-1 font-mono text-[9px] uppercase tracking-[0.2em] hover:bg-[hsl(var(--sidebar-accent))] transition-colors"
-                        style={{ color: "hsla(var(--sidebar-foreground), 0.6)" }}
-                      >Cancel</button>
-                    </div>
-                  )
-                  : <p className="mt-1">→ v{versionStatus.latestVersion} available{isAdmin ? " · click" : ""}</p>
-              )}
-            </div>
-          </div>
         </div>
       </aside>
       <header
