@@ -11,7 +11,8 @@
 // page just reflects the resulting status.
 
 import { useMemo, useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useColorScheme } from "@/lib/useColorScheme";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,7 @@ import CustomerDrawer from "@/components/collections/CustomerDrawer";
 import NewWorklistDialog from "@/components/collections/NewWorklistDialog";
 import AssignCustomersDialog from "@/components/collections/AssignCustomersDialog";
 import { ASSIGNMENT_STATUS_META } from "@/components/collections/meta";
-import { apiGet, parseAmount, formatCurrency, timeAgo } from "@/components/collections/utils";
+import { apiGet, apiSend, parseAmount, formatCurrency, timeAgo } from "@/components/collections/utils";
 
 // ── Main page ────────────────────────────────────────────────────
 
@@ -74,6 +75,47 @@ export default function Collections() {
       (a.sales_rep || "").toLowerCase().includes(q)
     );
   }, [assignments.data, searchFilter]);
+
+  // ── Bulk selection ──────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(() => /** @type {Set<number>} */ (new Set()));
+  // Drop the selection whenever the visible set changes (worklist / status /
+  // search) so a hidden row can't be acted on by accident.
+  useEffect(() => { setSelectedIds(new Set()); }, [selectedWorklistId, statusFilter, searchFilter]);
+  const toggleSelected = (id) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  const allVisibleSelected = filteredAssignments.length > 0 && filteredAssignments.every((a) => selectedIds.has(a.id));
+  const toggleSelectAll = () =>
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(filteredAssignments.map((a) => a.id)));
+
+  // Apply a status to every selected assignment. The status endpoint is
+  // per-assignment, so loop and report a succeeded/failed summary rather than
+  // failing silently on any one row.
+  const bulkStatus = useMutation({
+    mutationFn: async ({ status, reason }) => {
+      const ids = [...selectedIds];
+      const results = await Promise.allSettled(
+        ids.map((id) => apiSend(`/api/collections/assignments/${id}/status`, "PUT", { status, reason })),
+      );
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      return { ok, failed: ids.length - ok };
+    },
+    onSuccess: ({ ok, failed }) => {
+      if (ok) toast.success(`Updated ${ok} assignment${ok === 1 ? "" : "s"}`);
+      if (failed) toast.error(`${failed} update${failed === 1 ? "" : "s"} failed`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["worklist-assignments"] });
+    },
+    onError: (err) => toast.error(`Bulk update failed: ${err.message}`),
+  });
+  const runBulk = (status, label, reason) => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`${label} ${selectedIds.size} selected customer${selectedIds.size === 1 ? "" : "s"}?`)) return;
+    bulkStatus.mutate({ status, reason });
+  };
 
   const total = useMemo(
     () => filteredAssignments.reduce((s, r) => s + (r.outstanding_balance_num ?? parseAmount(r.outstanding_balance)), 0),
@@ -225,11 +267,32 @@ export default function Collections() {
                   </div>
                 )}
 
+                {/* Bulk-action toolbar — appears when rows are selected */}
+                {selectedIds.size > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+                    <span className="font-medium text-amber-300">{selectedIds.size} selected</span>
+                    <span className="text-muted-foreground">·</span>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("escalated", "Escalate", "Bulk escalate")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Escalate</button>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("closed", "Close", "Bulk close")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Close</button>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("written_off", "Write off", "Bulk write-off")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Write off</button>
+                    <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto rounded-md px-2 py-1 text-muted-foreground hover:text-foreground">Clear</button>
+                  </div>
+                )}
+
                 {/* Assignment list */}
                 <div className="rounded-xl border border-border bg-card overflow-hidden">
                   <table className="w-full text-sm">
                     <thead className="bg-muted/30 border-b border-border">
                       <tr>
+                        <th className="w-9 px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAll}
+                            className="cursor-pointer"
+                          />
+                        </th>
                         <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Customer name and Sage account number (ARCUS.NAMECUST / IDCUST)">Customer</th>
                         <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Sales rep currently assigned to the customer (ARCUS.CODESLSP)">Rep</th>
                         <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Latest outstanding balance synced from Sage (datarecord.outstanding_balance)">Outstanding</th>
@@ -240,11 +303,11 @@ export default function Collections() {
                     </thead>
                     <tbody>
                       {assignments.isLoading && (
-                        <tr><td colSpan={6} className="px-3 py-12 text-center text-sm text-muted-foreground">Loading…</td></tr>
+                        <tr><td colSpan={7} className="px-3 py-12 text-center text-sm text-muted-foreground">Loading…</td></tr>
                       )}
                       {!assignments.isLoading && filteredAssignments.length === 0 && (
                         <tr>
-                          <td colSpan={6} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                          <td colSpan={7} className="px-3 py-12 text-center text-sm text-muted-foreground">
                             <ClipboardList className="h-8 w-8 mx-auto mb-2 opacity-60" />
                             {(assignments.data || []).length === 0
                               ? "No customers on this list yet. Click Assign customers to add some."
@@ -263,11 +326,20 @@ export default function Collections() {
                             role="button"
                             tabIndex={0}
                             aria-label={`Open ${a.customer_name || "assignment"}`}
-                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
+                            onKeyDown={(e) => { if (e.target.tagName === "INPUT") return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
                             className={`border-b border-border last:border-0 cursor-pointer transition-colors ${
-                              drawerAssignment?.id === a.id ? "bg-amber-500/5" : "hover:bg-muted/30"
+                              selectedIds.has(a.id) ? "bg-amber-500/10" : drawerAssignment?.id === a.id ? "bg-amber-500/5" : "hover:bg-muted/30"
                             }`}
                           >
+                            <td className="w-9 px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${a.customer_name || "assignment"}`}
+                                checked={selectedIds.has(a.id)}
+                                onChange={() => toggleSelected(a.id)}
+                                className="cursor-pointer"
+                              />
+                            </td>
                             <td className="px-3 py-2">
                               <div className="font-medium text-foreground leading-tight">{a.customer_name || "—"}</div>
                               <div className="font-mono text-[11px] text-muted-foreground">{a.customer_number || "—"}</div>

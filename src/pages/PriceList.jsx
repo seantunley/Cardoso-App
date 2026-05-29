@@ -1,7 +1,8 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Search, Printer, FileDown, RefreshCw, AlertTriangle, Tag, Settings as SettingsIcon } from "lucide-react";
 import { toast } from "sonner";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
 
@@ -97,6 +98,18 @@ export default function PriceList() {
       String(r.item_description).toLowerCase().includes(q)
     );
   }, [items.data, search]);
+
+  // Paginate the rendered rows so a multi-thousand-item list doesn't put
+  // every row in the DOM at once. PDF/print still use the full filteredRows.
+  const PAGE_SIZE = 100;
+  const [page, setPage] = useState(1);
+  useEffect(() => { setPage(1); }, [priceList, commodity, supplier, search]);
+  const pageCount = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const safePage = Math.min(page, pageCount);
+  const pageRows = useMemo(
+    () => filteredRows.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredRows, safePage],
+  );
 
   // Both Print and Download go through the same PDF generator so paper
   // and downloaded file look identical. Browser window.print is never
@@ -326,16 +339,22 @@ export default function PriceList() {
                 </tr>
               </thead>
               <tbody>
-                {items.isLoading && (
-                  <tr><td colSpan={5} className="px-3 py-12 text-center text-muted-foreground"><RefreshCw className="inline h-4 w-4 animate-spin mr-2" /> Loading items…</td></tr>
-                )}
+                {items.isLoading && Array.from({ length: 12 }).map((_, i) => (
+                  <tr key={`sk-${i}`} className="border-b border-border last:border-0">
+                    <td className="px-3 py-2"><Skeleton className="h-3 w-20" /></td>
+                    <td className="px-3 py-2"><Skeleton className="h-3 w-48" /></td>
+                    <td className="px-3 py-2"><Skeleton className="mx-auto h-3 w-16" /></td>
+                    <td className="px-3 py-2"><Skeleton className="mx-auto h-3 w-10" /></td>
+                    <td className="px-3 py-2"><Skeleton className="ml-auto h-3 w-16" /></td>
+                  </tr>
+                ))}
                 {!items.isLoading && filteredRows.length === 0 && (
                   <tr><td colSpan={5} className="px-3 py-12 text-center text-muted-foreground">
                     <Tag className="h-8 w-8 mx-auto mb-2 opacity-60" />
                     No items match the current filters.
                   </td></tr>
                 )}
-                {filteredRows.map((r, i) => (
+                {pageRows.map((r, i) => (
                   <tr key={`${r.item_number}-${r.uom}`} className={`border-b border-border last:border-0 ${i % 2 === 0 ? "" : "bg-muted/10"} hover:bg-muted/20`}>
                     <td className="px-3 py-2 font-mono whitespace-nowrap">{r.item_number}</td>
                     <td className="px-3 py-2">{r.item_description || "—"}</td>
@@ -347,6 +366,33 @@ export default function PriceList() {
               </tbody>
             </table>
           </div>
+          {filteredRows.length > PAGE_SIZE && (
+            <div className="flex items-center justify-between gap-3 border-t border-border px-3 py-2 text-xs text-muted-foreground print:hidden">
+              <span className="tabular-nums">
+                {((safePage - 1) * PAGE_SIZE + 1).toLocaleString("en-ZA")}–
+                {Math.min(safePage * PAGE_SIZE, filteredRows.length).toLocaleString("en-ZA")} of {filteredRows.length.toLocaleString("en-ZA")}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={safePage <= 1}
+                  className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-40"
+                >
+                  Prev
+                </button>
+                <span className="tabular-nums px-1">Page {safePage} / {pageCount}</span>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(pageCount, p + 1))}
+                  disabled={safePage >= pageCount}
+                  className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-40"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

@@ -119,7 +119,7 @@ function YearChart({ title, subtitle, data, yearKeys, yearList, valueFormatter }
             <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
             <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={valueFormatter} />
             <Tooltip
-              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}
               formatter={(value) => [valueFormatter ? valueFormatter(value) : value, ""]}
             />
             <Legend />
@@ -169,7 +169,7 @@ function ChartCard({ title, subtitle, data, sites, valueSuffix = "", valueDomain
               tickFormatter={valueFormatter}
             />
             <Tooltip
-              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}
               formatter={(value) => [valueFormatter ? valueFormatter(value) : `${value}${valueSuffix}`, ""]}
             />
             <Legend />
@@ -485,7 +485,7 @@ function RevenueByCommodityChart({ siteId }) {
             <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
             <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={formatRand} />
             <Tooltip
-              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}
               formatter={(value) => [formatRand(value), ""]}
             />
             <Legend />
@@ -555,7 +555,7 @@ function DeadStockChart({ siteId }) {
               tickFormatter={formatRand}
             />
             <Tooltip
-              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              contentStyle={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12 }}
               formatter={(value, name) => {
                 if (name === "Dead value") return [formatRand(value), name];
                 return [formatQty(value), name];
