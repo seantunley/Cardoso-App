@@ -242,6 +242,11 @@ async function buildClawbackForPreviousPeriod(toDate) {
     if (!stillUnpaid.has(String(row.invoice_number).trim())) continue;
     const key = String(row.sales_rep || '').trim() || 'Unknown';
     if (!byRep.has(key)) byRep.set(key, []);
+    // Floor clawback at zero. A return / credit-note invoice has negative net
+    // sweets, so the commission "paid" on it was negative (it REDUCED the
+    // rep's payout in the prior period). Clawing a negative back would CREDIT
+    // the rep — wrong. There's nothing to reclaim on such invoices, so they
+    // contribute zero clawback (the row is still listed for visibility).
     byRep.get(key).push({
       invoice_number: row.invoice_number,
       customer_code: row.customer_code,
@@ -251,8 +256,8 @@ async function buildClawbackForPreviousPeriod(toDate) {
       outstanding_amount: Number(row.outstanding_amount) || 0,
       sweets_rate_at_paid: Number(row.sweets_rate_at_paid) || 0,
       reference_rate_at_paid: Number(row.reference_rate_at_paid) || 0,
-      sweet_commission_clawback: Number(row.sweet_commission_at_paid) || 0,
-      reference_commission_clawback: Number(row.reference_commission_at_paid) || 0,
+      sweet_commission_clawback: Math.max(0, Number(row.sweet_commission_at_paid) || 0),
+      reference_commission_clawback: Math.max(0, Number(row.reference_commission_at_paid) || 0),
     });
   }
 
