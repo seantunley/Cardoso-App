@@ -34,6 +34,7 @@ const pagePermissions = {
   Records: "can_access_records",
   Reconciliation: "can_access_reconciliation",
   Reports: "can_access_reports",
+  ReportingDashboard: "can_access_reports",
   Connections: "can_access_connections",
   Jti: "can_access_jti",
   HubJti: "can_access_jti",

@@ -19,6 +19,7 @@ import {
   getForecastConfig,
   updateForecastConfig,
   getItemSeasonality,
+  getReorderPlan,
 } from '../services/inventoryForecast.js';
 
 function isHub() { return process.env.HUB_MODE === 'true'; }
@@ -426,6 +427,79 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       res.json(getItemSeasonality(item));
     } catch (err) {
       logError('inventoryMovement.item_seasonality', err, { item: req.query?.item });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Reorder / purchase plan — forecast rows that need ordering now, grouped
+  // by supplier. JSON view backs the UI; ?export builds a supplier-grouped
+  // purchase-suggestion spreadsheet.
+  router.get('/api/inventory-movement/reorder-plan', ...guard, (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Reorder plan is only available on site installs.' });
+    try {
+      const { commodity, supplier } = req.query;
+      const rows = getReorderPlan({
+        commodity: commodity && commodity !== 'all' ? commodity : undefined,
+        supplier: supplier && supplier !== 'all' ? supplier : undefined,
+      });
+      res.json({ rows });
+    } catch (err) {
+      logError('inventoryMovement.reorder_plan', err, { query: req.query });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/reorder-plan/export', ...guard, async (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Reorder plan is only available on site installs.' });
+    try {
+      const { commodity, supplier } = req.query;
+      const rows = getReorderPlan({
+        commodity: commodity && commodity !== 'all' ? commodity : undefined,
+        supplier: supplier && supplier !== 'all' ? supplier : undefined,
+      });
+
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      const ws = wb.addWorksheet('Reorder Plan');
+      ws.addRow(['Supplier', 'Item', 'Description', 'Commodity', 'ABC', 'On Hand', 'Reorder Point', 'Days of Stock', 'Suggested Order Qty']);
+
+      // Rows arrive supplier-grouped from getReorderPlan; emit a subtotal
+      // row each time the supplier changes so the buyer can split POs.
+      let currentSupplier = null;
+      let supplierQty = 0;
+      const flushSubtotal = () => {
+        if (currentSupplier !== null) {
+          ws.addRow(['', '', '', '', '', '', '', `${currentSupplier} total`, Math.round(supplierQty * 10) / 10]);
+        }
+      };
+      for (const r of rows) {
+        if (r.supplier_name !== currentSupplier) {
+          flushSubtotal();
+          currentSupplier = r.supplier_name;
+          supplierQty = 0;
+        }
+        supplierQty += Number(r.suggested_order_qty) || 0;
+        ws.addRow([
+          r.supplier_name || '',
+          String(r.item_number || '').trim(),
+          String(r.item_description || '').trim(),
+          String(r.commodity || '').trim(),
+          r.abc_class || '',
+          r.qty_on_hand ?? 0,
+          r.reorder_point ?? 0,
+          r.days_of_stock ?? null,
+          r.suggested_order_qty ?? 0,
+        ]);
+      }
+      flushSubtotal();
+
+      const buf = await wb.xlsx.writeBuffer();
+      const stamp = new Date().toISOString().slice(0, 10);
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="reorder-plan-${stamp}.xlsx"`);
+      res.send(Buffer.from(buf));
+    } catch (err) {
+      logError('inventoryMovement.reorder_plan_export', err, { query: req.query });
       res.status(500).json({ error: err.message });
     }
   });

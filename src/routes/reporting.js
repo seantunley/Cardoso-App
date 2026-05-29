@@ -938,14 +938,18 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
-  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+  // Build the full aged-debtors report object. Extracted from the route
+  // handler so both the JSON endpoint and the PDF/Excel export endpoint
+  // share one query + aging implementation (no drift between screen and
+  // download). Throws on DB error; callers wrap in try/catch.
+  function buildAgedDebtorsReport(query) {
     const isHub = process.env.HUB_MODE === 'true';
-    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
-    const salesRepFilter = String(req.query.sales_rep || 'all').trim();
-    const accountTypeFilter = String(req.query.account_type || 'all').trim();
-    const siteFilter = String(req.query.site || 'all').trim();
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    const salesRepFilter = String(query.sales_rep || 'all').trim();
+    const accountTypeFilter = String(query.account_type || 'all').trim();
+    const siteFilter = String(query.site || 'all').trim();
 
-    try {
+    {
       let records;
       let sites = [];
       if (isHub) {
@@ -1067,7 +1071,7 @@ export function createReportingRouter({ requireAuth }) {
       const salesReps = Array.from(new Set(records.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
       const accountTypes = Array.from(new Set(records.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
 
-      res.json({
+      return {
         records: enriched,
         summary: {
           total_customers: enriched.length,
@@ -1082,10 +1086,39 @@ export function createReportingRouter({ requireAuth }) {
         site_name: SITE_NAME,
         hub_mode: isHub,
         min_balance: minBalance,
-      });
+      };
+    }
+  }
+
+  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+    try {
+      res.json(buildAgedDebtorsReport(req.query));
     } catch (err) {
       console.error('[reporting] aged-debtors error:', err);
       res.status(500).json({ error: 'Failed to fetch aged debtors' });
+    }
+  });
+
+  // GET /api/reports/aged-debtors/export?format=pdf|xlsx
+  router.get('/api/reports/aged-debtors/export', requireAuth, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildAgedDebtorsReport(req.query);
+      const { buildAgedDebtorsPdf, buildAgedDebtorsXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildAgedDebtorsXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="aged-debtors-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildAgedDebtorsPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="aged-debtors-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] aged-debtors export error:', err);
+      res.status(500).json({ error: 'Failed to export aged debtors' });
     }
   });
 
@@ -1102,10 +1135,12 @@ export function createReportingRouter({ requireAuth }) {
   // sales_rep only inside `data`/`local_fields`; that helper early-
   // returns when both columns are populated, so the cost is "free for
   // healthy rows + one JSON.parse pair for the laggards".
-  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+  // Build the rep-exposure report object. Shared by the JSON endpoint and
+  // the PDF/Excel export so screen and download never diverge.
+  function buildRepExposureReport(query) {
     const isHub = process.env.HUB_MODE === 'true';
-    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
-    try {
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    {
       let records;
       if (isHub) {
         records = prep(
@@ -1165,10 +1200,39 @@ export function createReportingRouter({ requireAuth }) {
         total_orange: reps.reduce((s, r) => s + r.flag_counts.orange, 0),
       };
 
-      res.json({ reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance });
+      return { reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance };
+    }
+  }
+
+  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+    try {
+      res.json(buildRepExposureReport(req.query));
     } catch (err) {
       console.error('[reporting] rep-exposure error:', err);
       res.status(500).json({ error: 'Failed to fetch rep exposure' });
+    }
+  });
+
+  // GET /api/reports/rep-exposure/export?format=pdf|xlsx
+  router.get('/api/reports/rep-exposure/export', requireAuth, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildRepExposureReport(req.query);
+      const { buildRepExposurePdf, buildRepExposureXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildRepExposureXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="rep-exposure-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildRepExposurePdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="rep-exposure-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] rep-exposure export error:', err);
+      res.status(500).json({ error: 'Failed to export rep exposure' });
     }
   });
 

@@ -294,6 +294,18 @@ const IconReports = ({ className, style }) => (
   </svg>
 );
 
+// Reporting Dashboard icon — a 2x2 tile grid (distinct from the stacked
+// "Reports" sheets) so the at-a-glance dashboard reads differently from the
+// report archive in the sidebar.
+const IconDashboard = ({ className, style }) => (
+  <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} style={style}>
+    <rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1.2" fill="#3b82f6" opacity="0.85"/>
+    <rect x="11" y="2.5" width="6.5" height="6.5" rx="1.2" fill="#10b981" opacity="0.85"/>
+    <rect x="2.5" y="11" width="6.5" height="6.5" rx="1.2" fill="#f59e0b" opacity="0.85"/>
+    <rect x="11" y="11" width="6.5" height="6.5" rx="1.2" fill="#a855f7" opacity="0.85"/>
+  </svg>
+);
+
 // Operations icon — monitor/heartbeat metaphor. The Operations page is
 // "what's the system doing?" so the icon reads as a status display:
 // scope screen frame + pulse line + activity dots in indigo.
@@ -363,6 +375,7 @@ const navItems = [
   { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true, group: "BAT and JTI" },
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true, group: "BAT and JTI" },
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "HubJti",           permission: "can_access_jti", hubOnly: true, group: "BAT and JTI" },
+  { name: "Reporting Dashboard", icon: IconDashboard,             page: "ReportingDashboard", permission: "can_access_reports", group: "Reports" },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
   { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_commission", siteOnly: true, group: "Reports" },
   { name: "Sales Commission",    icon: IconCommission,            page: "HubCommission",    permission: "can_access_commission", hubOnly: true,  group: "Reports" },
@@ -678,6 +691,7 @@ export default function Layout({ children, currentPageName }) {
                   title={isCollapsed ? item.name : undefined}
                   className={cn(
                     "relative flex items-center text-xs font-medium transition-colors duration-150 group",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)] focus-visible:ring-inset",
                     isCollapsed ? "justify-center w-10 h-10 mx-auto" : "gap-3 pl-4 pr-2 py-2.5 w-full text-sm"
                   )}
                   style={{
@@ -755,7 +769,7 @@ export default function Layout({ children, currentPageName }) {
                       <button
                         type="button"
                         onClick={() => toggleGroup(groupName)}
-                        className="w-full flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors"
+                        className="w-full flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)] focus-visible:ring-inset"
                         style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.7)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.45)"; }}

@@ -2,10 +2,14 @@ import { useState, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   TrendingUp, Package, RefreshCw, Search, ArrowUpDown,
-  BarChart3, AlertTriangle, ChevronLeft, ShoppingCart, Printer,
+  BarChart3, AlertTriangle, ChevronLeft, ChevronRight, ShoppingCart, Printer,
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
+import ItemDetailModal from "@/components/inventory/ItemDetailModal";
+import ForecastSettingsModal from "@/components/inventory/ForecastSettingsModal";
+import ReorderPlanView from "@/components/inventory/ReorderPlanView";
+import { Settings } from "lucide-react";
 
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
@@ -335,6 +339,17 @@ export default function InventoryMovement() {
   // Forecast state
   const [forecastSort, setForecastSort] = useState("days_of_stock");
   const [forecastDir, setForecastDir] = useState("asc");
+  const [forecastMode, setForecastMode] = useState("forecast"); // "forecast" | "reorder"
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [detailItem, setDetailItem] = useState(null);
+
+  // Admin gate for the forecast-settings button (the PUT is admin-only too).
+  const me = useQuery({
+    queryKey: ["me"],
+    queryFn: () => apiFetch("/api/auth/me"),
+    staleTime: 300_000,
+  });
+  const isAdmin = me.data?.role === "admin";
   const [abcFilter, setAbcFilter] = useState("all");
 
   const forecast = useQuery({
@@ -781,22 +796,42 @@ export default function InventoryMovement() {
       {tab === "forecast" && !hubMode && (
         <>
           <div className="flex items-center gap-3 flex-wrap mb-4">
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-muted-foreground">ABC Class</label>
-              {["all", "A", "B", "C"].map((v) => (
+            {/* Forecast vs Reorder-plan view toggle */}
+            <label className="text-xs text-muted-foreground">View</label>
+            <div className="flex items-center gap-1 rounded-lg border border-border bg-card p-0.5">
+              {[
+                { id: "forecast", label: "Forecast" },
+                { id: "reorder", label: "Reorder Plan" },
+              ].map((m) => (
                 <button
-                  key={v}
-                  onClick={() => setAbcFilter(v)}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-                    abcFilter === v
-                      ? "border-amber-500 bg-amber-500/15 text-amber-400"
-                      : "border-border bg-card text-muted-foreground hover:text-foreground"
+                  key={m.id}
+                  onClick={() => setForecastMode(m.id)}
+                  className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+                    forecastMode === m.id ? "bg-amber-500/15 text-amber-400" : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {v === "all" ? "All" : v}
+                  {m.label}
                 </button>
               ))}
             </div>
+            {forecastMode === "forecast" && (
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-muted-foreground">ABC Class</label>
+                {["all", "A", "B", "C"].map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setAbcFilter(v)}
+                    className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                      abcFilter === v
+                        ? "border-amber-500 bg-amber-500/15 text-amber-400"
+                        : "border-border bg-card text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {v === "all" ? "All" : v}
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               onClick={() => recomputeMutation.mutate()}
               disabled={recomputeMutation.isPending}
@@ -805,6 +840,15 @@ export default function InventoryMovement() {
               <RefreshCw className={`h-3.5 w-3.5 ${recomputeMutation.isPending ? "animate-spin" : ""}`} />
               Recompute
             </button>
+            {isAdmin && (
+              <button
+                onClick={() => setSettingsOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Settings
+              </button>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
@@ -819,21 +863,25 @@ export default function InventoryMovement() {
             </Tooltip>
           </div>
 
-          {forecast.isLoading && (
+          {forecastMode === "reorder" && (
+            <ReorderPlanView commodity={commodity} supplier={supplier} onRowClick={setDetailItem} />
+          )}
+
+          {forecastMode === "forecast" && forecast.isLoading && (
             <div className="flex items-center justify-center py-20 text-muted-foreground">
               <RefreshCw className="h-5 w-5 animate-spin mr-2" /> Loading forecast…
             </div>
           )}
-          {!forecast.isLoading && forecast.isError && (
+          {forecastMode === "forecast" && !forecast.isLoading && forecast.isError && (
             <QueryError error={forecast.error} label="forecast" />
           )}
-          {!forecast.isLoading && !forecast.isError && forecastRows.length === 0 && (
+          {forecastMode === "forecast" && !forecast.isLoading && !forecast.isError && forecastRows.length === 0 && (
             <div className="rounded-xl border border-border bg-card p-12 text-center text-sm text-muted-foreground">
               <Package className="h-10 w-10 mx-auto mb-3 text-muted-foreground" />
               No forecast data. Click "Recompute" after syncing sales data.
             </div>
           )}
-          {forecastRows.length > 0 && (
+          {forecastMode === "forecast" && forecastRows.length > 0 && (
             <div className="rounded-xl border border-border bg-card overflow-hidden">
               <div className="text-xs text-muted-foreground px-3 py-2 border-b border-border">
                 {forecastRows.length} items · sorted by {forecastSort.replace(/_/g, " ")} {forecastDir}
@@ -862,6 +910,7 @@ export default function InventoryMovement() {
                         tooltip="Runway at the current sell rate. = On Hand ÷ daily demand. Colour coding: red <7d, amber <14d, yellow <30d, green ≥30d. Anything below your lead time is a stockout risk." />
                       <SortHeader label="Order Qty" field="suggested_order_qty" current={forecastSort} dir={forecastDir} onSort={handleForecastSort} className="text-right"
                         tooltip="Suggested order size to cover one order cycle plus variability. = (daily demand × order cycle days) + safety stock − On Hand. Bumped up to the per-item minimum order qty if set. Order cycle days comes from Forecast Settings." />
+                      <th className="w-8 px-2 py-2" aria-hidden="true" />
                     </tr>
                   </thead>
                   <tbody>
@@ -885,7 +934,7 @@ export default function InventoryMovement() {
                         C: "bg-slate-500/15 text-slate-400 border-slate-500/30",
                       }[r.abc_class] || "";
                       return (
-                        <tr key={r.item_number} className={`border-b border-border last:border-0 ${urgency === "critical" ? "bg-red-500/5" : urgency === "warning" ? "bg-amber-500/5" : "hover:bg-muted/20"}`}>
+                        <tr key={r.item_number} onClick={() => setDetailItem(r)} className={`cursor-pointer border-b border-border last:border-0 ${urgency === "critical" ? "bg-red-500/5" : urgency === "warning" ? "bg-amber-500/5" : "hover:bg-muted/20"}`}>
                           <td className="px-3 py-2 font-mono whitespace-nowrap">{r.item_number}</td>
                           <td className="px-3 py-2 max-w-[180px] truncate" title={r.item_description}>{r.item_description || "—"}</td>
                           <td className="px-3 py-2 text-center">
@@ -899,12 +948,23 @@ export default function InventoryMovement() {
                           <td className="px-3 py-2 text-right tabular-nums">{r.seasonality_index?.toFixed(2) ?? "—"}</td>
                           <td className="px-3 py-2 text-right tabular-nums">{formatNum(r.reorder_point)}</td>
                           <td className="px-3 py-2 text-right">
-                            <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${urgencyCls}`}>
+                            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold tabular-nums ${urgencyCls}`}>
+                              {(urgency === "critical" || urgency === "warning") && <AlertTriangle className="h-3 w-3" aria-hidden="true" />}
                               {dos != null ? `${Math.round(dos)}d` : "—"}
                             </span>
                           </td>
                           <td className="px-3 py-2 text-right tabular-nums font-semibold">
                             {r.suggested_order_qty > 0 ? formatNum(r.suggested_order_qty) : "—"}
+                          </td>
+                          <td className="px-2 py-2 text-right">
+                            <button
+                              type="button"
+                              aria-label={`View details for ${r.item_number}`}
+                              onClick={(e) => { e.stopPropagation(); setDetailItem(r); }}
+                              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-500"
+                            >
+                              <ChevronRight className="h-4 w-4" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -916,6 +976,13 @@ export default function InventoryMovement() {
           )}
         </>
       )}
+
+      {detailItem && <ItemDetailModal item={detailItem} onClose={() => setDetailItem(null)} />}
+      <ForecastSettingsModal
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onSaved={() => recomputeMutation.mutate()}
+      />
     </div>
   );
 }

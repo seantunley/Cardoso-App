@@ -596,6 +596,133 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // GET /api/system/sage-health
+  //
+  // Consolidated "is the data current and healthy?" snapshot for site mode.
+  // Composes the signals that already exist but are scattered across BAT,
+  // the sync services, the error log, alerts and job_runs into one payload
+  // with a single overall status. Backs the SageHealthPanel shown on the
+  // Reporting dashboard and Operations page.
+  //
+  // requireAuth (not requireAdmin) so non-admin reporting users can still
+  // see whether the numbers they're looking at are fresh. Heavy modules
+  // (mssql via batReconciliation, alertEngine) are lazy-imported so loading
+  // system.js standalone doesn't drag them in.
+  router.get('/api/system/sage-health', requireAuth, async (req, res) => {
+    try {
+      const [{ getSageHealth }, { getSyncMeta: getCreditorMeta }, { getSyncMeta: getInventoryMeta }, { getSyncMeta: getReceiptMeta }] =
+        await Promise.all([
+          import('../services/batReconciliation.js'),
+          import('../services/creditorSync.js'),
+          import('../services/inventoryMovement.js'),
+          import('../services/stockReceipts.js'),
+        ]);
+
+      const sage = getSageHealth();
+
+      // Age (in hours) of a local-time timestamp string, computed in SQLite
+      // against now_local() so it stays consistent with how timestamps are
+      // stored (local UTC+2), never bare datetime('now').
+      const ageStmt = db.prepare("SELECT (julianday(now_local()) - julianday(?)) * 24.0 AS hours");
+      const ageHours = (ts) => {
+        if (!ts) return null;
+        try {
+          const row = ageStmt.get(ts);
+          return row && Number.isFinite(row.hours) ? row.hours : null;
+        } catch {
+          return null;
+        }
+      };
+
+      // Sync freshness per source. All three sync nightly, so >24h since the
+      // last successful sync = stale. null last_synced_at = never synced.
+      const STALE_HOURS = 24;
+      const rawSources = [
+        { key: 'creditors', label: 'Creditors', last_synced_at: getCreditorMeta()?.last_synced_at || null },
+        { key: 'inventory', label: 'Inventory sales', last_synced_at: getInventoryMeta()?.last_synced_at || null },
+        { key: 'receipts', label: 'Stock receipts', last_synced_at: getReceiptMeta()?.last_synced_at || null },
+      ];
+      const sources = rawSources.map((s) => {
+        const hours = ageHours(s.last_synced_at);
+        const stale = s.last_synced_at === null || (hours !== null && hours > STALE_HOURS);
+        return { ...s, age_hours: hours, stale };
+      });
+
+      // Configured database connections and their last sync outcome.
+      let connections = [];
+      try {
+        connections = db
+          .prepare('SELECT name, status, last_sync, last_error, record_count FROM databaseconnection ORDER BY name')
+          .all();
+      } catch {
+        connections = [];
+      }
+
+      // Errors logged in the last 24h (count + a few most-recent).
+      let errors24h = 0;
+      let recentErrors = [];
+      try {
+        errors24h = db
+          .prepare("SELECT COUNT(*) AS c FROM error_log WHERE level = 'error' AND occurred_at >= datetime(now_local(), '-24 hours')")
+          .get().c;
+        recentErrors = db
+          .prepare("SELECT source, message, occurred_at FROM error_log WHERE level = 'error' AND occurred_at >= datetime(now_local(), '-24 hours') ORDER BY occurred_at DESC LIMIT 5")
+          .all();
+      } catch {
+        errors24h = 0;
+      }
+
+      // Background job failures in the last 24h.
+      let jobFailures24h = 0;
+      try {
+        jobFailures24h = db
+          .prepare("SELECT COUNT(*) AS c FROM job_runs WHERE status = 'failed' AND started_at >= datetime(now_local(), '-24 hours')")
+          .get().c;
+      } catch {
+        jobFailures24h = 0;
+      }
+
+      // Active (unresolved) alerts.
+      let activeAlerts = 0;
+      let criticalAlerts = 0;
+      try {
+        const { getActiveAlerts } = await import('../lib/alertEngine.js');
+        const alerts = getActiveAlerts();
+        activeAlerts = alerts.length;
+        criticalAlerts = alerts.filter((a) => a.severity === 'critical').length;
+      } catch {
+        activeAlerts = 0;
+      }
+
+      // Roll up an overall status. Critical wins over warn wins over ok.
+      const anyStale = sources.some((s) => s.stale);
+      const sageDown = sage.ok === false;
+      let status = 'ok';
+      if ((sageDown && sage.downForMinutes > 5) || criticalAlerts > 0) {
+        status = 'critical';
+      } else if (sageDown || anyStale || jobFailures24h > 0 || errors24h > 0 || activeAlerts > 0) {
+        status = 'warn';
+      }
+
+      res.json({
+        status,
+        generated_at: new Date().toISOString(),
+        sage,
+        sources,
+        connections,
+        errors24h,
+        recentErrors,
+        jobFailures24h,
+        activeAlerts,
+        criticalAlerts,
+      });
+    } catch (err) {
+      console.error('[system.sage-health] failed:', err.message);
+      try { logError('system.sage_health', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
+      res.status(500).json({ error: 'Failed to load Sage health' });
+    }
+  });
+
   router.get('/api/system/tls-status', requireAuth, requireAdmin, async (req, res) => {
     const isWindows = process.platform === 'win32';
     const caddyDir = process.env.CADDY_DIR || 'C:\\Caddy';

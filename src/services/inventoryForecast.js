@@ -321,6 +321,54 @@ export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', 
   `).all(...params);
 }
 
+// Items that need ordering now: forecast rows with a positive suggested order
+// qty (qty on hand already below the order-up-to level). Enriched with the
+// latest supplier (LEFT JOIN, so items never received still surface under
+// "— No supplier") and ordered supplier-first for a purchase worklist.
+export function getReorderPlan({ commodity, supplier } = {}) {
+  let where = 'WHERE f.suggested_order_qty > 0';
+  const params = [];
+  if (commodity && commodity !== 'all') { where += ' AND ir.commodity = ?'; params.push(commodity); }
+  if (supplier && supplier !== 'all') { where += " AND COALESCE(sp.supplier_name, '') = ?"; params.push(supplier); }
+
+  return db.prepare(`
+    SELECT
+      f.item_number,
+      f.abc_class,
+      f.adjusted_demand,
+      f.reorder_point,
+      f.days_of_stock,
+      f.suggested_order_qty,
+      ir.item_description,
+      ir.commodity,
+      CAST(REPLACE(REPLACE(COALESCE(ir.qty_on_hand, '0'), ',', ''), ' ', '') AS REAL) AS qty_on_hand,
+      ir.price,
+      COALESCE(sp.supplier_name, '— No supplier') AS supplier_name
+    FROM inventory_forecast f
+    LEFT JOIN (
+      SELECT TRIM(item_number) AS item_number,
+             TRIM(item_description) AS item_description,
+             TRIM(commodity) AS commodity,
+             qty_on_hand,
+             TRIM(price) AS price,
+             ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
+      FROM inventoryrecord
+    ) ir ON ir.item_number = f.item_number AND ir.rn = 1
+    LEFT JOIN (
+      SELECT item_number, supplier_name FROM (
+        SELECT TRIM(srl.item_number) AS item_number,
+               TRIM(sr.supplier_name) AS supplier_name,
+               ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
+        FROM stock_receipt_line srl
+        JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
+      ) WHERE rn = 1
+    ) sp ON sp.item_number = f.item_number
+    ${where}
+    ORDER BY supplier_name ASC, f.days_of_stock ASC NULLS LAST
+  `).all(...params);
+}
+
 export function getForecastConfig() {
   return db.prepare("SELECT * FROM inventory_forecast_config WHERE item_number = '__global__'").get() || {
     lead_time_days: 7, order_cycle_days: 14, service_level: 0.95, min_order_qty: 0,

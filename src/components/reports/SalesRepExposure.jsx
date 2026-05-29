@@ -2,7 +2,7 @@ import { useMemo, useState, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCompactR, fmtCount, downloadCsv, BarChart, Bar, Cell,
+  fmtR, fmtCompactR, fmtCount, downloadCsv, downloadReport, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
@@ -47,6 +47,21 @@ export default function SalesRepExposure() {
     downloadCsv(`sales-rep-exposure-${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);
   };
 
+  // Server-side exports reuse the on-screen min-balance filter. Errors are
+  // surfaced (never swallowed) per the no-silent-failures rule.
+  const exportQs = () => {
+    const qs = new URLSearchParams();
+    if (minBalance) qs.set('min_balance', String(minBalance));
+    return qs.toString();
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  const handleExportPdf = () =>
+    downloadReport(`/api/reports/rep-exposure/export?format=pdf&${exportQs()}`, `sales-rep-exposure-${stamp()}.pdf`)
+      .catch((e) => alert(`PDF export failed: ${e.message}`));
+  const handleExportExcel = () =>
+    downloadReport(`/api/reports/rep-exposure/export?format=xlsx&${exportQs()}`, `sales-rep-exposure-${stamp()}.xlsx`)
+      .catch((e) => alert(`Excel export failed: ${e.message}`));
+
   const generatedAt = data?.generated_at ? new Date(data.generated_at) : new Date();
   const generatedAtFmt = generatedAt.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -58,6 +73,8 @@ export default function SalesRepExposure() {
       printId="rep-exposure"
       orientation="portrait"
       onExportCsv={reps.length ? handleExportCsv : null}
+      onExportExcel={reps.length ? handleExportExcel : null}
+      onExportPdf={reps.length ? handleExportPdf : null}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error}

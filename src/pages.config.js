@@ -60,6 +60,7 @@ const CustomerSearch = React.lazy(() => import('./pages/CustomerSearch'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Records = React.lazy(() => import('./pages/Records'));
 const Reports = React.lazy(() => import('./pages/Reports'));
+const ReportingDashboard = React.lazy(() => import('./pages/ReportingDashboard'));
 const Users = React.lazy(() => import('./pages/Users'));
 const Inventory = React.lazy(() => import('./pages/Inventory'));
 const NetworkDevices = React.lazy(() => import('./pages/NetworkDevices'));
@@ -96,6 +97,7 @@ export const PAGES = {
     "Dashboard": Dashboard,
     "Records": Records,
     "Reports": Reports,
+    "ReportingDashboard": ReportingDashboard,
     "Users": Users,
     "CreditDebug": CreditDebug,
     "Reconciliation": Reconciliation,

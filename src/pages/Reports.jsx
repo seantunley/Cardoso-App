@@ -37,7 +37,13 @@ const REPORTS = [
 const ALL_ITEMS = REPORTS.flatMap(g => g.items);
 
 export default function Reports() {
-  const [activeId, setActiveId] = useState('aged-debtors');
+  // Honour a ?report=<id> deep-link (used by the Reporting dashboard cards)
+  // so landing here lands on the right report. Falls back to aged-debtors.
+  const initialId = (() => {
+    const requested = new URLSearchParams(window.location.search).get('report');
+    return ALL_ITEMS.some(i => i.id === requested) ? requested : 'aged-debtors';
+  })();
+  const [activeId, setActiveId] = useState(initialId);
   const active = ALL_ITEMS.find(i => i.id === activeId);
 
   return (

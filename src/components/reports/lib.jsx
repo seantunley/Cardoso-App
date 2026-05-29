@@ -384,7 +384,7 @@ export function PrintFooter({ note }) {
 // Wraps a report with toolbar (Print + CSV), title, and the printable region.
 export function ReportFrame({
   title, subtitle, sectionLabel, printId, orientation = 'landscape',
-  onExportCsv, onPrint, isLoading, error, children,
+  onExportCsv, onExportPdf, onExportExcel, onPrint, isLoading, error, children,
   printHeader, printFooter,
 }) {
   usePrintStyles({ id: printId, orientation });
@@ -409,6 +409,24 @@ export function ReportFrame({
               style={{ borderRadius: '12px' }}
             >
               CSV
+            </button>
+          )}
+          {onExportExcel && (
+            <button
+              onClick={onExportExcel}
+              className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+              style={{ borderRadius: '12px' }}
+            >
+              Excel
+            </button>
+          )}
+          {onExportPdf && (
+            <button
+              onClick={onExportPdf}
+              className="inline-flex items-center gap-1.5 border border-border px-3 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
+              style={{ borderRadius: '12px' }}
+            >
+              PDF
             </button>
           )}
           {onPrint && (
@@ -482,6 +500,24 @@ export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big
       </div>
     </div>
   );
+}
+
+// Fetch a server-generated binary report (PDF / XLSX) and trigger download.
+// Used by the PDF/Excel toolbar buttons; the server reuses the same query
+// params as the on-screen report so the download always matches the view.
+export async function downloadReport(url, filename) {
+  const res = await fetch(url, { credentials: 'include' });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error(msg.error || `HTTP ${res.status}`);
+  }
+  const blob = await res.blob();
+  const objUrl = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = objUrl;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(objUrl);
 }
 
 // Helper to build CSV blobs and trigger download.
