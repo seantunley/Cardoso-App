@@ -83,9 +83,12 @@ function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
       GROUP BY sc.site_id, sc.item_number
     ) agg
     ${joinType} (
-      SELECT site_id, item_number,
-             item_description, commodity, qty_on_hand, last_cost, price, stocking_uom,
-             ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+      SELECT site_id, TRIM(item_number) AS item_number,
+             TRIM(item_description) AS item_description,
+             TRIM(commodity) AS commodity,
+             qty_on_hand, last_cost, price,
+             TRIM(stocking_uom) AS stocking_uom,
+             ROW_NUMBER() OVER (PARTITION BY site_id, TRIM(item_number) ORDER BY synced_at DESC) AS rn
       FROM hub_inventory
       ${irFilter}
     ) ir ON ir.item_number = agg.item_number AND ir.rn = 1

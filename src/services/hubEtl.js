@@ -294,20 +294,27 @@ async function syncSite(site) {
         inventory_value=excluded.inventory_value,
         synced_at=excluded.synced_at
     `);
+    // Trim every string field at ingest. Sage source data carries
+    // trailing space padding on most CHAR columns (e.g. item_number
+    // "74                      " not "74") which would otherwise cause
+    // joins against the clean numbers in hub_inventory_sales to miss —
+    // surfaced 2026-05-29 as blank descriptions + 0 qty on Hub Inventory
+    // Movement. Trimming at write keeps storage canonical.
+    const trim = (v) => (typeof v === 'string' ? v.trim() : v);
     const insertInventory = db.transaction((invRecords) => {
       const now = new Date().toISOString();
       for (const r of invRecords) {
         upsertInv.run({
           site_id: site.id,
-          item_number: r.item_number,
-          item_description: r.item_description || null,
-          qty_on_hand: r.qty_on_hand || null,
-          last_cost: r.last_cost || null,
-          price_list: r.price_list || null,
-          price: r.price || null,
-          stocking_uom: r.stocking_uom || null,
-          commodity: r.commodity || null,
-          inventory_value: r.inventory_value || null,
+          item_number: trim(r.item_number),
+          item_description: trim(r.item_description) || null,
+          qty_on_hand: trim(r.qty_on_hand) || null,
+          last_cost: trim(r.last_cost) || null,
+          price_list: trim(r.price_list) || null,
+          price: trim(r.price) || null,
+          stocking_uom: trim(r.stocking_uom) || null,
+          commodity: trim(r.commodity) || null,
+          inventory_value: trim(r.inventory_value) || null,
           synced_at: now,
         });
       }
@@ -340,7 +347,13 @@ async function syncSite(site) {
       nextInvPromise = willHaveMore ? guardOrphan(fetchInvPage(invOffset + consumed)) : null;
       if (consumed > 0) {
         insertInventory(invRecords);
-        for (const r of invRecords) { if (r.item_number) syncedItemNumbers.push(r.item_number); }
+        // Must trim here too — insertInventory canonicalises item_number
+        // via trim(), so the prune DELETE below uses the same form.
+        // Skipping the trim would delete every just-inserted row (DELETE
+        // matches trimmed stored values against padded source values).
+        for (const r of invRecords) {
+          if (r.item_number) syncedItemNumbers.push(typeof r.item_number === 'string' ? r.item_number.trim() : r.item_number);
+        }
         invOffset += consumed;
       }
       if (!nextInvPromise) break;

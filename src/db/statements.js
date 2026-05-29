@@ -34,11 +34,14 @@ function buildStatements(db) {
   // have completed — same perf benefit (one prepare per process) without
   // the boot-order dependency.
 
-  if (process.env.HUB_MODE === 'true') {
-    stmts.getHubSetting     = db.prepare('SELECT value FROM hub_settings WHERE key = ?');
-    stmts.setHubSetting     = db.prepare('INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value');
-    stmts.hubSitesForBackup = db.prepare('SELECT id, name, url, token FROM hub_sites');
-  }
+  // Earlier drafts eagerly prepared three hub statements here
+  // (getHubSetting / setHubSetting / hubSitesForBackup) gated on
+  // HUB_MODE. They turned out to be dead — no consumer referenced
+  // them — and the eager prepare boot-failed on a site→hub flip
+  // because buildStatements runs BEFORE initSchema creates the hub
+  // tables (same race documented above for the sync statements).
+  // Future hub-only prepared statements should follow the lazy
+  // module-cache pattern in syncEngine.js (getSyncStmt).
 
   return stmts;
 }

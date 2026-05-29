@@ -292,6 +292,7 @@ function initSchema(db) {
         flag_reason TEXT,
         flag_created_by TEXT,
         outstanding_balance TEXT,
+        outstanding_balance_num REAL DEFAULT 0,
         unpaid_invoices TEXT,
         receipts TEXT,
         updated_date TEXT,
@@ -351,6 +352,23 @@ function initSchema(db) {
     const hrCols = db.prepare("PRAGMA table_info(hub_records)").all().map(c => c.name);
     if (!hrCols.includes('unpaid_invoice_numbers')) {
       db.exec('ALTER TABLE hub_records ADD COLUMN unpaid_invoice_numbers TEXT');
+    }
+    // Numeric mirror of outstanding_balance — kept in sync by v54's
+    // triggers. Existing hub installs predate this column, so add it
+    // here and backfill so queries that filter/sort by the numeric
+    // form (top-balances, aged-debtors) don't crash with "no such
+    // column" on the first request after upgrade.
+    if (!hrCols.includes('outstanding_balance_num')) {
+      db.exec('ALTER TABLE hub_records ADD COLUMN outstanding_balance_num REAL DEFAULT 0');
+      db.exec(`
+        UPDATE hub_records
+           SET outstanding_balance_num = CASE
+             WHEN outstanding_balance IS NULL OR TRIM(outstanding_balance) = '' THEN 0
+             ELSE COALESCE(CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL), 0)
+           END
+      `);
+      // Index supports the same access patterns datarecord's index does.
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding_num ON hub_records(outstanding_balance_num)`);
     }
     db.exec(`
       UPDATE hub_records
