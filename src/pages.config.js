@@ -73,6 +73,7 @@ const PriceList = React.lazy(() => import('./pages/PriceList'));
 const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
 const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
 const HubCommission = React.lazy(() => import('./pages/HubCommission'));
+const Trends = React.lazy(() => import('./pages/Trends'));
 
 
 export const PAGES = {
@@ -85,6 +86,7 @@ export const PAGES = {
     "HubBackups": HubBackups,
     "HubMetrics": HubMetrics,
     "HubTrends": HubTrends,
+    "Trends": Trends,
     "HubSyncLog": HubSyncLog,
     "HubReconciliation": HubReconciliation,
     "Connections": Connections,

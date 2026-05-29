@@ -13,13 +13,14 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   const pool = await getSagePool();
   const now = new Date();
   const to = toDate || now;
-  // Default to 24 months back so the first sync on a fresh rollout
-  // populates enough history for the "Last 12 months" preset and
-  // dead-stock age logic to work correctly. Subsequent nightly runs
-  // still upsert the full window (the ON CONFLICT clause is idempotent)
-  // so there's no duplicated work — just a wider Sage scan on the
-  // initial sync that narrows naturally as the cache fills.
-  const from = fromDate || new Date(now.getFullYear() - 2, now.getMonth(), 1);
+  // Default window: from Jan 1 of (current year - 3) so the cache
+  // covers three FULL prior calendar years plus the current year-to-date.
+  // Was 24 months back (rolling) which left the oldest year visibly
+  // truncated on year-over-year charts (e.g. 2024 starting in May 2024
+  // for runs done in 2026). The ON CONFLICT upsert keeps repeated runs
+  // idempotent so the wider scan only costs Sage I/O on the initial
+  // sync; subsequent nightly runs upsert the same window cheaply.
+  const from = fromDate || new Date(now.getFullYear() - 3, 0, 1);
 
   const fromInt = parseInt(toYyyymmdd(from), 10);
   const toInt = parseInt(toYyyymmdd(to), 10);

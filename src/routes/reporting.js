@@ -612,6 +612,164 @@ export function createReportingRouter({ requireAuth }) {
   // last_unpaid_invoice_N keys it synthesises from the JSON; with
   // `receipts` not selected, the helper's receipts-spread step
   // short-circuits on `undefined` and contributes no work.
+  // GET /api/reports/trends/customer — site-mode mirror of /api/hub/trends.
+  // Bucket per-week / per-month record count + flag rate over time. Same
+  // shape as the hub endpoint so the React component can share its
+  // chart/pivot logic across both installs.
+  router.get('/api/reports/trends/customer', requireAuth, (req, res) => {
+    const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
+    const sinceParam = req.query.since ? String(req.query.since) : null;
+    if (sinceParam && !/^\d{4}-\d{2}-\d{2}$/.test(sinceParam)) {
+      return res.status(400).json({ error: 'since must be YYYY-MM-DD' });
+    }
+    const since = sinceParam || (() => {
+      const d = new Date();
+      if (period === 'monthly') d.setMonth(d.getMonth() - 6);
+      else d.setDate(d.getDate() - 12 * 7);
+      return d.toISOString().slice(0, 10);
+    })();
+    const bucketExpr = period === 'monthly'
+      ? "strftime('%Y-%m', updated_date)"
+      : "strftime('%Y-W%W', updated_date)";
+    try {
+      const rows = db.prepare(`
+        SELECT
+          ${bucketExpr} AS period,
+          COUNT(*) AS total_records,
+          SUM(CASE WHEN flag_color IS NOT NULL AND flag_color NOT IN ('', 'none') THEN 1 ELSE 0 END) AS flagged_records
+        FROM datarecord
+        WHERE updated_date >= ?
+          AND ${bucketExpr} IS NOT NULL
+        GROUP BY ${bucketExpr}
+        ORDER BY ${bucketExpr} ASC
+      `).all(since);
+
+      res.json({
+        period,
+        since,
+        site_name: SITE_NAME,
+        data: rows.map((row) => ({
+          period: row.period,
+          site_name: SITE_NAME,
+          total_records: row.total_records,
+          flagged_records: row.flagged_records,
+          flag_rate: row.total_records > 0
+            ? Math.round((row.flagged_records / row.total_records) * 1000) / 10
+            : 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.customer', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory — site-mode year-over-year inventory
+  // trends from inventory_sales_cache (the site's own monthly rollup,
+  // populated by inventoryMovement.syncInventorySales). One row per
+  // (year, month). year_list is the distinct set of years present.
+  router.get('/api/reports/trends/inventory', requireAuth, (_req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          CAST(substr(period, 1, 4) AS INTEGER) AS year,
+          CAST(substr(period, 6, 2) AS INTEGER) AS month,
+          SUM(qty_sold)    AS total_qty_sold,
+          SUM(revenue)     AS total_revenue,
+          SUM(order_count) AS total_orders,
+          COUNT(DISTINCT item_number) AS distinct_items
+        FROM inventory_sales_cache
+        WHERE period IS NOT NULL
+        GROUP BY substr(period, 1, 4), substr(period, 6, 2)
+        ORDER BY year ASC, month ASC
+      `).all();
+
+      const yearList = [...new Set(rows.map((r) => r.year))].sort((a, b) => a - b);
+      res.json({
+        period: 'monthly',
+        site_name: SITE_NAME,
+        year_list: yearList,
+        data: rows.map((row) => ({
+          year: row.year,
+          month: row.month,
+          total_qty_sold: Number(row.total_qty_sold) || 0,
+          total_revenue: Number(row.total_revenue) || 0,
+          total_orders: Number(row.total_orders) || 0,
+          distinct_items: Number(row.distinct_items) || 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/seasonal — site-mode top-10 per SA season.
+  router.get('/api/reports/trends/inventory/seasonal', requireAuth, (_req, res) => {
+    try {
+      const seasonalCase = `
+        CASE substr(sc.period, 6, 2)
+          WHEN '12' THEN 'Summer' WHEN '01' THEN 'Summer' WHEN '02' THEN 'Summer'
+          WHEN '03' THEN 'Autumn' WHEN '04' THEN 'Autumn' WHEN '05' THEN 'Autumn'
+          WHEN '06' THEN 'Winter' WHEN '07' THEN 'Winter' WHEN '08' THEN 'Winter'
+          WHEN '09' THEN 'Spring' WHEN '10' THEN 'Spring' WHEN '11' THEN 'Spring'
+        END`;
+      const rows = db.prepare(`
+        WITH seasonal AS (
+          SELECT ${seasonalCase} AS season,
+                 sc.item_number,
+                 SUM(sc.qty_sold)    AS qty_sold,
+                 SUM(sc.revenue)     AS revenue,
+                 SUM(sc.order_count) AS orders,
+                 COUNT(DISTINCT sc.period) AS months_seen
+          FROM inventory_sales_cache sc
+          WHERE sc.period IS NOT NULL
+          GROUP BY season, sc.item_number
+        ),
+        ranked AS (
+          SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.season ORDER BY s.qty_sold DESC) AS rn
+          FROM seasonal s WHERE s.season IS NOT NULL
+        )
+        SELECT r.season, r.rn AS rank, r.item_number,
+               r.qty_sold, r.revenue, r.orders, r.months_seen,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN inventoryrecord ir ON TRIM(ir.item_number) = TRIM(r.item_number)
+        WHERE r.rn <= 10
+        ORDER BY CASE r.season WHEN 'Summer' THEN 1 WHEN 'Autumn' THEN 2 WHEN 'Winter' THEN 3 WHEN 'Spring' THEN 4 END, r.rn
+      `).all();
+
+      const buckets = { Summer: [], Autumn: [], Winter: [], Spring: [] };
+      for (const row of rows) {
+        if (!buckets[row.season]) continue;
+        buckets[row.season].push({
+          rank: row.rank,
+          item_number: row.item_number,
+          item_description: row.item_description || null,
+          commodity: row.commodity || null,
+          qty_sold: Number(row.qty_sold) || 0,
+          revenue: Number(row.revenue) || 0,
+          orders: Number(row.orders) || 0,
+          months_seen: Number(row.months_seen) || 0,
+        });
+      }
+      res.json({
+        seasons: ['Summer', 'Autumn', 'Winter', 'Spring'],
+        months: {
+          Summer: ['Dec', 'Jan', 'Feb'],
+          Autumn: ['Mar', 'Apr', 'May'],
+          Winter: ['Jun', 'Jul', 'Aug'],
+          Spring: ['Sep', 'Oct', 'Nov'],
+        },
+        site_name: SITE_NAME,
+        data: buckets,
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.seasonal', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);

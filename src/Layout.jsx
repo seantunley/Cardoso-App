@@ -341,6 +341,7 @@ const navItems = [
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true, group: "Hub" },
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Hub" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true, group: "Hub" },
+  { name: "Trends",              icon: IconTrends,                page: "Trends",           permission: "can_access_reports", siteOnly: true, group: "Reports" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },
   // Operations — admin-only home for background job runs, system errors,
