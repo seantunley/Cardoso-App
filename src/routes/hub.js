@@ -758,6 +758,248 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
   });
 
+  // GET /api/hub/trends/inventory/revenue-by-commodity — revenue + qty per
+  // (period, commodity) for the "sales mix" view. Commodity is joined off
+  // hub_inventory (current snapshot per site/item — latest synced_at row).
+  router.get('/api/hub/trends/inventory/revenue-by-commodity', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+      const rows = db.prepare(`
+        SELECT his.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(his.revenue)  AS revenue,
+               SUM(his.qty_sold) AS qty
+        FROM hub_inventory_sales his
+        LEFT JOIN (
+          SELECT site_id, item_number, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+          FROM hub_inventory
+        ) ir ON ir.site_id = his.site_id AND ir.item_number = his.item_number AND ir.rn = 1
+        WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+        GROUP BY his.period, commodity
+        ORDER BY his.period ASC, commodity ASC
+      `).all(...sFilter.params, ...extraParams);
+
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        commodity_list: commodityList,
+        data: rows.map(r => ({
+          period: r.period,
+          commodity: r.commodity,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/margin-by-commodity — weighted average
+  // margin per (period, commodity). Uses CURRENT last_cost from hub_inventory
+  // applied against historical qty/revenue — directional (catches drift) but
+  // not exact (real margins moved with cost at the time of sale).
+  router.get('/api/hub/trends/inventory/margin-by-commodity', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+      const rows = db.prepare(`
+        SELECT his.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(his.revenue)  AS revenue,
+               SUM(his.qty_sold * COALESCE(
+                 CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
+               )) AS extended_cost
+        FROM hub_inventory_sales his
+        JOIN (
+          SELECT site_id, item_number, commodity, last_cost,
+                 ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+          FROM hub_inventory
+          WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
+        ) ir ON ir.site_id = his.site_id AND ir.item_number = his.item_number AND ir.rn = 1
+        WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+        GROUP BY his.period, commodity
+        ORDER BY his.period ASC, commodity ASC
+      `).all(...sFilter.params, ...extraParams);
+
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        commodity_list: commodityList,
+        note: 'Margin uses current last_cost against historical revenue — directional, not exact.',
+        data: rows.map(r => {
+          const revenue = Number(r.revenue) || 0;
+          const cost = Number(r.extended_cost) || 0;
+          return {
+            period: r.period,
+            commodity: r.commodity,
+            revenue,
+            cost,
+            margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
+          };
+        }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/dead-stock — for each of the last 24
+  // months, count items in hub_inventory whose most-recent sale period
+  // (ever) is older than the month minus 3 (i.e. no movement in the
+  // trailing quarter). dead_value = sum of inventory_value for those.
+  //
+  // Note: we don't have historical inventory snapshots, so the SKU set
+  // is fixed at "today's hub_inventory." The trend is the count of those
+  // SKUs that would have been considered dead at each past month.
+  router.get('/api/hub/trends/inventory/dead-stock', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const iFilter = siteFilterSql(req, res, 'hi.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const iExtraWhere = siteIdFilter ? ' AND hi.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+
+      const itemRows = db.prepare(`
+        WITH last_sale AS (
+          SELECT his.site_id, his.item_number, MAX(his.period) AS last_period
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+          GROUP BY his.site_id, his.item_number
+        )
+        SELECT hi.site_id, hi.item_number,
+               COALESCE(CAST(REPLACE(REPLACE(hi.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM hub_inventory hi
+        LEFT JOIN last_sale ls ON ls.site_id = hi.site_id AND ls.item_number = hi.item_number
+        WHERE 1=1${iFilter.sql}${iExtraWhere}
+      `).all(...sFilter.params, ...extraParams, ...iFilter.params, ...extraParams);
+
+      // Generate 24 trailing months (oldest first).
+      const months = [];
+      const now = new Date();
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+
+      const data = months.map(m => {
+        const [yy, mm] = m.split('-').map(Number);
+        const t = new Date(yy, mm - 1 - 3, 1);
+        const threshold = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+        let count = 0;
+        let value = 0;
+        for (const r of itemRows) {
+          if (!r.last_period || r.last_period < threshold) {
+            count++;
+            value += r.inv_value || 0;
+          }
+        }
+        return { month: m, dead_count: count, dead_value: value };
+      });
+
+      res.json({
+        total_skus: itemRows.length,
+        threshold_months: 3,
+        data,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/top-movers — top 10 SKUs by lifetime
+  // revenue, with last-12-months vs prior-12-months qty + revenue and
+  // % delta for each. Window endpoints computed in JS so the SQL stays
+  // portable.
+  router.get('/api/hub/trends/inventory/top-movers', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const iFilter = siteFilterSql(req, res, 'hi.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const iExtraWhere = siteIdFilter ? ' AND hi.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twentyfour = new Date(now.getFullYear(), now.getMonth() - 24, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+      const twentyfourStr = `${twentyfour.getFullYear()}-${String(twentyfour.getMonth() + 1).padStart(2, '0')}`;
+
+      const rows = db.prepare(`
+        WITH agg AS (
+          SELECT his.item_number,
+                 SUM(his.revenue)     AS total_revenue,
+                 SUM(his.qty_sold)    AS total_qty,
+                 SUM(his.order_count) AS total_orders,
+                 SUM(CASE WHEN his.period >= ? THEN his.qty_sold ELSE 0 END) AS this_year_qty,
+                 SUM(CASE WHEN his.period >= ? THEN his.revenue  ELSE 0 END) AS this_year_revenue,
+                 SUM(CASE WHEN his.period >= ? AND his.period < ? THEN his.qty_sold ELSE 0 END) AS prior_year_qty,
+                 SUM(CASE WHEN his.period >= ? AND his.period < ? THEN his.revenue  ELSE 0 END) AS prior_year_revenue
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+          GROUP BY his.item_number
+        ),
+        ranked AS (
+          SELECT a.*, ROW_NUMBER() OVER (ORDER BY a.total_revenue DESC) AS rn
+          FROM agg a
+        )
+        SELECT r.rn AS rank, r.item_number,
+               r.total_revenue, r.total_qty, r.total_orders,
+               r.this_year_qty, r.this_year_revenue,
+               r.prior_year_qty, r.prior_year_revenue,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT hi.item_number, hi.item_description, hi.commodity,
+                 ROW_NUMBER() OVER (PARTITION BY hi.item_number ORDER BY hi.synced_at DESC) AS rn
+          FROM hub_inventory hi
+          WHERE 1=1${iFilter.sql}${iExtraWhere}
+        ) ir ON ir.item_number = r.item_number AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY r.rn ASC
+      `).all(
+        twelveStr, twelveStr, twentyfourStr, twelveStr, twentyfourStr, twelveStr,
+        ...sFilter.params, ...extraParams,
+        ...iFilter.params, ...extraParams,
+      );
+
+      res.json({
+        this_year_from: twelveStr,
+        prior_year_from: twentyfourStr,
+        data: rows.map(r => {
+          const tyQ = Number(r.this_year_qty) || 0;
+          const pyQ = Number(r.prior_year_qty) || 0;
+          const tyR = Number(r.this_year_revenue) || 0;
+          const pyR = Number(r.prior_year_revenue) || 0;
+          return {
+            rank: r.rank,
+            item_number: r.item_number,
+            item_description: r.item_description || null,
+            commodity: r.commodity || null,
+            total_revenue: Number(r.total_revenue) || 0,
+            total_qty: Number(r.total_qty) || 0,
+            total_orders: Number(r.total_orders) || 0,
+            this_year_qty: tyQ,
+            this_year_revenue: tyR,
+            prior_year_qty: pyQ,
+            prior_year_revenue: pyR,
+            qty_delta_pct: pyQ > 0 ? Math.round(((tyQ - pyQ) / pyQ) * 1000) / 10 : null,
+            revenue_delta_pct: pyR > 0 ? Math.round(((tyR - pyR) / pyR) * 1000) / 10 : null,
+          };
+        }),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/hub/inventory
   // GET /api/hub/bat-summary — cross-site BAT reconciliation rollup. Joins
   // hub_bat_summary with hub_sites for the friendly site name + URL, computes

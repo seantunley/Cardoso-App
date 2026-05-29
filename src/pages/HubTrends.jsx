@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2 } from "lucide-react";
+import { TrendingUp, Users, Package, Sun, Leaf, Snowflake, Flower2, ArrowUp, ArrowDown } from "lucide-react";
 import { Tooltip as UITooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
@@ -47,6 +47,55 @@ async function fetchSeasonalTopItems(siteId) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || "Failed to load seasonal trends");
   return data;
+}
+
+async function fetchRevenueByCommodity(siteId) {
+  const qs = siteId && siteId !== 'all' ? `?site_id=${encodeURIComponent(siteId)}` : '';
+  const res = await fetch(`/api/hub/trends/inventory/revenue-by-commodity${qs}`, { credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to load revenue by commodity");
+  return data;
+}
+
+async function fetchMarginByCommodity(siteId) {
+  const qs = siteId && siteId !== 'all' ? `?site_id=${encodeURIComponent(siteId)}` : '';
+  const res = await fetch(`/api/hub/trends/inventory/margin-by-commodity${qs}`, { credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to load margin by commodity");
+  return data;
+}
+
+async function fetchDeadStock(siteId) {
+  const qs = siteId && siteId !== 'all' ? `?site_id=${encodeURIComponent(siteId)}` : '';
+  const res = await fetch(`/api/hub/trends/inventory/dead-stock${qs}`, { credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to load dead stock trend");
+  return data;
+}
+
+async function fetchTopMovers(siteId) {
+  const qs = siteId && siteId !== 'all' ? `?site_id=${encodeURIComponent(siteId)}` : '';
+  const res = await fetch(`/api/hub/trends/inventory/top-movers${qs}`, { credentials: "include" });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || "Failed to load top movers");
+  return data;
+}
+
+// Pivot [{ period, commodity, <valueKey> }] into one row per period with each
+// commodity as its own column — the shape recharts wants for a multi-line
+// chart. Missing combos become null so the line just breaks instead of
+// dropping to zero.
+function pivotByPeriodAndCommodity(rows, commodityList, valueKey) {
+  const periods = [...new Set(rows.map((r) => r.period))].sort();
+  const points = periods.map((period) => {
+    const point = { period };
+    for (const c of commodityList) {
+      const row = rows.find((r) => r.period === period && r.commodity === c);
+      point[c] = row?.[valueKey] ?? null;
+    }
+    return point;
+  });
+  return points;
 }
 
 function pivotByPeriodAndSite(rows, valueKey) {
@@ -400,6 +449,289 @@ function pivotByMonthAndYear(rows, valueKey, visibleYears) {
   return { seriesKeys, points };
 }
 
+function RevenueByCommodityChart({ siteId }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["hub-trends-inventory-revenue-by-commodity", siteId],
+    queryFn: () => fetchRevenueByCommodity(siteId),
+    staleTime: 60_000,
+  });
+  const commodityList = data?.commodity_list || [];
+  const rows = data?.data || [];
+  const points = useMemo(() => pivotByPeriodAndCommodity(rows, commodityList, "revenue"), [rows, commodityList]);
+
+  if (isLoading) {
+    return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
+  }
+  if (error) return <ErrorBanner message={error.message} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState>
+        Revenue by commodity appears once a site has at least one month of inventory sales synced to the hub.
+      </EmptyState>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Revenue by commodity</h2>
+        <p className="text-sm text-muted-foreground">Revenue by commodity, per month</p>
+      </div>
+      <div className="h-[360px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
+            <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
+            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={formatRand} />
+            <Tooltip
+              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              formatter={(value) => [formatRand(value), ""]}
+            />
+            <Legend />
+            {commodityList.map((c, idx) => (
+              <Line
+                key={c}
+                type="monotone"
+                dataKey={c}
+                name={c}
+                stroke={COLORS[idx % COLORS.length]}
+                strokeWidth={2.5}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+                connectNulls={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function MarginByCommodityChart({ siteId }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["hub-trends-inventory-margin-by-commodity", siteId],
+    queryFn: () => fetchMarginByCommodity(siteId),
+    staleTime: 60_000,
+  });
+  const commodityList = data?.commodity_list || [];
+  const rows = data?.data || [];
+  const points = useMemo(() => pivotByPeriodAndCommodity(rows, commodityList, "margin_pct"), [rows, commodityList]);
+
+  if (isLoading) {
+    return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
+  }
+  if (error) return <ErrorBanner message={error.message} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState>
+        Margin by commodity appears once a site has at least one month of inventory sales synced to the hub.
+      </EmptyState>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Margin by commodity</h2>
+        <p className="text-sm text-muted-foreground">Average margin % by commodity, per month</p>
+        <p className="text-xs text-muted-foreground/70 mt-1">
+          Uses current cost against historical revenue — directional, not exact.
+        </p>
+      </div>
+      <div className="h-[360px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={points} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
+            <XAxis dataKey="period" stroke="#94a3b8" fontSize={12} />
+            <YAxis stroke="#94a3b8" fontSize={12} tickFormatter={(v) => v.toFixed(1) + '%'} />
+            <Tooltip
+              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              formatter={(value) => [Number(value).toFixed(1) + '%', ""]}
+            />
+            <Legend />
+            {commodityList.map((c, idx) => (
+              <Line
+                key={c}
+                type="monotone"
+                dataKey={c}
+                name={c}
+                stroke={COLORS[idx % COLORS.length]}
+                strokeWidth={2.5}
+                dot={{ r: 3 }}
+                activeDot={{ r: 5 }}
+                connectNulls={false}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function DeadStockChart({ siteId }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["hub-trends-inventory-dead-stock", siteId],
+    queryFn: () => fetchDeadStock(siteId),
+    staleTime: 60_000,
+  });
+  const rows = data?.data || [];
+
+  if (isLoading) {
+    return <div className="h-[420px] animate-pulse rounded-xl border border-border bg-card" />;
+  }
+  if (error) return <ErrorBanner message={error.message} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState>
+        Dead-stock trend appears once a site has at least three months of inventory sales synced to the hub.
+      </EmptyState>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-4">
+        <h2 className="text-lg font-semibold text-foreground">Dead stock over time</h2>
+        <p className="text-sm text-muted-foreground">
+          SKUs with no sales in the trailing 3 months (count and stock value)
+        </p>
+      </div>
+      <div className="h-[360px] w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={rows} margin={{ top: 8, right: 12, left: 0, bottom: 8 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#334155" opacity={0.35} />
+            <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} />
+            <YAxis
+              yAxisId="left"
+              stroke={COLORS[0]}
+              fontSize={12}
+              tickFormatter={formatQty}
+            />
+            <YAxis
+              yAxisId="right"
+              orientation="right"
+              stroke={COLORS[2]}
+              fontSize={12}
+              tickFormatter={formatRand}
+            />
+            <Tooltip
+              contentStyle={{ background: "#020817", border: "1px solid #1e293b", borderRadius: 12 }}
+              formatter={(value, name) => {
+                if (name === "Dead value") return [formatRand(value), name];
+                return [formatQty(value), name];
+              }}
+            />
+            <Legend />
+            <Line
+              yAxisId="left"
+              type="monotone"
+              dataKey="dead_count"
+              name="Dead count"
+              stroke={COLORS[0]}
+              strokeWidth={2.5}
+              dot={{ r: 3 }}
+              activeDot={{ r: 5 }}
+            />
+            <Line
+              yAxisId="right"
+              type="monotone"
+              dataKey="dead_value"
+              name="Dead value"
+              stroke={COLORS[2]}
+              strokeWidth={2.5}
+              dot={{ r: 3 }}
+              activeDot={{ r: 5 }}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+}
+
+function DeltaCell({ pct }) {
+  if (pct === null || pct === undefined) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const n = Number(pct);
+  if (!Number.isFinite(n)) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const up = n >= 0;
+  const Icon = up ? ArrowUp : ArrowDown;
+  const cls = up
+    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+    : "bg-red-500/15 text-red-300 border-red-500/30";
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs tabular-nums ${cls}`}>
+      <Icon className="h-3 w-3" />
+      {Math.abs(n).toFixed(1)}%
+    </span>
+  );
+}
+
+function TopMoversTable({ siteId }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["hub-trends-inventory-top-movers", siteId],
+    queryFn: () => fetchTopMovers(siteId),
+    staleTime: 5 * 60_000,
+  });
+  const rows = data?.data || [];
+
+  if (isLoading) {
+    return <div className="h-[460px] animate-pulse rounded-xl border border-border bg-card" />;
+  }
+  if (error) return <ErrorBanner message={error.message} />;
+  if (rows.length === 0) {
+    return (
+      <EmptyState>
+        Top-movers appear once a site has at least 12 months of inventory sales synced to the hub.
+      </EmptyState>
+    );
+  }
+  return (
+    <div className="rounded-xl border border-border bg-card overflow-hidden">
+      <div className="flex items-baseline justify-between px-4 py-3 border-b border-border">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">Top 10 movers</h2>
+          <p className="text-sm text-muted-foreground">
+            Top 10 SKUs by lifetime revenue; trailing 12 months vs the 12 months before
+          </p>
+        </div>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+            <th className="px-3 py-2 w-8" title="Rank by lifetime revenue">#</th>
+            <th className="px-3 py-2" title="Sage item code">Item</th>
+            <th className="px-3 py-2" title="Item description">Description</th>
+            <th className="px-3 py-2" title="Commodity group">Commodity</th>
+            <th className="px-3 py-2 text-right" title="Units sold in the trailing 12 months">12-mo qty</th>
+            <th className="px-3 py-2 text-right" title="Change vs the previous 12 months">Δ qty %</th>
+            <th className="px-3 py-2 text-right" title="Revenue in the trailing 12 months">12-mo revenue</th>
+            <th className="px-3 py-2 text-right" title="Change vs the previous 12 months">Δ revenue %</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.item_number} className="border-b border-border last:border-0 hover:bg-muted/30">
+              <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{row.rank}</td>
+              <td className="px-3 py-1.5 font-mono text-xs text-foreground">{row.item_number}</td>
+              <td className="px-3 py-1.5 text-foreground/90 truncate max-w-[260px]" title={row.item_description || ""}>
+                {row.item_description || "—"}
+              </td>
+              <td className="px-3 py-1.5 text-foreground/80">{row.commodity || "—"}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums">{formatQty(row.this_year_qty)}</td>
+              <td className="px-3 py-1.5 text-right"><DeltaCell pct={row.qty_delta_pct} /></td>
+              <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">{formatRand(row.this_year_revenue)}</td>
+              <td className="px-3 py-1.5 text-right"><DeltaCell pct={row.revenue_delta_pct} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function InventoryTrends({ siteId }) {
   const [innerTab, setInnerTab] = useState("sales");
   const { data, isLoading, error } = useQuery({
@@ -487,6 +819,12 @@ function InventoryTrends({ siteId }) {
             <TabsTrigger value="sales" title="Year-over-year sales velocity, revenue, and order count" className="rounded-xl px-4 py-1.5 text-sm">
               Sales reports
             </TabsTrigger>
+            <TabsTrigger value="mix" title="Revenue and margin by commodity over time" className="rounded-xl px-4 py-1.5 text-sm">
+              Mix
+            </TabsTrigger>
+            <TabsTrigger value="movement" title="Dead stock trend and top movers vs prior year" className="rounded-xl px-4 py-1.5 text-sm">
+              Movement
+            </TabsTrigger>
             <TabsTrigger value="seasonal" title="Top 10 items per South African season" className="rounded-xl px-4 py-1.5 text-sm">
               Seasonal
             </TabsTrigger>
@@ -517,6 +855,16 @@ function InventoryTrends({ siteId }) {
               yearList={yearList}
               valueFormatter={formatQty}
             />
+          </TabsContent>
+
+          <TabsContent value="mix" className="space-y-6">
+            <RevenueByCommodityChart siteId={siteId} />
+            <MarginByCommodityChart siteId={siteId} />
+          </TabsContent>
+
+          <TabsContent value="movement" className="space-y-6">
+            <DeadStockChart siteId={siteId} />
+            <TopMoversTable siteId={siteId} />
           </TabsContent>
 
           <TabsContent value="seasonal" className="space-y-6">

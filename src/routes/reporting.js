@@ -770,6 +770,218 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
+  // GET /api/reports/trends/inventory/revenue-by-commodity — site-mode
+  // commodity revenue mix per period. Joins inventoryrecord to attach
+  // a commodity to each item_number.
+  router.get('/api/reports/trends/inventory/revenue-by-commodity', requireAuth, (_req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT sc.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(sc.revenue)  AS revenue,
+               SUM(sc.qty_sold) AS qty
+        FROM inventory_sales_cache sc
+        LEFT JOIN (
+          SELECT item_number, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
+        WHERE sc.period IS NOT NULL
+        GROUP BY sc.period, commodity
+        ORDER BY sc.period ASC, commodity ASC
+      `).all();
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        site_name: SITE_NAME,
+        commodity_list: commodityList,
+        data: rows.map(r => ({
+          period: r.period,
+          commodity: r.commodity,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.revenue_by_commodity', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/margin-by-commodity — site-mode
+  // weighted average margin per (period, commodity). Same caveat as the
+  // hub version: uses CURRENT last_cost against historical revenue, so
+  // it's directional, not exact.
+  router.get('/api/reports/trends/inventory/margin-by-commodity', requireAuth, (_req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT sc.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(sc.revenue)  AS revenue,
+               SUM(sc.qty_sold * COALESCE(
+                 CAST(REPLACE(REPLACE(ir.last_cost, ',', ''), ' ', '') AS REAL), 0
+               )) AS extended_cost
+        FROM inventory_sales_cache sc
+        JOIN (
+          SELECT item_number, commodity, last_cost,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+          WHERE last_cost IS NOT NULL AND TRIM(last_cost) != ''
+        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
+        WHERE sc.period IS NOT NULL
+        GROUP BY sc.period, commodity
+        ORDER BY sc.period ASC, commodity ASC
+      `).all();
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        site_name: SITE_NAME,
+        commodity_list: commodityList,
+        note: 'Margin uses current last_cost against historical revenue — directional, not exact.',
+        data: rows.map(r => {
+          const revenue = Number(r.revenue) || 0;
+          const cost = Number(r.extended_cost) || 0;
+          return {
+            period: r.period,
+            commodity: r.commodity,
+            revenue,
+            cost,
+            margin_pct: revenue > 0 ? Math.round(((revenue - cost) / revenue) * 1000) / 10 : 0,
+          };
+        }),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.margin_by_commodity', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/dead-stock — site-mode trailing-24-month
+  // dead-stock trend. Same shape as hub: per month, count of SKUs in
+  // inventoryrecord whose most-recent sale is older than the month minus 3.
+  router.get('/api/reports/trends/inventory/dead-stock', requireAuth, (_req, res) => {
+    try {
+      const itemRows = db.prepare(`
+        WITH last_sale AS (
+          SELECT TRIM(item_number) AS item_number, MAX(period) AS last_period
+          FROM inventory_sales_cache
+          WHERE period IS NOT NULL
+          GROUP BY TRIM(item_number)
+        )
+        SELECT TRIM(ir.item_number) AS item_number,
+               COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM inventoryrecord ir
+        LEFT JOIN last_sale ls ON ls.item_number = TRIM(ir.item_number)
+      `).all();
+
+      const months = [];
+      const now = new Date();
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+
+      const data = months.map(m => {
+        const [yy, mm] = m.split('-').map(Number);
+        const t = new Date(yy, mm - 1 - 3, 1);
+        const threshold = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+        let count = 0;
+        let value = 0;
+        for (const r of itemRows) {
+          if (!r.last_period || r.last_period < threshold) {
+            count++;
+            value += r.inv_value || 0;
+          }
+        }
+        return { month: m, dead_count: count, dead_value: value };
+      });
+
+      res.json({
+        site_name: SITE_NAME,
+        total_skus: itemRows.length,
+        threshold_months: 3,
+        data,
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.dead_stock', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/top-movers — site-mode top-10 SKUs by
+  // lifetime revenue with last-12-months vs prior-12-months delta.
+  router.get('/api/reports/trends/inventory/top-movers', requireAuth, (_req, res) => {
+    try {
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twentyfour = new Date(now.getFullYear(), now.getMonth() - 24, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+      const twentyfourStr = `${twentyfour.getFullYear()}-${String(twentyfour.getMonth() + 1).padStart(2, '0')}`;
+
+      const rows = db.prepare(`
+        WITH agg AS (
+          SELECT sc.item_number,
+                 SUM(sc.revenue)     AS total_revenue,
+                 SUM(sc.qty_sold)    AS total_qty,
+                 SUM(sc.order_count) AS total_orders,
+                 SUM(CASE WHEN sc.period >= ? THEN sc.qty_sold ELSE 0 END) AS this_year_qty,
+                 SUM(CASE WHEN sc.period >= ? THEN sc.revenue  ELSE 0 END) AS this_year_revenue,
+                 SUM(CASE WHEN sc.period >= ? AND sc.period < ? THEN sc.qty_sold ELSE 0 END) AS prior_year_qty,
+                 SUM(CASE WHEN sc.period >= ? AND sc.period < ? THEN sc.revenue  ELSE 0 END) AS prior_year_revenue
+          FROM inventory_sales_cache sc
+          WHERE sc.period IS NOT NULL
+          GROUP BY sc.item_number
+        ),
+        ranked AS (
+          SELECT a.*, ROW_NUMBER() OVER (ORDER BY a.total_revenue DESC) AS rn
+          FROM agg a
+        )
+        SELECT r.rn AS rank, r.item_number,
+               r.total_revenue, r.total_qty, r.total_orders,
+               r.this_year_qty, r.this_year_revenue,
+               r.prior_year_qty, r.prior_year_revenue,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT item_number, item_description, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(r.item_number) AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY r.rn ASC
+      `).all(twelveStr, twelveStr, twentyfourStr, twelveStr, twentyfourStr, twelveStr);
+
+      res.json({
+        site_name: SITE_NAME,
+        this_year_from: twelveStr,
+        prior_year_from: twentyfourStr,
+        data: rows.map(r => {
+          const tyQ = Number(r.this_year_qty) || 0;
+          const pyQ = Number(r.prior_year_qty) || 0;
+          const tyR = Number(r.this_year_revenue) || 0;
+          const pyR = Number(r.prior_year_revenue) || 0;
+          return {
+            rank: r.rank,
+            item_number: r.item_number,
+            item_description: r.item_description || null,
+            commodity: r.commodity || null,
+            total_revenue: Number(r.total_revenue) || 0,
+            total_qty: Number(r.total_qty) || 0,
+            total_orders: Number(r.total_orders) || 0,
+            this_year_qty: tyQ,
+            this_year_revenue: tyR,
+            prior_year_qty: pyQ,
+            prior_year_revenue: pyR,
+            qty_delta_pct: pyQ > 0 ? Math.round(((tyQ - pyQ) / pyQ) * 1000) / 10 : null,
+            revenue_delta_pct: pyR > 0 ? Math.round(((tyR - pyR) / pyR) * 1000) / 10 : null,
+          };
+        }),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.top_movers', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
