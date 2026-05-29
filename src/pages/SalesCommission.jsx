@@ -144,6 +144,9 @@ export default function SalesCommission() {
   const settings = data?.settings;
   const unpaidByRep = data?.unpaid_invoices || [];
   const unpaidTotals = data?.unpaid_totals;
+  const clawbackByRep = data?.clawback || [];
+  const clawbackTotals = data?.clawback_totals;
+  const clawbackPreviousPeriod = data?.clawback_previous_period;
 
   const headerTitle = useMemo(() => {
     if (!submitted.from || !submitted.to) return "Commission Sales Report";
@@ -414,6 +417,12 @@ export default function SalesCommission() {
             sweetsRate={settings?.sweets_rate}
             referenceRate={settings?.reference_rate}
           />
+
+          <ClawbackSection
+            byRep={clawbackByRep}
+            totals={clawbackTotals}
+            previousPeriod={clawbackPreviousPeriod}
+          />
         </>
       )}
 
@@ -523,6 +532,114 @@ function UnpaidInvoicesSection({ byRep, totals, sweetsRate, referenceRate }) {
                       <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.net_sweet_amount)}</td>
                       <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.original_amount)}</td>
                       <td className="px-4 py-1.5 text-right tabular-nums text-amber-300">{formatRand(inv.outstanding_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </details>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Clawback section — previous-period unpaid sweets invoices that are
+// STILL unpaid in Sage today. The headline commission above is not
+// adjusted; this is a standalone advisory the operator deducts from
+// the rep's payout manually. Uses the rate that was in force when the
+// commission was originally paid (snapshotted at archive time).
+function ClawbackSection({ byRep, totals, previousPeriod }) {
+  if (!byRep || byRep.length === 0) {
+    return null;
+  }
+
+  const fmtDate = (n) => {
+    if (!n) return "—";
+    const s = String(n);
+    return /^\d{8}$/.test(s) ? s.replace(/^(\d{4})(\d{2})(\d{2})$/, "$1-$2-$3") : s;
+  };
+
+  const prevLabel = previousPeriod
+    ? `${previousPeriod.fromDate} → ${previousPeriod.toDate}`
+    : "previous period";
+
+  return (
+    <div className="rounded-xl border border-red-500/30 bg-card overflow-hidden mb-4">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-red-500/30 bg-red-500/5">
+        <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
+          <Receipt className="w-4 h-4 text-red-400" />
+          Clawback — invoices from {prevLabel} still unpaid
+        </h2>
+        {totals && (
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {totals.invoice_count} invoice{totals.invoice_count === 1 ? "" : "s"}
+            <span className="mx-2">·</span>
+            Sweets clawback <span className="text-red-300">{formatRand(totals.total_sweet_commission_clawback)}</span>
+            <span className="mx-2">·</span>
+            Ref clawback {formatRand(totals.total_reference_commission_clawback)}
+          </div>
+        )}
+      </div>
+
+      <div className="text-xs text-muted-foreground px-4 py-2 border-b border-border/60">
+        These sweets invoices were flagged as unpaid at the end of the previous commission
+        period and are still unpaid in AR today. The commission paid on them last period
+        should be <strong className="text-red-300">deducted</strong> from each rep's payout this period. Rates shown are the
+        rates that were in force when the commission was originally paid (not today's rates).
+      </div>
+
+      <div className="divide-y divide-border">
+        {byRep.map((rep) => (
+          <details key={rep.sales_rep} className="group">
+            <summary className="cursor-pointer list-none px-4 py-2.5 flex items-center justify-between gap-4 hover:bg-muted/30">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="font-mono text-xs text-foreground">{rep.sales_rep}</span>
+                <span className="text-xs text-muted-foreground">
+                  {rep.invoice_count} invoice{rep.invoice_count === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="flex items-center gap-6 text-xs tabular-nums">
+                <span className="text-muted-foreground">
+                  Outstanding <span className="text-foreground">{formatRand(rep.total_outstanding)}</span>
+                </span>
+                <span className="text-red-300">
+                  Sweets clawback {formatRand(rep.total_sweet_commission_clawback)}
+                </span>
+                <span className="text-muted-foreground" title="Reference commission clawback at the prior-period rate">
+                  Ref clawback {formatRand(rep.total_reference_commission_clawback)}
+                </span>
+              </div>
+            </summary>
+            <div className="border-t border-border/60">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-[10px] uppercase tracking-wider text-muted-foreground border-b border-border">
+                    <th className="px-4 py-2 text-left">Invoice</th>
+                    <th className="px-4 py-2 text-left">Date</th>
+                    <th className="px-4 py-2 text-left">Customer</th>
+                    <th className="px-4 py-2 text-right">Net sweets</th>
+                    <th className="px-4 py-2 text-right">Outstanding</th>
+                    <th className="px-4 py-2 text-right">Sweets clawback</th>
+                    <th className="px-4 py-2 text-right">Ref clawback</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rep.invoices.map((inv) => (
+                    <tr key={inv.invoice_number} className="border-b border-border/40 last:border-0">
+                      <td className="px-4 py-1.5 font-mono text-xs">{inv.invoice_number}</td>
+                      <td className="px-4 py-1.5">{fmtDate(inv.invoice_date)}</td>
+                      <td className="px-4 py-1.5">
+                        <span className="text-foreground">{inv.customer_name || "—"}</span>
+                        <span className="text-muted-foreground ml-2 font-mono text-xs">{inv.customer_code}</span>
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.net_sweet_amount)}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.outstanding_amount)}</td>
+                      <td className="px-4 py-1.5 text-right tabular-nums text-red-300">
+                        {formatRand(inv.sweet_commission_clawback)}
+                        <span className="text-[10px] text-muted-foreground ml-1">@{formatPct(inv.sweets_rate_at_paid)}</span>
+                      </td>
+                      <td className="px-4 py-1.5 text-right tabular-nums">{formatRand(inv.reference_commission_clawback)}</td>
                     </tr>
                   ))}
                 </tbody>

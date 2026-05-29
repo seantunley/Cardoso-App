@@ -164,6 +164,144 @@ GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))),
 ORDER BY sales_rep, MIN(OESHDT.TRANDATE), invoice_number
 `.trim();
 
+// Compute the previous commission period for clawback lookup. The
+// period_year/month uses the END month convention (commissionPeriodForRun).
+function previousPeriodOf(year, month) {
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear  = month === 1 ? year - 1 : year;
+  const pad = (n) => String(n).padStart(2, '0');
+  return {
+    year: prevYear, month: prevMonth,
+    fromDate: `${prevMonth === 1 ? prevYear - 1 : prevYear}-${pad(prevMonth === 1 ? 12 : prevMonth - 1)}-24`,
+    toDate:   `${prevYear}-${pad(prevMonth)}-23`,
+  };
+}
+
+// Identify the canonical commission period that the given to-date falls
+// within. The 24th-23rd cycle: a to-date of 2026-03-23 → period (2026, 3);
+// 2026-03-24 → period (2026, 4); 2026-03-15 → period (2026, 3).
+function periodContaining(yyyymmdd) {
+  const [y, m, d] = yyyymmdd.split('-').map(Number);
+  if (d >= 24) return { year: m === 12 ? y + 1 : y, month: m === 12 ? 1 : m + 1 };
+  return { year: y, month: m };
+}
+
+// Recheck Sage for the snapshot of invoices from the previous period.
+// Returns a per-rep clawback bucket — only invoices still showing
+// SWPAID = 0 in AROBL today are included.
+async function buildClawbackForPreviousPeriod(toDate) {
+  const currentPeriod = periodContaining(toDate);
+  const prev = previousPeriodOf(currentPeriod.year, currentPeriod.month);
+
+  const snapshotRows = db.prepare(`
+    SELECT sales_rep, invoice_number, customer_code, customer_name, invoice_date,
+           net_sweet_amount, outstanding_amount,
+           sweets_rate_at_paid, reference_rate_at_paid,
+           sweet_commission_at_paid, reference_commission_at_paid
+    FROM commission_unpaid_snapshot
+    WHERE period_year = ? AND period_month = ?
+    ORDER BY sales_rep, invoice_date, invoice_number
+  `).all(prev.year, prev.month);
+
+  if (snapshotRows.length === 0) {
+    return { previous_period: { ...prev, invoices_in_snapshot: 0 }, clawback: [], totals: emptyClawbackTotals() };
+  }
+
+  // Recheck AROBL — for each invoice number, is it still unpaid (SWPAID=0)?
+  // Batch into chunks so the IN clause stays comfortable in SQL Server.
+  const stillUnpaid = new Set();
+  const all = snapshotRows.map((r) => r.invoice_number).filter(Boolean);
+  const CHUNK = 500;
+  try {
+    for (let i = 0; i < all.length; i += CHUNK) {
+      const slice = all.slice(i, i + CHUNK);
+      const placeholders = slice.map((_, idx) => `@inv${idx}`).join(',');
+      const sqlText = `
+        SELECT LTRIM(RTRIM(IDINVC)) AS invoice_number, SWPAID
+        FROM AROBL
+        WHERE LTRIM(RTRIM(IDINVC)) IN (${placeholders})
+      `;
+      const params = Object.fromEntries(slice.map((inv, idx) => [`inv${idx}`, inv]));
+      const result = await runCustomerSqlQuery(sqlText, params);
+      for (const row of (result.recordset || [])) {
+        if (row.SWPAID === 0 || row.SWPAID === false) {
+          stillUnpaid.add(String(row.invoice_number).trim());
+        }
+      }
+    }
+  } catch (err) {
+    // Sage unreachable / permission issue — clawback can't be computed
+    // safely, surface as warning so the rest of the report still ships.
+    logError('commission.clawback.sage_recheck', err, { period: prev }, 'warn');
+    return { previous_period: { ...prev, invoices_in_snapshot: snapshotRows.length, error: 'Sage recheck failed' }, clawback: [], totals: emptyClawbackTotals() };
+  }
+
+  // Bucket the still-unpaid rows by rep.
+  const byRep = new Map();
+  for (const row of snapshotRows) {
+    if (!stillUnpaid.has(String(row.invoice_number).trim())) continue;
+    const key = String(row.sales_rep || '').trim() || 'Unknown';
+    if (!byRep.has(key)) byRep.set(key, []);
+    byRep.get(key).push({
+      invoice_number: row.invoice_number,
+      customer_code: row.customer_code,
+      customer_name: row.customer_name,
+      invoice_date: row.invoice_date,
+      net_sweet_amount: Number(row.net_sweet_amount) || 0,
+      outstanding_amount: Number(row.outstanding_amount) || 0,
+      sweets_rate_at_paid: Number(row.sweets_rate_at_paid) || 0,
+      reference_rate_at_paid: Number(row.reference_rate_at_paid) || 0,
+      sweet_commission_clawback: Number(row.sweet_commission_at_paid) || 0,
+      reference_commission_clawback: Number(row.reference_commission_at_paid) || 0,
+    });
+  }
+
+  const clawback = [...byRep.entries()]
+    .map(([sales_rep, invoices]) => {
+      const total_sweet_commission_clawback = invoices.reduce((s, i) => s + i.sweet_commission_clawback, 0);
+      const total_reference_commission_clawback = invoices.reduce((s, i) => s + i.reference_commission_clawback, 0);
+      const total_outstanding = invoices.reduce((s, i) => s + i.outstanding_amount, 0);
+      return {
+        sales_rep,
+        invoice_count: invoices.length,
+        total_outstanding,
+        total_sweet_commission_clawback,
+        total_reference_commission_clawback,
+        invoices,
+      };
+    })
+    .sort((a, b) => {
+      const na = Number(a.sales_rep), nb = Number(b.sales_rep);
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+      if (Number.isFinite(na)) return -1;
+      if (Number.isFinite(nb)) return 1;
+      return a.sales_rep.localeCompare(b.sales_rep);
+    });
+
+  const totals = clawback.reduce((acc, r) => {
+    acc.invoice_count += r.invoice_count;
+    acc.total_outstanding += r.total_outstanding;
+    acc.total_sweet_commission_clawback += r.total_sweet_commission_clawback;
+    acc.total_reference_commission_clawback += r.total_reference_commission_clawback;
+    return acc;
+  }, emptyClawbackTotals());
+
+  return {
+    previous_period: { ...prev, invoices_in_snapshot: snapshotRows.length },
+    clawback,
+    totals,
+  };
+}
+
+function emptyClawbackTotals() {
+  return {
+    invoice_count: 0,
+    total_outstanding: 0,
+    total_sweet_commission_clawback: 0,
+    total_reference_commission_clawback: 0,
+  };
+}
+
 /**
  * Run the three Sage queries and assemble the per-rep report.
  *
@@ -348,5 +486,24 @@ export async function buildCommissionReport({ from, to }) {
     pending_sweet_commission: 0, pending_reference_commission: 0,
   });
 
-  return { from, to, settings, reps, totals, unpaid_invoices, unpaid_totals };
+  // Clawback from the previous period — re-check Sage for the snapshot
+  // of unpaid invoices that were tracked at end of period N-1. Anything
+  // still unpaid today contributes to a clawback liability for the rep.
+  // Result is informational — the headline totals above are unchanged
+  // (per design: operator deducts manually when paying out).
+  let clawbackResult;
+  try {
+    clawbackResult = await buildClawbackForPreviousPeriod(to);
+  } catch (err) {
+    logError('commission.report.clawback', err, { from, to }, 'warn');
+    clawbackResult = { previous_period: null, clawback: [], totals: emptyClawbackTotals() };
+  }
+
+  return {
+    from, to, settings, reps, totals,
+    unpaid_invoices, unpaid_totals,
+    clawback: clawbackResult.clawback,
+    clawback_totals: clawbackResult.totals,
+    clawback_previous_period: clawbackResult.previous_period,
+  };
 }

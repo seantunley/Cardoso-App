@@ -61,13 +61,44 @@ export function archiveCommissionReport({ db, archive, archiveRoot = ARCHIVE_ROO
       report_json, site_label, hub_push_status
     ) VALUES (
       ?, ?, ?, ?,
-      datetime('now'), ?, ?,
+      now_local(), ?, ?,
       ?, ?, ?, ?,
       ?, ?, 'pending'
     )
   `);
   const updatePath = db.prepare(`UPDATE commission_archive SET file_path = ? WHERE id = ?`);
   const select = db.prepare(`SELECT * FROM commission_archive WHERE id = ?`);
+
+  // Per-period snapshot of unpaid sweets invoices. Consumed by the next
+  // period's report to compute clawback. We delete first so a re-archive
+  // of the same period (e.g. operator re-runs "manual" after a fix)
+  // overwrites the snapshot cleanly.
+  const clearSnapshot = db.prepare(`
+    DELETE FROM commission_unpaid_snapshot
+    WHERE period_year = ? AND period_month = ?
+  `);
+  const insertSnapshot = db.prepare(`
+    INSERT INTO commission_unpaid_snapshot (
+      period_year, period_month, sales_rep,
+      invoice_number, customer_code, customer_name, invoice_date,
+      net_sweet_amount, outstanding_amount,
+      sweets_rate_at_paid, reference_rate_at_paid,
+      sweet_commission_at_paid, reference_commission_at_paid,
+      archive_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(period_year, period_month, invoice_number) DO UPDATE SET
+      sales_rep = excluded.sales_rep,
+      customer_code = excluded.customer_code,
+      customer_name = excluded.customer_name,
+      invoice_date = excluded.invoice_date,
+      net_sweet_amount = excluded.net_sweet_amount,
+      outstanding_amount = excluded.outstanding_amount,
+      sweets_rate_at_paid = excluded.sweets_rate_at_paid,
+      reference_rate_at_paid = excluded.reference_rate_at_paid,
+      sweet_commission_at_paid = excluded.sweet_commission_at_paid,
+      reference_commission_at_paid = excluded.reference_commission_at_paid,
+      archive_id = excluded.archive_id
+  `);
 
   let writtenFilePath = null;
   try {
@@ -84,6 +115,33 @@ export function archiveCommissionReport({ db, archive, archiveRoot = ARCHIVE_ROO
       fs.writeFileSync(finalPath, archive.buffer);
       writtenFilePath = finalPath;
       updatePath.run(finalPath, id);
+
+      // Persist the unpaid snapshot. Scheduled archives are authoritative
+      // for the period; manual archives also overwrite so an operator
+      // can correct the snapshot if a sync glitch produced bad data.
+      const sweetsRate = Number(archive.reportJson?.settings?.sweets_rate) || 0;
+      const refRate = Number(archive.reportJson?.settings?.reference_rate) || 0;
+      const unpaidByRep = Array.isArray(archive.reportJson?.unpaid_invoices)
+        ? archive.reportJson.unpaid_invoices : [];
+      clearSnapshot.run(archive.periodYear, archive.periodMonth);
+      for (const repBucket of unpaidByRep) {
+        const rep = String(repBucket.sales_rep || '').trim() || 'Unknown';
+        for (const inv of (repBucket.invoices || [])) {
+          const net = Number(inv.net_sweet_amount) || 0;
+          insertSnapshot.run(
+            archive.periodYear, archive.periodMonth, rep,
+            String(inv.invoice_number || '').trim(),
+            String(inv.customer_code || '').trim() || null,
+            inv.customer_name || null,
+            inv.invoice_date ? String(inv.invoice_date) : null,
+            net,
+            Number(inv.outstanding_amount) || 0,
+            sweetsRate, refRate,
+            net * sweetsRate, net * refRate,
+            id,
+          );
+        }
+      }
       return id;
     });
     const id = tx();
