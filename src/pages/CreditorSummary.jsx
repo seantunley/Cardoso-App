@@ -51,9 +51,6 @@ const COLUMNS = [
   { key: "last_receipt_date",  label: "Last receipt",  width: "120px",  align: "left",  format: fmtDate },
   { key: "last_payment_date",  label: "Last payment",  width: "120px",  align: "left",  format: fmtDate },
   { key: "ytd_receipt_count",  label: "YTD receipts",  width: "110px",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  { key: "ytd_po_count",       label: "YTD POs",       width: "90px",   align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  { key: "ytd_po_amount",      label: "YTD PO value",  width: "150px",  align: "right", format: (v) => `R ${fmtR(v)}` },
-  { key: "ytd_paid",           label: "YTD paid",      width: "150px",  align: "right", format: (v) => `R ${fmtR(v)}` },
   { key: "outstanding_amount", label: "Outstanding",   width: "150px",  align: "right", format: (v) => `R ${fmtR(v)}` },
 ];
 
@@ -97,12 +94,9 @@ export default function CreditorSummary() {
   }, [data, sortKey, sortDir]);
 
   const totals = useMemo(() => {
-    const acc = { ytd_paid: 0, ytd_po_amount: 0, outstanding_amount: 0, count: 0 };
+    const acc = { outstanding_amount: 0 };
     for (const r of rows) {
-      acc.ytd_paid += Number(r.ytd_paid) || 0;
-      acc.ytd_po_amount += Number(r.ytd_po_amount) || 0;
       acc.outstanding_amount += Number(r.outstanding_amount) || 0;
-      acc.count++;
     }
     return acc;
   }, [rows]);
@@ -192,10 +186,7 @@ export default function CreditorSummary() {
           </label>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-          <SummaryTile label="Vendors" value={totals.count.toLocaleString()} />
-          <SummaryTile label="YTD PO value" value={`R ${fmtR(totals.ytd_po_amount)}`} />
-          <SummaryTile label="YTD paid" value={`R ${fmtR(totals.ytd_paid)}`} />
+        <div className="grid grid-cols-1 sm:max-w-md gap-3">
           <SummaryTile label="Outstanding" value={`R ${fmtR(totals.outstanding_amount)}`} />
         </div>
 
