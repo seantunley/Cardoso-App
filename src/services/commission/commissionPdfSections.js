@@ -54,7 +54,7 @@ export function renderUnpaidPage(doc, autoTable, { depotName, periodLabel, unpai
   doc.addPage();
   const startY = pageHead(doc, {
     depotName,
-    title: `Unpaid Sweets Invoices — ${periodLabel}`,
+    title: `Unpaid Invoices — ${periodLabel}`,
     subtitle: "These invoices are counted in the commission totals but are still outstanding in AR. If any are still unpaid by the next commission period, the commission paid on them should be clawed back from that rep's next payout.",
   });
 
