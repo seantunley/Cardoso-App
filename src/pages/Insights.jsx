@@ -1,13 +1,15 @@
 // Insights — a proactive feed of "things worth looking at", computed by the
 // /api/insights detectors (sales declines, at-risk customers, dead stock,
 // debtor exposure). Each card deep-links to the page where you'd act on it.
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { AlertTriangle, TrendingDown, Info, CheckCircle2, ArrowRight, RefreshCw, Lightbulb } from "lucide-react";
+import { AlertTriangle, TrendingDown, Info, CheckCircle2, ArrowRight, RefreshCw, Lightbulb, SlidersHorizontal } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import EmptyState from "@/components/EmptyState";
 import { Skeleton } from "@/components/ui/skeleton";
 import { apiGet } from "@/components/collections/utils";
+import RulesModal from "@/components/insights/RulesModal";
 
 const SEVERITY = {
   high: { label: "High", ring: "border-red-500/40", dot: "bg-red-500", text: "text-red-600 dark:text-red-400", Icon: AlertTriangle },
@@ -41,6 +43,9 @@ function InsightCard({ insight, onOpen }) {
 
 export default function Insights() {
   const navigate = useNavigate();
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const me = useQuery({ queryKey: ["me"], queryFn: () => apiGet("/api/auth/me"), staleTime: 300_000 });
+  const isAdmin = me.data?.role === "admin";
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ["insights"],
     queryFn: () => apiGet("/api/insights"),
@@ -56,15 +61,28 @@ export default function Insights() {
         title="Insights"
         subtitle="Automatically surfaced changes and risks across sales, customers, inventory and receivables. Open a card to act on it."
         actions={
-          <button
-            type="button"
-            onClick={() => refetch()}
-            className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
-          </button>
+          <>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setRulesOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" /> Manage rules
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => refetch()}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} /> Refresh
+            </button>
+          </>
         }
       />
+
+      <RulesModal open={rulesOpen} onClose={() => setRulesOpen(false)} onChanged={() => refetch()} />
 
       {generated && <p className="mb-4 -mt-2 text-xs text-muted-foreground">Updated {generated}</p>}
 

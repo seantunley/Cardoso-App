@@ -92,6 +92,7 @@ import m86 from './v086_admin_can_access_backfill.js';
 import m87 from './v087_creditors_module.js';
 import m88 from './v088_commission_unpaid_override.js';
 import m89 from './v089_commission_unpaid_snapshot.js';
+import m90 from './v090_insight_rules.js';
 
 const migrations = [
   m1,
@@ -183,6 +184,7 @@ const migrations = [
   m87,
   m88,
   m89,
+  m90,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

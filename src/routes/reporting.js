@@ -2049,5 +2049,59 @@ export function createReportingRouter({ requireAuth }) {
     }
   });
 
+  // ── Custom insight rules (no-code builder) ──────────────────────────────
+  // Reads are open to any reporting user; writes are admin-only (inline check
+  // since this router only receives requireAuth).
+  const requireAdminInline = (req, res) => {
+    if (req.currentUser?.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return false; }
+    return true;
+  };
+
+  router.get('/api/insights/rules', requireAuth, async (req, res) => {
+    try {
+      const { listRules, METRIC_CATALOG } = await import('../services/insights.js');
+      res.json({ rules: listRules(), metrics: METRIC_CATALOG });
+    } catch (err) {
+      console.error('[reporting] insight rules list error:', err);
+      res.status(500).json({ error: 'Failed to load insight rules' });
+    }
+  });
+
+  router.post('/api/insights/rules', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const { createRule } = await import('../services/insights.js');
+      res.json(createRule(req.body || {}, req.currentUser?.email || null));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.put('/api/insights/rules/:id', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid rule id' });
+    try {
+      const { updateRule } = await import('../services/insights.js');
+      res.json(updateRule(id, req.body || {}));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.delete('/api/insights/rules/:id', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid rule id' });
+    try {
+      const { deleteRule } = await import('../services/insights.js');
+      const changes = deleteRule(id);
+      if (!changes) return res.status(404).json({ error: 'Rule not found' });
+      res.json({ ok: true, id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   return router;
 }
