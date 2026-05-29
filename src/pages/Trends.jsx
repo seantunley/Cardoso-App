@@ -342,6 +342,7 @@ function SeasonalTopItems() {
 }
 
 function InventoryTrends() {
+  const [innerTab, setInnerTab] = useState("sales");
   const { data, isLoading, error } = useQuery({
     queryKey: ["site-trends-inventory"],
     queryFn: fetchInventoryTrends,
@@ -410,33 +411,47 @@ function InventoryTrends() {
         </EmptyState>
       )}
       {!isLoading && !error && rows.length > 0 && (
-        <div className="space-y-6">
-          <YearChart
-            title="Sales Velocity"
-            subtitle="Units sold per month"
-            data={qtyPoints}
-            yearKeys={qtyKeys}
-            yearList={yearList}
-            valueFormatter={formatQty}
-          />
-          <YearChart
-            title="Sales Revenue"
-            subtitle="Revenue per month"
-            data={revPoints}
-            yearKeys={qtyKeys}
-            yearList={yearList}
-            valueFormatter={formatRand}
-          />
-          <YearChart
-            title="Order Count"
-            subtitle="Orders per month"
-            data={orderPoints}
-            yearKeys={qtyKeys}
-            yearList={yearList}
-            valueFormatter={formatQty}
-          />
-          <SeasonalTopItems />
-        </div>
+        <Tabs value={innerTab} onValueChange={setInnerTab} className="space-y-4">
+          <TabsList className="inline-flex h-10 rounded-2xl border border-border bg-muted p-1 gap-1">
+            <TabsTrigger value="sales" title="Year-over-year sales velocity, revenue, and order count" className="rounded-xl px-4 py-1.5 text-sm">
+              Sales reports
+            </TabsTrigger>
+            <TabsTrigger value="seasonal" title="Top 10 items per South African season" className="rounded-xl px-4 py-1.5 text-sm">
+              Seasonal
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="sales" className="space-y-6">
+            <YearChart
+              title="Sales Velocity"
+              subtitle="Units sold per month"
+              data={qtyPoints}
+              yearKeys={qtyKeys}
+              yearList={yearList}
+              valueFormatter={formatQty}
+            />
+            <YearChart
+              title="Sales Revenue"
+              subtitle="Revenue per month"
+              data={revPoints}
+              yearKeys={qtyKeys}
+              yearList={yearList}
+              valueFormatter={formatRand}
+            />
+            <YearChart
+              title="Order Count"
+              subtitle="Orders per month"
+              data={orderPoints}
+              yearKeys={qtyKeys}
+              yearList={yearList}
+              valueFormatter={formatQty}
+            />
+          </TabsContent>
+
+          <TabsContent value="seasonal" className="space-y-6">
+            <SeasonalTopItems />
+          </TabsContent>
+        </Tabs>
       )}
     </>
   );
