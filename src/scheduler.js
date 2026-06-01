@@ -609,6 +609,25 @@ export function startSchedulers() {
     ), 45_000);
     registerJob({ name: 'jti-boot-catchup', type: 'one-shot', delayMs: 45_000, mode: 'site', description: 'JTI catch-up — backfill up to 12 missed months on boot' });
 
+    // JTI daily self-heal — re-attempt last month's export every day until it
+    // lands. The 02:00-on-the-1st cron only fires if the app is running at that
+    // exact minute and Sage is reachable; a miss (app closed, Sage briefly
+    // down) otherwise stays unarchived until the next app restart. This daily
+    // run targets the SAME previous month all month long, so a missed window
+    // heals on its own the next day — and a pool_unavailable simply retries
+    // tomorrow. Cheap on normal days (one already-archived check). Runs at
+    // 09:00, when the app is most likely running and Sage reachable.
+    {
+      const t = cron.schedule('0 9 * * *', track(
+        'jti-daily-ensure',
+        () => runScheduledMonthlyJob({ db, getSagePool: getJtiSagePool }),
+        (result) => result,
+        { successCheck: () => true },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'jti-daily-ensure', type: 'cron', cronExpression: '0 9 * * *', taskRef: t, mode: 'site', description: 'JTI self-heal — ensure last month is archived if the 1st-of-month run was missed' });
+    }
+
     // JTI hub-push retry tick — every 15 minutes, scan for archives
     // in pending/failed state and try to send them. The post-archive
     // push trigger in handleExport / generateAndArchivePeriod handles
