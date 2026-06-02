@@ -411,6 +411,37 @@ function initSchema(db) {
          WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
       END
     `);
+    // Numeric-balance mirror triggers. Migration v54 installs these on
+    // EXISTING hubs, but on a fresh HUB_MODE database runMigrations runs
+    // before hub_records exists (see the canonical-column note above), so
+    // v54's gate-on-table-exists no-ops and outstanding_balance_num would
+    // sit at its DEFAULT 0 forever — the ETL only writes the text
+    // outstanding_balance. Mirror them inline (idempotent; bodies identical
+    // to v54) so fresh hubs populate the numeric column and balance queries
+    // (top-balances, aged-debtors) return data instead of an empty book.
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding_num ON hub_records(outstanding_balance_num)`);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_ins
+      AFTER INSERT ON hub_records
+      BEGIN
+        UPDATE hub_records SET outstanding_balance_num = CASE
+          WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+            THEN NULL
+          ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+        END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+      END
+    `);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_upd
+      AFTER UPDATE OF outstanding_balance ON hub_records
+      BEGIN
+        UPDATE hub_records SET outstanding_balance_num = CASE
+          WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+            THEN NULL
+          ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+        END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+      END
+    `);
   }
 }
 

@@ -1982,7 +1982,18 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           e.expiry_date, e.qty_at_expiry, e.entered_by, e.entry_source, e.notes, e.created_date AS expiry_created
         FROM stock_receipt_line srl
         JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        -- Sweets-only (commodity '1'), mirroring listReceiptLines: expiry
+        -- tracking doesn't apply to cigarettes/tobacco, and items with no
+        -- inventoryrecord row (unknown commodity) are excluded. Without this
+        -- the hub mirror surfaces tobacco lines as "missing expiry".
+        INNER JOIN (
+          SELECT TRIM(item_number) AS item_number,
+                 TRIM(commodity) AS commodity,
+                 ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ic ON ic.item_number = srl.item_number AND ic.rn = 1
         LEFT JOIN stock_receipt_line_expiry e ON e.receipt_line_id = srl.id
+        WHERE ic.commodity = '1'
         ORDER BY sr.receipt_date DESC, srl.id, e.expiry_date ASC, e.id ASC
         LIMIT ? OFFSET ?
       `).all(limit, offset);
