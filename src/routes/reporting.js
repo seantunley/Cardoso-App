@@ -331,7 +331,12 @@ $result | ConvertTo-Json -Depth 6 -Compress
   return parsed;
 }
 
-export function createReportingRouter({ requireAuth }) {
+export function createReportingRouter({ requireAuth, requirePermission }) {
+  // Report data (trends, exports, insights) is gated by can_access_reports so
+  // a bare authenticated account can't read revenue / dead-stock / debtor data
+  // it isn't entitled to. Fallback to requireAuth-only if requirePermission
+  // wasn't supplied (defensive; server.js always passes it).
+  const reportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
 
@@ -616,7 +621,7 @@ export function createReportingRouter({ requireAuth }) {
   // Bucket per-week / per-month record count + flag rate over time. Same
   // shape as the hub endpoint so the React component can share its
   // chart/pivot logic across both installs.
-  router.get('/api/reports/trends/customer', requireAuth, (req, res) => {
+  router.get('/api/reports/trends/customer', ...reportsGuard, (req, res) => {
     const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
     const sinceParam = req.query.since ? String(req.query.since) : null;
     if (sinceParam && !/^\d{4}-\d{2}-\d{2}$/.test(sinceParam)) {
@@ -668,7 +673,7 @@ export function createReportingRouter({ requireAuth }) {
   // trends from inventory_sales_cache (the site's own monthly rollup,
   // populated by inventoryMovement.syncInventorySales). One row per
   // (year, month). year_list is the distinct set of years present.
-  router.get('/api/reports/trends/inventory', requireAuth, (_req, res) => {
+  router.get('/api/reports/trends/inventory', ...reportsGuard, (_req, res) => {
     try {
       const rows = db.prepare(`
         SELECT
@@ -705,7 +710,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reports/trends/inventory/seasonal — site-mode top-10 per SA season.
-  router.get('/api/reports/trends/inventory/seasonal', requireAuth, (_req, res) => {
+  router.get('/api/reports/trends/inventory/seasonal', ...reportsGuard, (_req, res) => {
     try {
       const seasonalCase = `
         CASE substr(sc.period, 6, 2)
@@ -773,7 +778,7 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/reports/trends/inventory/revenue-by-commodity — site-mode
   // commodity revenue mix per period. Joins inventoryrecord to attach
   // a commodity to each item_number.
-  router.get('/api/reports/trends/inventory/revenue-by-commodity', requireAuth, (_req, res) => {
+  router.get('/api/reports/trends/inventory/revenue-by-commodity', ...reportsGuard, (_req, res) => {
     try {
       const rows = db.prepare(`
         SELECT sc.period AS period,
@@ -812,7 +817,7 @@ export function createReportingRouter({ requireAuth }) {
   // inventoryrecord whose most-recent sale is older than the month minus 3.
   // Restricted to SKUs with current inventory_value > 0 so the count and
   // value lines move together (see hub variant for rationale).
-  router.get('/api/reports/trends/inventory/dead-stock', requireAuth, (_req, res) => {
+  router.get('/api/reports/trends/inventory/dead-stock', ...reportsGuard, (_req, res) => {
     try {
       const itemRows = db.prepare(`
         WITH last_sale AS (
@@ -865,7 +870,7 @@ export function createReportingRouter({ requireAuth }) {
 
   // GET /api/reports/trends/inventory/top-movers — site-mode top-10 SKUs by
   // lifetime revenue with last-12-months vs prior-12-months delta.
-  router.get('/api/reports/trends/inventory/top-movers', requireAuth, (_req, res) => {
+  router.get('/api/reports/trends/inventory/top-movers', ...reportsGuard, (_req, res) => {
     try {
       const now = new Date();
       const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
@@ -1100,7 +1105,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reports/aged-debtors/export?format=pdf|xlsx
-  router.get('/api/reports/aged-debtors/export', requireAuth, async (req, res) => {
+  router.get('/api/reports/aged-debtors/export', ...reportsGuard, async (req, res) => {
     const format = String(req.query.format || 'pdf').toLowerCase();
     try {
       const report = buildAgedDebtorsReport(req.query);
@@ -1214,7 +1219,7 @@ export function createReportingRouter({ requireAuth }) {
   });
 
   // GET /api/reports/rep-exposure/export?format=pdf|xlsx
-  router.get('/api/reports/rep-exposure/export', requireAuth, async (req, res) => {
+  router.get('/api/reports/rep-exposure/export', ...reportsGuard, async (req, res) => {
     const format = String(req.query.format || 'pdf').toLowerCase();
     try {
       const report = buildRepExposureReport(req.query);
@@ -2039,7 +2044,7 @@ export function createReportingRouter({ requireAuth }) {
 
   // GET /api/insights — proactive insights feed (rule-based detectors over the
   // synced sales / inventory / debtor data). Site-mode; the hub returns empty.
-  router.get('/api/insights', requireAuth, async (req, res) => {
+  router.get('/api/insights', ...reportsGuard, async (req, res) => {
     try {
       const { computeInsights } = await import('../services/insights.js');
       res.json(computeInsights());
@@ -2057,7 +2062,7 @@ export function createReportingRouter({ requireAuth }) {
     return true;
   };
 
-  router.get('/api/insights/rules', requireAuth, async (req, res) => {
+  router.get('/api/insights/rules', ...reportsGuard, async (req, res) => {
     try {
       const { listRules, METRIC_CATALOG } = await import('../services/insights.js');
       res.json({ rules: listRules(), metrics: METRIC_CATALOG });

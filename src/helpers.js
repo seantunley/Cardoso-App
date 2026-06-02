@@ -200,6 +200,7 @@ export function defaultPermissionsForRole(role) {
       can_access_settings: true,
       can_access_jti: true,
       can_access_stock_receipt_expiry: true,
+      can_access_creditors: true,
       can_access_commission: true,
       can_manage_users: true,
       can_manage_rules: true,
@@ -227,6 +228,7 @@ export function defaultPermissionsForRole(role) {
     can_access_settings: false,
     can_access_jti: false,
     can_access_stock_receipt_expiry: false,
+    can_access_creditors: false,
     can_access_commission: false,
     can_manage_users: false,
     can_manage_rules: false,
@@ -264,6 +266,7 @@ export function sanitizeUser(user) {
     can_access_settings: boolFromRow(user.can_access_settings, false),
     can_access_jti: boolFromRow(user.can_access_jti, false),
     can_access_stock_receipt_expiry: boolFromRow(user.can_access_stock_receipt_expiry, false),
+    can_access_creditors: boolFromRow(user.can_access_creditors, false),
     can_access_commission: boolFromRow(user.can_access_commission, false),
     can_manage_users: boolFromRow(user.can_manage_users, false),
     // Used to be `user.role === 'admin' ? true : boolFromRow(...)` which made

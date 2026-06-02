@@ -268,6 +268,15 @@ async function syncApPayments(pool, settings, fromInt, toInt) {
 
   let upserted = 0;
   const run = db.transaction(() => {
+    // Reconcile reversals: a payment reversed/removed in Sage drops out of the
+    // window result and would otherwise linger forever (upsert never deletes),
+    // inflating YTD totals. Clear the synced payment-date window first, then
+    // re-insert. Guarded on a non-empty result so a transient empty query
+    // can't wipe good financial data; rows outside the window are untouched.
+    if (rows.length) {
+      db.prepare("DELETE FROM creditor_ap_payment WHERE source_table = 'APTCR' AND payment_date >= ? AND payment_date <= ?")
+        .run(intToDateStr(fromInt), intToDateStr(toInt));
+    }
     for (const r of rows) {
       if (!r.vendor_code || !r.payment_number) continue;
       upsert.run(

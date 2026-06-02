@@ -71,7 +71,7 @@ export default function CreditorSettingsTab() {
       // Empty string clears the override (server's COALESCE preserves the
       // existing value when null is sent; sending '' lets the operator
       // explicitly fall back to the built-in default).
-      for (const s of SOURCES) body[s.key] = overrides[s.key] || null;
+      for (const s of SOURCES) body[s.key] = overrides[s.key] || "";
       const r = await fetch("/api/creditors/sync-settings", {
         method: "PUT",
         credentials: "include",

@@ -82,7 +82,7 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
     try {
       db.prepare(`
         UPDATE inventory_sales_sync_meta SET
-          last_synced_at = datetime('now'),
+          last_synced_at = now_local(),
           last_synced_to = ?,
           rows_synced = ?
         WHERE id = 1
@@ -115,8 +115,15 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   `);
   const fromDateStr = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
   const toDateStr = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}-${String(to.getDate()).padStart(2, '0')}`;
+  const fromPeriod = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
+  const toPeriod = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}`;
 
   db.transaction(() => {
+    // Reconcile deletions: an item-month whose sales were corrected/returned to
+    // zero drops out of aggRows. Clear the synced period window first so such
+    // item-months don't linger stale in the cache (upsert alone never removes
+    // them). Months outside the window are untouched.
+    db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
     for (const r of aggRows) {
       upsertAgg.run(
         r.item_number,

@@ -213,7 +213,7 @@ app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createCreditLogicRouter({ requireAuth, requirePermission }));
 app.use(createBackupRouter());
 app.use(createDrRouter());
-app.use(createReportingRouter({ requireAuth }));
+app.use(createReportingRouter({ requireAuth, requirePermission }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
@@ -239,7 +239,7 @@ app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 // Creditors module — vendor master + AP transactions + POs synced
 // from Sage. Mounted on both modes; hub branches in the router itself
 // (read-only on hub once the ETL is wired).
-app.use(createCreditorRouter({ requireAuth, requirePermission }));
+app.use(createCreditorRouter({ requireAuth, requireAdmin, requirePermission }));
 
 // ── Price List (Sage ICPRICP per-unit prices) ──
 app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));

@@ -17,9 +17,13 @@ function isHub() { return process.env.HUB_MODE === 'true'; }
 
 // Single permission gates the whole module — applied as middleware on
 // every route. Hub mode read-only branches add their own queries.
-export function createCreditorRouter({ requireAuth, requirePermission }) {
+export function createCreditorRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
   const guard = [requireAuth, requirePermission('can_access_creditors')];
+  // Persisting/executing Sage SQL overrides is privileged — gate those with
+  // requireAdmin, not just the module permission, so a non-admin who merely
+  // has can_access_creditors can't store and run arbitrary SQL against Sage.
+  const adminGuard = [requireAuth, requireAdmin];
 
   // ===== Sync admin =====
   router.get('/api/creditors/sync-meta', ...guard, (_req, res) => {
@@ -31,7 +35,7 @@ export function createCreditorRouter({ requireAuth, requirePermission }) {
     }
   });
 
-  router.post('/api/creditors/sync', ...guard, async (_req, res) => {
+  router.post('/api/creditors/sync', ...adminGuard, async (_req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly — data comes from sites during ETL.' });
     try {
       const summary = await syncCreditorsFromSage();
@@ -43,7 +47,7 @@ export function createCreditorRouter({ requireAuth, requirePermission }) {
     }
   });
 
-  router.get('/api/creditors/sync-settings', ...guard, (_req, res) => {
+  router.get('/api/creditors/sync-settings', ...adminGuard, (_req, res) => {
     try {
       res.json({
         settings: getSyncSettings(),
@@ -60,7 +64,7 @@ export function createCreditorRouter({ requireAuth, requirePermission }) {
     }
   });
 
-  router.put('/api/creditors/sync-settings', ...guard, (req, res) => {
+  router.put('/api/creditors/sync-settings', ...adminGuard, (req, res) => {
     try {
       const updated = setSyncSettings(req.body || {});
       res.json({ ok: true, settings: updated });
