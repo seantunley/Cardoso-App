@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, memo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, memo } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
 import {
   RefreshCw, AlertCircle, ShieldCheck, Clock, Search,
@@ -19,6 +19,8 @@ import { toast } from "sonner";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
+
+const EMPTY_ARRAY = Object.freeze([]);
 
 const FLAG_COLORS = {
   red:    { bg: "bg-red-500/15",    text: "text-red-400",    border: "border-red-500/30",    label: "Red"    },
@@ -886,6 +888,11 @@ export default function HubDashboard() {
 
   useEffect(() => { fetchAll(); }, [dateRange]);
 
+  // Stable reference for `sites` so the memoised <HubCustomerSearch />
+  // isn't invalidated by a fresh [] identity each render when kpis is
+  // null. Must live above any early return for hook-order stability.
+  const sites = useMemo(() => kpis?.sites || EMPTY_ARRAY, [kpis?.sites]);
+
   const triggerSync = async () => {
     setSyncing(true);
     try {
@@ -990,8 +997,6 @@ export default function HubDashboard() {
       </div>
     </div>
   );
-
-  const sites = kpis?.sites || [];
 
   return (
     <div className="min-h-screen bg-background">

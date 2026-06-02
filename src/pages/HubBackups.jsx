@@ -1,7 +1,7 @@
 // src/pages/HubBackups.jsx
 // Hub admin page — monitors backup health across all registered sites.
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
@@ -33,12 +33,20 @@ function fmtRelative(iso) {
   return `${days}d ago`;
 }
 
+const FMT_DATE = new Intl.DateTimeFormat("en-ZA", {
+  year: "numeric", month: "short", day: "2-digit",
+  hour: "2-digit", minute: "2-digit",
+});
 function fmtDate(iso) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-ZA", {
-    year: "numeric", month: "short", day: "2-digit",
-    hour: "2-digit", minute: "2-digit",
-  });
+  // Guard against malformed payloads — a partially upgraded site could
+  // ship a non-ISO timestamp, and Intl.format() on an invalid Date
+  // throws RangeError mid-render, which would take out the whole page.
+  // The pre-hoist toLocaleString() form silently produced "Invalid Date"
+  // instead of throwing; preserve that contract.
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
+  return FMT_DATE.format(d);
 }
 
 const STATUS_META = {
@@ -111,7 +119,7 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
   const SqlIcon = sqlMeta.icon;
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm shadow-black/5 backdrop-blur-sm">
+    <div className="rounded-2xl border border-border/70 bg-card/95 p-5 shadow-sm shadow-black/5">
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-center gap-3 min-w-0">
@@ -498,7 +506,10 @@ export default function HubBackups() {
   }, [syncEnabled, toast]);
 
   const sites = data?.sites || [];
-  const hubBackupMap = Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s]));
+  const hubBackupMap = useMemo(
+    () => Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s])),
+    [hubBackupData?.sites],
+  );
 
   const handleDownload = useCallback(async (site) => {
     setDownloading(site.site_id);
@@ -511,7 +522,7 @@ export default function HubBackups() {
       a.href = url;
       a.download = `cardoso-${site.site_id}-${new Date().toISOString().slice(0, 10)}.db`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       toast({ title: "Backup downloaded", description: site.site_name });
     } catch (err) {
       toast({ title: "Download failed", description: err.message, variant: "destructive" });
@@ -531,7 +542,7 @@ export default function HubBackups() {
       a.href = url;
       a.download = `cardoso-config-${site.site_id}-${new Date().toISOString().slice(0, 10)}.env`;
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
       toast({ title: ".env downloaded", description: site.site_name });
     } catch (err) {
       toast({ title: ".env download failed", description: err.message, variant: "destructive" });

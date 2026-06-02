@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { ChevronDown, ChevronUp, Edit2, Lock, Zap, MessageSquare } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,13 +47,22 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
   const canEdit = typeof onEdit === "function";
   const color = record.flag_color || "none";
 
-  // Parse customer number from various locations
-  let parsedData = record.data;
-  if (typeof parsedData === "string") {
-    try { parsedData = JSON.parse(parsedData); } catch { parsedData = {}; }
-  }
+  // Parse customer number from various locations. JSON.parse can be
+  // expensive for large blobs so cache by record identity.
+  const parsedData = useMemo(() => {
+    const raw = record.data;
+    if (typeof raw !== "string") return raw;
+    try { return JSON.parse(raw); } catch { return {}; }
+  }, [record.data]);
   const customerNumber = record.customer_number || parsedData?.customer_number || record.source_id;
   const sourceTable = record.source_table || parsedData?.source_table;
+
+  // Format the relative date once per render rather than twice (mobile +
+  // desktop both consumed the same value).
+  const relativeSynced = useMemo(
+    () => formatDistanceToNow(new Date(record.synced_at || record.created_date), { addSuffix: true }),
+    [record.synced_at, record.created_date],
+  );
 
   return (
     <div
@@ -133,7 +142,7 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
           {/* Right: sync time + actions */}
           <div className="flex items-center gap-1 shrink-0">
             <span className="text-xs text-muted-foreground mr-2 hidden sm:block">
-              {formatDistanceToNow(new Date(record.synced_at || record.created_date), { addSuffix: true })}
+              {relativeSynced}
             </span>
 
             {canEdit ? (
@@ -188,13 +197,13 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
 
         {/* Sync time on mobile (below main row) */}
         <p className="text-xs text-muted-foreground mt-1.5 sm:hidden">
-          {formatDistanceToNow(new Date(record.synced_at || record.created_date), { addSuffix: true })}
+          {relativeSynced}
         </p>
 
-        {/* Custom Fields */}
-        {customFields?.filter(cf => cf.is_active && record[cf.field_key]).length > 0 && (
+        {/* Custom Fields — parent already pre-filtered to is_active. */}
+        {customFields?.some(cf => record[cf.field_key]) && (
           <div className="flex flex-wrap gap-1.5 mt-3">
-            {customFields.filter(cf => cf.is_active).map(cf => {
+            {customFields.map(cf => {
               const value = record[cf.field_key];
               if (!value) return null;
               return (

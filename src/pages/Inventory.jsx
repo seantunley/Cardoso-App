@@ -6,7 +6,7 @@ import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
 import SummaryTile from "@/components/shared/SummaryTile";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { reportClientError } from "@/lib/clientLog";
+import { useHubMode } from "@/lib/useAppInfo";
 import { getLedgerFortune, getReportSignature } from "@/lib/fun";
 
 // ── Resizable column widths (mirrors the CustomerBalances pattern) ──────────
@@ -156,6 +156,9 @@ async function fetchHubSites() {
   return res.json();
 }
 
+const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
+const EXCLUDED_COMMODITIES = new Set(['10']);
+
 const formatNum = (val, decimals = 2) => {
   if (val === null || val === undefined || val === '') return '—';
   const n = parseFloat(String(val).replace(/,/g, ''));
@@ -169,7 +172,7 @@ const formatCurrency = (val) => {
 
 export default function Inventory() {
   const colorScheme = useColorScheme();
-  const [hubMode, setHubMode] = useState(false);
+  const hubMode = useHubMode();
   const [siteFilter, setSiteFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [hideZeroQty, setHideZeroQty] = useState(true);
@@ -193,12 +196,6 @@ export default function Inventory() {
     }
   }
 
-  useEffect(() => {
-    fetch("/api/app-info")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (d?.hub_mode) setHubMode(true); })
-      .catch(err => reportClientError("Inventory.appInfo", err));
-  }, []);
 
   // Debounce search 200ms
   useEffect(() => {
@@ -225,8 +222,6 @@ export default function Inventory() {
     placeholderData: (prev) => prev,
   });
 
-  const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
-  const EXCLUDED_COMMODITIES = new Set(['10']);
   const allRows = data?.records ?? [];
   // The hub-side endpoint paginates and silently caps at 1000 rows
   // when no limit/offset is sent (which is our case — we don't send
@@ -249,7 +244,7 @@ export default function Inventory() {
       if (v && !EXCLUDED_COMMODITIES.has(v)) seen.add(v);
     }
     return [...seen].sort();
-  }, [allRows, EXCLUDED_COMMODITIES]);
+  }, [allRows]);
   const rows = useMemo(() => {
     const isBelowCost = (r) => {
       const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
@@ -312,7 +307,10 @@ export default function Inventory() {
     a.href = url;
     a.download = `inventory-export-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
-    URL.revokeObjectURL(url);
+    // Defer revoke so the browser has actually initiated the download
+    // before the blob URL becomes invalid (Firefox in particular can
+    // race the synchronous revoke).
+    setTimeout(() => URL.revokeObjectURL(url), 0);
   };
 
   return (
@@ -603,7 +601,6 @@ export default function Inventory() {
             hubMode={hubMode}
             formatNum={formatNum}
             formatCurrency={formatCurrency}
-            COMMODITY_LABELS={COMMODITY_LABELS}
             highlightBelowCost={highlightBelowCost}
             sortField={sortField}
             sortDir={sortDir}
@@ -628,7 +625,6 @@ export default function Inventory() {
 
 // ─── Tables ───────────────────────────────────────────────────────────────────
 const ROW_HEIGHT = 30;
-const TABLE_HEIGHT = typeof window !== "undefined" ? Math.max(300, window.innerHeight - 260) : 600;
 
 function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlightBelowCost }) {
   const isBelowCost = (row) => {
@@ -677,7 +673,7 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
   );
 }
 
-function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LABELS, highlightBelowCost, sortField, sortDir, onSort }) {
+function InventoryTable({ rows, hubMode, formatNum, formatCurrency, highlightBelowCost, sortField, sortDir, onSort }) {
   function SA({ field }) {
     if (sortField !== field) return <span className="ml-0.5 opacity-30">⇅</span>;
     return <span className="ml-0.5 opacity-80">{sortDir === "asc" ? "↑" : "↓"}</span>;

@@ -376,10 +376,11 @@ export default function HubMetrics() {
     refetchInterval: 300_000,
   });
 
-  const pingBySite = {};
-  for (const p of pingQuery.data?.sites ?? []) {
-    pingBySite[p.site_slug] = p;
-  }
+  const pingBySite = useMemo(() => {
+    const map = {};
+    for (const p of pingQuery.data?.sites ?? []) map[p.site_slug] = p;
+    return map;
+  }, [pingQuery.data?.sites]);
 
   return (
     <div className="min-h-screen p-6 bg-background">

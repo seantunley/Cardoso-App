@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -188,42 +188,54 @@ function renderFlagSummary(log) {
 
 export default function AuditLogTable({ logs = [] }) {
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [sortBy, setSortBy] = useState("created_date");
   const [sortOrder, setSortOrder] = useState("desc");
-  const [expandedRows, setExpandedRows] = useState({});
+  const [expandedRows, setExpandedRows] = useState(() => new Set());
+
+  // Debounce search input — avoids re-filtering N log rows on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchQuery), 200);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  // Per-log derived index built once per logs change: lowercased searchable
+  // fields, flag summary, pretty-printed changes blob. Avoids re-parsing
+  // JSON and re-lowercasing strings on every render / keystroke.
+  const indexedLogs = useMemo(() => {
+    return logs.map((log) => {
+      const flagSummary = log.action_type === "update_flag" ? renderFlagSummary(log) : null;
+      const search = [
+        log.user_name, log.user_email, log.resource_name,
+        log.action_type, log.action_details, log.resource_type,
+      ].map((s) => (s ? String(s).toLowerCase() : "")).join("\0");
+      const changesPretty = typeof log.changes === "string"
+        ? log.changes
+        : (log.changes ? JSON.stringify(log.changes, null, 2) : "");
+      return { log, flagSummary, search, changesPretty };
+    });
+  }, [logs]);
 
   const filteredAndSorted = useMemo(() => {
-    const filtered = logs.filter((log) => {
-      const query = searchQuery.toLowerCase();
-      return (
-        log.user_name?.toLowerCase().includes(query) ||
-        log.user_email?.toLowerCase().includes(query) ||
-        log.resource_name?.toLowerCase().includes(query) ||
-        log.action_type?.toLowerCase().includes(query) ||
-        log.action_details?.toLowerCase().includes(query) ||
-        log.resource_type?.toLowerCase().includes(query)
-      );
-    });
+    const query = debouncedQuery.toLowerCase();
+    const filtered = query ? indexedLogs.filter((e) => e.search.includes(query)) : indexedLogs;
 
-    filtered.sort((a, b) => {
-      let aVal = a[sortBy];
-      let bVal = b[sortBy];
-
+    const sorted = [...filtered].sort((a, b) => {
+      let aVal = a.log[sortBy];
+      let bVal = b.log[sortBy];
       if (aVal === undefined) aVal = "";
       if (bVal === undefined) bVal = "";
-
       if (typeof aVal === "string") {
         aVal = aVal.toLowerCase();
         bVal = bVal.toLowerCase();
       }
-
       if (aVal < bVal) return sortOrder === "asc" ? -1 : 1;
       if (aVal > bVal) return sortOrder === "asc" ? 1 : -1;
       return 0;
     });
 
-    return filtered;
-  }, [logs, searchQuery, sortBy, sortOrder]);
+    return sorted;
+  }, [indexedLogs, debouncedQuery, sortBy, sortOrder]);
 
   const handleSort = (column) => {
     if (sortBy === column) {
@@ -235,10 +247,11 @@ export default function AuditLogTable({ logs = [] }) {
   };
 
   const toggleExpanded = (id) => {
-    setExpandedRows((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+    setExpandedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
   };
 
   const SortIcon = ({ column }) => {
@@ -273,10 +286,9 @@ export default function AuditLogTable({ logs = [] }) {
 
           {/* Mobile card list — visible only on small screens */}
           <div className="block sm:hidden space-y-2">
-            {filteredAndSorted.map((log) => {
-              const isExpanded = !!expandedRows[log.id];
+            {filteredAndSorted.map(({ log, flagSummary, changesPretty }) => {
+              const isExpanded = expandedRows.has(log.id);
               const isFlagUpdate = log.action_type === "update_flag";
-              const flagSummary = isFlagUpdate ? renderFlagSummary(log) : null;
               return (
                 <div key={`m-${log.id}`} className="rounded-lg border border-border bg-muted/20 p-3 text-sm space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
@@ -307,7 +319,7 @@ export default function AuditLogTable({ logs = [] }) {
                   {isExpanded && (
                     <div className="rounded-lg border border-border bg-muted/50 p-2 text-xs text-muted-foreground">
                       <pre className="whitespace-pre-wrap break-words text-[11px]">
-                        {typeof log.changes === "string" ? log.changes : JSON.stringify(log.changes, null, 2)}
+                        {changesPretty}
                       </pre>
                     </div>
                   )}
@@ -364,10 +376,9 @@ export default function AuditLogTable({ logs = [] }) {
               </thead>
 
               <tbody>
-                {filteredAndSorted.map((log) => {
-                  const isExpanded = !!expandedRows[log.id];
+                {filteredAndSorted.map(({ log, flagSummary, changesPretty }) => {
+                  const isExpanded = expandedRows.has(log.id);
                   const isFlagUpdate = log.action_type === "update_flag";
-                  const flagSummary = isFlagUpdate ? renderFlagSummary(log) : null;
 
                   return (
                     <tr
@@ -458,9 +469,7 @@ export default function AuditLogTable({ logs = [] }) {
                                   {log.action_details || "-"}
                                 </div>
                                 <pre className="whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
-                                  {typeof log.changes === "string"
-                                    ? log.changes
-                                    : JSON.stringify(log.changes, null, 2)}
+                                  {changesPretty}
                                 </pre>
                               </div>
                             )}

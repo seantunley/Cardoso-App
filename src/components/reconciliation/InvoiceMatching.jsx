@@ -387,6 +387,18 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
     return paid;
   }, [activeTab, paid, exceptions, nonCompliant, missingPodRows]);
 
+  const colOrder = useMemo(() => ([
+    'idx', 'order', 'store', 'custNo', 'cust', 'week', 'orderDay', 'deliveryDay',
+    'leadTime', 'delivery', 'podUploaded', 'target',
+    ...(activeTab === 'exceptions' ? ['exception'] : []),
+    'ocr', 'invoice', 'amount',
+  ]), [activeTab]);
+
+  const totalColWidth = useMemo(
+    () => colOrder.reduce((s, id) => s + (widths[id] || 100), 0),
+    [colOrder, widths],
+  );
+
   const filtered = useMemo(() => {
     return tabData.filter((e) => {
       // The extraction_status filter (not_found / pending) only makes
@@ -598,27 +610,17 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
         className="border overflow-y-auto overflow-x-hidden max-h-[28rem]"
         style={{ borderColor: 'hsl(var(--border))', borderRadius: '12px' }}
       >
-        {(() => {
-          const colOrder = [
-            'idx', 'order', 'store', 'custNo', 'cust', 'week', 'orderDay', 'deliveryDay',
-            'leadTime', 'delivery', 'podUploaded', 'target',
-            ...(activeTab === 'exceptions' ? ['exception'] : []),
-            'ocr', 'invoice', 'amount',
-          ];
-          const totalWidth = colOrder.reduce((s, id) => s + (widths[id] || 100), 0);
-          return (
-        // Table is 100% of container; column percentages are
-        // computed from the pixel ratios in `widths` state. The
-        // browser handles "fill the container" — no JS-side
-        // auto-fit logic to get wrong. Resize handlers still
-        // operate in pixels (relative to current container width)
-        // and persist to localStorage, but on render we always
-        // re-derive percentages so the proportions are honoured
-        // regardless of container size.
+        {/* Table is 100% of container; column percentages are computed
+            from the pixel ratios in `widths` state. The browser handles
+            "fill the container" — no JS-side auto-fit logic to get wrong.
+            Resize handlers still operate in pixels (relative to current
+            container width) and persist to localStorage, but on render we
+            always re-derive percentages so the proportions are honoured
+            regardless of container size. */}
         <table className="text-xs w-full" style={{ tableLayout: 'fixed' }}>
           <colgroup>
             {colOrder.map((id) => (
-              <col key={id} style={{ width: `${((widths[id] || 100) / totalWidth) * 100}%` }} />
+              <col key={id} style={{ width: `${((widths[id] || 100) / totalColWidth) * 100}%` }} />
             ))}
           </colgroup>
           <thead className="sticky top-0 z-10" style={{ background: 'hsl(24 8% 11%)' }}>
@@ -774,8 +776,6 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
             ))}
           </tbody>
         </table>
-          );
-        })()}
       </div>
       <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
         Showing <span className="text-foreground tabular-nums">{filtered.length}</span> of{' '}

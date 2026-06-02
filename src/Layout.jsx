@@ -364,6 +364,7 @@ import CommandPalette from "@/components/CommandPalette";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
+import { useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
 import { toast } from "sonner";
 import { reportClientError } from "@/lib/clientLog";
@@ -424,7 +425,7 @@ export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
   const [isCollapsed, setIsCollapsed]       = useState(true);
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
-  const [hubMode, setHubMode]               = useState(false);
+  const hubMode = useHubMode();
   const [cmdOpen, setCmdOpen]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
@@ -472,13 +473,6 @@ export default function Layout({ children, currentPageName }) {
 
   const { user: currentUser, logout } = useAuth();
   const isAdmin = currentUser?.role === "admin";
-
-  useEffect(() => {
-    fetch("/api/app-info")
-      .then(r => r.ok ? r.json() : null)
-      .then(d => { if (d?.hub_mode) setHubMode(true); })
-      .catch(err => reportClientError("Layout.appInfo", err));
-  }, []);
 
   useEffect(() => {
     if (!currentUser) return;
