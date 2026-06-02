@@ -95,7 +95,7 @@ export default function Collections() {
   // per-assignment, so loop and report a succeeded/failed summary rather than
   // failing silently on any one row.
   const bulkStatus = useMutation({
-    mutationFn: async ({ status, reason }) => {
+    mutationFn: async (/** @type {{ status: string, reason: string }} */ { status, reason }) => {
       const ids = [...selectedIds];
       const results = await Promise.allSettled(
         ids.map((id) => apiSend(`/api/collections/assignments/${id}/status`, "PUT", { status, reason })),
@@ -326,7 +326,7 @@ export default function Collections() {
                             role="button"
                             tabIndex={0}
                             aria-label={`Open ${a.customer_name || "assignment"}`}
-                            onKeyDown={(e) => { if (e.target.tagName === "INPUT") return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
+                            onKeyDown={(e) => { if (e.target instanceof HTMLElement && e.target.tagName === "INPUT") return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
                             className={`border-b border-border last:border-0 cursor-pointer transition-colors ${
                               selectedIds.has(a.id) ? "bg-amber-500/10" : drawerAssignment?.id === a.id ? "bg-amber-500/5" : "hover:bg-muted/30"
                             }`}

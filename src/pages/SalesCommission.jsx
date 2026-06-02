@@ -455,6 +455,7 @@ export default function SalesCommission() {
 // Fixed-width, right-aligned metric cell (label over value) so the per-rep
 // summary numbers line up in columns across rows instead of as ragged inline
 // "label value" spans.
+/** @param {{ label: any, value: any, tone?: string, title?: string, width?: string }} props */
 function MetricCell({ label, value, tone = "text-foreground", title, width = "w-28" }) {
   return (
     <div className={`${width} shrink-0 text-right`} title={title}>

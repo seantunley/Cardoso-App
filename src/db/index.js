@@ -81,7 +81,9 @@ for (const [key, val] of PRAGMAS) {
 // can't be overridden) — every INSERT that relies on the default must
 // be migrated to set the column explicitly with now_local().
 const SAST_OFFSET_MS = 2 * 60 * 60 * 1000;
-db.function('now_local', () => {
+// better-sqlite3's .function() exists at runtime but the bundled @types
+// don't expose it on Database; cast so typecheck passes.
+/** @type {any} */ (db).function('now_local', () => {
   const d = new Date(Date.now() + SAST_OFFSET_MS);
   return d.toISOString().slice(0, 19).replace('T', ' ');
 });
