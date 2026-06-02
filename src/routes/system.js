@@ -637,7 +637,10 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       // Sync freshness per source. All three sync nightly, so >24h since the
       // last successful sync = stale. null last_synced_at = never synced.
       const STALE_HOURS = 24;
-      const rawSources = [
+      // These sync jobs only run on site installs; the hub receives this data
+      // via ETL, not local Sage sync. On the hub their meta stays null, which
+      // would falsely mark every source stale, so omit them in hub mode.
+      const rawSources = process.env.HUB_MODE === 'true' ? [] : [
         { key: 'creditors', label: 'Creditors', last_synced_at: getCreditorMeta()?.last_synced_at || null },
         { key: 'inventory', label: 'Inventory sales', last_synced_at: getInventoryMeta()?.last_synced_at || null },
         { key: 'receipts', label: 'Stock receipts', last_synced_at: getReceiptMeta()?.last_synced_at || null },

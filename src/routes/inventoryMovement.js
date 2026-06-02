@@ -21,10 +21,11 @@ import {
   getItemSeasonality,
   getReorderPlan,
 } from '../services/inventoryForecast.js';
+import { siteIdFilter, isSiteAllowed, getAllowedSiteIds } from '../lib/hubSiteScope.js';
 
 function isHub() { return process.env.HUB_MODE === 'true'; }
 
-function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
+function hubTopMovers({ from, to, limit = 50, commodity, siteId, siteFilter = { sql: '', params: [] } }) {
   // Build params in exact SQL placeholder order:
   //   1. scWhere: [siteId?, from?, to?]
   //   2. ir subquery WHERE: [siteId?]
@@ -44,6 +45,7 @@ function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
   if (siteId) { scWhere += ' AND sc.site_id = ?'; scParams.push(siteId); }
   if (fromMo) { scWhere += ' AND sc.period >= ?'; scParams.push(fromMo); }
   if (toMo) { scWhere += ' AND sc.period <= ?'; scParams.push(toMo); }
+  scWhere += siteFilter.sql; scParams.push(...siteFilter.params); // hub allow-list (sc.site_id)
 
   // When a commodity filter is active, use INNER JOIN so only items
   // matching that commodity appear in the results. Without a filter,
@@ -100,7 +102,7 @@ function hubTopMovers({ from, to, limit = 50, commodity, siteId }) {
   `).all(...params);
 }
 
-function hubItemTrend({ itemNumber, from, to, siteId }) {
+function hubItemTrend({ itemNumber, from, to, siteId, siteFilter = { sql: '', params: [] } }) {
   const fromMo = from ? from.slice(0, 7) : from;
   const toMo = to ? to.slice(0, 7) : to;
   let where = 'WHERE sc.item_number = ?';
@@ -108,6 +110,7 @@ function hubItemTrend({ itemNumber, from, to, siteId }) {
   if (siteId) { where += ' AND sc.site_id = ?'; params.push(siteId); }
   if (fromMo) { where += ' AND sc.period >= ?'; params.push(fromMo); }
   if (toMo) { where += ' AND sc.period <= ?'; params.push(toMo); }
+  where += siteFilter.sql; params.push(...siteFilter.params); // hub allow-list (sc.site_id)
 
   return db.prepare(`
     SELECT
@@ -123,7 +126,7 @@ function hubItemTrend({ itemNumber, from, to, siteId }) {
   `).all(...params);
 }
 
-function hubDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity, siteId }) {
+function hubDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity, siteId, siteFilter = { sql: '', params: [] } }) {
   const cutoffDate = new Date();
   cutoffDate.setDate(cutoffDate.getDate() - thresholdDays);
   const cutoff = `${cutoffDate.getFullYear()}-${String(cutoffDate.getMonth() + 1).padStart(2, '0')}-${String(cutoffDate.getDate()).padStart(2, '0')}`;
@@ -140,6 +143,7 @@ function hubDeadStock({ thresholdDays = 90, minValue = 0, limit = 100, commodity
   const irParams = [];
   if (siteId) { irWhere += ' AND ir.site_id = ?'; irParams.push(siteId); }
   if (commodity) { irWhere += ' AND ir.commodity = ?'; irParams.push(commodity); }
+  irWhere += siteFilter.sql; irParams.push(...siteFilter.params); // hub allow-list (ir.site_id)
   const params = [...irParams, cutoff, minValue, limit];
 
   return db.prepare(`
@@ -197,12 +201,16 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.get('/api/inventory-movement/top-movers', ...guard, (req, res) => {
     try {
       const { from, to, limit, commodity, site_id, supplier } = req.query;
+      if (isHub() && site_id && site_id !== 'all' && !isSiteAllowed(req, res, site_id)) {
+        return res.status(403).json({ error: 'Not permitted for this site' });
+      }
       const rows = isHub()
         ? hubTopMovers({
             from: from || undefined, to: to || undefined,
             limit: Math.max(1, parseInt(limit, 10) || 50),
             commodity: commodity && commodity !== 'all' ? commodity : undefined,
             siteId: site_id && site_id !== 'all' ? site_id : undefined,
+            siteFilter: siteIdFilter(req, res, 'sc.site_id'),
           })
         : getTopMovers({
             from: from || undefined, to: to || undefined,
@@ -221,10 +229,14 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     try {
       const { item, from, to, site_id } = req.query;
       if (!item) return res.status(400).json({ error: 'item is required' });
+      if (isHub() && site_id && site_id !== 'all' && !isSiteAllowed(req, res, site_id)) {
+        return res.status(403).json({ error: 'Not permitted for this site' });
+      }
       const rows = isHub()
         ? hubItemTrend({
             itemNumber: item, from: from || undefined, to: to || undefined,
             siteId: site_id && site_id !== 'all' ? site_id : undefined,
+            siteFilter: siteIdFilter(req, res, 'sc.site_id'),
           })
         : getItemTrend({ itemNumber: item, from: from || undefined, to: to || undefined });
       res.json({ rows });
@@ -237,6 +249,9 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.get('/api/inventory-movement/dead-stock', ...guard, (req, res) => {
     try {
       const { threshold, minValue, limit, commodity, site_id, supplier } = req.query;
+      if (isHub() && site_id && site_id !== 'all' && !isSiteAllowed(req, res, site_id)) {
+        return res.status(403).json({ error: 'Not permitted for this site' });
+      }
       const rows = isHub()
         ? hubDeadStock({
             thresholdDays: Math.max(1, parseInt(threshold, 10) || 90),
@@ -244,6 +259,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
             limit: Math.max(1, parseInt(limit, 10) || 100),
             commodity: commodity && commodity !== 'all' ? commodity : undefined,
             siteId: site_id && site_id !== 'all' ? site_id : undefined,
+            siteFilter: siteIdFilter(req, res, 'ir.site_id'),
           })
         : getDeadStock({
             thresholdDays: Math.max(1, parseInt(threshold, 10) || 90),
@@ -310,9 +326,15 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     }
   });
 
-  router.get('/api/inventory-movement/sites', ...guard, (_req, res) => {
+  router.get('/api/inventory-movement/sites', ...guard, (req, res) => {
     try {
-      res.json({ hub: isHub(), sites: isHub() ? hubSites() : [] });
+      let sites = isHub() ? hubSites() : [];
+      // Restrict the site picker to the user's allowed sites.
+      const allowedIds = getAllowedSiteIds(req, res);
+      if (isHub() && allowedIds !== null) {
+        sites = sites.filter((s) => allowedIds.has(s.id) || allowedIds.has(Number(s.id)) || allowedIds.has(String(s.id)));
+      }
+      res.json({ hub: isHub(), sites });
     } catch (err) {
       logError('inventoryMovement.sites', err);
       res.status(500).json({ error: err.message });

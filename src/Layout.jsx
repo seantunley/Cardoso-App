@@ -385,7 +385,7 @@ const navItems = [
   { name: "Inventory List",      icon: IconInventory,             page: "Inventory",        permission: "can_access_inventory", group: "Inventory" },
   { name: "Inventory Movement",  icon: IconInventoryMovement,     page: "InventoryMovement", permission: "can_access_inventory_movement", group: "Inventory" },
   { name: "Stock Expiry",        icon: IconStockExpiry,           page: "StockReceipts",    permission: "can_access_stock_receipt_expiry", group: "Inventory" },
-  { name: "Price List",          icon: IconPriceList,             page: "PriceList",        permission: "can_access_price_list", group: "Inventory" },
+  { name: "Price List",          icon: IconPriceList,             page: "PriceList",        permission: "can_access_price_list", siteOnly: true, group: "Inventory" },
   { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "HubReconciliation",permission: "can_access_hub_reconciliation", hubOnly: true, group: "BAT and JTI" },
   { name: "BAT Reconciliation",  icon: IconReconciliationCompare, page: "Reconciliation",   permission: "can_access_reconciliation", siteOnly: true, group: "BAT and JTI" },
   { name: "JTI Monthly Reports", icon: IconJti,                   page: "Jti",              permission: "can_access_jti", siteOnly: true, group: "BAT and JTI" },

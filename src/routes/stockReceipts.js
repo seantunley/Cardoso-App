@@ -8,23 +8,24 @@ import {
   addExpiry,
   normaliseIsoDate,
 } from '../services/stockReceipts.js';
+import { siteIdFilter, isSiteAllowed, getAllowedSiteIds } from '../lib/hubSiteScope.js';
 
 function isHub() { return process.env.HUB_MODE === 'true'; }
 
-function hubListLines({ search, missingExpiry, siteId, limit = 200 }) {
-  const where = [];
+function hubListLines({ search, missingExpiry, siteId, limit = 200, siteFilter = { sql: '', params: [] } }) {
+  let whereSql = 'WHERE 1=1';
   const params = [];
-  if (siteId) { where.push('h.site_id = ?'); params.push(siteId); }
+  if (siteId) { whereSql += ' AND h.site_id = ?'; params.push(siteId); }
   if (search) {
-    where.push('(h.receipt_number LIKE ? OR h.item_number LIKE ? OR h.item_description LIKE ?)');
+    whereSql += ' AND (h.receipt_number LIKE ? OR h.item_number LIKE ? OR h.item_description LIKE ?)';
     params.push(`%${search}%`, `%${search}%`, `%${search}%`);
   }
   if (missingExpiry) {
-    where.push('h.expiry_date IS NULL');
+    whereSql += ' AND h.expiry_date IS NULL';
   }
+  whereSql += siteFilter.sql; params.push(...siteFilter.params); // hub allow-list (h.site_id)
   const safeLimit = Math.max(1, Math.min(limit, 1000));
   params.push(safeLimit);
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
   return db.prepare(`
     SELECT
@@ -72,9 +73,14 @@ export function createStockReceiptRouter({ requireAuth, requirePermission }) {
     }
   });
 
-  router.get('/api/stock-receipts/sites', ...guard, (_req, res) => {
+  router.get('/api/stock-receipts/sites', ...guard, (req, res) => {
     try {
-      res.json({ hub: isHub(), sites: isHub() ? hubSites() : [] });
+      let sites = isHub() ? hubSites() : [];
+      const allowedIds = getAllowedSiteIds(req, res);
+      if (isHub() && allowedIds !== null) {
+        sites = sites.filter((s) => allowedIds.has(s.id) || allowedIds.has(Number(s.id)) || allowedIds.has(String(s.id)));
+      }
+      res.json({ hub: isHub(), sites });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
@@ -88,7 +94,10 @@ export function createStockReceiptRouter({ requireAuth, requirePermission }) {
 
       if (isHub()) {
         const siteId = req.query.site_id && req.query.site_id !== 'all' ? req.query.site_id : undefined;
-        const rows = hubListLines({ search, missingExpiry, siteId, limit });
+        if (siteId && !isSiteAllowed(req, res, siteId)) {
+          return res.status(403).json({ error: 'Not permitted for this site' });
+        }
+        const rows = hubListLines({ search, missingExpiry, siteId, limit, siteFilter: siteIdFilter(req, res, 'h.site_id') });
         return res.json({ count: rows.length, records: rows });
       }
 

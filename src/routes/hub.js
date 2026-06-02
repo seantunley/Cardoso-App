@@ -1612,6 +1612,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
+             can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
@@ -2310,16 +2311,23 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/commission/archives — list across all sites (latest first)
   // OR per-site if ?site_id=... given.
-  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission'), requireAllowedSite('site_id'), (req, res) => {
     try {
       const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
         ? req.query.site_id : null;
       const limitRaw = Number(req.query?.limit);
       const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 60;
-      const archives = listHubCommissionArchives({ db, siteId, limit });
-      const expected_sites = (HUB_SITES || []).map((s) => ({
-        id: s.id, name: s.name || s.slug || s.id,
-      }));
+      // Scope to the user's allowed sites — the service returns every site's
+      // archives (incl. report_json), so filter both the list and the expected-
+      // sites the UI shows. requireAllowedSite already rejects a disallowed
+      // explicit ?site_id.
+      const allowedIds = getAllowedSiteIds(req, res);
+      const siteAllowed = (sid) => allowedIds === null || allowedIds.has(sid) || allowedIds.has(Number(sid)) || allowedIds.has(String(sid));
+      let archives = listHubCommissionArchives({ db, siteId, limit });
+      if (allowedIds !== null) archives = archives.filter((a) => siteAllowed(a.site_id));
+      const expected_sites = (HUB_SITES || [])
+        .filter((s) => siteAllowed(s.id))
+        .map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
       res.json({ ok: true, archives, expected_sites, limit });
     } catch (err) {
       console.error('[hub-commission] list failed:', err.message);
@@ -2337,6 +2345,13 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
     const row = getHubCommissionArchive({ db, id });
     if (!row) return res.status(404).json({ error: `Hub commission archive #${id} not found` });
+    // Enforce the site allow-list — a restricted user must not download another
+    // site's archive by guessing its id. 404 (not 403) so we don't leak that
+    // the archive exists for a site they can't see.
+    const allowedIds = getAllowedSiteIds(req, res);
+    if (allowedIds !== null && !(allowedIds.has(row.site_id) || allowedIds.has(Number(row.site_id)) || allowedIds.has(String(row.site_id)))) {
+      return res.status(404).json({ error: `Hub commission archive #${id} not found` });
+    }
     if (!fs.existsSync(row.file_path)) {
       console.error(`[hub-commission] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
       logAudit({
@@ -3199,6 +3214,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
@@ -3215,6 +3231,10 @@ export function createReceiveUsersRouter() {
               u.can_access_inventory !== false ? 1 : 0,
               u.can_access_inventory_movement ? 1 : 0,
               u.can_access_network_devices ? 1 : 0,
+              u.can_access_price_list ? 1 : 0,
+              u.can_access_stock_receipt_expiry ? 1 : 0,
+              u.can_access_creditors ? 1 : 0,
+              u.can_access_commission ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -3234,6 +3254,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
@@ -3249,6 +3270,10 @@ export function createReceiveUsersRouter() {
               u.can_access_inventory !== false ? 1 : 0,
               u.can_access_inventory_movement ? 1 : 0,
               u.can_access_network_devices ? 1 : 0,
+              u.can_access_price_list ? 1 : 0,
+              u.can_access_stock_receipt_expiry ? 1 : 0,
+              u.can_access_creditors ? 1 : 0,
+              u.can_access_commission ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -3280,10 +3305,11 @@ export function createReceiveUsersRouter() {
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
+              can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -3297,6 +3323,10 @@ export function createReceiveUsersRouter() {
             u.can_access_inventory !== false ? 1 : 0,
             u.can_access_inventory_movement ? 1 : 0,
             u.can_access_network_devices ? 1 : 0,
+            u.can_access_price_list ? 1 : 0,
+            u.can_access_stock_receipt_expiry ? 1 : 0,
+            u.can_access_creditors ? 1 : 0,
+            u.can_access_commission ? 1 : 0,
             u.can_access_hub_metrics ? 1 : 0,
             u.can_access_hub_backups ? 1 : 0,
             u.can_access_hub_trends ? 1 : 0,
