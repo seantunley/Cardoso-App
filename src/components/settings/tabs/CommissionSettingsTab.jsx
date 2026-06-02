@@ -37,7 +37,7 @@ export default function CommissionSettingsTab() {
       setSweets(toPct(settings.data.sweets_rate));
       setCigtob(toPct(settings.data.cigtob_rate));
       setReference(toPct(settings.data.reference_rate));
-      setVat(toPct(settings.data.vat_rate ?? 0.14));
+      setVat(toPct(settings.data.vat_rate ?? 0.15));
     }
   }, [settings.data]);
 
