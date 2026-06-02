@@ -358,13 +358,18 @@ export async function buildCommissionReport({ from, to }) {
   const params = { from: fromInt, to: toInt, vat: vatDivisor };
 
   let salesCreditRows = [], receiptRows = [], unpaidRows = [];
+  let unpaidUnavailable = false;
   try {
     const [sc, r, up] = await Promise.all([
       runCustomerSqlQuery(salesAndCreditsSql, params),
       runCustomerSqlQuery(receiptsSql, params),
       runCustomerSqlQuery(unpaidSql, params).catch((err) => {
-        // Unpaid is informational only — a failure here shouldn't kill
-        // the commission report. Log it and continue with [].
+        // The unpaid list now seeds next period's clawback snapshot, so a
+        // failure here is NOT harmless: an empty list would later wipe the
+        // clawback basis. Flag it so the archival path can refuse to
+        // overwrite a good snapshot. The live report still renders — the
+        // headline totals come from the two independent queries above.
+        unpaidUnavailable = true;
         logError('commission.report.unpaid', err, { from, to }, 'warn');
         return { recordset: [] };
       }),
@@ -512,6 +517,10 @@ export async function buildCommissionReport({ from, to }) {
   return {
     from, to, settings, reps, totals,
     unpaid_invoices, unpaid_totals,
+    // True when the unpaid Sage query failed: unpaid_invoices is an empty
+    // stand-in, not a real "nothing outstanding". Archival uses this to
+    // avoid clobbering the clawback snapshot.
+    unpaid_unavailable: unpaidUnavailable,
     clawback: clawbackResult.clawback,
     clawback_totals: clawbackResult.totals,
     clawback_previous_period: clawbackResult.previous_period,

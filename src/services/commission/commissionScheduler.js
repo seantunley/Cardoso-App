@@ -52,7 +52,15 @@ export async function generateAndArchiveCommissionPeriod({
   try {
     report = await buildCommissionReport({ from: fromDate, to: toDate });
   } catch (err) {
-    return { status: 'skipped', reason: `report_query_failed: ${err.message}` };
+    return { status: 'failed', reason: `report_query_failed: ${err.message}` };
+  }
+
+  // The unpaid list seeds next period's clawback snapshot. If its Sage query
+  // failed, archiving now would persist an empty snapshot and silently drop
+  // every unpaid invoice from the next clawback. Fail (don't archive) so the
+  // generation retry / boot catch-up regenerates once Sage recovers.
+  if (report.unpaid_unavailable) {
+    return { status: 'failed', reason: 'unpaid_query_failed' };
   }
 
   const { name: depotName, city: depotCity } = readDepotProfile(db);
@@ -60,7 +68,7 @@ export async function generateAndArchiveCommissionPeriod({
   try {
     pdfBuffer = buildCommissionPdf({ depotName, report });
   } catch (err) {
-    return { status: 'skipped', reason: `pdf_build_failed: ${err.message}` };
+    return { status: 'failed', reason: `pdf_build_failed: ${err.message}` };
   }
 
   // Filename uses the city alone (e.g. "Johannesburg") — full depot
@@ -112,10 +120,17 @@ export async function runScheduledMonthlyCommissionJob({ db, now = new Date() })
   const result = await generateAndArchiveCommissionPeriod({
     db, year: period.year, month: period.month,
   });
+  const tag = `${period.year}-${String(period.month).padStart(2, '0')}`;
   if (result.status === 'archived') {
-    console.log(`[commission-scheduler] archived ${period.year}-${String(period.month).padStart(2, '0')} as #${result.archiveId}`);
+    console.log(`[commission-scheduler] archived ${tag} as #${result.archiveId}`);
+  } else if (result.status === 'failed') {
+    // Surfaced as a failed job run (see scheduler successCheck) so it's
+    // visible and the hourly generation retry picks it up.
+    console.error(`[commission-scheduler] FAILED ${tag}: ${result.reason}`);
+    try { logError('commission.scheduler.monthly', new Error(result.reason), { ...period }); }
+    catch (e) { console.error('[commission.scheduler.monthly.log]', e.message); }
   } else {
-    console.log(`[commission-scheduler] skipped ${period.year}-${String(period.month).padStart(2, '0')}: ${result.reason}`);
+    console.log(`[commission-scheduler] skipped ${tag}: ${result.reason}`);
   }
   return { period, ...result };
 }

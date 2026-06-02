@@ -119,27 +119,37 @@ export function archiveCommissionReport({ db, archive, archiveRoot = ARCHIVE_ROO
       // Persist the unpaid snapshot. Scheduled archives are authoritative
       // for the period; manual archives also overwrite so an operator
       // can correct the snapshot if a sync glitch produced bad data.
+      //
+      // EXCEPT when the unpaid Sage query failed: reportJson.unpaid_invoices
+      // is then an empty stand-in, and overwriting would wipe the clawback
+      // basis for the next period. Preserve any existing snapshot and leave
+      // a breadcrumb instead of clearing it. (The scheduler refuses to
+      // archive in this state, so this mainly guards manual archival.)
       const sweetsRate = Number(archive.reportJson?.settings?.sweets_rate) || 0;
       const refRate = Number(archive.reportJson?.settings?.reference_rate) || 0;
       const unpaidByRep = Array.isArray(archive.reportJson?.unpaid_invoices)
         ? archive.reportJson.unpaid_invoices : [];
-      clearSnapshot.run(archive.periodYear, archive.periodMonth);
-      for (const repBucket of unpaidByRep) {
-        const rep = String(repBucket.sales_rep || '').trim() || 'Unknown';
-        for (const inv of (repBucket.invoices || [])) {
-          const net = Number(inv.net_sweet_amount) || 0;
-          insertSnapshot.run(
-            archive.periodYear, archive.periodMonth, rep,
-            String(inv.invoice_number || '').trim(),
-            String(inv.customer_code || '').trim() || null,
-            inv.customer_name || null,
-            inv.invoice_date ? String(inv.invoice_date) : null,
-            net,
-            Number(inv.outstanding_amount) || 0,
-            sweetsRate, refRate,
-            net * sweetsRate, net * refRate,
-            id,
-          );
+      if (archive.reportJson?.unpaid_unavailable) {
+        console.warn(`[commission.archive] #${id} (${archive.periodYear}-${String(archive.periodMonth).padStart(2, '0')}): unpaid query unavailable — preserving existing unpaid snapshot rather than overwriting with an empty one`);
+      } else {
+        clearSnapshot.run(archive.periodYear, archive.periodMonth);
+        for (const repBucket of unpaidByRep) {
+          const rep = String(repBucket.sales_rep || '').trim() || 'Unknown';
+          for (const inv of (repBucket.invoices || [])) {
+            const net = Number(inv.net_sweet_amount) || 0;
+            insertSnapshot.run(
+              archive.periodYear, archive.periodMonth, rep,
+              String(inv.invoice_number || '').trim(),
+              String(inv.customer_code || '').trim() || null,
+              inv.customer_name || null,
+              inv.invoice_date ? String(inv.invoice_date) : null,
+              net,
+              Number(inv.outstanding_amount) || 0,
+              sweetsRate, refRate,
+              net * sweetsRate, net * refRate,
+              id,
+            );
+          }
         }
       }
       return id;
@@ -200,5 +210,36 @@ export function commissionPeriodForRun(now = new Date()) {
     month: m,
     fromDate: `${prevYear}-${pad(prevMonth)}-24`,
     toDate: `${y}-${pad(m)}-23`,
+  };
+}
+
+/**
+ * The most recent commission period that has actually CLOSED — i.e. whose
+ * end date (the 23rd) is strictly in the past. `commissionPeriodForRun`
+ * always returns the current calendar month, whose period is still open on
+ * days 1–23; archiving it then would persist a partial report AND let its
+ * 'scheduled' row make the real 24th-of-month cron skip the period. Use
+ * this for on-demand ("Run now") archival so an early run targets the last
+ * complete period instead. The monthly cron itself fires on the 24th, when
+ * the current period is already closed, so it keeps using commissionPeriodForRun.
+ *
+ * @param {Date} [now]
+ * @returns {{ year: number, month: number, fromDate: string, toDate: string }}
+ */
+export function latestClosedCommissionPeriod(now = new Date()) {
+  const cur = commissionPeriodForRun(now);
+  const today = now.toISOString().slice(0, 10);
+  if (cur.toDate < today) return cur; // current period has already closed
+  // Still open — step back one month to the last period that has closed.
+  const month = cur.month === 1 ? 12 : cur.month - 1;
+  const year  = cur.month === 1 ? cur.year - 1 : cur.year;
+  const pad = (n) => String(n).padStart(2, '0');
+  const prevMonth = month === 1 ? 12 : month - 1;
+  const prevYear  = month === 1 ? year - 1 : year;
+  return {
+    year,
+    month,
+    fromDate: `${prevYear}-${pad(prevMonth)}-24`,
+    toDate: `${year}-${pad(month)}-23`,
   };
 }

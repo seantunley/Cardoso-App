@@ -653,9 +653,10 @@ export function startSchedulers() {
         'commission-monthly-archive',
         () => runScheduledMonthlyCommissionJob({ db }),
         (result) => result,
-        // Skipped runs (already_archived, report_query_failed) are
-        // normal outcomes for this job, not failures.
-        { successCheck: () => true },
+        // already_archived (skipped) is a normal outcome; a transient Sage/
+        // PDF/unpaid failure returns status:'failed' and IS a job failure so
+        // it's visible and the hourly generation-retry below re-attempts it.
+        { successCheck: (r) => r?.status !== 'failed' },
       ));
       cronTasks.push(t);
       registerJob({ name: 'commission-monthly-archive', type: 'cron', cronExpression: '0 3 24 * *', taskRef: t, mode: 'site', description: 'Commission monthly archive — generate + archive the current commission period (24th-of-month cycle)' });
@@ -676,6 +677,24 @@ export function startSchedulers() {
       { successCheck: (r) => !r?.failed },
     ), 60_000);
     registerJob({ name: 'commission-boot-catchup', type: 'one-shot', delayMs: 60_000, mode: 'site', description: 'Commission catch-up — backfill up to 12 missed months on boot' });
+
+    // Commission generation retry — every 60 minutes, re-run a short
+    // catch-up (current + previous period). A transient Sage/PDF/unpaid
+    // failure at the 03:00 cron, or a brief outage on the 24th, would
+    // otherwise leave that month un-archived until the next reboot. The
+    // hasScheduledArchive guard makes this a cheap DB no-op once the period
+    // is archived; only a genuinely missing period re-hits Sage.
+    intervals.push(setInterval(track(
+      'commission-generation-retry',
+      () => runCommissionBootCatchUp({ db, monthsBack: 2 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 60 * 60 * 1000));
+    registerJob({ name: 'commission-generation-retry', type: 'interval', intervalMs: 60 * 60 * 1000, mode: 'site', description: 'Commission generation retry — re-attempt missed/failed monthly archives hourly' });
 
     // Commission hub-push retry tick — every 15 minutes, scan for
     // archives in pending/failed state and try to send them. Same
