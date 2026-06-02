@@ -118,7 +118,26 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
   const seenReceipts = new Set();
   let linesUpserted = 0;
 
+  // Stamp captured before the run. Every line touched this sync gets
+  // updated_date >= this; lines left untouched (reversed/removed in Sage) keep
+  // an older value, which is how we find stale "phantom" lines below.
+  const syncStamp = db.prepare('SELECT now_local() AS t').get().t;
+
+  // Remove phantom lines: any line on a re-synced receipt that wasn't touched
+  // this run (older updated_date) AND has no operator-entered expiry. Lines
+  // WITH expiry are kept — never destroy captured data. We exclude them
+  // explicitly rather than relying on ON DELETE CASCADE, which doesn't fire
+  // because PRAGMA foreign_keys is off, so no expiry rows are orphaned either.
+  const reconcileLine = db.prepare(`
+    DELETE FROM stock_receipt_line
+    WHERE receipt_id = ?
+      AND updated_date < ?
+      AND id NOT IN (SELECT receipt_line_id FROM stock_receipt_line_expiry)
+  `);
+
+  let linesRemoved = 0;
   const insertAll = db.transaction(() => {
+    const touchedReceiptIds = new Set();
     for (const r of rows) {
       const receiptDate = intToDateStr(r.receipt_date_int);
       upsertReceipt.run(
@@ -133,6 +152,7 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
         continue;
       }
       seenReceipts.add(r.receipt_number);
+      touchedReceiptIds.add(receipt.id);
       upsertLine.run(
         receipt.id,
         r.line_no ?? 0,
@@ -144,8 +164,14 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
       );
       linesUpserted++;
     }
+    // Only reconcile receipts we actually re-synced this run, so a transient
+    // empty/failed query can't strip lines off untouched receipts.
+    for (const receiptId of touchedReceiptIds) {
+      linesRemoved += reconcileLine.run(receiptId, syncStamp).changes;
+    }
   });
   insertAll();
+  if (linesRemoved) console.log(`[stock-receipts] reconciled ${linesRemoved} stale line(s) removed from Sage`);
 
   try {
     db.prepare(`
