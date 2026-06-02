@@ -112,7 +112,10 @@ SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
        SUM(ISNULL(OESHDT.FAMTSALES, 0)) AS gross_amount,
        SUM(ISNULL(OESHDT.FRETSALES, 0)) AS credit_amount
 FROM OESHDT
-INNER JOIN ICITMV ON OESHDT.ITEM = ICITMV.ITEMNO
+-- No ICITMV join: COMMODIM = '1' on ICITEM already filters to sweets, and
+-- nothing here reads a vendor column. Joining the vendor table on ITEMNO
+-- multiplies each shipment line by an item's vendor count, overstating sales,
+-- credits and commission (same Sage cardinality trap jtiQuery.js avoids with EXISTS).
 INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
 WHERE OESHDT.TRANDATE BETWEEN @from AND @to
   AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
@@ -147,7 +150,9 @@ SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
        SUM(ISNULL(OESHDT.FAMTSALES, 0))
          - SUM(ISNULL(OESHDT.FRETSALES, 0))      AS net_sweet_amount
 FROM OESHDT
-INNER JOIN ICITMV ON OESHDT.ITEM = ICITMV.ITEMNO
+-- No ICITMV join (see sales query): joining the vendor table multiplies
+-- shipment lines for multi-vendor items and would inflate the per-invoice
+-- net sweet amount and the clawback snapshots built from it.
 INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
 INNER JOIN AROBL ar
   ON LTRIM(RTRIM(ar.IDINVC))  = LTRIM(RTRIM(OESHDT.TRANNUM))

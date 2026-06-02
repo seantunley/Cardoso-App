@@ -26,6 +26,9 @@ export function computeAllForecasts() {
   const now = new Date();
   const currentMonth = now.getMonth() + 1;
   const currentPeriod = `${now.getFullYear()}-${String(currentMonth).padStart(2, '0')}`;
+  // The most recent COMPLETE calendar month — the anchor the moving-average
+  // window is measured back from (the current partial month is excluded below).
+  const lastCompletePeriod = `${currentMonth === 1 ? now.getFullYear() - 1 : now.getFullYear()}-${String(currentMonth === 1 ? 12 : currentMonth - 1).padStart(2, '0')}`;
 
   const items = db.prepare(`
     SELECT DISTINCT sc.item_number
@@ -128,7 +131,7 @@ export function computeAllForecasts() {
       seasonality_index, adjusted_demand,
       safety_stock, reorder_point, days_of_stock, suggested_order_qty,
       abc_class, computed_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(item_number) DO UPDATE SET
       avg_daily_demand=excluded.avg_daily_demand,
       demand_std_dev=excluded.demand_std_dev,
@@ -156,9 +159,13 @@ export function computeAllForecasts() {
 
       const config = getConfig(item_number);
 
-      // Weighted moving averages (most recent first in the array)
-      const wma3 = weightedAvg(months.slice(0, 3), [3, 2, 1]);
-      const wma6 = weightedAvg(months.slice(0, 6), [6, 5, 4, 3, 2, 1]);
+      // Weighted moving averages over the most-recent calendar months.
+      // The cache only stores months with sales (producer filters QTYSOLD > 0),
+      // so densify first — otherwise slice(0, N) walks back N *sale* months and
+      // an intermittent seller looks busier than it is (Jan/Apr read as adjacent).
+      const filledMonths = fillCalendarMonths(months, lastCompletePeriod);
+      const wma3 = weightedAvg(filledMonths.slice(0, 3), [3, 2, 1]);
+      const wma6 = weightedAvg(filledMonths.slice(0, 6), [6, 5, 4, 3, 2, 1]);
 
       // Seasonality index
       const seasonality = computeSeasonality(seasonalByItem.get(item_number) || months, currentMonth);
@@ -229,6 +236,27 @@ export function computeAllForecasts() {
     logError('inventoryForecast.run', err);
     throw err;
   }
+}
+
+// Expand a present-only (sale-bearing) month array into a dense, descending
+// calendar series ending at `anchorPeriod` (the last complete month). Missing
+// months — both interior gaps and the stretch from the latest sale up to the
+// anchor — are materialised as zero-demand so the weighted average reflects
+// true recency. `months` is most-recent-first; the returned array is too.
+function fillCalendarMonths(months, anchorPeriod) {
+  if (months.length === 0) return months;
+  const toIndex = (p) => { const [y, m] = p.split('-').map(Number); return y * 12 + (m - 1); };
+  const toPeriod = (idx) => `${Math.floor(idx / 12)}-${String((idx % 12) + 1).padStart(2, '0')}`;
+  const byPeriod = new Map(months.map((r) => [r.period, r]));
+  // Never drop a present month that somehow sits past the anchor (defensive).
+  const startIdx = Math.max(toIndex(anchorPeriod), toIndex(months[0].period));
+  const earliestIdx = toIndex(months[months.length - 1].period); // DESC → last is oldest
+  const filled = [];
+  for (let idx = startIdx; idx >= earliestIdx; idx--) {
+    const period = toPeriod(idx);
+    filled.push(byPeriod.get(period) || { period, qty_sold: 0, revenue: 0 });
+  }
+  return filled;
 }
 
 function weightedAvg(months, weights) {

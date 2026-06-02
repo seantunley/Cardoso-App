@@ -107,6 +107,12 @@ if (TLS_FRONTING) {
 // On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
 app.set('trust proxy', 1);
 
+// gzip responses. Hub payloads (sites list, kpis, aged-debtors) run into
+// multiple MB and ship over Tailscale/LAN — gzip cuts wire size 5-10×.
+// Mounted BEFORE express.static so the hashed JS/CSS bundles are compressed
+// too; compression() only touches responses that pass through it first.
+app.use(compression());
+
 if (IS_PRODUCTION) {
   app.use(express.static(path.join(process.cwd(), 'dist')));
   app.use(cors({
@@ -119,12 +125,6 @@ if (IS_PRODUCTION) {
 } else {
   app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173', credentials: true }));
 }
-// gzip JSON responses. Hub payloads (sites list, kpis, aged-debtors)
-// run into multiple MB and ship over Tailscale/LAN — gzip cuts wire
-// size 5-10×. Note: must be mounted BEFORE express.static so the
-// hashed JS/CSS bundles get compressed too.
-app.use(compression());
-
 // 2 MB JSON body cap. The previous (default) limit was 100kb but
 // express's default actually allows unbounded bodies on app.use(json())
 // without an explicit `limit` — every hub receive endpoint
