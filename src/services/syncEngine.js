@@ -641,6 +641,18 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       console.error('[collections-sync] post-sync hook failed:', err.message);
     }
 
+    // The insights feed is derived from the debtor/inventory data this import
+    // just mutated. Drop its cache centrally here so every caller (manual
+    // import route + interval auto-sync) recomputes against fresh numbers —
+    // the nightly job still warms it. Dynamic import + guard so a stale cache
+    // never breaks the import. Site-mode only; a no-op in hub mode.
+    try {
+      const { invalidateInsightsCache } = await import('./insights.js');
+      invalidateInsightsCache();
+    } catch (err) {
+      console.error('[insights] cache invalidation after import failed:', err.message);
+    }
+
     return {
       success: true,
       message: `Import completed - ${importedCount} records added`,

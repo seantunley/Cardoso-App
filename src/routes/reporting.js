@@ -2057,8 +2057,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // synced sales / inventory / debtor data). Site-mode; the hub returns empty.
   router.get('/api/insights', ...reportsGuard, async (req, res) => {
     try {
-      const { computeInsights } = await import('../services/insights.js');
-      res.json(computeInsights());
+      const { computeInsights, refreshInsights } = await import('../services/insights.js');
+      // ?refresh=true forces a recompute (the Insights page's explicit
+      // "Refresh" button) instead of serving the invalidation-driven cache.
+      const force = req.query.refresh === 'true' || req.query.refresh === '1';
+      res.json(force ? refreshInsights() : computeInsights());
     } catch (err) {
       console.error('[reporting] insights error:', err);
       res.status(500).json({ error: 'Failed to compute insights' });

@@ -72,7 +72,11 @@ function buildInsights() {
   const now = new Date();
   const lastM = ym(new Date(now.getFullYear(), now.getMonth() - 1, 1));   // last complete month
   const prevM = ym(new Date(now.getFullYear(), now.getMonth() - 2, 1));
-  const prev3 = [1, 2, 3].map((i) => ym(new Date(now.getFullYear(), now.getMonth() - i, 1)));
+  // Prior-3-month baseline for the SKU-decliner detector: the three COMPLETE
+  // months BEFORE lastM (offsets 2,3,4). It must NOT include lastM (offset 1) —
+  // lastM is the comparison month, passed separately into the query; including
+  // it here would collapse the baseline to two months and skew the alert.
+  const prev3 = [2, 3, 4].map((i) => ym(new Date(now.getFullYear(), now.getMonth() - i, 1)));
 
   const insights = [];
   const metrics = {}; // METRIC_CATALOG values, for custom-rule evaluation

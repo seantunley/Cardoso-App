@@ -296,13 +296,13 @@ function round2(v) { return v != null ? Math.round(v * 100) / 100 : null; }
 function round1(v) { return v != null ? Math.round(v * 10) / 10 : null; }
 
 export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', abcFilter, limit = 200, commodity, supplier }) {
-  let where = 'WHERE 1=1';
   const params = [];
-  if (abcFilter && abcFilter !== 'all') { where += ' AND f.abc_class = ?'; params.push(abcFilter); }
-  if (commodity && commodity !== 'all') { where += ' AND ir.commodity = ?'; params.push(commodity); }
 
   // Supplier filter — same latest-receipt definition used by Top Movers
   // and Dead Stock. INNER JOIN drops items that have never been received.
+  // Built BEFORE the WHERE clause: its placeholder appears first in the SQL
+  // text (the JOIN precedes WHERE), so its bind value must lead `params` —
+  // otherwise an ABC/commodity filter would bind to the supplier slot.
   const supplierJoin = supplier && supplier !== 'all'
     ? `INNER JOIN (
         SELECT item_number, supplier_name FROM (
@@ -316,6 +316,10 @@ export function getForecastList({ sortField = 'days_of_stock', sortDir = 'asc', 
       ) sp ON sp.item_number = f.item_number AND sp.supplier_name = ?`
     : '';
   if (supplier && supplier !== 'all') params.push(supplier);
+
+  let where = 'WHERE 1=1';
+  if (abcFilter && abcFilter !== 'all') { where += ' AND f.abc_class = ?'; params.push(abcFilter); }
+  if (commodity && commodity !== 'all') { where += ' AND ir.commodity = ?'; params.push(commodity); }
 
   const safeLimit = Math.max(1, Math.min(limit, 1000));
   params.push(safeLimit);

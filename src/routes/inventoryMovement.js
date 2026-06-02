@@ -289,6 +289,15 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly — data comes from sites during ETL sync.' });
     try {
       const result = await syncSalesFromSage();
+      // Sales cache + forecast inputs just changed — drop the insights cache
+      // so the next load recomputes. (Can't centralise in the sales-sync
+      // service: insights imports it, so importing insights back would cycle.)
+      try {
+        const { invalidateInsightsCache } = await import('../services/insights.js');
+        invalidateInsightsCache();
+      } catch (e) {
+        console.error('[insights] cache invalidation after sales sync failed:', e.message);
+      }
       logAudit({
         req,
         action: 'inventoryMovement.sync',

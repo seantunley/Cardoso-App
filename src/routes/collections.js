@@ -15,6 +15,12 @@ function parseAmount(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+// First unpaid invoice's date (DD/MM/YYYY) pulled from the live
+// unpaid_invoices JSON, mirroring helpers.expandDataRecord's
+// last_unpaid_invoice_1_date. json_valid keeps json_extract from erroring on
+// null/blank/non-JSON rows (it yields NULL there instead).
+const FIRST_INVOICE_DATE_SQL = "(CASE WHEN json_valid(d.unpaid_invoices) THEN json_extract(d.unpaid_invoices, '$[0].date') END)";
+
 function getFlagLabel(color) {
   if (color === 'red') return 'Hold';
   if (color === 'orange') return 'Caution';
@@ -315,18 +321,23 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
         where.push(`TRIM(d.sales_rep) = ?`);
         params.push(salesRep);
       }
-      // Days overdue compares against last_unpaid_invoice_1_date in
-      // DD/MM/YYYY format. We let SQLite parse via substr() + julianday
-      // — slower than indexed columns but fine for the ~hundreds of
-      // outstanding customers a depot sees.
+      // Days overdue compares against the first unpaid invoice's date in
+      // DD/MM/YYYY format. Read it from the unpaid_invoices JSON (the live
+      // source the sync writes) rather than the legacy
+      // last_unpaid_invoice_1_date column, which sync no longer refreshes —
+      // reading that stale column omits newly-overdue customers and keeps
+      // already-paid ones. json_valid guards rows with null/blank/bad JSON.
+      // We let SQLite parse via substr() + julianday — slower than indexed
+      // columns but fine for the ~hundreds of outstanding customers a depot
+      // sees.
       if (Number.isFinite(daysOverdue) && daysOverdue > 0) {
         where.push(`(
-          d.last_unpaid_invoice_1_date IS NOT NULL
-          AND d.last_unpaid_invoice_1_date != ''
+          ${FIRST_INVOICE_DATE_SQL} IS NOT NULL
+          AND ${FIRST_INVOICE_DATE_SQL} != ''
           AND CAST((julianday('now') - julianday(
-            substr(d.last_unpaid_invoice_1_date, 7, 4) || '-' ||
-            substr(d.last_unpaid_invoice_1_date, 4, 2) || '-' ||
-            substr(d.last_unpaid_invoice_1_date, 1, 2)
+            substr(${FIRST_INVOICE_DATE_SQL}, 7, 4) || '-' ||
+            substr(${FIRST_INVOICE_DATE_SQL}, 4, 2) || '-' ||
+            substr(${FIRST_INVOICE_DATE_SQL}, 1, 2)
           )) AS INTEGER) >= ?
         )`);
         params.push(daysOverdue);
@@ -336,7 +347,7 @@ export function createCollectionsRouter({ requireAuth, requirePermission }) {
         SELECT d.id, d.customer_number, d.customer_name, d.outstanding_balance,
                d.outstanding_balance_num, d.flag_color, d.flag_reason,
                d.sales_rep, d.account_type, d.terms,
-               d.last_unpaid_invoice_1_date AS last_invoice_date,
+               ${FIRST_INVOICE_DATE_SQL} AS last_invoice_date,
                -- Surface the worklist this customer is already on (if any)
                -- so the UI can render them as disabled with the owner.
                (SELECT w.id   FROM collection_assignment a

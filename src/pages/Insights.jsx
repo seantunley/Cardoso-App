@@ -75,7 +75,13 @@ export default function Insights() {
             )}
             <button
               type="button"
-              onClick={() => refetch()}
+              onClick={async () => {
+                // Force a server-side recompute (warms the cache), then pull
+                // the fresh result — a plain refetch would re-serve the cache.
+                try { await apiGet("/api/insights?refresh=true"); }
+                catch (e) { console.error("[insights] forced refresh failed:", e?.message || e); }
+                refetch();
+              }}
               title="Recompute insights from the latest data"
               className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground hover:text-foreground"
             >
