@@ -664,7 +664,7 @@ export function getSageCacheMeta() {
 
 function setSageCacheMeta(key, value) {
   try {
-    db.prepare(`INSERT INTO bat_sage_cache_meta (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    db.prepare(`INSERT INTO bat_sage_cache_meta (key, value, updated_at) VALUES (?, ?, now_local())
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
       .run(key, value);
   } catch (e) {
@@ -699,7 +699,7 @@ export async function refreshSageWeekTotalsCache() {
     const replace = db.transaction((rows) => {
       const upsert = db.prepare(`
         INSERT INTO bat_sage_week_cache (year, week_number, delivery, discount, pricing, total, batch_count, refreshed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
         ON CONFLICT(year, week_number) DO UPDATE SET
           delivery = excluded.delivery,
           discount = excluded.discount,
@@ -2171,7 +2171,7 @@ export function setOcrPaused(v) {
   ocrPaused = next;
   try {
     db.prepare(`
-      INSERT INTO bat_settings (key, value, updated_at) VALUES ('ocr_paused', ?, datetime('now'))
+      INSERT INTO bat_settings (key, value, updated_at) VALUES ('ocr_paused', ?, now_local())
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(next ? '1' : '0');
   } catch (err) {
@@ -3708,7 +3708,7 @@ function getBatSetting(key) {
 
 function setBatSetting(key, value) {
   try {
-    db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES (?, ?, now_local())
                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
       .run(key, String(value));
   } catch (e) { console.error('[bat-settings] write failed:', e.message); }
@@ -3738,7 +3738,7 @@ function recordReconciliationError(reconId, message) {
   try { logError('bat.recon', new Error(String(message)), { reconciliation_id: reconId }); } catch {} // eslint-disable-line no-empty -- logError wrapper; reconciliation update still persists below
   try {
     db.prepare(
-      "UPDATE bat_reconciliations SET last_error = ?, last_error_at = datetime('now') WHERE id = ?"
+      "UPDATE bat_reconciliations SET last_error = ?, last_error_at = now_local() WHERE id = ?"
     ).run(String(message).slice(0, 500), reconId);
   } catch (err) {
     console.error('[bat] Failed to persist reconciliation error:', err.message);
@@ -4006,6 +4006,12 @@ export async function generateCardosoInvoicesFromSage({ fromDate, toDate, mode =
   _activeGenerate = { request, cancelled: false, startedAt: new Date().toISOString() };
   let lines;
   try {
+    // Bare table names resolve against the connection's configured database
+    // (databaseconnection.database_name) like every other Sage query — no
+    // hard-coded company DB, so this runs on any site, not only one named
+    // CARDAT. Date window bound as mssql @-params instead of interpolated.
+    request.input('from', sql.Int, from);
+    request.input('to', sql.Int, to);
     const result = await request.query(`
       SELECT
         LTRIM(RTRIM(d.ITEM))      AS item,
@@ -4019,13 +4025,13 @@ export async function generateCardosoInvoicesFromSage({ fromDate, toDate, mode =
         LTRIM(RTRIM(h.PONUMBER))  AS po_number,
         LTRIM(RTRIM(h.REFERENCE)) AS reference,
         icp.UNITPRICE             AS cardoso_price
-      FROM CARDAT.dbo.OEINVH h
-      INNER JOIN CARDAT.dbo.OEINVD d ON d.INVUNIQ = h.INVUNIQ
-      LEFT JOIN  CARDAT.dbo.ICPRICP icp
+      FROM OEINVH h
+      INNER JOIN OEINVD d ON d.INVUNIQ = h.INVUNIQ
+      LEFT JOIN  ICPRICP icp
         ON icp.ITEMNO    = d.ITEM
        AND icp.PRICELIST = d.PRICELIST
       WHERE d.PRICELIST IN ('BF', 'OC')
-        AND h.INVDATE BETWEEN ${from} AND ${to}
+        AND h.INVDATE BETWEEN @from AND @to
         AND COALESCE(icp.UNITPRICE, 0) > 0
       ORDER BY h.INVNUMBER
     `);
