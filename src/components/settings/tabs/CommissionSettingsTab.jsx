@@ -103,7 +103,7 @@ export default function CommissionSettingsTab() {
       />
       <RateField
         label="VAT rate"
-        hint="AR receipts (AMTPAYMHC) are stripped of VAT before display: gross ÷ (1 + this rate). Default 14% matches the historical spreadsheet formula."
+        hint="AR receipts (AMTPAYMHC) are stripped of VAT before display: gross ÷ (1 + this rate). Default 15% (SA VAT rate); set 14% to match the older spreadsheet formula."
         value={vat}
         onChange={setVat}
       />
