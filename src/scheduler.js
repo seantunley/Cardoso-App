@@ -16,7 +16,16 @@ import { pruneOldRows, vacuumDb } from './lib/retention.js';
 import { runScheduledMonthlyJob, runBootCatchUp } from './services/jti/jtiScheduler.js';
 import { getJtiSagePool } from './services/jti/jtiPool.js';
 import { pushPendingArchives } from './services/jti/jtiHubPush.js';
+import {
+  runScheduledMonthlyCommissionJob,
+  runCommissionBootCatchUp,
+} from './services/commission/commissionScheduler.js';
+import { pushPendingCommissionArchives } from './services/commission/commissionHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
+import { syncSalesFromSage } from './services/inventoryMovement.js';
+import { computeAllForecasts } from './services/inventoryForecast.js';
+import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
+import { syncCreditorsFromSage } from './services/creditorSync.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -52,6 +61,9 @@ async function runScheduledSyncCycle() {
         console.error(`Scheduled sync failed for connection ${connection.id}:`, error.message);
       }
     }
+    // Customer/debtor data just changed — drop the insights cache so the next
+    // load recomputes against fresh balances (the nightly job warms it).
+    try { invalidateInsightsCache(); } catch { /* non-fatal */ }
   } catch (error) {
     console.error('Scheduled sync job failed:', error);
   } finally {
@@ -142,7 +154,7 @@ export async function verifyLatestBackup() {
     console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(counts)})`);
     return { ok: true, file: latest.name, ageHours, counts };
   } finally {
-    try { backupDb.close(); } catch {}
+    try { backupDb.close(); } catch (e) { console.warn('[scheduler.backup_verify.close]', e.message); }
   }
 }
 
@@ -256,13 +268,13 @@ export async function runLocalBackup() {
     const parsedKeep = parseInt(process.env.BACKUP_KEEP_COUNT, 10);
     const keep = Number.isFinite(parsedKeep) && parsedKeep >= 0 ? parsedKeep : 6;
     files.slice(keep).forEach((f) => {
-      try { unlinkSync(path.join(backupDir, f.name)); } catch (_) {}
+      try { unlinkSync(path.join(backupDir, f.name)); } catch (e) { console.warn('[scheduler.backup.prune_db]', { file: f.name }, e.message); }
       // Also drop the sibling .previews/ snapshot directory if present.
       // Hardlinked files keep the underlying inode alive as long as any
       // other snapshot (or the live previews dir) still references them,
       // so this rm only frees disk if every other reference is also gone.
       const siblingPreviews = path.join(backupDir, f.name.replace(/\.db$/, '.previews'));
-      try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (_) {}
+      try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (e) { console.warn('[scheduler.backup.prune_previews]', { siblingPreviews }, e.message); }
     });
     if (files.length > keep) {
       console.log(`[backup] Pruned ${files.length - keep} old backup(s) and sibling preview snapshots, keeping ${keep}`);
@@ -353,7 +365,7 @@ async function runBatIntegritySweep() {
         failed_check_ids: ['integrity_check_crashed'],
         error: err?.message || String(err),
       });
-      try { logError('bat.integrity.crash', err, { reconciliation_id: r.id }); } catch {}
+      try { logError('bat.integrity.crash', err, { reconciliation_id: r.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already pushed to failures[] above
     }
   }
   const summary = { total: recons.length, passing, failing, skipped, failures };
@@ -379,7 +391,7 @@ function track(name, fn, contextFn, opts) {
     // since those usually have their own dedicated logging upstream
     // (e.g. credit-logic-sync writes to credit_logic_state.last_error).
     console.error(`[${name}] failed:`, err.message);
-    try { logError(`scheduler.${name}`, err); } catch {}
+    try { logError(`scheduler.${name}`, err); } catch {} // eslint-disable-line no-empty -- logError wrapper inside scheduler tracker; mirror failure already logged to console above
   });
 }
 
@@ -423,6 +435,33 @@ export function startSchedulers() {
     // Initial boot refresh (delayed so DB migrations and Sage pool init can settle)
     setTimeout(track('sage-cache-refresh', refreshSageWeekTotalsCache), 15000);
     registerJob({ name: 'sage-cache-refresh', type: 'one-shot', delayMs: 15000, mode: 'site', description: 'BAT Sage cache — boot refresh' });
+
+    // Inventory movement — nightly sync of sales aggregates from Sage
+    // OESHDT into the local inventory_sales_cache table. Runs at 04:00
+    // so the data is fresh by the time operators check in the morning.
+    {
+      const t = cron.schedule('0 4 * * *', track('inventory-sales-sync', async () => {
+        await syncSalesFromSage();
+        computeAllForecasts();
+        // Warm the insights cache off the fresh data so the first morning load
+        // is instant. Guarded — a warm failure must not fail the sync job.
+        try { refreshInsights(); } catch (e) { console.warn('[insights.warm] failed:', e.message); }
+      }));
+      cronTasks.push(t);
+      registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute' });
+    }
+
+    // Creditors — nightly Sage pull of APVEN + APOBL + APTCR + POPORH1
+    // into local creditor_* tables. Runs at 04:30, after inventory sync
+    // but before backup-verify (03:30) — wait, backup-verify is earlier
+    // so we just need a free slot before the morning workday. 04:30 is it.
+    {
+      const t = cron.schedule('30 4 * * *', track('creditors-sync', async () => {
+        await syncCreditorsFromSage();
+      }));
+      cronTasks.push(t);
+      registerJob({ name: 'creditors-sync', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'site', description: 'Nightly creditors sync from Sage APVEN/APOBL/APTCR/POPORH1' });
+    }
   }
 
   if (process.env.HUB_MODE !== 'true') {
@@ -500,10 +539,10 @@ export function startSchedulers() {
               { url: probe.url, status: probe.status },
               'warn',
             );
-          } catch {}
+          } catch {} // eslint-disable-line no-empty -- logError wrapper; probe failure already recorded via probe.error/status
         }
       } catch (err) {
-        try { logError('hub.probe', err, { phase: 'unhandled' }); } catch {}
+        try { logError('hub.probe', err, { phase: 'unhandled' }); } catch {} // eslint-disable-line no-empty -- logError wrapper inside scheduler boot; cannot recurse
       }
     }, 5000);
 
@@ -570,6 +609,25 @@ export function startSchedulers() {
     ), 45_000);
     registerJob({ name: 'jti-boot-catchup', type: 'one-shot', delayMs: 45_000, mode: 'site', description: 'JTI catch-up — backfill up to 12 missed months on boot' });
 
+    // JTI daily self-heal — re-attempt last month's export every day until it
+    // lands. The 02:00-on-the-1st cron only fires if the app is running at that
+    // exact minute and Sage is reachable; a miss (app closed, Sage briefly
+    // down) otherwise stays unarchived until the next app restart. This daily
+    // run targets the SAME previous month all month long, so a missed window
+    // heals on its own the next day — and a pool_unavailable simply retries
+    // tomorrow. Cheap on normal days (one already-archived check). Runs at
+    // 09:00, when the app is most likely running and Sage reachable.
+    {
+      const t = cron.schedule('0 9 * * *', track(
+        'jti-daily-ensure',
+        () => runScheduledMonthlyJob({ db, getSagePool: getJtiSagePool }),
+        (result) => result,
+        { successCheck: () => true },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'jti-daily-ensure', type: 'cron', cronExpression: '0 9 * * *', taskRef: t, mode: 'site', description: 'JTI self-heal — ensure last month is archived if the 1st-of-month run was missed' });
+    }
+
     // JTI hub-push retry tick — every 15 minutes, scan for archives
     // in pending/failed state and try to send them. The post-archive
     // push trigger in handleExport / generateAndArchivePeriod handles
@@ -584,6 +642,70 @@ export function startSchedulers() {
       { successCheck: () => true }, // failed-to-push is normal, not a job failure
     ), 15 * 60 * 1000));
     registerJob({ name: 'jti-hub-push-retry', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'site', description: 'JTI hub push retry — re-attempt any pending/failed pushes' });
+
+    // Commission monthly archive — fires at 03:00 site-local on the 24th
+    // of every month. The commission cycle is "24th of prev month → 23rd
+    // of current month", so running on the 24th means the previous-day
+    // window has just closed and a complete period is ready to archive.
+    // Site-only (HUB_MODE installs receive these archives via push).
+    {
+      const t = cron.schedule('0 3 24 * *', track(
+        'commission-monthly-archive',
+        () => runScheduledMonthlyCommissionJob({ db }),
+        (result) => result,
+        // already_archived (skipped) is a normal outcome; a transient Sage/
+        // PDF/unpaid failure returns status:'failed' and IS a job failure so
+        // it's visible and the hourly generation-retry below re-attempts it.
+        { successCheck: (r) => r?.status !== 'failed' },
+      ));
+      cronTasks.push(t);
+      registerJob({ name: 'commission-monthly-archive', type: 'cron', cronExpression: '0 3 24 * *', taskRef: t, mode: 'site', description: 'Commission monthly archive — generate + archive the current commission period (24th-of-month cycle)' });
+    }
+
+    // Commission boot-time catch-up — backfills up to 12 missed months
+    // on app startup. 60-second delay so migrations + Sage health probe
+    // have settled; the catch-up may run several reports back-to-back
+    // if the site has been offline for months, better to start cleanly.
+    setTimeout(track(
+      'commission-boot-catchup',
+      () => runCommissionBootCatchUp({ db, monthsBack: 12 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 60_000);
+    registerJob({ name: 'commission-boot-catchup', type: 'one-shot', delayMs: 60_000, mode: 'site', description: 'Commission catch-up — backfill up to 12 missed months on boot' });
+
+    // Commission generation retry — every 60 minutes, re-run a short
+    // catch-up (current + previous period). A transient Sage/PDF/unpaid
+    // failure at the 03:00 cron, or a brief outage on the 24th, would
+    // otherwise leave that month un-archived until the next reboot. The
+    // hasScheduledArchive guard makes this a cheap DB no-op once the period
+    // is archived; only a genuinely missing period re-hits Sage.
+    intervals.push(setInterval(track(
+      'commission-generation-retry',
+      () => runCommissionBootCatchUp({ db, monthsBack: 2 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 60 * 60 * 1000));
+    registerJob({ name: 'commission-generation-retry', type: 'interval', intervalMs: 60 * 60 * 1000, mode: 'site', description: 'Commission generation retry — re-attempt missed/failed monthly archives hourly' });
+
+    // Commission hub-push retry tick — every 15 minutes, scan for
+    // archives in pending/failed state and try to send them. Same
+    // safety-net role as the JTI retry tick.
+    intervals.push(setInterval(track(
+      'commission-hub-push-retry',
+      () => pushPendingCommissionArchives({ db, batchSize: 10 }),
+      (result) => result,
+      { successCheck: () => true },
+    ), 15 * 60 * 1000));
+    registerJob({ name: 'commission-hub-push-retry', type: 'interval', intervalMs: 15 * 60 * 1000, mode: 'site', description: 'Commission hub push retry — re-attempt any pending/failed pushes' });
   }
 
   // Alert engine evaluation tick — runs every 60s, evaluates the rules
@@ -762,22 +884,22 @@ export function gracefulShutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
 
-  for (const task of cronTasks) { try { task.stop(); } catch {} }
-  for (const interval of intervals) { try { clearInterval(interval); } catch {} }
+  for (const task of cronTasks) { try { task.stop(); } catch (e) { console.warn('[scheduler.shutdown.task_stop]', e.message); } }
+  for (const interval of intervals) { try { clearInterval(interval); } catch (e) { console.warn('[scheduler.shutdown.clear_interval]', e.message); } }
 
   if (serverRef) {
     serverRef.close(() => {
-      try { db.exec('PRAGMA optimize'); } catch {}
-      try { db.close(); } catch {}
+      try { db.exec('PRAGMA optimize'); } catch (e) { console.warn('[scheduler.shutdown.pragma_optimize]', e.message); }
+      try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.db_close]', e.message); }
       process.exit(0);
     });
 
     setTimeout(() => {
-      try { db.close(); } catch {}
+      try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.forced_db_close]', e.message); }
       process.exit(1);
     }, 5000);
   } else {
-    try { db.close(); } catch {}
+    try { db.close(); } catch (e) { console.warn('[scheduler.shutdown.no_server_db_close]', e.message); }
     process.exit(0);
   }
 }

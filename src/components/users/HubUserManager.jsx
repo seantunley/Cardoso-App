@@ -11,15 +11,15 @@ import { humanizeApiError } from "@/lib/humanizeApiError";
 
 // sites = array of { site_id, site_name, site_slug } (from /api/hub/kpis)
 export default function HubUserManager({ sites = [] }) {
-  const [selectedUsers, setSelectedUsers] = useState(new Set());
-  const [selectedSites, setSelectedSites] = useState(new Set());
-  const [manageUser, setManageUser] = useState(null); // { id, email, allowed_sites }
-  const [manageSiteIds, setManageSiteIds] = useState(new Set());
+  const [selectedUsers, setSelectedUsers] = useState(/** @type {Set<any>} */ (new Set()));
+  const [selectedSites, setSelectedSites] = useState(/** @type {Set<any>} */ (new Set()));
+  const [manageUser, setManageUser] = useState(/** @type {any} */ (null)); // { id, email, allowed_sites }
+  const [manageSiteIds, setManageSiteIds] = useState(/** @type {Set<any>} */ (new Set()));
   const qc = useQueryClient();
 
   const { data: users = [], isLoading, refetch, isFetching } = useQuery({
     queryKey: ["hub-users"],
-    queryFn: () => fetch("/api/hub/users", { credentials: "include" }).then(r => r.json()),
+    queryFn: () => /** @type {Promise<any[]>} */ (fetch("/api/hub/users", { credentials: "include" }).then(r => r.json())),
   });
 
   const pushMutation = useMutation({

@@ -1,4 +1,4 @@
-import { DEFAULT_CREDIT_LOGIC_CONFIG, normaliseCreditLogicConfig } from "./creditLogic";
+import { DEFAULT_CREDIT_LOGIC_CONFIG, normaliseCreditLogicConfig } from "./creditLogic.js";
 
 function parseAmount(value) {
   if (!value || String(value).trim() === "") return 0;
@@ -92,7 +92,7 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
 
   const allDates = [...invoices, ...receipts].map((item) => item.date).filter(Boolean);
   const mostRecent = allDates.length > 0 ? Math.max(...allDates.map((date) => +date)) : null;
-  const inactiveDays = mostRecent !== null ? Math.floor((today - mostRecent) / 86400000) : null;
+  const inactiveDays = mostRecent !== null ? Math.floor((today.getTime() - mostRecent) / 86400000) : null;
   const inactiveYears = inactiveDays !== null && inactiveDays > (config.thresholds.longInactiveYears * 365)
     ? Math.floor(inactiveDays / 365)
     : null;
@@ -186,7 +186,7 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
 
   const paidPairs = pairs.filter((pair) => pair.receipt !== null);
   const unpaidPairs = pairs.filter((pair) => pair.receipt === null);
-  const unpaidAges = unpaidPairs.map((pair) => (pair.invoice.date ? Math.floor((today - pair.invoice.date) / 86400000) : null)).filter((days) => days !== null);
+  const unpaidAges = unpaidPairs.map((pair) => (pair.invoice.date ? Math.floor((today.getTime() - pair.invoice.date) / 86400000) : null)).filter((days) => days !== null);
   const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
 
   if (oldestUnpaidAge !== null && oldestUnpaidAge > config.thresholds.breachDays) {

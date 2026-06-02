@@ -56,7 +56,7 @@ async function jsonFetch(url, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   let body = null;
-  try { body = await res.json(); } catch {}
+  try { body = await res.json(); } catch {} // eslint-disable-line no-empty -- body parse fallback; null body is the documented contract
   if (!res.ok) {
     const msg = body?.error || `HTTP ${res.status}`;
     const err = new Error(msg);

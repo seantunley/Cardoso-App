@@ -114,7 +114,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       });
     } catch (error) {
       console.error(`Login error (phase=${phase}):`, error);
-      try { logError('auth.login', error, { email: req.body?.email, phase }); } catch {}
+      try { logError('auth.login', error, { email: req.body?.email, phase }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: `Login failed during ${phase}` });
     }
   });
@@ -180,7 +180,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       res.json({ success: true, user: withSessionExpiry(req, sanitizeUser(user)) });
     } catch (err) {
       console.error('[hub-token-login] error:', err);
-      try { logError('auth.hub_token_login', err); } catch {}
+      try { logError('auth.hub_token_login', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Hub login failed' });
     }
   });
@@ -260,7 +260,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       req.session.cookie.maxAge = MAX_AGE_MS;
       req.session.save((err) => {
         if (err) {
-          try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+          try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
           return res.status(500).json({ error: 'Failed to extend session' });
         }
         const expires = req.session?.cookie?.expires
@@ -269,7 +269,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         res.json({ success: true, session_expires_at: expires });
       });
     } catch (err) {
-      try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {}
+      try { logError('auth.extend_session', err, { user_id: req.currentUser?.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Failed to extend session' });
     }
   });
@@ -354,12 +354,12 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       const info = db.prepare(`
         INSERT INTO "user" (
           email, full_name, role, password_hash, is_active, must_change_password,
-          can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+          can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list, can_access_network_devices,
           can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
           can_access_records, can_access_reports, can_access_connections, can_access_reconciliation, can_access_hub_reconciliation, can_access_settings,
-          can_access_jti,
+          can_access_jti, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
           can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         email.trim().toLowerCase(),
         full_name,
@@ -371,6 +371,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         defaults.can_access_customer_balances !== false ? 1 : 0,
         defaults.can_access_collections !== false ? 1 : 0,
         defaults.can_access_inventory !== false ? 1 : 0,
+        defaults.can_access_inventory_movement ? 1 : 0,
+        defaults.can_access_price_list ? 1 : 0,
         defaults.can_access_network_devices ? 1 : 0,
         defaults.can_access_hub_metrics ? 1 : 0,
         defaults.can_access_hub_backups ? 1 : 0,
@@ -382,6 +384,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         defaults.can_access_hub_reconciliation ? 1 : 0,
         defaults.can_access_settings ? 1 : 0,
         defaults.can_access_jti ? 1 : 0,
+        defaults.can_access_stock_receipt_expiry ? 1 : 0,
+        defaults.can_access_creditors ? 1 : 0,
+        defaults.can_access_commission ? 1 : 0,
         defaults.can_manage_users ? 1 : 0,
         defaults.can_manage_rules ? 1 : 0,
         defaults.can_edit_records ? 1 : 0,
@@ -413,6 +418,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_customer_balances',
       'can_access_collections',
       'can_access_inventory',
+      'can_access_inventory_movement',
+      'can_access_price_list',
       'can_access_network_devices',
       'can_access_hub_metrics',
       'can_access_hub_backups',
@@ -424,6 +431,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_hub_reconciliation',
       'can_access_settings',
       'can_access_jti',
+      'can_access_stock_receipt_expiry',
+      'can_access_creditors',
+      'can_access_commission',
       'can_manage_users',
       'can_manage_rules',
       'can_edit_records',
@@ -536,6 +546,8 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_customer_balances',
       'can_access_collections',
       'can_access_inventory',
+      'can_access_inventory_movement',
+      'can_access_price_list',
       'can_access_network_devices',
       'can_access_hub_metrics',
       'can_access_hub_backups',
@@ -547,6 +559,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_hub_reconciliation',
       'can_access_settings',
       'can_access_jti',
+      'can_access_stock_receipt_expiry',
+      'can_access_creditors',
+      'can_access_commission',
       'can_manage_users',
       'can_manage_rules',
       'can_edit_records',

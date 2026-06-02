@@ -3,6 +3,8 @@ import { useColorScheme } from "@/lib/useColorScheme";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useQuery } from "@tanstack/react-query";
 import { Package, Search, RefreshCw, X, Download, Printer } from "lucide-react";
+import SummaryTile from "@/components/shared/SummaryTile";
+import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { reportClientError } from "@/lib/clientLog";
 import { getLedgerFortune, getReportSignature } from "@/lib/fun";
@@ -30,19 +32,19 @@ function useInvColumnWidths(containerRef) {
   // Debounce-flushed localStorage write — see comment in
   // src/lib/useColumnWidths.js. Avoids JSON.stringify + sync
   // localStorage.setItem at 60Hz during a column drag.
-  const writeTimerRef = useRef(null);
+  const writeTimerRef = useRef(/** @type {ReturnType<typeof setTimeout> | null} */ (null));
   useEffect(() => {
     widthsRef.current = widths;
     if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
     writeTimerRef.current = setTimeout(() => {
-      try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- hot path on every column drag; localStorage quota errors are non-fatal
       writeTimerRef.current = null;
     }, 200);
     return () => {
       if (writeTimerRef.current) {
         clearTimeout(writeTimerRef.current);
         writeTimerRef.current = null;
-        try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+        try { localStorage.setItem(INV_COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- hot path teardown; localStorage quota errors are non-fatal
       }
     };
   }, [widths]);
@@ -174,6 +176,10 @@ export default function Inventory() {
   const [highlightBelowCost, setHighlightBelowCost] = useState(false);
   const [priceListFilter, setPriceListFilter] = useState('all');
   const [commodityFilter, setCommodityFilter] = useState('all');
+  // Controlled <details> open state so the filter panel doesn't collapse
+  // when filter state changes cause re-renders (native <details> loses
+  // its open flag when its DOM subtree is recreated).
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sortField, setSortField] = useState("item_description");
   const [sortDir, setSortDir] = useState("asc");
@@ -245,11 +251,17 @@ export default function Inventory() {
     return [...seen].sort();
   }, [allRows, EXCLUDED_COMMODITIES]);
   const rows = useMemo(() => {
+    const isBelowCost = (r) => {
+      const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
+      const cost = parseFloat(String(r.last_cost || '').replace(/[^0-9.-]/g, ''));
+      return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
+    };
     const filtered = allRows
       .filter(r => !hideZeroQty || parseFloat(r.qty_on_hand) > 0)
       .filter(r => !EXCLUDED_COMMODITIES.has(String(r.commodity ?? '').trim()))
       .filter(r => priceListFilter === 'all' || r.price_list === priceListFilter)
-      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter);
+      .filter(r => commodityFilter === 'all' || String(r.commodity ?? '').trim() === commodityFilter)
+      .filter(r => !highlightBelowCost || isBelowCost(r));
     return [...filtered].sort((a, b) => {
       let va, vb;
       const numFields = ["qty_on_hand", "last_cost", "price", "inventory_value"];
@@ -263,7 +275,7 @@ export default function Inventory() {
         return sortDir === "asc" ? va.localeCompare(vb) : vb.localeCompare(va);
       }
     });
-  }, [allRows, hideZeroQty, priceListFilter, commodityFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
+  }, [allRows, hideZeroQty, highlightBelowCost, priceListFilter, commodityFilter, sortField, sortDir, EXCLUDED_COMMODITIES]);
 
   const sites = useMemo(() => {
     return sitesData.map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
@@ -355,14 +367,11 @@ export default function Inventory() {
           tr { page-break-inside: avoid; }
         }
       `}</style>
-      <div className="inventory-print-scope max-w-[1600px] mx-auto">
+      <div className="inventory-print-scope">
         {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between mb-8 gap-4 border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
-              <Package className="w-3 h-3 text-accent" strokeWidth={1.5} />
-              § Stock
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Every <em className="text-phosphor">unit</em>.
             </h1>
@@ -421,75 +430,79 @@ export default function Inventory() {
         </div>
 
 
-        {/* Filter bar */}
-        <div className="mb-4 rounded-2xl border border-border bg-card/80 p-4 no-print inv-filter-bar">
-          {/* Search row */}
-          <div className="mb-3 flex items-center gap-3">
-            <div className="relative flex-1">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search item number or description…"
-                className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
-              {search && (<button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>)}
-            </div>
-            {(activeFilterCount > 0 || search) && (
-              <button onClick={clearAll} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap">
-                <X className="h-3 w-3" />Clear all
-                {activeFilterCount > 0 && <span className="rounded-full bg-primary/15 px-1.5 py-0.5 text-xs font-semibold text-primary">{activeFilterCount}</span>}
-              </button>
-            )}
-          </div>
-
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div className="flex min-w-0 flex-1 flex-col gap-3">
-              <div className="text-sm font-medium text-foreground">
-                Filters
+        {/* Filter bar — collapsible. Mirrors the pattern on Customer
+            Balances: pill-style filters stack as labelled rows, dropdown
+            + toggles share the bottom row. Search lives BELOW the
+            filter block so it stays accessible when filters are
+            collapsed. */}
+        {(() => {
+          const totalHolding = (() => {
+            const src = rows.length > 0 ? rows : allRows;
+            return src.reduce((sum, r) => {
+              const pre = parseFloat(String(r.inventory_value || "").replace(/[^0-9.-]/g, ""));
+              if (Number.isFinite(pre) && pre !== 0) return sum + pre;
+              const q = parseFloat(String(r.qty_on_hand || "").replace(/[^0-9.-]/g, ""));
+              const c = parseFloat(String(r.last_cost || "").replace(/[^0-9.-]/g, ""));
+              if (Number.isFinite(q) && Number.isFinite(c)) return sum + q * c;
+              return sum;
+            }, 0);
+          })();
+          return (
+        <>
+        <CollapsibleFilterBar
+          open={filtersOpen}
+          onOpenChange={setFiltersOpen}
+          className="mb-3 no-print inv-filter-bar"
+          chips={/** @type {Array<{ key: string, label: any, onClear: () => void }>} */ ([
+            commodityFilter !== "all" && { key: "commodity", label: COMMODITY_LABELS[commodityFilter] || commodityFilter, onClear: () => setCommodityFilter("all") },
+            priceListFilter !== "all" && { key: "priceList", label: `Price list ${priceListFilter}`, onClear: () => setPriceListFilter("all") },
+            hubMode && siteFilter !== "all" && { key: "site", label: (sites.find(s => s.id === siteFilter)?.name) || siteFilter, onClear: () => setSiteFilter("all") },
+            hideZeroQty && { key: "hidezero", label: "Hide zero qty", onClear: () => setHideZeroQty(false) },
+            highlightBelowCost && { key: "below", label: "Price ≤ cost only", onClear: () => setHighlightBelowCost(false) },
+          ].filter(Boolean))}
+          onClearAll={clearAll}
+        >
+          <>
+            {commodities.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Commodity</div>
+                <div className="flex flex-wrap gap-2">
+                  <FilterPill active={commodityFilter === "all"} onClick={() => setCommodityFilter("all")}>All</FilterPill>
+                  {commodities.map((v) => (
+                    <FilterPill key={v} active={commodityFilter === v} onClick={() => setCommodityFilter(v)}>
+                      {COMMODITY_LABELS[v] || v}
+                    </FilterPill>
+                  ))}
+                </div>
               </div>
+            )}
 
-              {/* Commodity pills */}
-              {commodities.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Commodity</div>
-                  <div className="flex flex-wrap gap-2">
-                    <FilterPill active={commodityFilter === "all"} onClick={() => setCommodityFilter("all")}>All</FilterPill>
-                    {commodities.map((v) => (
-                      <FilterPill key={v} active={commodityFilter === v} onClick={() => setCommodityFilter(v)}>
-                        {COMMODITY_LABELS[v] || v}
-                      </FilterPill>
-                    ))}
-                  </div>
+            {priceLists.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Price list</div>
+                <div className="flex flex-wrap gap-2">
+                  <FilterPill active={priceListFilter === "all"} onClick={() => setPriceListFilter("all")}>All</FilterPill>
+                  {priceLists.map((pl) => (
+                    <FilterPill key={pl} active={priceListFilter === pl} onClick={() => setPriceListFilter(pl)}>{pl}</FilterPill>
+                  ))}
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Price list pills */}
-              {priceLists.length > 0 && (
-                <div className="flex flex-col gap-2">
-                  <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Price list</div>
-                  <div className="flex flex-wrap gap-2">
-                    <FilterPill active={priceListFilter === "all"} onClick={() => setPriceListFilter("all")}>All</FilterPill>
-                    {priceLists.map((pl) => (
-                      <FilterPill key={pl} active={priceListFilter === pl} onClick={() => setPriceListFilter(pl)}>{pl}</FilterPill>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="flex w-full flex-col gap-3 lg:w-auto lg:min-w-[220px]">
-              {/* Site select (hub only) */}
+            <div className="flex flex-wrap items-end gap-3 pt-1">
               {hubMode && sites.length > 0 && (
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-1.5 min-w-[180px]">
                   <label className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Site</label>
                   <select value={siteFilter} onChange={(e) => setSiteFilter(e.target.value)}
                     style={{ colorScheme }}
-                    className="min-h-[40px] rounded-xl border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
+                    className="h-9 rounded-lg border border-border bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring">
                     <option value="all">All sites</option>
                     {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </div>
               )}
 
-              {/* Toggle filters */}
-              <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2 ml-auto flex-wrap">
                 <FilterToggle active={hideZeroQty} onClick={() => setHideZeroQty((v) => !v)} tooltip="Hide items with no stock on hand">
                   {hideZeroQty ? "⊘ " : ""}Hide zero qty
                 </FilterToggle>
@@ -498,8 +511,37 @@ export default function Inventory() {
                 </FilterToggle>
               </div>
             </div>
+          </>
+        </CollapsibleFilterBar>
+
+        {/* Search row — sits beneath the filter block so it stays
+            available while filters are collapsed. */}
+        <div className="mb-3 flex items-center gap-3 no-print">
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search item number or description…"
+              className="w-full rounded-lg border border-border bg-background py-2 pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring" />
+            {search && (<button onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>)}
           </div>
+          {/* Clear-all button now lives in the filter summary header
+              alongside the active-filter chips. */}
         </div>
+
+        {/* Summary tile — total Rand value of stock on hand. Prefer the
+            sync's pre-computed inventory_value column, fall back to
+            qty × last_cost. Tracks filtered rows when filters are
+            active, otherwise the full dataset. */}
+        {allRows.length > 0 && (
+          <div className="mb-4 grid gap-4 md:grid-cols-2 no-print">
+            <SummaryTile
+              label={`Total inventory holding (${(rows.length || allRows.length).toLocaleString("en-ZA")} items${activeFilterCount > 0 || search ? " · filtered" : ""})`}
+              value={`R ${formatCurrency(totalHolding).replace(/^R\s*/, "")}`}
+            />
+          </div>
+        )}
+        </>
+          );
+        })()}
         {/* State: loading */}
         {isLoading && (
           <div className="flex items-center justify-center py-20">
@@ -535,11 +577,7 @@ export default function Inventory() {
           <h1 className="text-lg font-bold">Inventory</h1>
           <p className="text-xs text-gray-600">
             Printed: {new Date().toLocaleString("en-ZA")} ·{' '}
-            {(highlightBelowCost ? rows.filter(r => {
-              const price = parseFloat(String(r.price || '').replace(/[^0-9.-]/g, ''));
-              const cost = parseFloat(String(r.last_cost || '').replace(/[^0-9.-]/g, ''));
-              return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
-            }).length : rows.length)} item{rows.length !== 1 ? "s" : ""}
+            {rows.length} item{rows.length !== 1 ? "s" : ""}
             {highlightBelowCost && ' · Below-cost only'}
             {activeFilterCount > 0 && ` · ${activeFilterCount} filter${activeFilterCount !== 1 ? 's' : ''} applied`}
             <br />
@@ -598,11 +636,7 @@ function InventoryPrintTable({ rows, hubMode, formatNum, formatCurrency, highlig
     const cost = parseFloat(String(row.last_cost || '').replace(/[^0-9.-]/g, ''));
     return !isNaN(price) && !isNaN(cost) && cost > 0 && price <= cost;
   };
-
-  // When the "Highlight below cost" toggle is on, the print should only
-  // include those rows (treat the toggle as a hard filter for print scope —
-  // on screen it stays a visual highlight).
-  const printRows = highlightBelowCost ? rows.filter(isBelowCost) : rows;
+  const printRows = rows;
 
   return (
     <div className="inv-print-only hidden print-table-shell rounded-xl border border-border bg-card overflow-hidden">
@@ -650,7 +684,7 @@ function InventoryTable({ rows, hubMode, formatNum, formatCurrency, COMMODITY_LA
   }
   // `relative` so the absolute-positioned ResizeHandle anchors correctly.
   const sh = "relative px-2 py-1.5 text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors";
-  const parentRef = useRef(null);
+  const parentRef = useRef(/** @type {HTMLDivElement | null} */ (null));
 
   const virtualizer = useVirtualizer({
     count: rows.length,

@@ -235,9 +235,7 @@ function Header({ subtitle, greeting, operatorCodename }) {
   return (
     <div className="flex items-end justify-between gap-8 border-b border-border pb-6">
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-          § Overview
-        </div>
+
         <h1 className="font-display text-5xl lg:text-6xl leading-[0.95] text-foreground tracking-tight">
           The <em className="text-phosphor">ledger</em>,<br />
           at a glance.

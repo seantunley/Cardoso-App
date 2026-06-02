@@ -1,4 +1,5 @@
 import express from 'express';
+import compression from 'compression';
 import helmet from 'helmet';
 import cors from 'cors';
 import session from 'express-session';
@@ -27,6 +28,13 @@ import { createNetworkDevicesRouter } from './src/routes/networkDevices.js';
 import { initBatSchema } from './src/db/batSchema.js';
 import { createBatReconciliationRouter } from './src/routes/batReconciliation.js';
 import { createJtiRouter } from './src/routes/jti.js';
+import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
+import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
+import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
+import { createCreditorRouter } from './src/routes/creditors.js';
+import { createPricingRouter } from './src/routes/pricing.js';
+import { createDepotProfileRouter } from './src/routes/depotProfile.js';
+import { createCommissionRouter } from './src/routes/commission.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
@@ -99,6 +107,12 @@ if (TLS_FRONTING) {
 // On Tailscale/network proxies, this should be safe — only trust hop 1 (the proxy itself)
 app.set('trust proxy', 1);
 
+// gzip responses. Hub payloads (sites list, kpis, aged-debtors) run into
+// multiple MB and ship over Tailscale/LAN — gzip cuts wire size 5-10×.
+// Mounted BEFORE express.static so the hashed JS/CSS bundles are compressed
+// too; compression() only touches responses that pass through it first.
+app.use(compression());
+
 if (IS_PRODUCTION) {
   app.use(express.static(path.join(process.cwd(), 'dist')));
   app.use(cors({
@@ -111,7 +125,16 @@ if (IS_PRODUCTION) {
 } else {
   app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173', credentials: true }));
 }
-app.use(express.json());
+// 2 MB JSON body cap. The previous (default) limit was 100kb but
+// express's default actually allows unbounded bodies on app.use(json())
+// without an explicit `limit` — every hub receive endpoint
+// (/api/hub/receive-rules, /api/hub/receive-users) accepted arbitrarily
+// large payloads, a memory-DoS vector. 2MB comfortably covers the
+// largest known payload (full users + rules push for a 50-user
+// install ≈ 200KB) with 10× headroom; raise per-route via a dedicated
+// express.json({ limit: ... }) on a router if a future endpoint
+// legitimately needs more.
+app.use(express.json({ limit: '2mb' }));
 
 // Session store backed by a dedicated better-sqlite3 connection. Replaces
 // connect-sqlite3 (which depended on the legacy `sqlite3` package and pulled
@@ -190,7 +213,7 @@ app.use(createSystemRouter({ requireAuth, requireAdmin }));
 app.use(createCreditLogicRouter({ requireAuth, requirePermission }));
 app.use(createBackupRouter());
 app.use(createDrRouter());
-app.use(createReportingRouter({ requireAuth }));
+app.use(createReportingRouter({ requireAuth, requirePermission }));
 app.use(createCollectionsRouter({ requireAuth, requirePermission }));
 app.use(createNetworkDevicesRouter({ requireAuth, requireAdmin, requirePermission }));
 app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShuttingDown }));
@@ -199,8 +222,31 @@ app.use(createConnectionsRouter({ db, requireAuth, requirePermission, isShutting
 // (initBatSchema already ran earlier, before the migrations.)
 app.use(createBatReconciliationRouter({ requireAuth, requireAdmin, requirePermission }));
 
+// ── Sage credit-note description corrections (admin-only) ──
+app.use(createSageCorrectionsRouter({ requireAuth, requireAdmin }));
+
 // ── JTI Sales export (Accpac OE Shipment History → .xlsx) ──
 app.use(createJtiRouter({ requireAuth, requirePermission }));
+
+// ── Inventory Movement (sales velocity / dead stock analytics) ──
+app.use(createInventoryMovementRouter({ requireAuth, requireAdmin, requirePermission }));
+
+// Stock Receipt Expiry — mounted on both site and hub. The router
+// internally gates write operations (sync, add-expiry) to site-only;
+// hub gets read-only list endpoints querying hub_stock_receipt_expiry.
+app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
+
+// Creditors module — vendor master + AP transactions + POs synced
+// from Sage. Mounted on both modes; hub branches in the router itself
+// (read-only on hub once the ETL is wired).
+app.use(createCreditorRouter({ requireAuth, requireAdmin, requirePermission }));
+
+// ── Price List (Sage ICPRICP per-unit prices) ──
+app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));
+app.use(createCommissionRouter({ requireAuth, requireAdmin, requirePermission }));
+
+// ── Depot profile (letterhead details for customer-facing documents) ──
+app.use(createDepotProfileRouter({ db, requireAuth, requireAdmin }));
 
 if (process.env.HUB_MODE === 'true') {
   initHubTables();
@@ -247,7 +293,7 @@ if (IS_PRODUCTION) {
 startSchedulers();
 recoverAbandonedSyncs();
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, (...args) => {
-  try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {}
+  try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; shutdown continues regardless
   gracefulShutdown(...args);
 }));
 // Process-level safety nets — anything that escapes a callback or promise
@@ -255,11 +301,11 @@ recoverAbandonedSyncs();
 // "uncaught error at Y".
 process.on('uncaughtException', (err) => {
   console.error('[UNCAUGHT]', err.message);
-  try { logError('system.uncaught', err); } catch {}
+  try { logError('system.uncaught', err); } catch {} // eslint-disable-line no-empty -- logError wrapper inside process-level safety net; cannot recurse here
 });
 process.on('unhandledRejection', (err) => {
   console.error('[UNHANDLED]', err?.message || err);
-  try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {}
+  try { logError('system.unhandled', err instanceof Error ? err : new Error(String(err))); } catch {} // eslint-disable-line no-empty -- logError wrapper inside process-level safety net; cannot recurse here
 });
 // BIND_ADDRESS controls which network interface the server listens on.
 //   '0.0.0.0' (default) — all interfaces; LAN clients can reach the app
@@ -287,12 +333,12 @@ ensureSeedUsers().then(() => {
         node: process.version,
         env: process.env.NODE_ENV || 'development',
       }, 'info');
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- logError wrapper; boot continues regardless
   }));
   // Resume any paused BAT OCR extractions from a previous run
   resumeExtractionWorker();
 }).catch((error) => {
   console.error('Failed to seed users:', error);
-  try { logError('system.boot', error, { phase: 'ensureSeedUsers' }); } catch {}
+  try { logError('system.boot', error, { phase: 'ensureSeedUsers' }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still exit(1) below
   process.exit(1);
 });

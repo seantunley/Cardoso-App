@@ -67,7 +67,7 @@ function requireReportingToken(req, res, next) {
         },
         'warn',
       );
-    } catch {}
+    } catch (e) { console.error('[backup.auth_failed.log]', { route: req.path }, e.message); }
     return res.status(401).json({ error: 'Unauthorized: valid x-reporting-token required' });
   }
 
@@ -259,7 +259,7 @@ function cleanupStaleSnapshots() {
       const p = path.join(tmpDir, f);
       try {
         if (fs.statSync(p).mtimeMs < cutoff) { fs.unlinkSync(p); removed++; }
-      } catch {}
+      } catch (e) { if (e.code !== 'ENOENT') console.warn('[backup.cleanup_stale]', { p }, e.message); }
     }
     if (removed > 0) console.log(`[backup] Cleaned up ${removed} stale snapshot file(s) from previous run`);
   } catch (err) {
@@ -396,7 +396,7 @@ export function createBackupRouter() {
       console.error('[backup/sql-status] Error reading SQLBackupAndFTP DB:', err.message);
       res.json(createSqlBackupUnavailableResponse(`Unable to read SQLBackupAndFTP routines DB: ${err.message}`));
     } finally {
-      try { routinesDb?.close(); } catch (_) {}
+      try { routinesDb?.close(); } catch (e) { console.warn('[backup.sql_status.routines_close]', e.message); }
     }
   });
 
@@ -450,7 +450,7 @@ export function createBackupRouter() {
           status,
           userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
         });
-      } catch {}
+      } catch (e) { console.warn('[backup.config_download.audit]', { status }, e.message); }
     };
 
     // Attach lifecycle listeners BEFORE sending. res.send is synchronous
@@ -523,7 +523,7 @@ export function createBackupRouter() {
       if (cleaned) return;
       if (!tmpPath) return; // nothing to clean yet — try again later
       cleaned = true;
-      try { fs.unlinkSync(tmpPath); } catch {}
+      try { fs.unlinkSync(tmpPath); } catch (e) { if (e.code !== 'ENOENT') console.warn('[backup.db_download.cleanup]', { tmpPath }, e.message); }
     };
     const writeAudit = (status) => {
       if (auditWritten) return; auditWritten = true;
@@ -558,7 +558,7 @@ export function createBackupRouter() {
           status,
           userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
         });
-      } catch {}
+      } catch (e) { console.warn('[backup.db_download.audit]', { status }, e.message); }
     };
 
     // AbortController lets the close-handler cancel the SHA-256 hash
@@ -589,7 +589,7 @@ export function createBackupRouter() {
     });
 
     try {
-      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch {}
+      try { fs.mkdirSync(tmpDir, { recursive: true }); } catch (e) { console.warn('[backup.db_download.mkdir_tmp]', { tmpDir }, e.message); }
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       tmpPath = path.join(tmpDir, `snapshot-${process.pid}-${ts}.db`);
 
@@ -677,7 +677,7 @@ export function createBackupRouter() {
           // we can't change status, but we can still abort the response
           // so the hub-side fetch gets a clean disconnect rather than
           // a hung half-stream.
-          try { res.destroy(err); } catch {}
+          try { res.destroy(err); } catch (e) { console.warn('[backup.db_download.res_destroy_on_stream_err]', e.message); }
         }
       });
       // Clean up the temp file when the read finishes — but DON'T audit
@@ -736,7 +736,7 @@ export function createBackupRouter() {
           status,
           userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
         });
-      } catch {}
+      } catch (e) { console.warn('[backup.previews_download.audit]', { status }, e.message); }
     };
 
     res.on('finish', () => writeAudit('success'));
@@ -771,8 +771,8 @@ export function createBackupRouter() {
       });
       archive.on('error', (err) => {
         console.error('[backup-previews] archive error:', err.message);
-        try { logError('backup.preview_zip', err, { count: entries.length }); } catch {}
-        try { res.destroy(err); } catch {}
+        try { logError('backup.preview_zip', err, { count: entries.length }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still destroy the response below
+        try { res.destroy(err); } catch (e) { console.warn('[backup.preview_zip.res_destroy_on_archive_err]', e.message); }
       });
       archive.on('data', (chunk) => { bytesStreamed += chunk.length; });
 
@@ -786,12 +786,12 @@ export function createBackupRouter() {
       await archive.finalize();
     } catch (err) {
       console.error('[backup-previews] failed:', err.message);
-      try { logError('backup.preview_zip', err); } catch {}
+      try { logError('backup.preview_zip', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log below
       writeAudit('failure', { error: err.message });
       if (!res.headersSent) {
         res.status(500).json({ error: err.message });
       } else {
-        try { res.destroy(err); } catch {}
+        try { res.destroy(err); } catch (e) { console.warn('[backup.preview_zip.res_destroy_on_outer_err]', e.message); }
       }
     }
   });
@@ -823,7 +823,7 @@ export function createBackupRouter() {
             status,
             userOverride: { email: 'system:reporting-token', full_name: 'reporting-token' },
           });
-        } catch {}
+        } catch (e) { console.warn('[backup.nested_archive.audit]', { auditAction, status }, e.message); }
       };
 
       res.on('finish', () => writeAudit('success'));
@@ -854,8 +854,8 @@ export function createBackupRouter() {
         });
         archive.on('error', (err) => {
           console.error(`[${auditAction}] archive error:`, err.message);
-          try { logError(auditAction, err); } catch {}
-          try { res.destroy(err); } catch {}
+          try { logError(auditAction, err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still destroy the response below
+          try { res.destroy(err); } catch (e) { console.warn('[backup.nested_archive.res_destroy_on_archive_err]', { auditAction }, e.message); }
         });
         archive.on('data', (chunk) => { bytesStreamed += chunk.length; });
 
@@ -869,12 +869,12 @@ export function createBackupRouter() {
         await archive.finalize();
       } catch (err) {
         console.error(`[${auditAction}] failed:`, err.message);
-        try { logError(auditAction, err); } catch {}
+        try { logError(auditAction, err); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log below
         writeAudit('failure', { error: err.message });
         if (!res.headersSent) {
           res.status(500).json({ error: err.message });
         } else {
-          try { res.destroy(err); } catch {}
+          try { res.destroy(err); } catch (e) { console.warn('[backup.nested_archive.res_destroy_on_outer_err]', { auditAction }, e.message); }
         }
       }
     });

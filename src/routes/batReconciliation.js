@@ -203,7 +203,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       }
       res.status(500).json({ error: err.message || 'Failed to process spreadsheet' });
     } finally {
-      try { fs.unlinkSync(req.file.path); } catch {}
+      try { fs.unlinkSync(req.file.path); } catch (e) { console.warn('[batReconciliation.upload_spreadsheet.cleanup]', { path: req.file.path }, e.message); }
     }
   });
 
@@ -288,7 +288,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
           });
         }
       } finally {
-        try { fs.unlinkSync(file.path); } catch {}
+        try { fs.unlinkSync(file.path); } catch (e) { console.warn('[batReconciliation.upload_batch.cleanup]', { path: file.path }, e.message); }
       }
     }
 
@@ -405,7 +405,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       const oldest = extractionEvents.listeners(channel)[0];
       if (oldest) {
         extractionEvents.off(channel, oldest);
-        try { oldest.__sseRes?.end(); } catch {}
+        try { oldest.__sseRes?.end(); } catch (e) { console.warn('[batReconciliation.extraction_sse.evict_oldest]', { channel }, e.message); }
       }
     }
 
@@ -416,7 +416,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     extractionEvents.on(channel, onUpdate);
 
     // Heartbeat every 25 s so proxies / load balancers don't kill the connection.
-    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 25_000);
+    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) { console.warn('[batReconciliation.extraction_sse.heartbeat]', { channel }, e.message); } }, 25_000);
 
     // Belt-and-suspenders cap. `req.on('close')` fires on a normal TCP teardown,
     // but a half-open connection (NAT silently dropping state, laptop suspended,
@@ -426,7 +426,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const hardCap = setTimeout(() => {
       clearInterval(heartbeat);
       extractionEvents.off(channel, onUpdate);
-      try { res.end(); } catch {}
+      try { res.end(); } catch (e) { console.warn('[batReconciliation.extraction_sse.hardcap_end]', { channel }, e.message); }
     }, 30 * 60 * 1000);
 
     req.on('close', () => {
@@ -718,6 +718,19 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       FROM bat_reconciliations
     `).all();
 
+    // Latest week with a real uploaded reconciliation (excluding the
+    // synthetic marked_zero rows). Surfaced as a dashboard tile so the
+    // operator can see at a glance how current their supplier file is.
+    const latestRecon = db.prepare(`
+      SELECT year, week_number
+      FROM bat_reconciliations
+      WHERE COALESCE(marked_zero, 0) = 0
+      ORDER BY year DESC, week_number DESC
+      LIMIT 1
+    `).get();
+    const latestReconWeek = latestRecon?.week_number ?? null;
+    const latestReconYear = latestRecon?.year ?? null;
+
     // Merge into one comparison list keyed by (year, week_number)
     const merged = new Map();
     const keyOf = (y, w) => `${y}/${w}`;
@@ -757,6 +770,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
 
     res.json({
       currentWeek, lastWeekPaid, lastWeekPaidYear,
+      latestReconWeek, latestReconYear,
       sagePaidWeeks, sageWeekTotals, weekComparison, missingWeeks, sageError,
       cacheRefreshedAt: cacheMeta.last_refreshed_at || null,
       cacheChangeSummary: cacheMeta.last_change_summary ? JSON.parse(cacheMeta.last_change_summary) : null,
@@ -996,7 +1010,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     let resumed = false;
     if (!paused) {
       // Kick off the worker for any leftover pending extractions
-      try { resumeExtractionWorker(); resumed = true; } catch {}
+      try { resumeExtractionWorker(); resumed = true; } catch (e) { console.warn('[batReconciliation.ocr_pause.resume_worker]', e.message); }
     }
     if (wasPaused !== paused) {
       logAudit({
@@ -1146,7 +1160,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       const result = replicateSupplierIntoCardoso();
       // Auto-rerun the match so the dashboard reflects the new values
       let matching = null;
-      try { matching = matchCardosoToSupplier(null); } catch {}
+      try { matching = matchCardosoToSupplier(null); } catch (e) { console.warn('[batReconciliation.replicate_supplier.rerun_match]', e.message); }
       logAudit({
         req, action: 'bat_replicate_supplier', resourceType: 'system',
         resourceName: 'Cardoso invoices ↤ supplier extractions',
@@ -1199,7 +1213,7 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
       });
       res.status(500).json({ error: err.message });
     } finally {
-      try { fs.unlinkSync(req.file.path); } catch {}
+      try { fs.unlinkSync(req.file.path); } catch (e) { console.warn('[batReconciliation.cardoso_upload.cleanup]', { path: req.file.path }, e.message); }
     }
   });
 

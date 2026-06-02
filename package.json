@@ -1,7 +1,7 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.5.7",
+  "version": "2026.5.8",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
@@ -18,7 +18,9 @@
     "preview": "vite preview",
     "hub:postgres:bootstrap": "node scripts/hub-postgres-bootstrap.mjs",
     "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs",
-    "check:migrations": "node scripts/check-migration-versions.mjs"
+    "check:migrations": "node scripts/check-migration-versions.mjs",
+    "schema:dump": "node scripts/dump-schema-snapshot.mjs",
+    "prepare": "node scripts/install-git-hooks.mjs"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
@@ -61,6 +63,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "cross-env": "^10.1.0",
     "date-fns": "^3.6.0",
@@ -76,6 +79,7 @@
     "input-otp": "^1.4.2",
     "jsonwebtoken": "^9.0.3",
     "jspdf": "^4.0.0",
+    "jspdf-autotable": "^5.0.8",
     "leaflet": "^1.9.4",
     "lodash": "^4.18.1",
     "lucide-react": "^1.16.0",
@@ -94,7 +98,6 @@
     "react-resizable-panels": "^4.11.1",
     "react-router-dom": "^6.26.0",
     "recharts": "^2.15.4",
-    "sharp": "^0.34.5",
     "sonner": "^2.0.1",
     "tailwind-merge": "^3.6.0",
     "tailwindcss-animate": "^1.0.7",
@@ -122,6 +125,7 @@
     "globals": "^17.6.0",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.14",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",
     "typescript": "^6.0.3",
     "vite": "^8.0.13",

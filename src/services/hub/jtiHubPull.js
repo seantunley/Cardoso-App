@@ -104,7 +104,7 @@ export async function pullMissingArchivesForSite({ site, db, fetchImpl = globalT
     } catch (err) {
       failed++;
       console.error(`[jti-pull] site=${site.id} archive #${a.id} pull failed: ${err.message}`);
-      try { logError('hub.jti_pull', err, { siteId: site.id, archiveId: a.id }); } catch {}
+      try { logError('hub.jti_pull', err, { siteId: site.id, archiveId: a.id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; pull failure already logged to console above
     }
   }
   return { siteId: site.id, status: failed > 0 ? 'partial' : 'ok', listed: archives.length, missing: missing.length, pulled, failed };

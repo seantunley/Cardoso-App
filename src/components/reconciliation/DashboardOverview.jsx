@@ -49,7 +49,7 @@ export default function DashboardOverview({ data }) {
 
   return (
     <div className="space-y-8">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-in">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
         <Tile
           label="Total BAT"
           value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(summary.totalSupplier)}</>}

@@ -591,8 +591,138 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       res.json(getSecuritySignals());
     } catch (err) {
       console.error('[system.security-signals] failed:', err.message);
-      try { logError('system.security_signals', err); } catch {}
+      try { logError('system.security_signals', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: 'Failed to load security signals' });
+    }
+  });
+
+  // GET /api/system/sage-health
+  //
+  // Consolidated "is the data current and healthy?" snapshot for site mode.
+  // Composes the signals that already exist but are scattered across BAT,
+  // the sync services, the error log, alerts and job_runs into one payload
+  // with a single overall status. Backs the SageHealthPanel shown on the
+  // Reporting dashboard and Operations page.
+  //
+  // requireAuth (not requireAdmin) so non-admin reporting users can still
+  // see whether the numbers they're looking at are fresh. Heavy modules
+  // (mssql via batReconciliation, alertEngine) are lazy-imported so loading
+  // system.js standalone doesn't drag them in.
+  router.get('/api/system/sage-health', requireAuth, async (req, res) => {
+    try {
+      const [{ getSageHealth }, { getSyncMeta: getCreditorMeta }, { getSyncMeta: getInventoryMeta }, { getSyncMeta: getReceiptMeta }] =
+        await Promise.all([
+          import('../services/batReconciliation.js'),
+          import('../services/creditorSync.js'),
+          import('../services/inventoryMovement.js'),
+          import('../services/stockReceipts.js'),
+        ]);
+
+      const sage = getSageHealth();
+
+      // Age (in hours) of a local-time timestamp string, computed in SQLite
+      // against now_local() so it stays consistent with how timestamps are
+      // stored (local UTC+2), never bare datetime('now').
+      const ageStmt = db.prepare("SELECT (julianday(now_local()) - julianday(?)) * 24.0 AS hours");
+      const ageHours = (ts) => {
+        if (!ts) return null;
+        try {
+          const row = ageStmt.get(ts);
+          return row && Number.isFinite(row.hours) ? row.hours : null;
+        } catch {
+          return null;
+        }
+      };
+
+      // Sync freshness per source. All three sync nightly, so >24h since the
+      // last successful sync = stale. null last_synced_at = never synced.
+      const STALE_HOURS = 24;
+      // These sync jobs only run on site installs; the hub receives this data
+      // via ETL, not local Sage sync. On the hub their meta stays null, which
+      // would falsely mark every source stale, so omit them in hub mode.
+      const rawSources = process.env.HUB_MODE === 'true' ? [] : [
+        { key: 'creditors', label: 'Creditors', last_synced_at: getCreditorMeta()?.last_synced_at || null },
+        { key: 'inventory', label: 'Inventory sales', last_synced_at: getInventoryMeta()?.last_synced_at || null },
+        { key: 'receipts', label: 'Stock receipts', last_synced_at: getReceiptMeta()?.last_synced_at || null },
+      ];
+      const sources = rawSources.map((s) => {
+        const hours = ageHours(s.last_synced_at);
+        const stale = s.last_synced_at === null || (hours !== null && hours > STALE_HOURS);
+        return { ...s, age_hours: hours, stale };
+      });
+
+      // Configured database connections and their last sync outcome.
+      let connections = [];
+      try {
+        connections = db
+          .prepare('SELECT name, status, last_sync, last_error, record_count FROM databaseconnection ORDER BY name')
+          .all();
+      } catch {
+        connections = [];
+      }
+
+      // Errors logged in the last 24h (count + a few most-recent).
+      let errors24h = 0;
+      let recentErrors = [];
+      try {
+        errors24h = db
+          .prepare("SELECT COUNT(*) AS c FROM error_log WHERE level = 'error' AND occurred_at >= datetime(now_local(), '-24 hours')")
+          .get().c;
+        recentErrors = db
+          .prepare("SELECT source, message, occurred_at FROM error_log WHERE level = 'error' AND occurred_at >= datetime(now_local(), '-24 hours') ORDER BY occurred_at DESC LIMIT 5")
+          .all();
+      } catch {
+        errors24h = 0;
+      }
+
+      // Background job failures in the last 24h.
+      let jobFailures24h = 0;
+      try {
+        jobFailures24h = db
+          .prepare("SELECT COUNT(*) AS c FROM job_runs WHERE status = 'failed' AND started_at >= datetime(now_local(), '-24 hours')")
+          .get().c;
+      } catch {
+        jobFailures24h = 0;
+      }
+
+      // Active (unresolved) alerts.
+      let activeAlerts = 0;
+      let criticalAlerts = 0;
+      try {
+        const { getActiveAlerts } = await import('../lib/alertEngine.js');
+        const alerts = getActiveAlerts();
+        activeAlerts = alerts.length;
+        criticalAlerts = alerts.filter((a) => a.severity === 'critical').length;
+      } catch {
+        activeAlerts = 0;
+      }
+
+      // Roll up an overall status. Critical wins over warn wins over ok.
+      const anyStale = sources.some((s) => s.stale);
+      const sageDown = sage.ok === false;
+      let status = 'ok';
+      if ((sageDown && sage.downForMinutes > 5) || criticalAlerts > 0) {
+        status = 'critical';
+      } else if (sageDown || anyStale || jobFailures24h > 0 || errors24h > 0 || activeAlerts > 0) {
+        status = 'warn';
+      }
+
+      res.json({
+        status,
+        generated_at: new Date().toISOString(),
+        sage,
+        sources,
+        connections,
+        errors24h,
+        recentErrors,
+        jobFailures24h,
+        activeAlerts,
+        criticalAlerts,
+      });
+    } catch (err) {
+      console.error('[system.sage-health] failed:', err.message);
+      try { logError('system.sage_health', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
+      res.status(500).json({ error: 'Failed to load Sage health' });
     }
   });
 
@@ -695,7 +825,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         child.stderr.on('data', (d) => { out += d.toString(); });
         child.on('close', () => resolve(out));
         child.on('error', reject);
-        setTimeout(() => { try { child.kill(); } catch {} resolve(out); }, 5000);
+        setTimeout(() => { try { child.kill(); } catch (e) { console.warn('[system.tls_status.kill_sc_query]', e.message); } resolve(out); }, 5000);
       });
       let serviceStatus = 'not_installed';
       if (/STATE\s*:\s*\d+\s+RUNNING/i.test(queryOutput)) serviceStatus = 'running';
@@ -768,7 +898,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
 
       res.json({ ok: true, hostname, message: 'Cert re-issued and Caddy restarted.' });
     } catch (err) {
-      try { logError('system.tls_renew', err, { hostname }); } catch {}
+      try { logError('system.tls_renew', err, { hostname }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log below
       logAudit({
         req, action: 'tls_cert_renew', resourceType: 'system',
         resourceName: hostname || 'unknown',
@@ -816,7 +946,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const before = db.prepare(`SELECT value FROM bat_settings WHERE key = 'hub_sync_url'`).get()?.value || null;
       if (raw) {
         const cleaned = raw.replace(/\/$/, '');
-        db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, datetime('now'))
+        db.prepare(`INSERT INTO bat_settings (key, value, updated_at) VALUES ('hub_sync_url', ?, now_local())
                     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`)
           .run(cleaned);
       } else {
@@ -834,7 +964,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const probe = await probeHubUrl();
       res.json({ ok: true, probe });
     } catch (err) {
-      try { logError('system.hub_url_update', err); } catch {}
+      try { logError('system.hub_url_update', err); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       res.status(500).json({ error: err.message });
     }
   });
@@ -1022,7 +1152,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     autoUpdatePhase = 'verifying';
     const actual = await sha256File(tmpZip);
     if (actual !== manifest.app_zip_sha256.toLowerCase()) {
-      try { fs.unlinkSync(tmpZip); } catch {}
+      try { fs.unlinkSync(tmpZip); } catch (e) { console.warn('[system.autoUpdate.sha_mismatch_cleanup]', { tmpZip }, e.message); }
       return { ok: false, reason: 'app_zip_sha_mismatch' };
     }
     console.log('[AutoUpdate-delta] SHA-256 verified. Launching apply-app-update.ps1 via Task Scheduler.');
@@ -1050,7 +1180,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       await launchViaTaskScheduler(taskName, wrapper);
     } catch (err) {
       console.error('[AutoUpdate-delta] Task Scheduler launch failed:', err.message);
-      try { logError('app.update.delta', err, { phase: 'task_scheduler_launch' }); } catch {}
+      try { logError('app.update.delta', err, { phase: 'task_scheduler_launch' }); } catch (e) { console.error('[system.task_scheduler]', { phase: 'delta_launch_log' }, e.message); }
       return { ok: false, reason: `task_scheduler_launch_failed:${err.message}` };
     }
     return { ok: true, mode: 'delta' };
@@ -1138,7 +1268,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         await launchViaTaskScheduler(taskName, installerScript);
       } catch (err) {
         console.error('[AutoUpdate] Task Scheduler launch failed:', err.message);
-        try { logError('app.update.full', err, { phase: 'task_scheduler_launch' }); } catch {}
+        try { logError('app.update.full', err, { phase: 'task_scheduler_launch' }); } catch (e) { console.error('[system.task_scheduler]', { phase: 'full_launch_log' }, e.message); }
         autoUpdateRunning = false;
         autoUpdatePhase = null;
         autoUpdateStartedAt = null;
@@ -1158,7 +1288,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       autoUpdatePhase = null;
       autoUpdateStartedAt = null;
       if (tmpPath) {
-        try { fs.unlinkSync(tmpPath); } catch {}
+        try { fs.unlinkSync(tmpPath); } catch (e) { console.warn('[system.autoUpdate.error_cleanup]', { tmpPath }, e.message); }
       }
       return { ok: false, reason: err.message };
     }
@@ -1287,7 +1417,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const dbPath = process.env.DB_PATH || './database/cardoso.db';
       const resolvedDbPath = path.resolve(dbPath);
       const backupDir = path.resolve(path.dirname(resolvedDbPath), 'backups');
-      try { fs.mkdirSync(backupDir, { recursive: true }); } catch {}
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (e) { console.warn('[system.backup.mkdir]', { backupDir }, e.message); }
       const siteId = process.env.SITE_ID || 'site';
       const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
       const destPath = path.join(backupDir, `cardoso-${siteId}-${ts}.db`);
@@ -1375,7 +1505,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       });
     } catch (error) {
       console.error('[maintenance] backup-now failed:', error.message);
-      try { logError('maintenance.backup_now', error); } catch {}
+      try { logError('maintenance.backup_now', error); } catch (e) { console.error('[system.maintenance_backup_log]', { op: 'backup_now' }, e.message); }
       res.status(500).json({ error: error.message || 'Failed to create backup' });
     }
   });

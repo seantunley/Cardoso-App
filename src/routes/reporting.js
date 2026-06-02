@@ -20,6 +20,8 @@ import { pagination } from '../lib/httpParams.js';
 import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/batReconciliation.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
+import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
+import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -330,7 +332,12 @@ $result | ConvertTo-Json -Depth 6 -Compress
   return parsed;
 }
 
-export function createReportingRouter({ requireAuth }) {
+export function createReportingRouter({ requireAuth, requirePermission }) {
+  // Report data (trends, exports, insights) is gated by can_access_reports so
+  // a bare authenticated account can't read revenue / dead-stock / debtor data
+  // it isn't entitled to. Fallback to requireAuth-only if requirePermission
+  // wasn't supplied (defensive; server.js always passes it).
+  const reportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
 
@@ -367,25 +374,44 @@ export function createReportingRouter({ requireAuth }) {
   // GET /api/top-balances?limit=30
   router.get('/api/top-balances', requireAuth, (req, res) => {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 200);
+    // Cap raised from 200 → 10000 so the Customer Balances page can
+    // request its full dataset in one fetch (no client-side pagination
+    // — it scrolls in place like the Inventory list).
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 10000);
     const isHub = process.env.HUB_MODE === 'true';
     const siteFilter = String(req.query.site || 'all').trim();
     const ageBucket = String(req.query.ageBucket || 'all').trim();
     const salesRepFilter = String(req.query.salesRep || 'all').trim();
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
+    const lastPurchaseDays = Math.max(parseInt(req.query.lastPurchaseDays, 10) || 0, 0);
+    const dormantOnly = ['1', 'true', 'yes', 'on'].includes(String(req.query.dormantOnly || '').toLowerCase());
 
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
     // sales_rep can come from JSON blobs (data / local_fields) so we always
     // filter it in JS after hydrateSalesRepAndAccountType has run.
-    // Same goes for age bucket / invoice-match (need parsed invoices).
-    const needsInMemoryFilter = ageBucket !== 'all' || hideInvoiceMatchesBalance || salesRepFilter !== 'all';
+    // Same goes for age bucket / invoice-match / last-purchase / dormant
+    // (need parsed invoices and computed credit verdicts).
+    const needsInMemoryFilter =
+      ageBucket !== 'all' ||
+      hideInvoiceMatchesBalance ||
+      salesRepFilter !== 'all' ||
+      lastPurchaseDays > 0 ||
+      dormantOnly;
 
     try {
       let sites = [];
       let total = 0;
       let filteredTotalOutstanding = 0;
       let allRecords = [];
+
+      // Active credit-logic config (the hub-synced 'local' config where a site
+      // has one) — loaded once per request and memoised. The server-computed
+      // credit badge MUST use it; passing null falls back to the default and
+      // silently ignores configured thresholds, which the client-side badge
+      // then trusts over its own fetched config.
+      let _creditConfig;
+      const creditConfig = () => (_creditConfig ??= getCreditLogicForAnalysis().config);
 
       if (isHub) {
         sites = prep(`
@@ -449,20 +475,20 @@ export function createReportingRouter({ requireAuth }) {
         ).all(SITE_NAME, balanceAmountGt).map(r => r.site_name).filter(Boolean);
 
         const fetchSql = needsInMemoryFilter
-          ? `SELECT customer_number, customer_name, sales_rep, account_type,
+          ? `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
                     flag_color, flag_reason, auto_flagged, terms,
-                    data, local_fields,
+                    local_fields,
                     ? AS site_name
              FROM datarecord
              WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
                AND outstanding_balance != '0'
                AND outstanding_balance_num > ?
              ORDER BY outstanding_balance_num DESC`
-          : `SELECT customer_number, customer_name, sales_rep, account_type,
+          : `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
                     flag_color, flag_reason, auto_flagged, terms,
-                    data, local_fields,
+                    local_fields,
                     ? AS site_name,
                     COUNT(*) OVER() AS _total_count,
                     SUM(outstanding_balance_num) OVER() AS _total_sum
@@ -482,17 +508,52 @@ export function createReportingRouter({ requireAuth }) {
         }
         allRecords = rawRows
           .map(hydrateSalesRepAndAccountType)
-          .map(expandDataRecord);
+          .map(expandDataRecord)
+          .map((row) => {
+            // Compute credit verdict once on the server so the client can
+            // skip the per-row useMemo on every parent re-render.
+            try {
+              const { verdict, score } = analyseInvoiceCredit([row], [], creditConfig());
+              row.credit_verdict = verdict;
+              row.credit_score = score;
+            } catch (err) {
+              console.error('[balances.credit_verdict] compute failed for', {
+                id: row?.id,
+                customer_number: row?.customer_number,
+              }, err.message);
+            }
+            return row;
+          });
       }
 
       // ── In-memory pagination path (age bucket / invoice-match / sales rep active) ──
       let recordsForPage;
       let pageTotalOutstanding;
       if (needsInMemoryFilter) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
         const filtered = allRecords.filter((row) => {
           if (!matchesAgeBucket(row, ageBucket)) return false;
           if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
           if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
+          // "Haven't bought in N+ days" — uses the last invoice date.
+          // Customers with no date on record fail the filter, since we
+          // can't prove they've bought recently.
+          if (lastPurchaseDays > 0) {
+            const dt = parseBalanceDate(row.LastInvoiceDate ?? row.last_invoice_date ?? row.last_unpaid_invoice_1_date);
+            if (!dt) return false;
+            const days = Math.floor((today - dt) / 86400000);
+            if (days < lastPurchaseDays) return false;
+          }
+          // Dormant — derived from analyseInvoiceCredit using the active
+          // credit-logic config (same as the badge), so the filter matches
+          // the verdict the row actually shows.
+          if (dormantOnly) {
+            try {
+              const v = analyseInvoiceCredit([row], [], creditConfig()).verdict;
+              if (v !== 'dormant') return false;
+            } catch { return false; }
+          }
           return true;
         });
         total = filtered.length;
@@ -565,14 +626,344 @@ export function createReportingRouter({ requireAuth }) {
   // last_unpaid_invoice_N keys it synthesises from the JSON; with
   // `receipts` not selected, the helper's receipts-spread step
   // short-circuits on `undefined` and contributes no work.
-  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
-    const isHub = process.env.HUB_MODE === 'true';
-    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
-    const salesRepFilter = String(req.query.sales_rep || 'all').trim();
-    const accountTypeFilter = String(req.query.account_type || 'all').trim();
-    const siteFilter = String(req.query.site || 'all').trim();
-
+  // GET /api/reports/trends/customer — site-mode mirror of /api/hub/trends.
+  // Bucket per-week / per-month record count + flag rate over time. Same
+  // shape as the hub endpoint so the React component can share its
+  // chart/pivot logic across both installs.
+  router.get('/api/reports/trends/customer', ...reportsGuard, (req, res) => {
+    const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
+    const sinceParam = req.query.since ? String(req.query.since) : null;
+    if (sinceParam && !/^\d{4}-\d{2}-\d{2}$/.test(sinceParam)) {
+      return res.status(400).json({ error: 'since must be YYYY-MM-DD' });
+    }
+    const since = sinceParam || (() => {
+      const d = new Date();
+      if (period === 'monthly') d.setMonth(d.getMonth() - 6);
+      else d.setDate(d.getDate() - 12 * 7);
+      return d.toISOString().slice(0, 10);
+    })();
+    const bucketExpr = period === 'monthly'
+      ? "strftime('%Y-%m', updated_date)"
+      : "strftime('%Y-W%W', updated_date)";
     try {
+      const rows = db.prepare(`
+        SELECT
+          ${bucketExpr} AS period,
+          COUNT(*) AS total_records,
+          SUM(CASE WHEN flag_color IS NOT NULL AND flag_color NOT IN ('', 'none') THEN 1 ELSE 0 END) AS flagged_records
+        FROM datarecord
+        WHERE updated_date >= ?
+          AND ${bucketExpr} IS NOT NULL
+        GROUP BY ${bucketExpr}
+        ORDER BY ${bucketExpr} ASC
+      `).all(since);
+
+      res.json({
+        period,
+        since,
+        site_name: SITE_NAME,
+        data: rows.map((row) => ({
+          period: row.period,
+          site_name: SITE_NAME,
+          total_records: row.total_records,
+          flagged_records: row.flagged_records,
+          flag_rate: row.total_records > 0
+            ? Math.round((row.flagged_records / row.total_records) * 1000) / 10
+            : 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.customer', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory — site-mode year-over-year inventory
+  // trends from inventory_sales_cache (the site's own monthly rollup,
+  // populated by inventoryMovement.syncInventorySales). One row per
+  // (year, month). year_list is the distinct set of years present.
+  router.get('/api/reports/trends/inventory', ...reportsGuard, (_req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT
+          CAST(substr(period, 1, 4) AS INTEGER) AS year,
+          CAST(substr(period, 6, 2) AS INTEGER) AS month,
+          SUM(qty_sold)    AS total_qty_sold,
+          SUM(revenue)     AS total_revenue,
+          SUM(order_count) AS total_orders,
+          COUNT(DISTINCT item_number) AS distinct_items
+        FROM inventory_sales_cache
+        WHERE period IS NOT NULL
+        GROUP BY substr(period, 1, 4), substr(period, 6, 2)
+        ORDER BY year ASC, month ASC
+      `).all();
+
+      const yearList = [...new Set(rows.map((r) => r.year))].sort((a, b) => a - b);
+      res.json({
+        period: 'monthly',
+        site_name: SITE_NAME,
+        year_list: yearList,
+        data: rows.map((row) => ({
+          year: row.year,
+          month: row.month,
+          total_qty_sold: Number(row.total_qty_sold) || 0,
+          total_revenue: Number(row.total_revenue) || 0,
+          total_orders: Number(row.total_orders) || 0,
+          distinct_items: Number(row.distinct_items) || 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/seasonal — site-mode top-10 per SA season.
+  router.get('/api/reports/trends/inventory/seasonal', ...reportsGuard, (_req, res) => {
+    try {
+      const seasonalCase = `
+        CASE substr(sc.period, 6, 2)
+          WHEN '12' THEN 'Summer' WHEN '01' THEN 'Summer' WHEN '02' THEN 'Summer'
+          WHEN '03' THEN 'Autumn' WHEN '04' THEN 'Autumn' WHEN '05' THEN 'Autumn'
+          WHEN '06' THEN 'Winter' WHEN '07' THEN 'Winter' WHEN '08' THEN 'Winter'
+          WHEN '09' THEN 'Spring' WHEN '10' THEN 'Spring' WHEN '11' THEN 'Spring'
+        END`;
+      const rows = db.prepare(`
+        WITH seasonal AS (
+          SELECT ${seasonalCase} AS season,
+                 sc.item_number,
+                 SUM(sc.qty_sold)    AS qty_sold,
+                 SUM(sc.revenue)     AS revenue,
+                 SUM(sc.order_count) AS orders,
+                 COUNT(DISTINCT sc.period) AS months_seen
+          FROM inventory_sales_cache sc
+          WHERE sc.period IS NOT NULL
+          GROUP BY season, sc.item_number
+        ),
+        ranked AS (
+          SELECT s.*, ROW_NUMBER() OVER (PARTITION BY s.season ORDER BY s.qty_sold DESC) AS rn
+          FROM seasonal s WHERE s.season IS NOT NULL
+        )
+        SELECT r.season, r.rn AS rank, r.item_number,
+               r.qty_sold, r.revenue, r.orders, r.months_seen,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN inventoryrecord ir ON TRIM(ir.item_number) = TRIM(r.item_number)
+        WHERE r.rn <= 10
+        ORDER BY CASE r.season WHEN 'Summer' THEN 1 WHEN 'Autumn' THEN 2 WHEN 'Winter' THEN 3 WHEN 'Spring' THEN 4 END, r.rn
+      `).all();
+
+      const buckets = { Summer: [], Autumn: [], Winter: [], Spring: [] };
+      for (const row of rows) {
+        if (!buckets[row.season]) continue;
+        buckets[row.season].push({
+          rank: row.rank,
+          item_number: row.item_number,
+          item_description: row.item_description || null,
+          commodity: row.commodity || null,
+          qty_sold: Number(row.qty_sold) || 0,
+          revenue: Number(row.revenue) || 0,
+          orders: Number(row.orders) || 0,
+          months_seen: Number(row.months_seen) || 0,
+        });
+      }
+      res.json({
+        seasons: ['Summer', 'Autumn', 'Winter', 'Spring'],
+        months: {
+          Summer: ['Dec', 'Jan', 'Feb'],
+          Autumn: ['Mar', 'Apr', 'May'],
+          Winter: ['Jun', 'Jul', 'Aug'],
+          Spring: ['Sep', 'Oct', 'Nov'],
+        },
+        site_name: SITE_NAME,
+        data: buckets,
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.seasonal', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/revenue-by-commodity — site-mode
+  // commodity revenue mix per period. Joins inventoryrecord to attach
+  // a commodity to each item_number.
+  router.get('/api/reports/trends/inventory/revenue-by-commodity', ...reportsGuard, (_req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT sc.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(sc.revenue)  AS revenue,
+               SUM(sc.qty_sold) AS qty
+        FROM inventory_sales_cache sc
+        LEFT JOIN (
+          SELECT item_number, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
+        WHERE sc.period IS NOT NULL
+        GROUP BY sc.period, commodity
+        ORDER BY sc.period ASC, commodity ASC
+      `).all();
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        site_name: SITE_NAME,
+        commodity_list: commodityList,
+        data: rows.map(r => ({
+          period: r.period,
+          commodity: r.commodity,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        })),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.revenue_by_commodity', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/dead-stock — site-mode trailing-24-month
+  // dead-stock trend. Same shape as hub: per month, count of SKUs in
+  // inventoryrecord whose most-recent sale is older than the month minus 3.
+  // Restricted to SKUs with current inventory_value > 0 so the count and
+  // value lines move together (see hub variant for rationale).
+  router.get('/api/reports/trends/inventory/dead-stock', ...reportsGuard, (_req, res) => {
+    try {
+      const itemRows = db.prepare(`
+        WITH last_sale AS (
+          SELECT TRIM(item_number) AS item_number, MAX(period) AS last_period
+          FROM inventory_sales_cache
+          WHERE period IS NOT NULL
+          GROUP BY TRIM(item_number)
+        )
+        SELECT TRIM(ir.item_number) AS item_number,
+               COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM inventoryrecord ir
+        LEFT JOIN last_sale ls ON ls.item_number = TRIM(ir.item_number)
+        WHERE COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
+      `).all();
+
+      const months = [];
+      const now = new Date();
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+
+      const data = months.map(m => {
+        const [yy, mm] = m.split('-').map(Number);
+        const t = new Date(yy, mm - 1 - 3, 1);
+        const threshold = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+        let count = 0;
+        let value = 0;
+        for (const r of itemRows) {
+          if (!r.last_period || r.last_period < threshold) {
+            count++;
+            value += r.inv_value || 0;
+          }
+        }
+        return { month: m, dead_count: count, dead_value: value };
+      });
+
+      res.json({
+        site_name: SITE_NAME,
+        total_skus: itemRows.length,
+        threshold_months: 3,
+        data,
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.dead_stock', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/reports/trends/inventory/top-movers — site-mode top-10 SKUs by
+  // lifetime revenue with last-12-months vs prior-12-months delta.
+  router.get('/api/reports/trends/inventory/top-movers', ...reportsGuard, (_req, res) => {
+    try {
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twentyfour = new Date(now.getFullYear(), now.getMonth() - 24, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+      const twentyfourStr = `${twentyfour.getFullYear()}-${String(twentyfour.getMonth() + 1).padStart(2, '0')}`;
+
+      const rows = db.prepare(`
+        WITH agg AS (
+          SELECT sc.item_number,
+                 SUM(sc.revenue)     AS total_revenue,
+                 SUM(sc.qty_sold)    AS total_qty,
+                 SUM(sc.order_count) AS total_orders,
+                 SUM(CASE WHEN sc.period >= ? THEN sc.qty_sold ELSE 0 END) AS this_year_qty,
+                 SUM(CASE WHEN sc.period >= ? THEN sc.revenue  ELSE 0 END) AS this_year_revenue,
+                 SUM(CASE WHEN sc.period >= ? AND sc.period < ? THEN sc.qty_sold ELSE 0 END) AS prior_year_qty,
+                 SUM(CASE WHEN sc.period >= ? AND sc.period < ? THEN sc.revenue  ELSE 0 END) AS prior_year_revenue
+          FROM inventory_sales_cache sc
+          WHERE sc.period IS NOT NULL
+          GROUP BY sc.item_number
+        ),
+        ranked AS (
+          SELECT a.*, ROW_NUMBER() OVER (ORDER BY a.total_revenue DESC) AS rn
+          FROM agg a
+        )
+        SELECT r.rn AS rank, r.item_number,
+               r.total_revenue, r.total_qty, r.total_orders,
+               r.this_year_qty, r.this_year_revenue,
+               r.prior_year_qty, r.prior_year_revenue,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT item_number, item_description, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(r.item_number) AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY r.rn ASC
+      `).all(twelveStr, twelveStr, twentyfourStr, twelveStr, twentyfourStr, twelveStr);
+
+      res.json({
+        site_name: SITE_NAME,
+        this_year_from: twelveStr,
+        prior_year_from: twentyfourStr,
+        data: rows.map(r => {
+          const tyQ = Number(r.this_year_qty) || 0;
+          const pyQ = Number(r.prior_year_qty) || 0;
+          const tyR = Number(r.this_year_revenue) || 0;
+          const pyR = Number(r.prior_year_revenue) || 0;
+          return {
+            rank: r.rank,
+            item_number: r.item_number,
+            item_description: r.item_description || null,
+            commodity: r.commodity || null,
+            total_revenue: Number(r.total_revenue) || 0,
+            total_qty: Number(r.total_qty) || 0,
+            total_orders: Number(r.total_orders) || 0,
+            this_year_qty: tyQ,
+            this_year_revenue: tyR,
+            prior_year_qty: pyQ,
+            prior_year_revenue: pyR,
+            qty_delta_pct: pyQ > 0 ? Math.round(((tyQ - pyQ) / pyQ) * 1000) / 10 : null,
+            revenue_delta_pct: pyR > 0 ? Math.round(((tyR - pyR) / pyR) * 1000) / 10 : null,
+          };
+        }),
+      });
+    } catch (err) {
+      logError('reports.trends.inventory.top_movers', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Build the full aged-debtors report object. Extracted from the route
+  // handler so both the JSON endpoint and the PDF/Excel export endpoint
+  // share one query + aging implementation (no drift between screen and
+  // download). Throws on DB error; callers wrap in try/catch.
+  function buildAgedDebtorsReport(query) {
+    const isHub = process.env.HUB_MODE === 'true';
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    const salesRepFilter = String(query.sales_rep || 'all').trim();
+    const accountTypeFilter = String(query.account_type || 'all').trim();
+    const siteFilter = String(query.site || 'all').trim();
+
+    {
       let records;
       let sites = [];
       if (isHub) {
@@ -606,7 +997,7 @@ export function createReportingRouter({ requireAuth }) {
           `SELECT customer_number, customer_name, sales_rep, account_type, terms,
                   outstanding_balance, unpaid_invoices,
                   flag_color, flag_reason, auto_flagged,
-                  data, local_fields,
+                  local_fields,
                   ? AS site_name
            FROM datarecord
            WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
@@ -694,7 +1085,7 @@ export function createReportingRouter({ requireAuth }) {
       const salesReps = Array.from(new Set(records.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
       const accountTypes = Array.from(new Set(records.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
 
-      res.json({
+      return {
         records: enriched,
         summary: {
           total_customers: enriched.length,
@@ -709,10 +1100,39 @@ export function createReportingRouter({ requireAuth }) {
         site_name: SITE_NAME,
         hub_mode: isHub,
         min_balance: minBalance,
-      });
+      };
+    }
+  }
+
+  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+    try {
+      res.json(buildAgedDebtorsReport(req.query));
     } catch (err) {
       console.error('[reporting] aged-debtors error:', err);
       res.status(500).json({ error: 'Failed to fetch aged debtors' });
+    }
+  });
+
+  // GET /api/reports/aged-debtors/export?format=pdf|xlsx
+  router.get('/api/reports/aged-debtors/export', ...reportsGuard, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildAgedDebtorsReport(req.query);
+      const { buildAgedDebtorsPdf, buildAgedDebtorsXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildAgedDebtorsXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="aged-debtors-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildAgedDebtorsPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="aged-debtors-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] aged-debtors export error:', err);
+      res.status(500).json({ error: 'Failed to export aged debtors' });
     }
   });
 
@@ -729,10 +1149,12 @@ export function createReportingRouter({ requireAuth }) {
   // sales_rep only inside `data`/`local_fields`; that helper early-
   // returns when both columns are populated, so the cost is "free for
   // healthy rows + one JSON.parse pair for the laggards".
-  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+  // Build the rep-exposure report object. Shared by the JSON endpoint and
+  // the PDF/Excel export so screen and download never diverge.
+  function buildRepExposureReport(query) {
     const isHub = process.env.HUB_MODE === 'true';
-    const minBalance = Math.max(0, parseFloat(req.query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
-    try {
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    {
       let records;
       if (isHub) {
         records = prep(
@@ -792,10 +1214,39 @@ export function createReportingRouter({ requireAuth }) {
         total_orange: reps.reduce((s, r) => s + r.flag_counts.orange, 0),
       };
 
-      res.json({ reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance });
+      return { reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance };
+    }
+  }
+
+  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+    try {
+      res.json(buildRepExposureReport(req.query));
     } catch (err) {
       console.error('[reporting] rep-exposure error:', err);
       res.status(500).json({ error: 'Failed to fetch rep exposure' });
+    }
+  });
+
+  // GET /api/reports/rep-exposure/export?format=pdf|xlsx
+  router.get('/api/reports/rep-exposure/export', ...reportsGuard, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildRepExposureReport(req.query);
+      const { buildRepExposurePdf, buildRepExposureXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildRepExposureXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="rep-exposure-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildRepExposurePdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="rep-exposure-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] rep-exposure export error:', err);
+      res.status(500).json({ error: 'Failed to export rep exposure' });
     }
   });
 
@@ -1506,6 +1957,69 @@ export function createReportingRouter({ requireAuth }) {
     });
   });
 
+  router.get('/api/reporting/inventory-movement', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
+      const rows = prep(
+        `SELECT item_number, period, qty_sold, revenue, order_count, last_sale_date
+         FROM inventory_sales_cache ORDER BY item_number, period LIMIT ? OFFSET ?`
+      ).all(limit, offset);
+      const meta = db.prepare('SELECT last_synced_at, last_synced_to, rows_synced FROM inventory_sales_sync_meta WHERE id = 1').get();
+      res.json({
+        site_id: SITE_ID,
+        site_slug: SITE_SLUG,
+        offset,
+        limit,
+        count: rows.length,
+        has_more: rows.length === limit,
+        records: rows,
+        sync_meta: meta || {},
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/reporting/stock-receipt-expiry', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
+      const rows = prep(`
+        SELECT
+          sr.receipt_number, sr.supplier_name, sr.receipt_date,
+          srl.id AS receipt_line_id, srl.line_no, srl.item_number, srl.item_description,
+          srl.qty_received, srl.uom, srl.unit_cost,
+          e.expiry_date, e.qty_at_expiry, e.entered_by, e.entry_source, e.notes, e.created_date AS expiry_created
+        FROM stock_receipt_line srl
+        JOIN stock_receipt sr ON sr.id = srl.receipt_id
+        -- Sweets-only (commodity '1'), mirroring listReceiptLines: expiry
+        -- tracking doesn't apply to cigarettes/tobacco, and items with no
+        -- inventoryrecord row (unknown commodity) are excluded. Without this
+        -- the hub mirror surfaces tobacco lines as "missing expiry".
+        INNER JOIN (
+          SELECT TRIM(item_number) AS item_number,
+                 TRIM(commodity) AS commodity,
+                 ROW_NUMBER() OVER (PARTITION BY TRIM(item_number) ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ic ON ic.item_number = srl.item_number AND ic.rn = 1
+        LEFT JOIN stock_receipt_line_expiry e ON e.receipt_line_id = srl.id
+        WHERE ic.commodity = '1'
+        ORDER BY sr.receipt_date DESC, srl.id, e.expiry_date ASC, e.id ASC
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
+      res.json({
+        site_id: SITE_ID,
+        site_slug: SITE_SLUG,
+        offset,
+        limit,
+        count: rows.length,
+        has_more: rows.length === limit,
+        records: rows,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ---- JTI archive intake (server-to-server, hub→site pull-fallback) ----
   //
   // The user-facing /api/jti/archive endpoints are gated by login +
@@ -1546,6 +2060,75 @@ export function createReportingRouter({ requireAuth }) {
     res.setHeader('Content-Length', String(buffer.length));
     res.setHeader('X-JTI-Archive-Sha256', row.sha256);
     res.end(buffer);
+  });
+
+  // GET /api/insights — proactive insights feed (rule-based detectors over the
+  // synced sales / inventory / debtor data). Site-mode; the hub returns empty.
+  router.get('/api/insights', ...reportsGuard, async (req, res) => {
+    try {
+      const { computeInsights, refreshInsights } = await import('../services/insights.js');
+      // ?refresh=true forces a recompute (the Insights page's explicit
+      // "Refresh" button) instead of serving the invalidation-driven cache.
+      const force = req.query.refresh === 'true' || req.query.refresh === '1';
+      res.json(force ? refreshInsights() : computeInsights());
+    } catch (err) {
+      console.error('[reporting] insights error:', err);
+      res.status(500).json({ error: 'Failed to compute insights' });
+    }
+  });
+
+  // ── Custom insight rules (no-code builder) ──────────────────────────────
+  // Reads are open to any reporting user; writes are admin-only (inline check
+  // since this router only receives requireAuth).
+  const requireAdminInline = (req, res) => {
+    if (req.currentUser?.role !== 'admin') { res.status(403).json({ error: 'Admin only' }); return false; }
+    return true;
+  };
+
+  router.get('/api/insights/rules', ...reportsGuard, async (req, res) => {
+    try {
+      const { listRules, METRIC_CATALOG } = await import('../services/insights.js');
+      res.json({ rules: listRules(), metrics: METRIC_CATALOG });
+    } catch (err) {
+      console.error('[reporting] insight rules list error:', err);
+      res.status(500).json({ error: 'Failed to load insight rules' });
+    }
+  });
+
+  router.post('/api/insights/rules', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const { createRule } = await import('../services/insights.js');
+      res.json(createRule(req.body || {}, req.currentUser?.email || null));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.put('/api/insights/rules/:id', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid rule id' });
+    try {
+      const { updateRule } = await import('../services/insights.js');
+      res.json(updateRule(id, req.body || {}));
+    } catch (err) {
+      res.status(400).json({ error: err.message });
+    }
+  });
+
+  router.delete('/api/insights/rules/:id', requireAuth, async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'Invalid rule id' });
+    try {
+      const { deleteRule } = await import('../services/insights.js');
+      const changes = deleteRule(id);
+      if (!changes) return res.status(404).json({ error: 'Rule not found' });
+      res.json({ ok: true, id });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   return router;

@@ -1,338 +1,400 @@
-import { useMemo, useState } from "react";
+// Collections — rebuilt UI sitting on top of worklist + assignment +
+// activity tables. The page has three columns at desktop sizes:
+//   1. Worklist sidebar (left) — pick which worklist you're working
+//   2. Assignment list (centre) — customers on that worklist, with
+//      bulk actions and quick filters
+//   3. Customer drawer (right, slides in on row click) — activity
+//      timeline, action buttons, status controls
+//
+// Auto-collection of zero-balance customers happens server-side in
+// services/collectionsService.js#processCollectionBalanceDelta; this
+// page just reflects the resulting status.
+
+import { useMemo, useState, useEffect } from "react";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useColorScheme } from "@/lib/useColorScheme";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { PhoneCall, Pencil, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useToast } from "@/components/ui/use-toast";
+import { Input } from "@/components/ui/input";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { getLedgerFortune } from "@/lib/fun";
+  ChevronRight, Plus, Search, UserCircle2, ClipboardList,
+  ListPlus, Filter, Printer,
+} from "lucide-react";
+import SummaryTile from "@/components/shared/SummaryTile";
+import CustomerDrawer from "@/components/collections/CustomerDrawer";
+import NewWorklistDialog from "@/components/collections/NewWorklistDialog";
+import AssignCustomersDialog from "@/components/collections/AssignCustomersDialog";
+import { ASSIGNMENT_STATUS_META } from "@/components/collections/meta";
+import { apiGet, apiSend, parseAmount, formatCurrency, timeAgo } from "@/components/collections/utils";
 
-const STATUS_META = {
-  pending: { label: "Pending", className: "border-slate-500/30 bg-slate-500/10 text-slate-300" },
-  contacted: { label: "Contacted", className: "border-sky-500/30 bg-sky-500/10 text-sky-300" },
-  promised: { label: "Promised", className: "border-amber-500/30 bg-amber-500/10 text-amber-300" },
-  resolved: { label: "Resolved", className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-300" },
-};
-
-const FLAG_META = {
-  red: { label: "Hold", dot: "bg-red-500", className: "border-red-500/30 bg-red-500/10 text-red-300" },
-  orange: { label: "Caution", dot: "bg-orange-400", className: "border-orange-500/30 bg-orange-500/10 text-orange-300" },
-};
-
-function parseAmount(value) {
-  const num = parseFloat(String(value ?? "").replace(/,/g, "").replace(/\s/g, ""));
-  return Number.isFinite(num) ? num : 0;
-}
-
-function formatCurrency(value) {
-  return `R ${parseAmount(value).toLocaleString("en-ZA", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
-}
-
-function formatContacted(value) {
-  if (!value) return "—";
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("en-ZA", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function StatusBadge({ status }) {
-  const meta = STATUS_META[status] || STATUS_META.pending;
-  return <span className={`inline-flex rounded-full border px-2 py-1 text-xs font-medium ${meta.className}`}>{meta.label}</span>;
-}
-
-function FlagBadge({ color, label }) {
-  const meta = FLAG_META[color] || FLAG_META.orange;
-  return (
-    <span className={`inline-flex items-center gap-2 rounded-full border px-2 py-1 text-xs font-medium ${meta.className}`}>
-      <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
-      {label || meta.label}
-    </span>
-  );
-}
-
-async function fetchCollections() {
-  const res = await fetch("/api/collections", { credentials: "include" });
-  const data = await res.json().catch(() => []);
-  if (!res.ok) throw new Error(data.error || "Failed to load collections pipeline");
-  return data;
-}
-
-async function saveCollection({ customerId, status, notes }) {
-  const res = await fetch(`/api/collections/${customerId}`, {
-    method: "PUT",
-    credentials: "include",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ status, notes }),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || "Failed to save collections item");
-  return data;
-}
+// ── Main page ────────────────────────────────────────────────────
 
 export default function Collections() {
-  const colorScheme = useColorScheme();
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [flagFilter, setFlagFilter] = useState("all");
-  const [sortDirection, setSortDirection] = useState("desc");
-  const [editingRecord, setEditingRecord] = useState(null);
-  const [formState, setFormState] = useState({ status: "pending", notes: "" });
+  useColorScheme();
   const queryClient = useQueryClient();
-  const { toast } = useToast();
+  const [selectedWorklistId, setSelectedWorklistId] = useState(/** @type {number | null} */ (null));
+  const [statusFilter, setStatusFilter] = useState("active");
+  const [searchFilter, setSearchFilter] = useState("");
+  const [openAssign, setOpenAssign] = useState(false);
+  const [openNew, setOpenNew] = useState(false);
+  const [drawerAssignment, setDrawerAssignment] = useState(/** @type {any} */ (null));
 
-  const { data = [], isLoading, error } = useQuery({
-    queryKey: ["collections-pipeline"],
-    queryFn: fetchCollections,
+  const me = useQuery({ queryKey: ["me"], queryFn: () => /** @type {Promise<{ id?: number, role?: string } | null>} */ (apiGet("/api/auth/me")), staleTime: 60_000 });
+  const users = useQuery({
+    queryKey: ["collection-users"],
+    queryFn: () => /** @type {Promise<Array<{ id: number, email?: string, full_name?: string }>>} */ (apiGet("/api/collections/assignable-users").then(d => d.users || [])),
+    staleTime: 300_000,
+  });
+  const worklists = useQuery({
+    queryKey: ["worklists"],
+    queryFn: () => /** @type {Promise<Array<import('@/types/api-rows').Worklist & { owner_email?: string, collected_count?: number }>>} */ (apiGet("/api/collections/worklists").then(d => d.worklists || [])),
     staleTime: 30_000,
   });
+  // Auto-select first worklist when list arrives
+  useEffect(() => {
+    if (selectedWorklistId == null && worklists.data?.length) {
+      setSelectedWorklistId(worklists.data[0].id);
+    }
+  }, [worklists.data, selectedWorklistId]);
 
-  const updateMutation = useMutation({
-    mutationFn: saveCollection,
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["collections-pipeline"] });
-      setEditingRecord(null);
-      toast({ title: "Collections item updated" });
-    },
-    onError: (err) => {
-      toast({ title: "Save failed", description: err.message, variant: "destructive" });
-    },
+  const assignments = useQuery({
+    queryKey: ["worklist-assignments", selectedWorklistId, statusFilter],
+    queryFn: () => /** @type {Promise<Array<import('@/types/api-rows').Assignment & { outstanding_balance_num?: number, last_action_at?: string }>>} */ (apiGet(`/api/collections/worklists/${selectedWorklistId}/assignments?status=${statusFilter}`)
+      .then(d => d.assignments || [])),
+    enabled: !!selectedWorklistId,
+    staleTime: 10_000,
   });
 
-  const filteredRows = useMemo(() => {
-    let rows = data;
-    if (statusFilter !== "all") rows = rows.filter((row) => row.status === statusFilter);
-    if (flagFilter === "hold") rows = rows.filter((row) => row.flag_color === "red");
-    if (flagFilter === "caution") rows = rows.filter((row) => row.flag_color === "orange");
+  const filteredAssignments = useMemo(() => {
+    const rows = assignments.data || [];
+    if (!searchFilter.trim()) return rows;
+    const q = searchFilter.toLowerCase();
+    return rows.filter(a =>
+      (a.customer_name || "").toLowerCase().includes(q) ||
+      (a.customer_number || "").toLowerCase().includes(q) ||
+      (a.sales_rep || "").toLowerCase().includes(q)
+    );
+  }, [assignments.data, searchFilter]);
 
-    return [...rows].sort((a, b) => {
-      const diff = parseAmount(a.outstanding_balance) - parseAmount(b.outstanding_balance);
-      return sortDirection === "desc" ? -diff : diff;
+  // ── Bulk selection ──────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(() => /** @type {Set<number>} */ (new Set()));
+  // Drop the selection whenever the visible set changes (worklist / status /
+  // search) so a hidden row can't be acted on by accident.
+  useEffect(() => { setSelectedIds(new Set()); }, [selectedWorklistId, statusFilter, searchFilter]);
+  const toggleSelected = (id) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
     });
-  }, [data, statusFilter, flagFilter, sortDirection]);
+  const allVisibleSelected = filteredAssignments.length > 0 && filteredAssignments.every((a) => selectedIds.has(a.id));
+  const toggleSelectAll = () =>
+    setSelectedIds(allVisibleSelected ? new Set() : new Set(filteredAssignments.map((a) => a.id)));
 
-  const totalOutstanding = useMemo(
-    () => filteredRows.reduce((sum, row) => sum + parseAmount(row.outstanding_balance), 0),
-    [filteredRows]
+  // Apply a status to every selected assignment. The status endpoint is
+  // per-assignment, so loop and report a succeeded/failed summary rather than
+  // failing silently on any one row.
+  const bulkStatus = useMutation({
+    mutationFn: async (/** @type {{ status: string, reason: string }} */ { status, reason }) => {
+      const ids = [...selectedIds];
+      const results = await Promise.allSettled(
+        ids.map((id) => apiSend(`/api/collections/assignments/${id}/status`, "PUT", { status, reason })),
+      );
+      const ok = results.filter((r) => r.status === "fulfilled").length;
+      return { ok, failed: ids.length - ok };
+    },
+    onSuccess: ({ ok, failed }) => {
+      if (ok) toast.success(`Updated ${ok} assignment${ok === 1 ? "" : "s"}`);
+      if (failed) toast.error(`${failed} update${failed === 1 ? "" : "s"} failed`);
+      setSelectedIds(new Set());
+      queryClient.invalidateQueries({ queryKey: ["worklist-assignments"] });
+    },
+    onError: (err) => toast.error(`Bulk update failed: ${err.message}`),
+  });
+  const runBulk = (status, label, reason) => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`${label} ${selectedIds.size} selected customer${selectedIds.size === 1 ? "" : "s"}?`)) return;
+    bulkStatus.mutate({ status, reason });
+  };
+
+  const total = useMemo(
+    () => filteredAssignments.reduce((s, r) => s + (r.outstanding_balance_num ?? parseAmount(r.outstanding_balance)), 0),
+    [filteredAssignments]
   );
+  const overdueFollowups = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    return filteredAssignments.filter(a => a.next_followup_date && a.next_followup_date <= today && a.status === "active").length;
+  }, [filteredAssignments]);
 
-  const openEditor = (row) => {
-    setEditingRecord(row);
-    setFormState({ status: row.status || "pending", notes: row.notes || "" });
-  };
-
-  const submitEdit = async (event) => {
-    event.preventDefault();
-    if (!editingRecord) return;
-    updateMutation.mutate({
-      customerId: editingRecord.customer_id,
-      status: formState.status,
-      notes: formState.notes,
-    });
-  };
+  const selectedWorklist = worklists.data?.find(w => w.id === selectedWorklistId);
+  const isOwner = selectedWorklist && me.data?.id === selectedWorklist.owner_user_id;
+  const isAdmin = me.data?.role === "admin";
 
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
-      <div className="mx-auto max-w-[1600px] space-y-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5">
-          <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Collections</div>
-            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
-              Chase the <em className="text-phosphor">outstanding</em>.
-            </h1>
-            <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground mt-3 tabular-nums">
-              {filteredRows.length} customer{filteredRows.length === 1 ? "" : "s"} · {formatCurrency(totalOutstanding)} outstanding
-            </p>
-          </div>
-          <div className="relative overflow-hidden border border-border bg-card px-5 py-4" style={{ borderRadius: "12px" }}>
-            <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }} />
-            <div className="pl-2">
-              <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Displayed total</div>
-              <div className="font-display text-2xl text-foreground tabular-nums mt-1">{formatCurrency(totalOutstanding)}</div>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="border-b border-border pb-5">
+
+          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+            Chase the <em className="text-phosphor">outstanding</em>.
+          </h1>
+          <p className="text-sm text-muted-foreground mt-3">
+            Worklists keep each rep on their assigned customers. Auto-detected payments come off the list; everything else stays manual.
+          </p>
+        </div>
+
+        <div className="grid gap-5 lg:grid-cols-[260px_1fr] print:block">
+          {/* Worklist sidebar */}
+          <aside className="space-y-3 print:hidden">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Worklists</h2>
+              <Button size="sm" variant="ghost" onClick={() => setOpenNew(true)} title="Create a new collections worklist. You become the owner. Logged to audit_log.">
+                <Plus className="h-3.5 w-3.5 mr-1" />New
+              </Button>
             </div>
-          </div>
-        </div>
+            <div className="space-y-1">
+              {worklists.isLoading && <p className="text-xs text-muted-foreground">Loading…</p>}
+              {!worklists.isLoading && (worklists.data?.length ?? 0) === 0 && (
+                <div className="rounded-lg border border-dashed border-border p-4 text-xs text-muted-foreground">
+                  No worklists yet. Create one to start assigning customers.
+                </div>
+              )}
+              {(worklists.data || []).map((w) => {
+                const active = w.id === selectedWorklistId;
+                return (
+                  <button
+                    key={w.id}
+                    onClick={() => { setSelectedWorklistId(w.id); setDrawerAssignment(null); }}
+                    title={`Open the "${w.name}" worklist (owner: ${w.owner_name || w.owner_email || "Unassigned"}). Shows ${w.active_count} active assignments.`}
+                    className={`w-full text-left rounded-lg border px-3 py-2 transition-colors ${
+                      active
+                        ? "border-amber-500/40 bg-amber-500/10"
+                        : "border-border bg-card hover:bg-muted/30"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-foreground truncate">{w.name}</div>
+                      <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-colors ${active ? "text-amber-300" : "text-muted-foreground/60"}`} />
+                    </div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground flex items-center gap-1">
+                      <UserCircle2 className="h-3 w-3" />
+                      <span className="truncate">{w.owner_name || w.owner_email || "Unassigned"}</span>
+                    </div>
+                    <div className="mt-1 flex items-center gap-2 text-[10px]">
+                      <span className="rounded bg-amber-500/15 text-amber-300 px-1.5 py-0.5" title="Number of collection_assignments rows with status='active' on this worklist">{w.active_count} active</span>
+                      {(w.collected_count ?? 0) > 0 && (
+                        <span className="rounded bg-emerald-500/15 text-emerald-300 px-1.5 py-0.5" title="Number of collection_assignments auto-closed to status='collected' once the customer's outstanding balance fell to zero">{w.collected_count} collected</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </aside>
 
-        <div className="flex flex-col gap-3 rounded-xl border border-border bg-card p-4 sm:flex-row sm:flex-wrap sm:items-center">
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</label>
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
-              style={{ colorScheme }}
-              className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="all">All</option>
-              <option value="pending">Pending</option>
-              <option value="contacted">Contacted</option>
-              <option value="promised">Promised</option>
-              <option value="resolved">Resolved</option>
-            </select>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Flag</label>
-            <select
-              value={flagFilter}
-              onChange={(e) => setFlagFilter(e.target.value)}
-              style={{ colorScheme }}
-              className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="all">All</option>
-              <option value="hold">Hold only</option>
-              <option value="caution">Caution only</option>
-            </select>
-          </div>
-
-          <div className="sm:ml-auto flex items-center gap-2">
-            <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Sort</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSortDirection((current) => (current === "desc" ? "asc" : "desc"))}
-            >
-              Outstanding {sortDirection === "desc" ? "↓" : "↑"}
-            </Button>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-border bg-card p-4 text-sm text-muted-foreground">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <span>{filteredRows.length} record{filteredRows.length === 1 ? "" : "s"} in pipeline</span>
-            <span>Total outstanding: <span className="font-semibold text-foreground">{formatCurrency(totalOutstanding)}</span></span>
-          </div>
-        </div>
-
-        {isLoading && (
-          <div className="space-y-3 rounded-xl border border-border bg-card p-4">
-            {Array.from({ length: 6 }).map((_, idx) => (
-              <div key={idx} className="h-12 animate-pulse rounded-lg bg-muted" />
-            ))}
-          </div>
-        )}
-
-        {!isLoading && error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-300">
-            {error.message || "Failed to load collections pipeline"}
-          </div>
-        )}
-
-        {!isLoading && !error && filteredRows.length === 0 && (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card px-6 py-16 text-center">
-            <PhoneCall className="mb-4 h-12 w-12 text-muted-foreground" />
-            <h2 className="text-lg font-semibold text-foreground">No collections items right now</h2>
-            <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              {getLedgerFortune()}
-            </p>
-          </div>
-        )}
-
-        {!isLoading && !error && filteredRows.length > 0 && (
-          <div className="overflow-x-auto rounded-xl border border-border bg-card">
-            <table className="w-full min-w-[980px] text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/40 text-left">
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Customer Name</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Outstanding Balance</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Flag</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Status</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Last Contacted</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Terms</th>
-                  <th className="px-4 py-3 font-medium text-muted-foreground">Notes</th>
-                  <th className="px-4 py-3 text-right font-medium text-muted-foreground">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.map((row) => (
-                  <tr key={row.customer_id} className="border-b border-border/80 align-top last:border-0">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">{row.name || "—"}</div>
-                      <div className="text-xs text-muted-foreground">Customer #{row.customer_id}</div>
-                    </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums text-foreground">{formatCurrency(row.outstanding_balance)}</td>
-                    <td className="px-4 py-3"><FlagBadge color={row.flag_color} label={row.flag_label} /></td>
-                    <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
-                    <td className="px-4 py-3 text-muted-foreground">{formatContacted(row.contacted_at)}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{row.terms || "—"}</td>
-                    <td className="max-w-[320px] px-4 py-3 text-muted-foreground">
-                      <div className="line-clamp-3 whitespace-pre-wrap break-words">{row.notes || "—"}</div>
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <Button variant="outline" size="sm" onClick={() => openEditor(row)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                        Edit
+          {/* Main column */}
+          <section className="space-y-4">
+            {selectedWorklist ? (
+              <>
+                {/* Worklist summary + actions */}
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-3 print:flex-row print:items-baseline">
+                  <div>
+                    <h2 className="text-lg font-semibold text-foreground">{selectedWorklist.name}</h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Owner: {selectedWorklist.owner_name || selectedWorklist.owner_email || "Unassigned"}
+                      {overdueFollowups > 0 && (
+                        <span className="ml-2 text-amber-400 font-medium">
+                          · {overdueFollowups} follow-up{overdueFollowups !== 1 ? "s" : ""} due
+                        </span>
+                      )}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap print:hidden">
+                    {(isOwner || isAdmin) && (
+                      <Button size="sm" onClick={() => setOpenAssign(true)} title="Pick customers with outstanding balances and add them to this worklist. Each insert is logged to audit_log.">
+                        <ListPlus className="h-3.5 w-3.5 mr-1" />Assign customers
                       </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                    )}
+                    <Button size="sm" variant="outline" onClick={() => window.print()} disabled={filteredAssignments.length === 0} title="Print the visible assignment list via the browser print dialog (filters and search are preserved).">
+                      <Printer className="h-3.5 w-3.5 mr-1" />Print
+                    </Button>
+                  </div>
+                  <div className="hidden print:block text-xs text-muted-foreground">
+                    Printed {new Date().toLocaleString("en-ZA")}
+                  </div>
+                </div>
+
+                {/* Filter bar */}
+                <div className="flex flex-wrap items-center gap-2 print:hidden">
+                  <Filter className="h-4 w-4 text-amber-400" />
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status:</span>
+                  {["active", "collected", "escalated", "all"].map((s) => {
+                    const tipMap = {
+                      active: "Show open assignments (collection_assignments.status='active')",
+                      collected: "Show assignments auto-closed when the customer's balance dropped to zero (status='collected')",
+                      escalated: "Show assignments manually flagged for management attention (status='escalated')",
+                      all: "Show every assignment on this worklist regardless of status",
+                    };
+                    return (
+                      <button
+                        key={s}
+                        onClick={() => setStatusFilter(s)}
+                        title={tipMap[s]}
+                        className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                          statusFilter === s
+                            ? "border-amber-500 bg-amber-500/15 text-amber-300"
+                            : "border-border bg-card text-muted-foreground hover:text-foreground"
+                        }`}
+                      >
+                        {ASSIGNMENT_STATUS_META[s]?.label || (s === "all" ? "All" : s)}
+                      </button>
+                    );
+                  })}
+                  <div className="relative flex-1 max-w-xs ml-auto">
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input value={searchFilter} onChange={(e) => setSearchFilter(e.target.value)} placeholder="Filter customers…" title="Client-side filter on customer name, customer number, or sales rep — narrows the visible rows without re-querying." className="pl-8 h-8" />
+                  </div>
+                </div>
+
+                {/* Summary tile */}
+                {filteredAssignments.length > 0 && (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <SummaryTile
+                      label={`Total outstanding (${filteredAssignments.length} customer${filteredAssignments.length !== 1 ? "s" : ""})`}
+                      value={`R ${formatCurrency(total)}`}
+                    />
+                  </div>
+                )}
+
+                {/* Bulk-action toolbar — appears when rows are selected */}
+                {selectedIds.size > 0 && (
+                  <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
+                    <span className="font-medium text-amber-300">{selectedIds.size} selected</span>
+                    <span className="text-muted-foreground">·</span>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("escalated", "Escalate", "Bulk escalate")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Escalate</button>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("closed", "Close", "Bulk close")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Close</button>
+                    <button type="button" disabled={bulkStatus.isPending} onClick={() => runBulk("written_off", "Write off", "Bulk write-off")} className="rounded-md border border-border px-2 py-1 hover:text-foreground disabled:opacity-50">Write off</button>
+                    <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto rounded-md px-2 py-1 text-muted-foreground hover:text-foreground">Clear</button>
+                  </div>
+                )}
+
+                {/* Assignment list */}
+                <div className="rounded-xl border border-border bg-card overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/30 border-b border-border">
+                      <tr>
+                        <th className="w-9 px-3 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            aria-label="Select all visible"
+                            checked={allVisibleSelected}
+                            onChange={toggleSelectAll}
+                            className="cursor-pointer"
+                          />
+                        </th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Customer name and Sage account number (ARCUS.NAMECUST / IDCUST)">Customer</th>
+                        <th className="px-3 py-2 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Sales rep currently assigned to the customer (ARCUS.CODESLSP)">Rep</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Latest outstanding balance synced from Sage (datarecord.outstanding_balance)">Outstanding</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="collection_assignments.status — active, collected (auto when balance hits 0), or escalated">Status</th>
+                        <th className="px-3 py-2 text-center text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Next promised contact date (collection_assignments.next_followup_date). Amber when overdue.">Follow-up</th>
+                        <th className="px-3 py-2 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-help" title="Timestamp of the most recent collection_activity row for this assignment">Last action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {assignments.isLoading && (
+                        <tr><td colSpan={7} className="px-3 py-12 text-center text-sm text-muted-foreground">Loading…</td></tr>
+                      )}
+                      {!assignments.isLoading && filteredAssignments.length === 0 && (
+                        <tr>
+                          <td colSpan={7} className="px-3 py-12 text-center text-sm text-muted-foreground">
+                            <ClipboardList className="h-8 w-8 mx-auto mb-2 opacity-60" />
+                            {(assignments.data || []).length === 0
+                              ? "No customers on this list yet. Click Assign customers to add some."
+                              : "No customers match your filters."}
+                          </td>
+                        </tr>
+                      )}
+                      {filteredAssignments.map((a) => {
+                        const meta = ASSIGNMENT_STATUS_META[a.status] || ASSIGNMENT_STATUS_META.active;
+                        const bal = a.outstanding_balance_num ?? parseAmount(a.outstanding_balance);
+                        const today = new Date().toISOString().slice(0, 10);
+                        const followupOverdue = a.next_followup_date && a.next_followup_date <= today && a.status === "active";
+                        return (
+                          <tr key={a.id}
+                            onClick={() => setDrawerAssignment(a)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Open ${a.customer_name || "assignment"}`}
+                            onKeyDown={(e) => { if (e.target instanceof HTMLElement && e.target.tagName === "INPUT") return; if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setDrawerAssignment(a); } }}
+                            className={`border-b border-border last:border-0 cursor-pointer transition-colors ${
+                              selectedIds.has(a.id) ? "bg-amber-500/10" : drawerAssignment?.id === a.id ? "bg-amber-500/5" : "hover:bg-muted/30"
+                            }`}
+                          >
+                            <td className="w-9 px-3 py-2 text-center" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                aria-label={`Select ${a.customer_name || "assignment"}`}
+                                checked={selectedIds.has(a.id)}
+                                onChange={() => toggleSelected(a.id)}
+                                className="cursor-pointer"
+                              />
+                            </td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-foreground leading-tight">{a.customer_name || "—"}</div>
+                              <div className="font-mono text-[11px] text-muted-foreground">{a.customer_number || "—"}</div>
+                            </td>
+                            <td className="px-3 py-2 text-xs text-muted-foreground">{a.sales_rep || "—"}</td>
+                            <td className="px-3 py-2 text-right tabular-nums font-semibold">R {formatCurrency(bal)}</td>
+                            <td className="px-3 py-2 text-center">
+                              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${meta.cls}`}>{meta.label}</span>
+                            </td>
+                            <td className={`px-3 py-2 text-center text-xs ${followupOverdue ? "text-amber-400 font-semibold" : "text-muted-foreground"}`}>
+                              {followupOverdue && a.next_followup_date ? `Overdue · ${a.next_followup_date}` : (a.next_followup_date || "—")}
+                            </td>
+                            <td className="px-3 py-2 text-right text-xs text-muted-foreground">{timeAgo(a.last_action_at)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            ) : (
+              <div className="rounded-xl border border-dashed border-border p-10 text-center">
+                <ClipboardList className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
+                <p className="text-sm text-muted-foreground">
+                  {worklists.data?.length === 0
+                    ? "Create your first worklist to get started."
+                    : "Pick a worklist on the left."}
+                </p>
+              </div>
+            )}
+          </section>
+        </div>
       </div>
 
-      <Dialog open={!!editingRecord} onOpenChange={(open) => !open && !updateMutation.isPending && setEditingRecord(null)}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>Edit collections item</DialogTitle>
-            <DialogDescription>
-              {editingRecord?.name || "Customer"} · {editingRecord ? formatCurrency(editingRecord.outstanding_balance) : ""}
-            </DialogDescription>
-          </DialogHeader>
+      {/* Right drawer */}
+      {drawerAssignment && (
+        <CustomerDrawer
+          assignment={drawerAssignment}
+          onClose={() => setDrawerAssignment(null)}
+          onChange={() => queryClient.invalidateQueries({ queryKey: ["worklist-assignments"] })}
+        />
+      )}
 
-          <form className="space-y-4" onSubmit={submitEdit}>
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Status</label>
-              <select
-                value={formState.status}
-                onChange={(e) => setFormState((current) => ({ ...current, status: e.target.value }))}
-                style={{ colorScheme }}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="pending">Pending</option>
-                <option value="contacted">Contacted</option>
-                <option value="promised">Promised</option>
-                <option value="resolved">Resolved</option>
-              </select>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-foreground">Notes</label>
-              <textarea
-                value={formState.notes}
-                onChange={(e) => setFormState((current) => ({ ...current, notes: e.target.value }))}
-                rows={5}
-                className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-                placeholder="Add collection notes, promises, or follow-up context"
-              />
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="ghost" onClick={() => setEditingRecord(null)} disabled={updateMutation.isPending}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={updateMutation.isPending}>
-                {updateMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Save
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <NewWorklistDialog
+        open={openNew}
+        onClose={() => setOpenNew(false)}
+        users={users.data || []}
+        onCreated={(w) => { queryClient.invalidateQueries({ queryKey: ["worklists"] }); setSelectedWorklistId(w.id); }}
+      />
+      <AssignCustomersDialog
+        open={openAssign}
+        onClose={() => setOpenAssign(false)}
+        worklistId={selectedWorklistId}
+        onAssigned={() => queryClient.invalidateQueries({ queryKey: ["worklist-assignments"] })}
+      />
     </div>
   );
 }

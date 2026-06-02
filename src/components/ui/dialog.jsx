@@ -14,7 +14,7 @@ const DialogPortal = DialogPrimitive.Portal
 
 const DialogClose = DialogPrimitive.Close
 
-/** @param {React.ComponentPropsWithRef<any>} props */
+/** @param {{ className?: string, ref?: any, [x: string]: any }} props */
 const DialogOverlay = ({
   className,
   ref,
@@ -22,7 +22,7 @@ const DialogOverlay = ({
 }) => <DialogPrimitive.Overlay ref={ref} className={cn("fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0", className)} {...props} />
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
-/** @param {React.ComponentPropsWithRef<any>} props */
+/** @param {{ className?: string, children?: any, ref?: any, [x: string]: any }} props */
 const DialogContent = ({
   className,
   children,
@@ -46,6 +46,7 @@ const DialogContent = ({
   </DialogPortal>
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
+/** @param {{ className?: string, [x: string]: any }} props */
 const DialogHeader = ({
   className,
   ...props
@@ -56,6 +57,7 @@ const DialogHeader = ({
 )
 DialogHeader.displayName = "DialogHeader"
 
+/** @param {{ className?: string, [x: string]: any }} props */
 const DialogFooter = ({
   className,
   ...props
@@ -66,7 +68,7 @@ const DialogFooter = ({
 )
 DialogFooter.displayName = "DialogFooter"
 
-/** @param {React.ComponentPropsWithRef<any>} props */
+/** @param {{ className?: string, ref?: any, [x: string]: any }} props */
 const DialogTitle = ({
   className,
   ref,
@@ -74,7 +76,7 @@ const DialogTitle = ({
 }) => <DialogPrimitive.Title ref={ref} className={cn("font-display text-2xl leading-tight tracking-tight text-foreground", className)} {...props} />
 DialogTitle.displayName = DialogPrimitive.Title.displayName
 
-/** @param {React.ComponentPropsWithRef<any>} props */
+/** @param {{ className?: string, ref?: any, [x: string]: any }} props */
 const DialogDescription = ({
   className,
   ref,

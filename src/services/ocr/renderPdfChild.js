@@ -93,7 +93,7 @@ async function main() {
   // sharp's libvips operation cache holds up to 50 MB of intermediate
   // buffers — for our one-shot per-process render that's just sunk
   // memory. Disable.
-  try { sharp.cache(false); } catch {}
+  try { sharp.cache(false); } catch (e) { console.warn('[ocr.renderPdfChild.sharp_cache]', e.message); }
 
   // ── Render via PDFium ─────────────────────────────────────────────
   let lib;
@@ -167,8 +167,8 @@ async function main() {
     // Explicit destroy — PDFium holds WASM memory; the OS reaps it
     // on process exit anyway, but tidiness helps if anything in the
     // pipeline shifts to long-lived workers later.
-    try { if (doc) doc.destroy(); } catch {}
-    try { if (lib) lib.destroy(); } catch {}
+    try { if (doc) doc.destroy(); } catch (e) { console.warn('[ocr.renderPdfChild.doc_destroy]', e.message); }
+    try { if (lib) lib.destroy(); } catch (e) { console.warn('[ocr.renderPdfChild.lib_destroy]', e.message); }
   }
 }
 

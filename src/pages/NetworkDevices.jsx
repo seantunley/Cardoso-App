@@ -9,7 +9,6 @@ import {
   ChevronUp,
   ExternalLink,
   Info,
-  Network,
   RefreshCw,
   Server,
   Users,
@@ -302,10 +301,7 @@ export default function NetworkDevices() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
-              <Network className="w-3 h-3 text-accent" strokeWidth={1.5} />
-              § Network
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Every <em className="text-phosphor">device</em>, visible.
             </h1>

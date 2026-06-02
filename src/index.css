@@ -293,3 +293,25 @@
   ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 0; }
   ::-webkit-scrollbar-thumb:hover { background: hsl(var(--accent)); }
 }
+
+/* Keyboard focus: a consistent visible ring on any interactive element that
+   doesn't define its own focus-visible style. Mouse clicks don't trigger it
+   (focus-visible only fires for keyboard / assistive-tech focus), so it's
+   unobtrusive for pointer users. */
+:where(a, button, [role="button"], [tabindex="0"], input, select, textarea):focus-visible {
+  outline: 2px solid var(--phosphor);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Respect the OS "reduce motion" setting — near-instant transitions and no
+   looping animations (phosphor flicker, spinners, pulses) for users who opt
+   out of motion. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}

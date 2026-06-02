@@ -17,9 +17,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
   if (!comparison?.length) {
     return (
       <section>
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-5">
-          § Fee Comparison
-        </div>
+
         <div
           className="border py-10 text-center"
           style={{ borderColor: 'hsl(var(--border))', background: 'hsl(var(--card))', borderRadius: '12px' }}
@@ -35,9 +33,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
   return (
     <section className="space-y-5">
       <div>
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-          § Fee Comparison
-        </div>
+
         <h3 className="font-display text-3xl leading-tight text-foreground">
           BAT <em className="text-muted-foreground">vs</em> Sage.
         </h3>

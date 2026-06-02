@@ -6,7 +6,7 @@ const LOG_DIR = path.join(process.cwd(), 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'errors.log');
 const MAX_BYTES = 10 * 1024 * 1024; // 10MB before rotation
 
-try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {}
+try { fs.mkdirSync(LOG_DIR, { recursive: true }); } catch {} // eslint-disable-line no-empty -- logging here would recurse into errorLog itself
 
 /** @typedef {Record<string, unknown>} LogMeta */
 
@@ -34,7 +34,7 @@ function rotateIfNeeded() {
     if (stat.size > MAX_BYTES) {
       fs.renameSync(LOG_FILE, path.join(LOG_DIR, 'errors.log.1'));
     }
-  } catch {}
+  } catch {} // eslint-disable-line no-empty -- logging rotation failure would recurse into errorLog
 }
 
 // ── SQLite mirror (synchronous) ──────────────────────────────────────────────

@@ -60,6 +60,8 @@ const CustomerSearch = React.lazy(() => import('./pages/CustomerSearch'));
 const Dashboard = React.lazy(() => import('./pages/Dashboard'));
 const Records = React.lazy(() => import('./pages/Records'));
 const Reports = React.lazy(() => import('./pages/Reports'));
+const ReportingDashboard = React.lazy(() => import('./pages/ReportingDashboard'));
+const Insights = React.lazy(() => import('./pages/Insights'));
 const Users = React.lazy(() => import('./pages/Users'));
 const Inventory = React.lazy(() => import('./pages/Inventory'));
 const NetworkDevices = React.lazy(() => import('./pages/NetworkDevices'));
@@ -68,6 +70,14 @@ const Reconciliation = React.lazy(() => import('./pages/Reconciliation'));
 const Operations = React.lazy(() => import('./pages/Operations'));
 const Jti = React.lazy(() => import('./pages/Jti'));
 const HubJti = React.lazy(() => import('./pages/HubJti'));
+const InventoryMovement = React.lazy(() => import('./pages/InventoryMovement'));
+const PriceList = React.lazy(() => import('./pages/PriceList'));
+const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
+const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
+const HubCommission = React.lazy(() => import('./pages/HubCommission'));
+const Trends = React.lazy(() => import('./pages/Trends'));
+const CreditorSummary = React.lazy(() => import('./pages/CreditorSummary'));
+const CreditorSearch = React.lazy(() => import('./pages/CreditorSearch'));
 
 
 export const PAGES = {
@@ -80,6 +90,7 @@ export const PAGES = {
     "HubBackups": HubBackups,
     "HubMetrics": HubMetrics,
     "HubTrends": HubTrends,
+    "Trends": Trends,
     "HubSyncLog": HubSyncLog,
     "HubReconciliation": HubReconciliation,
     "Connections": Connections,
@@ -87,12 +98,21 @@ export const PAGES = {
     "Dashboard": Dashboard,
     "Records": Records,
     "Reports": Reports,
+    "ReportingDashboard": ReportingDashboard,
+    "Insights": Insights,
     "Users": Users,
     "CreditDebug": CreditDebug,
     "Reconciliation": Reconciliation,
     "Operations": Operations,
     "Jti": Jti,
     "HubJti": HubJti,
+    "InventoryMovement": InventoryMovement,
+    "PriceList": PriceList,
+    "StockReceipts": StockReceipts,
+    "SalesCommission": SalesCommission,
+    "HubCommission": HubCommission,
+    "CreditorSummary": CreditorSummary,
+    "CreditorSearch": CreditorSearch,
 }
 
 export const pagesConfig = {

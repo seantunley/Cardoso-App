@@ -176,7 +176,7 @@ export default function JobRunsPanel() {
           (sync runs every 5 min; backup runs nightly at 02:00).
         </div>
       ) : (
-        <div ref={containerRef} className="rounded-xl border border-border bg-card overflow-x-auto">
+        <div ref={containerRef} className="rounded-xl border border-border bg-card overflow-x-auto overflow-y-auto max-h-[calc(100vh-260px)]">
           {(() => {
             // Same render strategy as InvoiceMatching: table is 100% wide,
             // colgroup uses percentages derived from the pixel ratios in
@@ -192,7 +192,7 @@ export default function JobRunsPanel() {
                 <col key={id} style={{ width: `${((widths[id] || 100) / total) * 100}%` }} />
               ))}
             </colgroup>
-            <thead>
+            <thead className="sticky top-0 z-10 bg-card">
               <tr className="border-b border-border bg-muted/40">
                 <Th id="job"       label="Job"        startResize={startResize} resetColumn={resetColumn} />
                 <Th id="status"    label="Status"     startResize={startResize} resetColumn={resetColumn} />

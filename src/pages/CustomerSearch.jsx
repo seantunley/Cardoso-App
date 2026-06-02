@@ -619,9 +619,7 @@ export default function CustomerSearch() {
         {/* Header */}
         <div className="border-b border-border pb-5 flex items-end justify-between gap-4 flex-wrap">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-              § Customer Management
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Search the <em className="text-phosphor">ledger</em>.
             </h1>

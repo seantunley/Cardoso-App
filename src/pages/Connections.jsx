@@ -352,7 +352,7 @@ export default function Connections() {
       <div className="max-w-[1600px] mx-auto p-6 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Connections</div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Sources of <em className="text-phosphor">truth</em>.
             </h1>

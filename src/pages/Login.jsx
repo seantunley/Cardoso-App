@@ -227,18 +227,18 @@ export default function Login() {
         />
 
         {/* Top mark */}
-        <div className="relative z-10 flex items-center gap-3">
-          <div className="w-6 h-6 bg-accent" style={{ boxShadow: "0 0 28px hsla(33,95%,55%,0.6)" }} />
-          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-            Cardoso Cigarettes / Ledger System
-          </span>
+        <div className="relative z-10 flex items-center">
+          <img
+            src="/cardoso-logo-orange.png"
+            alt="Cardoso Depots"
+            className="h-28 w-auto"
+            style={{ filter: "drop-shadow(0 0 28px hsla(33,95%,55%,0.4))" }}
+          />
         </div>
 
         {/* Hero quote */}
         <div className="relative z-10 max-w-xl">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-accent mb-8">
-            § 01 · Access
-          </div>
+
           <h1 className="font-display text-6xl xl:text-7xl leading-[0.95] tracking-tight">
             Every <em className="text-phosphor">rand</em>,
             <br />
@@ -287,11 +287,12 @@ export default function Login() {
       {/* ── Right: the terminal ── */}
       <div className="flex-1 lg:flex-none lg:w-[480px] flex flex-col justify-center px-6 py-16 lg:px-16 relative">
         {/* Mobile mark */}
-        <div className="lg:hidden mb-12 flex items-center gap-3">
-          <div className="w-5 h-5 bg-accent" />
-          <span className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
-            Cardoso Cigarettes / Ledger
-          </span>
+        <div className="lg:hidden mb-12 flex items-center">
+          <img
+            src="/cardoso-logo-orange.png"
+            alt="Cardoso Depots"
+            className="h-16 w-auto"
+          />
         </div>
 
         <div className="max-w-sm w-full">

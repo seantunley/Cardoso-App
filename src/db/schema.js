@@ -292,6 +292,7 @@ function initSchema(db) {
         flag_reason TEXT,
         flag_created_by TEXT,
         outstanding_balance TEXT,
+        outstanding_balance_num REAL DEFAULT 0,
         unpaid_invoices TEXT,
         receipts TEXT,
         updated_date TEXT,
@@ -352,6 +353,23 @@ function initSchema(db) {
     if (!hrCols.includes('unpaid_invoice_numbers')) {
       db.exec('ALTER TABLE hub_records ADD COLUMN unpaid_invoice_numbers TEXT');
     }
+    // Numeric mirror of outstanding_balance — kept in sync by v54's
+    // triggers. Existing hub installs predate this column, so add it
+    // here and backfill so queries that filter/sort by the numeric
+    // form (top-balances, aged-debtors) don't crash with "no such
+    // column" on the first request after upgrade.
+    if (!hrCols.includes('outstanding_balance_num')) {
+      db.exec('ALTER TABLE hub_records ADD COLUMN outstanding_balance_num REAL DEFAULT 0');
+      db.exec(`
+        UPDATE hub_records
+           SET outstanding_balance_num = CASE
+             WHEN outstanding_balance IS NULL OR TRIM(outstanding_balance) = '' THEN 0
+             ELSE COALESCE(CAST(REPLACE(REPLACE(outstanding_balance, ',', ''), ' ', '') AS REAL), 0)
+           END
+      `);
+      // Index supports the same access patterns datarecord's index does.
+      db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding_num ON hub_records(outstanding_balance_num)`);
+    }
     db.exec(`
       UPDATE hub_records
          SET unpaid_invoice_numbers = (
@@ -391,6 +409,37 @@ function initSchema(db) {
               WHERE json_extract(value, '$.number') IS NOT NULL
            ), '')
          WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+      END
+    `);
+    // Numeric-balance mirror triggers. Migration v54 installs these on
+    // EXISTING hubs, but on a fresh HUB_MODE database runMigrations runs
+    // before hub_records exists (see the canonical-column note above), so
+    // v54's gate-on-table-exists no-ops and outstanding_balance_num would
+    // sit at its DEFAULT 0 forever — the ETL only writes the text
+    // outstanding_balance. Mirror them inline (idempotent; bodies identical
+    // to v54) so fresh hubs populate the numeric column and balance queries
+    // (top-balances, aged-debtors) return data instead of an empty book.
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding_num ON hub_records(outstanding_balance_num)`);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_ins
+      AFTER INSERT ON hub_records
+      BEGIN
+        UPDATE hub_records SET outstanding_balance_num = CASE
+          WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+            THEN NULL
+          ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+        END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
+      END
+    `);
+    db.exec(`
+      CREATE TRIGGER IF NOT EXISTS trg_hub_records_balance_num_upd
+      AFTER UPDATE OF outstanding_balance ON hub_records
+      BEGIN
+        UPDATE hub_records SET outstanding_balance_num = CASE
+          WHEN NEW.outstanding_balance IS NULL OR NEW.outstanding_balance = '' OR NEW.outstanding_balance = '0'
+            THEN NULL
+          ELSE CAST(REPLACE(REPLACE(NEW.outstanding_balance, ',', ''), ' ', '') AS REAL)
+        END WHERE site_id = NEW.site_id AND record_id = NEW.record_id;
       END
     `);
   }

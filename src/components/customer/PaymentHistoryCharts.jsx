@@ -20,8 +20,8 @@ export default function PaymentHistoryCharts({ lagData }) {
           <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} />
           <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} unit="d" />
           <Tooltip
-            contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 6, fontSize: 11 }}
-            labelStyle={{ color: '#e2e8f0' }}
+            contentStyle={{ background: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 6, fontSize: 11 }}
+            labelStyle={{ color: 'hsl(var(--foreground))' }}
             formatter={(val) => [`${val} days`, 'Lag']}
           />
           <Bar dataKey="lagDays" radius={[3, 3, 0, 0]}>

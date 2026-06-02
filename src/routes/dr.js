@@ -317,7 +317,7 @@ export function createDrRouter() {
           site_id: sanitizeForLog(site_id),
           ip: sanitizeForLog(req.ip, 64),
         }, 'warn');
-      } catch {}
+      } catch (e) { console.error('[dr.hub_preflight]', { hub_url: sanitizeForLog(hub_url), site_id: sanitizeForLog(site_id) }, e.message); }
       return res.status(lookupErr.status || 502).json({ error: lookupErr.message });
     }
 
@@ -343,7 +343,7 @@ export function createDrRouter() {
           ip: sanitizeForLog(req.ip, 64),
           hub_email: sanitizeForLog(hub_email),
         }, 'warn');
-      } catch {}
+      } catch (e) { console.error('[dr.override_auth_failed]', { hub_email: sanitizeForLog(hub_email) }, e.message); }
       return res.status(401).json({ error: 'Local admin password is incorrect.' });
     }
 
@@ -390,7 +390,7 @@ export function createDrRouter() {
         status: 'success',
         userOverride: { email: `dr-wizard:${sanitizeForLog(hub_email)}`, full_name: 'dr-wizard' },
       });
-    } catch {}
+    } catch (e) { console.error('[dr.restore_initiated_audit]', { restoreId }, e.message); }
 
     setStatus(restoreId, {
       restore_id: restoreId,
@@ -479,7 +479,7 @@ export function createDrRouter() {
             companionFailures.push({ key, filename, error: msg, missing: is404 });
             try {
               logError('dr.companion_fetch', companionErr, { restore_id: restoreId, key, filename });
-            } catch {}
+            } catch (e) { console.error('[dr.companion_fetch]', { restoreId, key, filename }, e.message); }
           }
         }
 
@@ -505,7 +505,7 @@ export function createDrRouter() {
           }
         } catch (urlErr) {
           companionFailures.push({ key: 'hub_url_update', error: String(urlErr.message || urlErr) });
-          try { logError('dr.hub_url_update', urlErr, { restore_id: restoreId }); } catch {}
+          try { logError('dr.hub_url_update', urlErr, { restore_id: restoreId }); } catch (e) { console.error('[dr.hub_url_update]', { restoreId }, e.message); }
         }
 
         setStatus(restoreId, {
@@ -549,14 +549,14 @@ export function createDrRouter() {
       } catch (err) {
         try {
           fs.rmSync(stagingDir, { recursive: true, force: true });
-        } catch {}
+        } catch (e) { console.error('[dr.staging_cleanup]', { restoreId, stagingDir }, e.message); }
         setStatus(restoreId, {
           phase: 'failed',
           message: 'Restore failed before file swap. Live install untouched.',
           error: String(err.message || err),
           terminal: true,
         });
-        try { logError('dr.restore_pipeline', err, { restore_id: restoreId }); } catch {}
+        try { logError('dr.restore_pipeline', err, { restore_id: restoreId }); } catch (e) { console.error('[dr.restore_pipeline]', { restoreId }, e.message); }
       } finally {
         // Lock release on terminal state, regardless of outcome. On
         // success the apply-restore.ps1 script will stop the service
@@ -577,7 +577,7 @@ export function createDrRouter() {
           error: String(unexpected?.message || unexpected),
           terminal: true,
         });
-      } catch {}
+      } catch (e) { console.error('[dr.restore_pipeline_fallback]', { restoreId }, e.message); }
     });
   });
 

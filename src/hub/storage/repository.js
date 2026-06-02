@@ -62,6 +62,46 @@ export function createHubRepository(adapter) {
         synced_at TEXT DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(site_id, item_number)
       );
+      CREATE TABLE IF NOT EXISTS hub_inventory_sales (
+        site_id       TEXT    NOT NULL,
+        item_number   TEXT    NOT NULL,
+        period        TEXT    NOT NULL,
+        qty_sold      REAL    NOT NULL DEFAULT 0,
+        revenue       REAL    NOT NULL DEFAULT 0,
+        order_count   INTEGER NOT NULL DEFAULT 0,
+        last_sale_date TEXT,
+        synced_at     TEXT    DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (site_id, item_number, period)
+      );
+      CREATE INDEX IF NOT EXISTS idx_hub_inv_sales_site_period
+        ON hub_inventory_sales(site_id, period);
+      CREATE TABLE IF NOT EXISTS hub_stock_receipt_expiry (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        site_id TEXT NOT NULL,
+        receipt_number TEXT,
+        supplier_name TEXT,
+        receipt_date TEXT,
+        receipt_line_id INTEGER,
+        line_no INTEGER,
+        item_number TEXT NOT NULL,
+        item_description TEXT,
+        qty_received TEXT,
+        uom TEXT,
+        unit_cost TEXT,
+        expiry_date TEXT,
+        qty_at_expiry TEXT,
+        entered_by TEXT,
+        entry_source TEXT,
+        notes TEXT,
+        expiry_created TEXT,
+        synced_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_hub_stock_expiry_site
+        ON hub_stock_receipt_expiry(site_id);
+      CREATE INDEX IF NOT EXISTS idx_hub_stock_expiry_item
+        ON hub_stock_receipt_expiry(site_id, item_number);
+      CREATE INDEX IF NOT EXISTS idx_hub_stock_expiry_date
+        ON hub_stock_receipt_expiry(expiry_date);
     `);
 
     adapter.run(`
@@ -133,7 +173,7 @@ export function createHubRepository(adapter) {
           adapter.prepare(`
             UPDATE hub_sites
             SET in_env = 0,
-                removed_from_env_at = COALESCE(removed_from_env_at, datetime('now'))
+                removed_from_env_at = COALESCE(removed_from_env_at, now_local())
             WHERE id NOT IN (${placeholders}) AND in_env = 1
           `).run(...incomingIds);
         }

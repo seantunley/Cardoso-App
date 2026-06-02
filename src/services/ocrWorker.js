@@ -77,7 +77,7 @@ function withTimeout(promise, timeoutMs, label) {
 // which row is on which step in real time. Best-effort: a postMessage
 // failure here is non-fatal — extraction continues.
 function emitProgress(id, stage) {
-  try { parentPort.postMessage({ type: 'progress', id, stage }); } catch {}
+  try { parentPort.postMessage({ type: 'progress', id, stage }); } catch (e) { console.error('[ocrWorker.emit_progress]', { id, stage }, e.message); }
 }
 
 // ── Per-engine rate-limit cooldown ──────────────────────────────────────────
@@ -172,7 +172,7 @@ async function getSharp() {
   // in `bat.ocr.memory` metrics. The lane-level recycle in
   // batReconciliation.js still runs as the primary defence; this just
   // removes one source of growth.
-  try { _sharp.cache(false); } catch {}
+  try { _sharp.cache(false); } catch (e) { console.error('[ocrWorker.sharp_init]', { op: 'cache_disable' }, e.message); }
   return _sharp;
 }
 
@@ -502,13 +502,13 @@ async function fetchBoundedBuffer(response, maxBytes) {
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
-        try { await reader.cancel(); } catch {}
+        try { await reader.cancel(); } catch (e) { console.error('[ocrWorker.fetch_bounded]', { phase: 'cancel_oversize', total, maxBytes }, e.message); }
         throw new Error(`PDF size exceeds limit ${maxBytes} (cancelled at ${total} bytes)`);
       }
       chunks.push(value);
     }
   } finally {
-    try { reader.releaseLock(); } catch {}
+    try { reader.releaseLock(); } catch (e) { console.warn('[ocrWorker.fetch_bounded.release_lock]', e.message); }
   }
   return Buffer.concat(chunks.map(c => Buffer.from(c)));
 }
@@ -588,7 +588,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         }
         return null;
       } finally {
-        try { doc.destroy(); } catch {}
+        try { doc.destroy(); } catch (e) { console.error('[ocrWorker.pdf_text]', { phase: 'doc_destroy' }, e.message); }
       }
     })(), 20_000, 'pdf_text');
     if (result?.invoice) {
@@ -617,7 +617,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         message: String(err?.message || err).slice(0, 500),
         tierError: false,
       });
-    } catch {}
+    } catch (e) { console.warn('[ocrWorker.pdf_text.post_engine_error]', { msgId }, e.message); }
   }
 
   // Step 2: render to image. The render now runs in a SHORT-LIVED CHILD
@@ -726,7 +726,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
         message: String(err?.message || err).slice(0, 500),
         tierError: false,
       });
-    } catch {}
+    } catch (e) { console.warn('[ocrWorker.preview_save.post_engine_error]', { msgId }, e.message); }
   }
 
   // Step 3: multi-engine OCR pipeline
@@ -819,7 +819,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           tierError: false,
           cooldown: true,
         });
-      } catch {}
+      } catch (e) { console.warn('[ocrWorker.cascade.post_cooldown_skip]', { msgId, engine: engine.name }, e.message); }
       continue;
     }
     for (const angle of [0, 90]) {
@@ -857,7 +857,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
               text_length: (text || '').length,
               text_preview: (text || '').slice(0, 1000),
             });
-          } catch {}
+          } catch (e) { console.warn('[ocrWorker.cascade.post_no_match_short]', { msgId, engine: engine.name, angle }, e.message); }
           continue;
         }
         // Mark that this row got at least one engine's worth of readable
@@ -892,7 +892,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
             // from "engine missed the invoice region of the page entirely".
             text_preview: text.slice(0, 1500),
           });
-        } catch {}
+        } catch (e) { console.warn('[ocrWorker.cascade.post_no_regex_match]', { msgId, engine: engine.name, angle }, e.message); }
       } catch (err) {
         // Surface per-engine failures to the parent for System Log
         // attribution. Without this, a misconfigured Google Vision (key
@@ -917,11 +917,11 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
             tierError: !!err?.tierError,
             rateLimited,
           });
-        } catch {}
+        } catch (e) { console.error('[ocrWorker.engine_error_post]', { msgId, engine: engine.name, angle }, e.message); }
         if (err.tierError && !tierError) tierError = `${engine.name}: ${err.message}`;
         // If Tesseract crashed mid-run, surface so the main thread can rebuild this lane.
         if (engine.name.startsWith('Tesseract') && _tesseract) {
-          try { await _tesseract.terminate().catch(() => {}); } catch {}
+          try { await _tesseract.terminate().catch(() => {}); } catch (e) { console.warn('[ocrWorker.cascade.tesseract_terminate]', e.message); }
           _tesseract = null;
         }
         // After marking cooldown, no point trying angle 90 of the same
@@ -959,7 +959,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
 parentPort.on('message', async (msg) => {
   if (!msg) return;
   if (msg.type === 'shutdown') {
-    try { if (_tesseract) await _tesseract.terminate().catch(() => {}); } catch {}
+    try { if (_tesseract) await _tesseract.terminate().catch(() => {}); } catch (e) { console.warn('[ocrWorker.shutdown.tesseract_terminate]', e.message); }
     process.exit(0);
   }
   if (msg.type === 'extract') {
