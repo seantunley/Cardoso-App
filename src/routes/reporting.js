@@ -21,6 +21,7 @@ import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/b
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
+import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -404,6 +405,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       let filteredTotalOutstanding = 0;
       let allRecords = [];
 
+      // Active credit-logic config (the hub-synced 'local' config where a site
+      // has one) — loaded once per request and memoised. The server-computed
+      // credit badge MUST use it; passing null falls back to the default and
+      // silently ignores configured thresholds, which the client-side badge
+      // then trusts over its own fetched config.
+      let _creditConfig;
+      const creditConfig = () => (_creditConfig ??= getCreditLogicForAnalysis().config);
+
       if (isHub) {
         sites = prep(`
           SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
@@ -504,7 +513,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
             // Compute credit verdict once on the server so the client can
             // skip the per-row useMemo on every parent re-render.
             try {
-              const { verdict, score } = analyseInvoiceCredit([row], [], null);
+              const { verdict, score } = analyseInvoiceCredit([row], [], creditConfig());
               row.credit_verdict = verdict;
               row.credit_score = score;
             } catch (err) {
@@ -536,12 +545,12 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
             const days = Math.floor((today - dt) / 86400000);
             if (days < lastPurchaseDays) return false;
           }
-          // Dormant — derived from analyseInvoiceCredit. Uses default
-          // credit-logic config; the verdict is stable enough for a
-          // filter (it only swings between adjacent buckets at edges).
+          // Dormant — derived from analyseInvoiceCredit using the active
+          // credit-logic config (same as the badge), so the filter matches
+          // the verdict the row actually shows.
           if (dormantOnly) {
             try {
-              const v = analyseInvoiceCredit([row], [], null).verdict;
+              const v = analyseInvoiceCredit([row], [], creditConfig()).verdict;
               if (v !== 'dormant') return false;
             } catch { return false; }
           }

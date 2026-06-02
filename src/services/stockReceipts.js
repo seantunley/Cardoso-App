@@ -123,21 +123,42 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
   // an older value, which is how we find stale "phantom" lines below.
   const syncStamp = db.prepare('SELECT now_local() AS t').get().t;
 
-  // Remove phantom lines: any line on a re-synced receipt that wasn't touched
-  // this run (older updated_date) AND has no operator-entered expiry. Lines
-  // WITH expiry are kept — never destroy captured data. We exclude them
-  // explicitly rather than relying on ON DELETE CASCADE, which doesn't fire
-  // because PRAGMA foreign_keys is off, so no expiry rows are orphaned either.
-  const reconcileLine = db.prepare(`
+  // Remove phantom lines across the WHOLE refreshed date window — not just
+  // receipts that returned a line this run. A receipt whose last RQRECEIVED>0
+  // line was deleted/reversed in Sage returns no rows, so it never enters a
+  // "touched" set, yet its stale lines (and the now-empty receipt) must still
+  // go or they linger in the expiry module and the hub export. Any line not
+  // touched this run (older updated_date) AND without operator-entered expiry
+  // is removed; lines WITH expiry are kept — never destroy captured data. We
+  // exclude them explicitly rather than relying on ON DELETE CASCADE, which
+  // doesn't fire because PRAGMA foreign_keys is off, so no expiry rows are
+  // orphaned either. The query already succeeded (a failure throws before this
+  // transaction), so an empty window is authoritative.
+  const reconcileWindow = db.prepare(`
     DELETE FROM stock_receipt_line
-    WHERE receipt_id = ?
-      AND updated_date < ?
+    WHERE updated_date < ?
       AND id NOT IN (SELECT receipt_line_id FROM stock_receipt_line_expiry)
+      AND receipt_id IN (
+        SELECT id FROM stock_receipt
+        WHERE site_id = '' AND source_table = 'POPORH1'
+          AND receipt_date >= ? AND receipt_date <= ?
+      )
+  `);
+  // Drop receipt headers in the window left with no lines (fully reversed in
+  // Sage), so no phantom receipt remains. Headers that still have lines —
+  // including expiry-preserved ones — are untouched.
+  const reconcileEmptyReceipts = db.prepare(`
+    DELETE FROM stock_receipt
+    WHERE site_id = '' AND source_table = 'POPORH1'
+      AND receipt_date >= ? AND receipt_date <= ?
+      AND id NOT IN (SELECT DISTINCT receipt_id FROM stock_receipt_line WHERE receipt_id IS NOT NULL)
   `);
 
   let linesRemoved = 0;
+  let receiptsRemoved = 0;
+  const fromStr = intToDateStr(fromInt);
+  const toStr = intToDateStr(toInt);
   const insertAll = db.transaction(() => {
-    const touchedReceiptIds = new Set();
     for (const r of rows) {
       const receiptDate = intToDateStr(r.receipt_date_int);
       upsertReceipt.run(
@@ -152,7 +173,6 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
         continue;
       }
       seenReceipts.add(r.receipt_number);
-      touchedReceiptIds.add(receipt.id);
       upsertLine.run(
         receipt.id,
         r.line_no ?? 0,
@@ -164,14 +184,13 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
       );
       linesUpserted++;
     }
-    // Only reconcile receipts we actually re-synced this run, so a transient
-    // empty/failed query can't strip lines off untouched receipts.
-    for (const receiptId of touchedReceiptIds) {
-      linesRemoved += reconcileLine.run(receiptId, syncStamp).changes;
-    }
+    // Reconcile the whole refreshed window so receipts whose every line was
+    // reversed are cleaned up too, then drop any receipt left with no lines.
+    linesRemoved = reconcileWindow.run(syncStamp, fromStr, toStr).changes;
+    receiptsRemoved = reconcileEmptyReceipts.run(fromStr, toStr).changes;
   });
   insertAll();
-  if (linesRemoved) console.log(`[stock-receipts] reconciled ${linesRemoved} stale line(s) removed from Sage`);
+  if (linesRemoved || receiptsRemoved) console.log(`[stock-receipts] reconciled ${linesRemoved} stale line(s) and ${receiptsRemoved} empty receipt(s) removed from Sage`);
 
   try {
     db.prepare(`

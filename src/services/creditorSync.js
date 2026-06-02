@@ -271,12 +271,14 @@ async function syncApPayments(pool, settings, fromInt, toInt) {
     // Reconcile reversals: a payment reversed/removed in Sage drops out of the
     // window result and would otherwise linger forever (upsert never deletes),
     // inflating YTD totals. Clear the synced payment-date window first, then
-    // re-insert. Guarded on a non-empty result so a transient empty query
-    // can't wipe good financial data; rows outside the window are untouched.
-    if (rows.length) {
-      db.prepare("DELETE FROM creditor_ap_payment WHERE source_table = 'APTCR' AND payment_date >= ? AND payment_date <= ?")
-        .run(intToDateStr(fromInt), intToDateStr(toInt));
-    }
+    // re-insert. The query already succeeded by this point (a failure throws
+    // before this transaction runs), so an EMPTY result is authoritative —
+    // "every payment in the window was reversed" — and must clear the window
+    // too. Mirrors the APOBL clear-and-reload above; rows outside the window
+    // are untouched. (Was guarded on rows.length, which left stale payments
+    // whenever a window legitimately emptied out.)
+    db.prepare("DELETE FROM creditor_ap_payment WHERE source_table = 'APTCR' AND payment_date >= ? AND payment_date <= ?")
+      .run(intToDateStr(fromInt), intToDateStr(toInt));
     for (const r of rows) {
       if (!r.vendor_code || !r.payment_number) continue;
       upsert.run(
@@ -345,7 +347,27 @@ async function syncPos(pool, settings, fromInt, toInt) {
 
   let headersUpserted = 0;
   let linesUpserted = 0;
+  let headersRemoved = 0;
+  let linesRemoved = 0;
   const run = db.transaction(() => {
+    // Stamp captured BEFORE upserting. Touched headers get synced_at >= it;
+    // in-window headers left untouched (PO deleted in Sage) keep an older
+    // synced_at and are reconciled away below. Both queries already succeeded
+    // (a failure throws before this), so the synced set is authoritative for
+    // the window. Same pattern as stockReceipts' phantom-line reconcile.
+    const syncStamp = db.prepare('SELECT now_local() AS t').get().t;
+    const fromStr = intToDateStr(fromInt);
+    const toStr = intToDateStr(toInt);
+
+    // Lines returned this run, grouped by PO, to prune lines removed from a
+    // PO that otherwise survived.
+    const lineNosByPo = new Map();
+    for (const r of lRows) {
+      if (!r.po_number) continue;
+      if (!lineNosByPo.has(r.po_number)) lineNosByPo.set(r.po_number, new Set());
+      lineNosByPo.get(r.po_number).add(r.line_no ?? 0);
+    }
+
     for (const r of hRows) {
       if (!r.po_number) continue;
       upsertHeader.run(
@@ -375,9 +397,38 @@ async function syncPos(pool, settings, fromInt, toInt) {
       );
       linesUpserted++;
     }
+
+    // 1. Drop in-window PO headers that vanished from Sage — their lines
+    //    first, since PRAGMA foreign_keys is off and won't cascade.
+    const staleHeaderIds = db.prepare(
+      "SELECT id FROM creditor_po_header WHERE source_table = 'POPORH1' AND po_date >= ? AND po_date <= ? AND (synced_at IS NULL OR synced_at < ?)"
+    ).all(fromStr, toStr, syncStamp).map((h) => h.id);
+    if (staleHeaderIds.length) {
+      const ph = staleHeaderIds.map(() => '?').join(',');
+      db.prepare(`DELETE FROM creditor_po_line WHERE po_id IN (${ph})`).run(...staleHeaderIds);
+      headersRemoved += db.prepare(`DELETE FROM creditor_po_header WHERE id IN (${ph})`).run(...staleHeaderIds).changes;
+    }
+
+    // 2. Prune lines removed from a PO that survived (its line dropped out of
+    //    lRows). An empty keep-set means every line was deleted in Sage.
+    for (const r of hRows) {
+      if (!r.po_number) continue;
+      const header = getHeaderId.get(r.po_number);
+      if (!header) continue;
+      const keep = lineNosByPo.get(r.po_number);
+      if (keep && keep.size) {
+        const ph = [...keep].map(() => '?').join(',');
+        linesRemoved += db.prepare(`DELETE FROM creditor_po_line WHERE po_id = ? AND line_no NOT IN (${ph})`).run(header.id, ...keep).changes;
+      } else {
+        linesRemoved += db.prepare('DELETE FROM creditor_po_line WHERE po_id = ?').run(header.id).changes;
+      }
+    }
   });
   run();
-  return { headerRows: hRows.length, lineRows: lRows.length, headersUpserted, linesUpserted };
+  if (headersRemoved || linesRemoved) {
+    console.log(`[creditor-sync] reconciled POs: ${headersRemoved} header(s) and ${linesRemoved} line(s) removed from Sage`);
+  }
+  return { headerRows: hRows.length, lineRows: lRows.length, headersUpserted, linesUpserted, headersRemoved, linesRemoved };
 }
 
 // Update each vendor's last_receipt_date and last_payment_date from the
