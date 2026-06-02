@@ -54,7 +54,7 @@
     "@radix-ui/react-toggle-group": "^1.1.2",
     "@radix-ui/react-tooltip": "^1.1.8",
     "@tanstack/react-query": "^5.100.14",
-    "@tanstack/react-virtual": "^3.13.23",
+    "@tanstack/react-virtual": "^3.14.2",
     "archiver": "^8.0.0",
     "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.6.0",
