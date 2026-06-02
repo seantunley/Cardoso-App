@@ -1,8 +1,10 @@
 import { useMemo, useState, Fragment } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCompactR, fmtCount, downloadCsv, BarChart, Bar, Cell,
+  fmtR, fmtCompactR, fmtCount, downloadCsv, downloadReport, BarChart, Bar, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
@@ -17,7 +19,16 @@ function fetchRepExposure(minBalance) {
 }
 
 export default function SalesRepExposure() {
-  const [minBalance, setMinBalance] = useState(3);
+  // Min-balance filter persisted in the URL (shareable + reload-safe).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const minBalance = Number(searchParams.get('min_balance') ?? 3);
+  const setMinBalance = (v) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (v == null || String(v) === '3') next.delete('min_balance');
+      else next.set('min_balance', String(v));
+      return next;
+    }, { replace: true });
   const [expandedRep, setExpandedRep] = useState(null);
 
   const { data, isLoading, error } = useQuery({
@@ -47,6 +58,21 @@ export default function SalesRepExposure() {
     downloadCsv(`sales-rep-exposure-${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);
   };
 
+  // Server-side exports reuse the on-screen min-balance filter. Errors are
+  // surfaced (never swallowed) per the no-silent-failures rule.
+  const exportQs = () => {
+    const qs = new URLSearchParams();
+    if (minBalance) qs.set('min_balance', String(minBalance));
+    return qs.toString();
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  const handleExportPdf = () =>
+    downloadReport(`/api/reports/rep-exposure/export?format=pdf&${exportQs()}`, `sales-rep-exposure-${stamp()}.pdf`)
+      .catch((e) => toast.error("PDF export failed", { description: e.message }));
+  const handleExportExcel = () =>
+    downloadReport(`/api/reports/rep-exposure/export?format=xlsx&${exportQs()}`, `sales-rep-exposure-${stamp()}.xlsx`)
+      .catch((e) => toast.error("Excel export failed", { description: e.message }));
+
   const generatedAt = data?.generated_at ? new Date(data.generated_at) : new Date();
   const generatedAtFmt = generatedAt.toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
@@ -58,6 +84,8 @@ export default function SalesRepExposure() {
       printId="rep-exposure"
       orientation="portrait"
       onExportCsv={reps.length ? handleExportCsv : null}
+      onExportExcel={reps.length ? handleExportExcel : null}
+      onExportPdf={reps.length ? handleExportPdf : null}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error}

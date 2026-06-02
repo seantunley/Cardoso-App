@@ -135,11 +135,12 @@ export async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active, must_change_password,
-        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list,
         can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
+        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'admin@example.com',
       'Admin User',
@@ -151,6 +152,8 @@ export async function ensureSeedUsers() {
       adminDefaults.can_access_customer_balances !== false ? 1 : 0,
       adminDefaults.can_access_collections !== false ? 1 : 0,
       adminDefaults.can_access_inventory !== false ? 1 : 0,
+      adminDefaults.can_access_inventory_movement ? 1 : 0,
+      adminDefaults.can_access_price_list ? 1 : 0,
       adminDefaults.can_access_hub_metrics ? 1 : 0,
       adminDefaults.can_access_hub_backups ? 1 : 0,
       adminDefaults.can_access_hub_trends ? 1 : 0,
@@ -158,6 +161,9 @@ export async function ensureSeedUsers() {
       adminDefaults.can_access_reports ? 1 : 0,
       adminDefaults.can_access_connections ? 1 : 0,
       adminDefaults.can_access_settings ? 1 : 0,
+      adminDefaults.can_access_stock_receipt_expiry ? 1 : 0,
+      adminDefaults.can_access_creditors ? 1 : 0,
+      adminDefaults.can_access_commission ? 1 : 0,
       adminDefaults.can_manage_users ? 1 : 0,
       adminDefaults.can_manage_rules ? 1 : 0,
       adminDefaults.can_edit_records ? 1 : 0,
@@ -188,11 +194,12 @@ export async function ensureSeedUsers() {
     db.prepare(`
       INSERT INTO "user" (
         email, full_name, role, password_hash, is_active, must_change_password,
-        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory,
+        can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list,
         can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
+        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'user@example.com',
       'Regular User',
@@ -204,6 +211,8 @@ export async function ensureSeedUsers() {
       userDefaults.can_access_customer_balances !== false ? 1 : 0,
       userDefaults.can_access_collections !== false ? 1 : 0,
       userDefaults.can_access_inventory !== false ? 1 : 0,
+      userDefaults.can_access_inventory_movement ? 1 : 0,
+      userDefaults.can_access_price_list ? 1 : 0,
       userDefaults.can_access_hub_metrics ? 1 : 0,
       userDefaults.can_access_hub_backups ? 1 : 0,
       userDefaults.can_access_hub_trends ? 1 : 0,
@@ -211,6 +220,9 @@ export async function ensureSeedUsers() {
       userDefaults.can_access_reports ? 1 : 0,
       userDefaults.can_access_connections ? 1 : 0,
       userDefaults.can_access_settings ? 1 : 0,
+      userDefaults.can_access_stock_receipt_expiry ? 1 : 0,
+      userDefaults.can_access_creditors ? 1 : 0,
+      userDefaults.can_access_commission ? 1 : 0,
       userDefaults.can_manage_users ? 1 : 0,
       userDefaults.can_manage_rules ? 1 : 0,
       userDefaults.can_edit_records ? 1 : 0,

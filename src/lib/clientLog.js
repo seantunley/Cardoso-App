@@ -16,5 +16,5 @@ export function reportClientError(scope, err, meta) {
       body: JSON.stringify({ scope, message, stack, meta }),
       keepalive: true,
     }).catch(() => {});
-  } catch {}
+  } catch {} // eslint-disable-line no-empty -- adding logging here would recurse via reportClientError
 }

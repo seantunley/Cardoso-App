@@ -42,7 +42,7 @@ async function checkBackupIntegrity(siteId, filePath) {
     resultText = err.message || 'integrity_check_failed';
     needsCorruptRename = true;
   } finally {
-    try { backupDb?.close(); } catch (_) {}
+    try { backupDb?.close(); } catch (e) { console.warn('[hubEtl.integrity_check.close]', { filePath }, e.message); }
     backupDb = null;
   }
 
@@ -294,20 +294,27 @@ async function syncSite(site) {
         inventory_value=excluded.inventory_value,
         synced_at=excluded.synced_at
     `);
+    // Trim every string field at ingest. Sage source data carries
+    // trailing space padding on most CHAR columns (e.g. item_number
+    // "74                      " not "74") which would otherwise cause
+    // joins against the clean numbers in hub_inventory_sales to miss —
+    // surfaced 2026-05-29 as blank descriptions + 0 qty on Hub Inventory
+    // Movement. Trimming at write keeps storage canonical.
+    const trim = (v) => (typeof v === 'string' ? v.trim() : v);
     const insertInventory = db.transaction((invRecords) => {
       const now = new Date().toISOString();
       for (const r of invRecords) {
         upsertInv.run({
           site_id: site.id,
-          item_number: r.item_number,
-          item_description: r.item_description || null,
-          qty_on_hand: r.qty_on_hand || null,
-          last_cost: r.last_cost || null,
-          price_list: r.price_list || null,
-          price: r.price || null,
-          stocking_uom: r.stocking_uom || null,
-          commodity: r.commodity || null,
-          inventory_value: r.inventory_value || null,
+          item_number: trim(r.item_number),
+          item_description: trim(r.item_description) || null,
+          qty_on_hand: trim(r.qty_on_hand) || null,
+          last_cost: trim(r.last_cost) || null,
+          price_list: trim(r.price_list) || null,
+          price: trim(r.price) || null,
+          stocking_uom: trim(r.stocking_uom) || null,
+          commodity: trim(r.commodity) || null,
+          inventory_value: trim(r.inventory_value) || null,
           synced_at: now,
         });
       }
@@ -340,7 +347,13 @@ async function syncSite(site) {
       nextInvPromise = willHaveMore ? guardOrphan(fetchInvPage(invOffset + consumed)) : null;
       if (consumed > 0) {
         insertInventory(invRecords);
-        for (const r of invRecords) { if (r.item_number) syncedItemNumbers.push(r.item_number); }
+        // Must trim here too — insertInventory canonicalises item_number
+        // via trim(), so the prune DELETE below uses the same form.
+        // Skipping the trim would delete every just-inserted row (DELETE
+        // matches trimmed stored values against padded source values).
+        for (const r of invRecords) {
+          if (r.item_number) syncedItemNumbers.push(typeof r.item_number === 'string' ? r.item_number.trim() : r.item_number);
+        }
         invOffset += consumed;
       }
       if (!nextInvPromise) break;
@@ -353,7 +366,125 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
-    // Network devices: now served live from ntopng API — no ETL pull here.
+    // Inventory movement (sales velocity cache) — paginated fetch using
+    // the same pattern as the inventory sync above. Each page is 1000
+    // rows with a 10s timeout; large sites with many SKUs × months no
+    // longer risk aborting on a single oversized response.
+    //
+    // All pages are collected in memory first, then the delete+insert
+    // runs in a single transaction. This prevents a partial replace if
+    // a later page fetch fails — the old data stays intact until a
+    // fully successful sync completes.
+    try {
+      const fetchMovPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-movement?offset=${pageOffset}&limit=1000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory movement fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      // Stage: collect all pages before touching the DB.
+      const allMovRecords = [];
+      let movOffset = 0;
+      let nextMovPromise = guardOrphan(fetchMovPage(0));
+      while (true) {
+        const movData = await nextMovPromise;
+        const movRecords = movData?.records || [];
+        const consumed = movRecords.length;
+        const willHaveMore = movData?.has_more === true && consumed > 0;
+        nextMovPromise = willHaveMore ? guardOrphan(fetchMovPage(movOffset + consumed)) : null;
+        for (const r of movRecords) allMovRecords.push(r);
+        movOffset += consumed;
+        if (!nextMovPromise) break;
+      }
+
+      // Swap: atomic delete + insert in one transaction.
+      const upsertMov = db.prepare(`
+        INSERT INTO hub_inventory_sales (site_id, item_number, period, qty_sold, revenue, order_count, last_sale_date, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(site_id, item_number, period) DO UPDATE SET
+          qty_sold=excluded.qty_sold, revenue=excluded.revenue,
+          order_count=excluded.order_count, last_sale_date=excluded.last_sale_date,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_sales WHERE site_id = ?').run(site.id);
+        for (const r of allMovRecords) {
+          upsertMov.run(site.id, r.item_number, r.period, r.qty_sold || 0, r.revenue || 0, r.order_count || 0, r.last_sale_date || null);
+        }
+      })();
+    } catch (movErr) {
+      console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
+    }
+
+    // Stock receipt expiry — read-only hub copy for cross-site visibility.
+    // Paginated fetch (1000 rows / 10s per page), stage all pages in
+    // memory, then atomic delete+insert so a mid-page failure leaves
+    // existing data intact.
+    try {
+      const fetchSrePage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/stock-receipt-expiry?offset=${pageOffset}&limit=1000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Stock receipt expiry fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally {
+          clearTimeout(t);
+        }
+      };
+
+      const allSreRecords = [];
+      let sreOffset = 0;
+      let nextSrePromise = guardOrphan(fetchSrePage(0));
+      while (true) {
+        const sreData = await nextSrePromise;
+        const sreRecords = sreData?.records || [];
+        const consumed = sreRecords.length;
+        const willHaveMore = sreData?.has_more === true && consumed > 0;
+        nextSrePromise = willHaveMore ? guardOrphan(fetchSrePage(sreOffset + consumed)) : null;
+        for (const r of sreRecords) allSreRecords.push(r);
+        sreOffset += consumed;
+        if (!nextSrePromise) break;
+      }
+
+      const insertSre = db.prepare(`
+        INSERT INTO hub_stock_receipt_expiry (
+          site_id, receipt_number, supplier_name, receipt_date,
+          receipt_line_id, line_no, item_number, item_description,
+          qty_received, uom, unit_cost,
+          expiry_date, qty_at_expiry, entered_by, entry_source, notes, expiry_created,
+          synced_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_stock_receipt_expiry WHERE site_id = ?').run(site.id);
+        for (const r of allSreRecords) {
+          insertSre.run(
+            site.id, r.receipt_number, r.supplier_name, r.receipt_date,
+            r.receipt_line_id, r.line_no, r.item_number, r.item_description,
+            r.qty_received, r.uom, r.unit_cost,
+            r.expiry_date || null, r.qty_at_expiry || null, r.entered_by || null,
+            r.entry_source || null, r.notes || null, r.expiry_created || null,
+          );
+        }
+      })();
+    } catch (sreErr) {
+      console.log(`[hub-etl] Stock receipt expiry sync skipped for ${site.id}: ${sreErr.message}`);
+    }
 
     // BAT Reconciliation summary — recorded into hub_bat_summary.
     // The fetch was kicked off in parallel right after KPIs (above),
@@ -670,7 +801,7 @@ async function pullBackupForSite(site) {
             bodyTimedOut = true;
             // cancel() rejects any in-flight read() — caught inside
             // the loop so we exit cleanly with whatever bytes arrived.
-            try { reader.cancel(); } catch {}
+            try { reader.cancel(); } catch (e) { console.error('[hubEtl.stream_close]', { siteId: site.id, phase: 'body_timeout_cancel' }, e.message); }
           }, BODY_READ_TIMEOUT_MS);
           try {
             while (total < BODY_BYTE_CAP) {
@@ -688,7 +819,7 @@ async function pullBackupForSite(site) {
           } finally {
             clearTimeout(bodyTimer);
             // Release the connection so the upstream can stop sending.
-            try { await reader.cancel(); } catch {}
+            try { await reader.cancel(); } catch (e) { console.error('[hubEtl.stream_close]', { siteId: site.id, phase: 'finally_cancel' }, e.message); }
           }
           let prefix = '';
           if (total > 0) {
@@ -726,7 +857,7 @@ async function pullBackupForSite(site) {
       try {
         db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
           .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
-      } catch {}
+      } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'http_error_row' }, e.message); }
       return { ok: false, error: friendly };
     }
     const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
@@ -811,11 +942,11 @@ async function pullBackupForSite(site) {
         // a valid 0-file snapshot to a future restore.
         const MIN_ZIP_BYTES = 22;
         if (previewSize < MIN_ZIP_BYTES) {
-          try { unlinkSync(previewFile); } catch {}
+          try { unlinkSync(previewFile); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'too_small' }, e.message); }
           console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch returned ${previewSize} bytes — too small to be a valid zip; deleted.`);
           previewsResult = { ok: false, error: `zip too small: ${previewSize} bytes` };
         } else if (Number.isFinite(expectedSize) && expectedSize > 0 && previewSize !== expectedSize) {
-          try { unlinkSync(previewFile); } catch {}
+          try { unlinkSync(previewFile); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'truncated' }, e.message); }
           console.warn(`[HUB BACKUP] ${site.name}: BAT previews truncated download (${previewSize} of ${expectedSize} bytes) — deleted.`);
           previewsResult = { ok: false, error: `truncated: ${previewSize}/${expectedSize}` };
         } else {
@@ -830,7 +961,7 @@ async function pullBackupForSite(site) {
       try {
         const { unlinkSync, existsSync } = await import('fs');
         if (existsSync(previewFile)) unlinkSync(previewFile);
-      } catch {}
+      } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: previewFile, reason: 'partial_cleanup' }, e.message); }
       console.warn(`[HUB BACKUP] ${site.name}: BAT previews fetch failed — ${describeFetchError(prevErr, `${site.url}/api/backup/bat-previews`)}`);
     }
 
@@ -872,13 +1003,13 @@ async function pullBackupForSite(site) {
           const { statSync, unlinkSync } = await import('fs');
           const size = statSync(file).size;
           if (size < MIN_ZIP_BYTES) {
-            try { unlinkSync(file); } catch {}
+            try { unlinkSync(file); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_too_small', archive: name }, e.message); }
             console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch returned ${size} bytes — too small to be a valid zip; deleted.`);
             archiveResults[name] = { ok: false, error: `zip too small: ${size} bytes` };
             continue;
           }
           if (Number.isFinite(expectedSize) && expectedSize > 0 && size !== expectedSize) {
-            try { unlinkSync(file); } catch {}
+            try { unlinkSync(file); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_truncated', archive: name }, e.message); }
             console.warn(`[HUB BACKUP] ${site.name}: ${label} truncated download (${size} of ${expectedSize} bytes) — deleted.`);
             archiveResults[name] = { ok: false, error: `truncated: ${size}/${expectedSize}` };
             continue;
@@ -895,7 +1026,7 @@ async function pullBackupForSite(site) {
         try {
           const { unlinkSync, existsSync } = await import('fs');
           if (existsSync(file)) unlinkSync(file);
-        } catch {}
+        } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file, reason: 'archive_partial_cleanup', archive: name }, e.message); }
         console.warn(`[HUB BACKUP] ${site.name}: ${label} fetch failed — ${describeFetchError(err, `${site.url}/api/backup/${name}`)}`);
         archiveResults[name] = { ok: false, error: err.message };
       }
@@ -924,7 +1055,7 @@ async function pullBackupForSite(site) {
       const dbKeep = Number.isFinite(parsedDbKeep) && parsedDbKeep >= 1 ? parsedDbKeep : 30;
       const dbToDelete = dbFiles.slice(dbKeep);
       for (const f of dbToDelete) {
-        try { unlinkSync(path.join(dir, f.name)); } catch {}
+        try { unlinkSync(path.join(dir, f.name)); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: f.name, reason: 'db_prune' }, e.message); }
       }
       if (dbToDelete.length > 0) {
         console.log(`[HUB BACKUP] ${site.name}: pruned ${dbToDelete.length} old DB backup(s), keeping ${dbKeep}`);
@@ -951,7 +1082,7 @@ async function pullBackupForSite(site) {
         const keepN = Number.isFinite(parsed) && parsed >= 1 ? parsed : defaultKeep;
         const toDelete = zips.slice(keepN);
         for (const f of toDelete) {
-          try { unlinkSync(path.join(dir, f.name)); } catch {}
+          try { unlinkSync(path.join(dir, f.name)); } catch (e) { console.error('[hubEtl.file_unlink]', { siteId: site.id, file: f.name, reason: 'zip_prune', prefix }, e.message); }
         }
         if (toDelete.length > 0) {
           console.log(`[HUB BACKUP] ${site.name}: pruned ${toDelete.length} old ${label}(s), keeping ${keepN}`);
@@ -974,7 +1105,7 @@ async function pullBackupForSite(site) {
     try {
       db.prepare(`INSERT INTO hub_backup_integrity (site_id, filename, result) VALUES (?, ?, ?)`)
         .run(site.id, '(download failed)', `pull_failed: ${friendly}`);
-    } catch {}
+    } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'outer_catch_row' }, e.message); }
     return { ok: false, error: friendly };
   }
 }

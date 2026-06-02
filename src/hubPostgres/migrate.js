@@ -106,7 +106,7 @@ async function runHubPostgresMigrations(options = {}) {
   } finally {
     try {
       await client.query('SELECT pg_advisory_unlock(hashtext($1))', [`hub-postgres-migrate:${config.schema}`]);
-    } catch {}
+    } catch (e) { console.warn('[hubPostgres.migrate.advisory_unlock]', { schema: config.schema }, e.message); }
     await client.end();
   }
 }

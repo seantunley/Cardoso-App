@@ -133,7 +133,7 @@ async function unzipInto(zipPath, destDir, dryRun) {
         if (err) return reject(err);
         // Single failure path that closes the zipfile FD before
         // bubbling up — yauzl doesn't auto-close on stream error.
-        const fail = (e) => { try { zipfile.close(); } catch {} reject(e); };
+        const fail = (e) => { try { zipfile.close(); } catch (closeErr) { console.warn('[restore.zip.close_on_fail]', { zipPath }, closeErr.message); } reject(e); };
         zipfile.readEntry();
         zipfile.on('entry', (entry) => {
           // Reject path-traversal entries. Zips from our own endpoints
@@ -158,7 +158,7 @@ async function unzipInto(zipPath, destDir, dryRun) {
             ws.on('error', fail);
           });
         });
-        zipfile.on('end', () => { try { zipfile.close(); } catch {} resolve(); });
+        zipfile.on('end', () => { try { zipfile.close(); } catch (e) { console.warn('[restore.zip.close_on_end]', { zipPath }, e.message); } resolve(); });
         zipfile.on('error', fail);
       });
     });
@@ -346,7 +346,7 @@ async function main() {
     // Stale WAL/SHM from a previous install would corrupt-look the new DB.
     for (const sidecar of ['cardoso.db-wal', 'cardoso.db-shm']) {
       const p = path.join(targetDir, 'database', sidecar);
-      try { fs.unlinkSync(p); } catch {}
+      try { fs.unlinkSync(p); } catch (e) { if (e.code !== 'ENOENT') console.warn('[restore.db.cleanup_sidecar]', { sidecar, p }, e.message); }
     }
     fs.copyFileSync(dbSrcPath, liveDbPath);
   }
@@ -370,7 +370,7 @@ async function main() {
       // Best-effort mode 0600 — Windows ignores POSIX bits but
       // chmod() is a no-op rather than an error, so this is safe to
       // call unconditionally.
-      try { fs.chmodSync(envDest, 0o600); } catch {}
+      try { fs.chmodSync(envDest, 0o600); } catch (e) { console.warn('[restore.env.chmod]', { envDest }, e.message); }
     }
   } else {
     console.log(`[2/5] .env:         ${skipEnv ? 'SKIPPED (--skip-env)' : 'MISSING — operator must supply manually'}`);

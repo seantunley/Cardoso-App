@@ -112,7 +112,7 @@ export function initBatSchema(db) {
     if (!ciHas('discount'))   db.exec("ALTER TABLE bat_cardoso_invoices ADD COLUMN discount REAL");
     if (!ciHas('del_fee'))    db.exec("ALTER TABLE bat_cardoso_invoices ADD COLUMN del_fee REAL");
   if (!ciHas('c_overwritten')) db.exec("ALTER TABLE bat_cardoso_invoices ADD COLUMN c_overwritten INTEGER DEFAULT 0");
-  } catch {}
+  } catch (e) { if (!/duplicate column name/i.test(e.message)) console.error('[batSchema.cardoso_invoices_columns]', e.message); }
 
   db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_cardoso_inv_recon ON bat_cardoso_invoices(reconciliation_id)`);
   db.exec(`CREATE INDEX IF NOT EXISTS idx_bat_cardoso_inv_num ON bat_cardoso_invoices(invoice_number)`);

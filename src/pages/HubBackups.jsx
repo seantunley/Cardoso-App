@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, HardDrive, CloudOff, Power, CloudDownload, ShieldCheck, Upload,
+  AlertTriangle, XCircle, Clock, CloudOff, Power, CloudDownload, ShieldCheck, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -556,10 +556,7 @@ export default function HubBackups() {
       <div className="mx-auto max-w-[1600px]">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 pb-5 border-b border-border">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
-              <HardDrive className="w-3 h-3 text-accent" strokeWidth={1.5} />
-              § Backups
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Safe, <em className="text-phosphor">every night</em>.
             </h1>

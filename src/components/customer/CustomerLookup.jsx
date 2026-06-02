@@ -561,10 +561,11 @@ export default function CustomerLookup({
       loadRecordHistory(record.id);
 
       const custNum = String(record.customer_number || "").trim();
-      if (isParentCustNum(custNum)) {
+      const prefix = getNumericPrefix(custNum);
+      if (prefix) {
         setSubAccounts(matchedSubAccounts.filter((r) => {
           const cn = String(r.customer_number || "").trim();
-          return cn !== custNum && getNumericPrefix(cn) === custNum;
+          return cn !== custNum && getNumericPrefix(cn) === prefix;
         }));
       } else {
         setSubAccounts([]);
@@ -636,7 +637,7 @@ export default function CustomerLookup({
         try {
           const ch = typeof e.changes === 'string' ? JSON.parse(e.changes) : (e.changes || {});
           new_value = ch.flag_color || ch.to || null;
-        } catch {}
+        } catch {} // eslint-disable-line no-empty -- JSON parse fallback; null new_value is the documented contract
         return { action: 'flag_changed', new_value };
       });
     const activeLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
@@ -648,30 +649,34 @@ export default function CustomerLookup({
 
     // User-set flags are hard overrides — no analysis can outrank a human decision.
     // auto_flagged = true means the flag was set by rules, not a human; human flags always win.
-    const isManualRedFlag    = customer.flag_color === "red"    && !customer.auto_flagged;
-    const isManualOrangeFlag = customer.flag_color === "orange" && !customer.auto_flagged;
+    // Check the entire account family (parent + children) so a manual flag on any
+    // member applies regardless of which account was looked up.
+    const manualRedRecord = allAccountRecords.find(r => r.flag_color === "red" && !r.auto_flagged);
+    const manualOrangeRecord = !manualRedRecord
+      ? allAccountRecords.find(r => r.flag_color === "orange" && !r.auto_flagged)
+      : null;
 
-    if (isManualRedFlag && analysis.verdict !== "hold") {
+    if (manualRedRecord && analysis.verdict !== "hold") {
       return {
         ...analysis,
         verdict: "hold",
         title: "Hold — Manually Flagged",
-        summary: buildManualFlagSummary("red", customer.flag_created_by),
+        summary: buildManualFlagSummary("red", manualRedRecord.flag_created_by),
         factors: [
-          { type: "block", text: buildManualFlagFactor("red", customer.flag_created_by) },
+          { type: "block", text: buildManualFlagFactor("red", manualRedRecord.flag_created_by) },
           ...analysis.factors,
         ],
       };
     }
 
-    if (isManualOrangeFlag && analysis.verdict === "approve") {
+    if (manualOrangeRecord && analysis.verdict === "approve") {
       return {
         ...analysis,
         verdict: "caution",
         title: "Proceed with Caution — Manually Flagged",
-        summary: buildManualFlagSummary("orange", customer.flag_created_by),
+        summary: buildManualFlagSummary("orange", manualOrangeRecord.flag_created_by),
         factors: [
-          { type: "warn", text: buildManualFlagFactor("orange", customer.flag_created_by) },
+          { type: "warn", text: buildManualFlagFactor("orange", manualOrangeRecord.flag_created_by) },
           ...analysis.factors,
         ],
       };
@@ -682,8 +687,8 @@ export default function CustomerLookup({
     if (
       analysis.isDormantReactivation &&
       analysis.verdict === "approve" &&
-      !isManualRedFlag &&
-      !isManualOrangeFlag
+      !manualRedRecord &&
+      !manualOrangeRecord
     ) {
       return {
         ...analysis,

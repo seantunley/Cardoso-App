@@ -74,6 +74,43 @@ export default [
         { ignore: ["cmdk-input-wrapper", "toast-close"] },
       ],
       "react-hooks/rules-of-hooks": "error",
+      // Blocks `try { ... } catch {}` and `try { ... } catch (_) {}` from
+      // shipping. Every caught error must surface to log or toast — operator
+      // guidance from 2026-05-28 after a silent-failure audit found ~50
+      // swallowed errors that hid real bugs. If a catch is intentionally
+      // doing nothing (e.g. discarding a localStorage write quota error),
+      // tag it with `// eslint-disable-line no-empty` and a one-line reason.
+      "no-empty": ["error", { allowEmptyCatch: false }],
+    },
+  },
+  // Server-side, libs, scripts — the same no-empty guard but no React/JSX
+  // rules. Without this block, server files like src/routes/*.js and
+  // src/services/*.js were entirely unlinted and accumulated the silent
+  // catches that the 2026-05-28 audit had to clean up.
+  {
+    files: [
+      "src/routes/**/*.js",
+      "src/services/**/*.js",
+      "src/db/**/*.js",
+      "src/lib/**/*.js",
+      "src/hubPostgres/**/*.js",
+      "src/api/**/*.js",
+      "src/helpers.js",
+      "src/startup.js",
+      "src/scheduler.js",
+      "src/fieldRegistry.js",
+      "server.js",
+      "scripts/**/*.{js,mjs}",
+    ],
+    languageOptions: {
+      globals: { ...globals.node },
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: "module",
+      },
+    },
+    rules: {
+      "no-empty": ["error", { allowEmptyCatch: false }],
     },
   },
 ];

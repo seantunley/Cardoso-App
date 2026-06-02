@@ -30,6 +30,11 @@ import {
   listArchiveGroups,
   streamArchiveBundle,
 } from '../services/hub/jtiHubBundle.js';
+import {
+  receiveCommissionArchive,
+  listHubCommissionArchives,
+  getHubCommissionArchive,
+} from '../services/hub/commissionHubReceive.js';
 import fs from 'fs';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -62,7 +67,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   const setHubSetting = (key, value) => {
     try {
       db.prepare(`INSERT INTO hub_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, value);
-    } catch {}
+    } catch (e) { console.warn('[hub.setting_upsert]', { key }, e.message); }
   };
   router.post('/api/hub/pull-backups-now', requireAuth, requireAdmin, requirePermission('can_access_hub_backups'), async (req, res) => {
     if (backupPullInProgress) {
@@ -466,7 +471,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_sites
         WHERE 1=1${sitesFilter.sql}
       `).all(...sitesFilter.params);
-    } catch {}
+    } catch (e) { console.warn('[hub.dashboard.sites_query]', e.message); }
     const sites = allSites;
 
     // ── KPI rollup (one query, in-JS pivot) ─────────────────────────────
@@ -561,8 +566,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       ? "strftime('%Y-%m', hr.updated_date)"
       : "strftime('%Y-W%W', hr.updated_date)";
 
+    // Optional explicit single-site filter (the operator-facing
+    // dropdown on /trends). Stacks with the allow-list sql below.
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+
     try {
       const filter = siteFilterSql(req, res, 'hr.site_id');
+      const extraWhere = siteIdFilter ? ' AND hr.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
       const rows = db.prepare(`
         SELECT
           ${bucketExpr} AS period,
@@ -573,10 +584,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_records hr
         LEFT JOIN hub_sites hs ON hs.id = hr.site_id
         WHERE hr.updated_date >= ?
-          AND ${bucketExpr} IS NOT NULL${filter.sql}
+          AND ${bucketExpr} IS NOT NULL${filter.sql}${extraWhere}
         GROUP BY ${bucketExpr}, hr.site_id, hs.name
         ORDER BY ${bucketExpr} ASC, hr.site_id ASC
-      `).all(since, ...filter.params);
+      `).all(since, ...filter.params, ...extraParams);
 
       res.json({
         period,
@@ -591,6 +602,353 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             ? Math.round((row.flagged_records / row.total_records) * 1000) / 10
             : 0,
         })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory — monthly inventory trends per site.
+  // Two parallel signals over time, both sourced from hub_inventory_sales
+  // (the per-period rollup the site sync builds):
+  //   - total_qty_sold: units shipped per month per site
+  //   - total_revenue:  revenue per month per site
+  // Weekly bucketing isn't supported — hub_inventory_sales only carries
+  // YYYY-MM granularity (the site ETL aggregates into months at write
+  // time), so we always return monthly regardless of the query param.
+  router.get('/api/hub/trends/inventory', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    // Return one row per (year, month) summed across sites on a shared
+    // Jan-Dec axis so the operator can spot seasonal patterns and growth.
+    // We deliberately enumerate every calendar year that has data — no
+    // rolling 3-year window. Years don't fall off as time passes; the
+    // per-year toggle chips in the UI let the operator narrow the
+    // comparison to whatever subset they care about today.
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+
+    try {
+      const filter = siteFilterSql(req, res, 'his.site_id');
+      const extraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+      const rows = db.prepare(`
+        SELECT
+          CAST(substr(his.period, 1, 4) AS INTEGER) AS year,
+          CAST(substr(his.period, 6, 2) AS INTEGER) AS month,
+          SUM(his.qty_sold)                       AS total_qty_sold,
+          SUM(his.revenue)                        AS total_revenue,
+          SUM(his.order_count)                    AS total_orders,
+          COUNT(DISTINCT his.item_number)         AS distinct_items
+        FROM hub_inventory_sales his
+        WHERE his.period IS NOT NULL${filter.sql}${extraWhere}
+        GROUP BY substr(his.period, 1, 4), substr(his.period, 6, 2)
+        ORDER BY year ASC, month ASC
+      `).all(...filter.params, ...extraParams);
+
+      // year_list = every year present in the data (ascending). Stays
+      // accurate as new periods land — no manual maintenance required.
+      const yearSet = new Set(rows.map((r) => r.year));
+      const yearList = [...yearSet].sort((a, b) => a - b);
+
+      res.json({
+        period: 'monthly',
+        year_list: yearList,
+        data: rows.map((row) => ({
+          year: row.year,
+          month: row.month,
+          total_qty_sold: Number(row.total_qty_sold) || 0,
+          total_revenue: Number(row.total_revenue) || 0,
+          total_orders: Number(row.total_orders) || 0,
+          distinct_items: Number(row.distinct_items) || 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/seasonal — top-10 items per South African
+  // season, aggregated across every year present in hub_inventory_sales.
+  //
+  // SA seasons (https://uni24.co.za/the-four-seasons-in-south-africa-summer-autumn-winter-and-spring/):
+  //   Summer: Dec, Jan, Feb
+  //   Autumn: Mar, Apr, May
+  //   Winter: Jun, Jul, Aug
+  //   Spring: Sep, Oct, Nov
+  //
+  // Pulls the substring '01'..'12' off `period` (stored YYYY-MM) and maps
+  // it to a season label. Aggregate is global by default; ?site_id=... or
+  // the operator's allowed-sites scope narrows it.
+  router.get('/api/hub/trends/inventory/seasonal', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const filter = siteFilterSql(req, res, 'his.site_id');
+      const extraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+      const seasonalCase = `
+        CASE substr(his.period, 6, 2)
+          WHEN '12' THEN 'Summer' WHEN '01' THEN 'Summer' WHEN '02' THEN 'Summer'
+          WHEN '03' THEN 'Autumn' WHEN '04' THEN 'Autumn' WHEN '05' THEN 'Autumn'
+          WHEN '06' THEN 'Winter' WHEN '07' THEN 'Winter' WHEN '08' THEN 'Winter'
+          WHEN '09' THEN 'Spring' WHEN '10' THEN 'Spring' WHEN '11' THEN 'Spring'
+        END`;
+      const rows = db.prepare(`
+        WITH seasonal AS (
+          SELECT
+            ${seasonalCase} AS season,
+            his.item_number AS item_number,
+            SUM(his.qty_sold)    AS qty_sold,
+            SUM(his.revenue)     AS revenue,
+            SUM(his.order_count) AS orders,
+            COUNT(DISTINCT his.period) AS months_seen
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${filter.sql}${extraWhere}
+          GROUP BY season, his.item_number
+        ),
+        ranked AS (
+          SELECT s.*,
+                 ROW_NUMBER() OVER (PARTITION BY s.season ORDER BY s.qty_sold DESC) AS rn
+          FROM seasonal s
+          WHERE s.season IS NOT NULL
+        )
+        SELECT r.season, r.rn AS rank, r.item_number,
+               r.qty_sold, r.revenue, r.orders, r.months_seen,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT item_number,
+                 item_description,
+                 commodity,
+                 ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY synced_at DESC) AS rn
+          FROM hub_inventory
+        ) ir ON ir.item_number = r.item_number AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY
+          CASE r.season WHEN 'Summer' THEN 1 WHEN 'Autumn' THEN 2 WHEN 'Winter' THEN 3 WHEN 'Spring' THEN 4 END,
+          r.rn
+      `).all(...filter.params, ...extraParams);
+
+      // Bucket by season for the UI: client gets a tidy
+      // { Summer: [...10 rows], Autumn: [...10], Winter: [...10], Spring: [...10] }.
+      const buckets = { Summer: [], Autumn: [], Winter: [], Spring: [] };
+      for (const row of rows) {
+        if (!buckets[row.season]) continue;
+        buckets[row.season].push({
+          rank: row.rank,
+          item_number: row.item_number,
+          item_description: row.item_description || null,
+          commodity: row.commodity || null,
+          qty_sold: Number(row.qty_sold) || 0,
+          revenue: Number(row.revenue) || 0,
+          orders: Number(row.orders) || 0,
+          months_seen: Number(row.months_seen) || 0,
+        });
+      }
+
+      res.json({
+        seasons: ['Summer', 'Autumn', 'Winter', 'Spring'],
+        months: {
+          Summer: ['Dec', 'Jan', 'Feb'],
+          Autumn: ['Mar', 'Apr', 'May'],
+          Winter: ['Jun', 'Jul', 'Aug'],
+          Spring: ['Sep', 'Oct', 'Nov'],
+        },
+        data: buckets,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/revenue-by-commodity — revenue + qty per
+  // (period, commodity) for the "sales mix" view. Commodity is joined off
+  // hub_inventory (current snapshot per site/item — latest synced_at row).
+  router.get('/api/hub/trends/inventory/revenue-by-commodity', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+      const rows = db.prepare(`
+        SELECT his.period AS period,
+               COALESCE(NULLIF(TRIM(ir.commodity), ''), '(uncategorised)') AS commodity,
+               SUM(his.revenue)  AS revenue,
+               SUM(his.qty_sold) AS qty
+        FROM hub_inventory_sales his
+        LEFT JOIN (
+          SELECT site_id, item_number, commodity,
+                 ROW_NUMBER() OVER (PARTITION BY site_id, item_number ORDER BY synced_at DESC) AS rn
+          FROM hub_inventory
+        ) ir ON ir.site_id = his.site_id AND ir.item_number = his.item_number AND ir.rn = 1
+        WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+        GROUP BY his.period, commodity
+        ORDER BY his.period ASC, commodity ASC
+      `).all(...sFilter.params, ...extraParams);
+
+      const commodityList = [...new Set(rows.map(r => r.commodity))].sort();
+      res.json({
+        commodity_list: commodityList,
+        data: rows.map(r => ({
+          period: r.period,
+          commodity: r.commodity,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        })),
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/dead-stock — for each of the last 24
+  // months, count items in hub_inventory whose most-recent sale period
+  // (ever) is older than the month minus 3 (i.e. no movement in the
+  // trailing quarter). dead_value = sum of inventory_value for those.
+  //
+  // Restricted to SKUs with CURRENT inventory_value > 0 so the count
+  // and value lines move together — without this filter the value line
+  // sits at zero for early months because SKUs that went dead long
+  // ago have since been wound down to zero stock today.
+  //
+  // Note: we don't have historical inventory snapshots, so the SKU set
+  // is fixed at "today's hub_inventory." The trend is the count of those
+  // SKUs that would have been considered dead at each past month.
+  router.get('/api/hub/trends/inventory/dead-stock', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const iFilter = siteFilterSql(req, res, 'hi.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const iExtraWhere = siteIdFilter ? ' AND hi.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+
+      const itemRows = db.prepare(`
+        WITH last_sale AS (
+          SELECT his.site_id, his.item_number, MAX(his.period) AS last_period
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+          GROUP BY his.site_id, his.item_number
+        )
+        SELECT hi.site_id, hi.item_number,
+               COALESCE(CAST(REPLACE(REPLACE(hi.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM hub_inventory hi
+        LEFT JOIN last_sale ls ON ls.site_id = hi.site_id AND ls.item_number = hi.item_number
+        WHERE COALESCE(CAST(REPLACE(REPLACE(hi.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0${iFilter.sql}${iExtraWhere}
+      `).all(...sFilter.params, ...extraParams, ...iFilter.params, ...extraParams);
+
+      // Generate 24 trailing months (oldest first).
+      const months = [];
+      const now = new Date();
+      for (let i = 23; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`);
+      }
+
+      const data = months.map(m => {
+        const [yy, mm] = m.split('-').map(Number);
+        const t = new Date(yy, mm - 1 - 3, 1);
+        const threshold = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`;
+        let count = 0;
+        let value = 0;
+        for (const r of itemRows) {
+          if (!r.last_period || r.last_period < threshold) {
+            count++;
+            value += r.inv_value || 0;
+          }
+        }
+        return { month: m, dead_count: count, dead_value: value };
+      });
+
+      res.json({
+        total_skus: itemRows.length,
+        threshold_months: 3,
+        data,
+      });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // GET /api/hub/trends/inventory/top-movers — top 10 SKUs by lifetime
+  // revenue, with last-12-months vs prior-12-months qty + revenue and
+  // % delta for each. Window endpoints computed in JS so the SQL stays
+  // portable.
+  router.get('/api/hub/trends/inventory/top-movers', requireAuth, requirePermission('can_access_hub_trends'), (req, res) => {
+    const siteIdFilter = req.query.site_id ? String(req.query.site_id) : null;
+    try {
+      const sFilter = siteFilterSql(req, res, 'his.site_id');
+      const iFilter = siteFilterSql(req, res, 'hi.site_id');
+      const sExtraWhere = siteIdFilter ? ' AND his.site_id = ?' : '';
+      const iExtraWhere = siteIdFilter ? ' AND hi.site_id = ?' : '';
+      const extraParams = siteIdFilter ? [siteIdFilter] : [];
+
+      const now = new Date();
+      const twelve = new Date(now.getFullYear(), now.getMonth() - 12, 1);
+      const twentyfour = new Date(now.getFullYear(), now.getMonth() - 24, 1);
+      const twelveStr = `${twelve.getFullYear()}-${String(twelve.getMonth() + 1).padStart(2, '0')}`;
+      const twentyfourStr = `${twentyfour.getFullYear()}-${String(twentyfour.getMonth() + 1).padStart(2, '0')}`;
+
+      const rows = db.prepare(`
+        WITH agg AS (
+          SELECT his.item_number,
+                 SUM(his.revenue)     AS total_revenue,
+                 SUM(his.qty_sold)    AS total_qty,
+                 SUM(his.order_count) AS total_orders,
+                 SUM(CASE WHEN his.period >= ? THEN his.qty_sold ELSE 0 END) AS this_year_qty,
+                 SUM(CASE WHEN his.period >= ? THEN his.revenue  ELSE 0 END) AS this_year_revenue,
+                 SUM(CASE WHEN his.period >= ? AND his.period < ? THEN his.qty_sold ELSE 0 END) AS prior_year_qty,
+                 SUM(CASE WHEN his.period >= ? AND his.period < ? THEN his.revenue  ELSE 0 END) AS prior_year_revenue
+          FROM hub_inventory_sales his
+          WHERE his.period IS NOT NULL${sFilter.sql}${sExtraWhere}
+          GROUP BY his.item_number
+        ),
+        ranked AS (
+          SELECT a.*, ROW_NUMBER() OVER (ORDER BY a.total_revenue DESC) AS rn
+          FROM agg a
+        )
+        SELECT r.rn AS rank, r.item_number,
+               r.total_revenue, r.total_qty, r.total_orders,
+               r.this_year_qty, r.this_year_revenue,
+               r.prior_year_qty, r.prior_year_revenue,
+               ir.item_description, ir.commodity
+        FROM ranked r
+        LEFT JOIN (
+          SELECT hi.item_number, hi.item_description, hi.commodity,
+                 ROW_NUMBER() OVER (PARTITION BY hi.item_number ORDER BY hi.synced_at DESC) AS rn
+          FROM hub_inventory hi
+          WHERE 1=1${iFilter.sql}${iExtraWhere}
+        ) ir ON ir.item_number = r.item_number AND ir.rn = 1
+        WHERE r.rn <= 10
+        ORDER BY r.rn ASC
+      `).all(
+        twelveStr, twelveStr, twentyfourStr, twelveStr, twentyfourStr, twelveStr,
+        ...sFilter.params, ...extraParams,
+        ...iFilter.params, ...extraParams,
+      );
+
+      res.json({
+        this_year_from: twelveStr,
+        prior_year_from: twentyfourStr,
+        data: rows.map(r => {
+          const tyQ = Number(r.this_year_qty) || 0;
+          const pyQ = Number(r.prior_year_qty) || 0;
+          const tyR = Number(r.this_year_revenue) || 0;
+          const pyR = Number(r.prior_year_revenue) || 0;
+          return {
+            rank: r.rank,
+            item_number: r.item_number,
+            item_description: r.item_description || null,
+            commodity: r.commodity || null,
+            total_revenue: Number(r.total_revenue) || 0,
+            total_qty: Number(r.total_qty) || 0,
+            total_orders: Number(r.total_orders) || 0,
+            this_year_qty: tyQ,
+            this_year_revenue: tyR,
+            prior_year_qty: pyQ,
+            prior_year_revenue: pyR,
+            qty_delta_pct: pyQ > 0 ? Math.round(((tyQ - pyQ) / pyQ) * 1000) / 10 : null,
+            revenue_delta_pct: pyR > 0 ? Math.round(((tyR - pyR) / pyR) * 1000) / 10 : null,
+          };
+        }),
       });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -894,7 +1252,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       });
       res.json({ orphans: enriched });
     } catch (err) {
-      try { logError('hub.orphan_sites', err); } catch {}
+      try { logError('hub.orphan_sites', err); } catch (e) { console.error('[hub.recon_orphan_cleanup]', { op: 'orphan_sites_list' }, e.message); }
       res.status(500).json({ error: err.message });
     }
   });
@@ -940,7 +1298,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
       res.json({ ok: true, counts });
     } catch (err) {
-      try { logError('hub.forget_orphan_site', err, { site_id: siteId }); } catch {}
+      try { logError('hub.forget_orphan_site', err, { site_id: siteId }); } catch (e) { console.error('[hub.recon_orphan_cleanup]', { siteId }, e.message); }
       res.status(500).json({ error: err.message });
     }
   });
@@ -1155,7 +1513,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     try {
       const users = db.prepare(`
         SELECT id, email, full_name, role, is_active, hub_redirect,
-               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
                can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
                can_access_records, can_access_reports, can_access_connections, can_access_settings,
                can_manage_users, can_manage_rules, can_edit_records, can_flag_records, created_date
@@ -1186,6 +1544,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         can_access_customer_balances: boolFromRow(u.can_access_customer_balances, true),
         can_access_collections: boolFromRow(u.can_access_collections, true),
         can_access_inventory: boolFromRow(u.can_access_inventory, true),
+        can_access_inventory_movement: boolFromRow(u.can_access_inventory_movement, false),
         can_access_network_devices: boolFromRow(u.can_access_network_devices, false),
         can_access_hub_metrics: boolFromRow(u.can_access_hub_metrics, false),
         can_access_hub_backups: boolFromRow(u.can_access_hub_backups, false),
@@ -1252,7 +1611,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
-             can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+             can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
+             can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
@@ -1532,7 +1892,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           // syncSite will eventually correct the displayed time. But
           // surface the failure so it's not silent if v62-style
           // schema drift bites again.
-          try { logError('hub.trigger_accpac_sync.stamp', updateErr, { site_id: site.id }); } catch {}
+          try { logError('hub.trigger_accpac_sync.stamp', updateErr, { site_id: site.id }); } catch (e) { console.error('[hub.sync_site]', { siteId: site.id, phase: 'stamp_log' }, e.message); }
         }
       }
 
@@ -1573,7 +1933,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       } catch (pullErr) {
         hubPullOk = false;
         hubPullError = pullErr?.message || String(pullErr);
-        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch {}
+        try { logError('hub.trigger_accpac_sync.refresh', pullErr, { site_id: site.id }); } catch (e) { console.error('[hub.sync_site]', { siteId: site.id, phase: 'refresh_log' }, e.message); }
       }
 
       res.json({
@@ -1738,7 +2098,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const isValidationError = err instanceof TypeError || err instanceof RangeError;
       const status = isValidationError ? 400 : 500;
       console.error(`[hub-jti] receive failed for site=${matched.id}: ${err.message}`);
-      try { logError('hub.jti_receive', err, { site_id: matched.id, status }); } catch {}
+      try { logError('hub.jti_receive', err, { site_id: matched.id, status }); } catch (e) { console.error('[hub.jti_receive]', { siteId: matched.id, status }, e.message); }
       res.status(status).json({ ok: false, error: err.message });
     }
   });
@@ -1829,14 +2189,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       periodYear: year, periodMonth: month,
       res,
       onError: (err) => {
-        try { logError('hub.jti_bundle', err, { period_year: year, period_month: month }); } catch {}
+        try { logError('hub.jti_bundle', err, { period_year: year, period_month: month }); } catch (e) { console.error('[hub.jti_bundle]', { period_year: year, period_month: month }, e.message); }
         try {
           logAudit({
             req, action: 'hub_jti_bundle_download', resourceType: 'system',
             resourceName: `JTI bundle ${year}-${String(month).padStart(2, '0')}`,
             details: `Bundle stream failed: ${err.message}`, status: 'failure',
           });
-        } catch {}
+        } catch (auditErr) { console.warn('[hub.jti_bundle.audit_failure]', { year, month }, auditErr.message); }
       },
     });
 
@@ -1849,7 +2209,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           resourceName: outcome.filename,
           details: `Downloaded JTI bundle for ${year}-${String(month).padStart(2, '0')} — ${outcome.archives.length} sites: ${outcome.archives.map((a) => a.site_id).join(', ')}`,
         });
-      } catch {}
+      } catch (e) { console.warn('[hub.jti_bundle.audit_success]', { year, month }, e.message); }
       return; // response is streaming; do not write further status/body
     }
 
@@ -1866,7 +2226,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         details: `Bundle refused (${outcome.code}): ${outcome.message}`,
         status: 'failure',
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.jti_bundle.audit_refused]', { year, month, code: outcome.code }, e.message); }
     res.status(statusCode).json({
       ok: false,
       code: outcome.code,
@@ -1875,6 +2235,142 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       ...(outcome.received_count   != null ? { received_count:   outcome.received_count   } : {}),
       ...(outcome.expected_count   != null ? { expected_count:   outcome.expected_count   } : {}),
     });
+  });
+
+  // ========================================================================
+  // Commission archive intake — site pushes a finished monthly .pdf + metadata
+  // ========================================================================
+  //
+  // Same shape as the JTI receive endpoint above. Token-auth via
+  // requireJtiSiteToken (same HUB_SITES list — a site has one reporting
+  // token covering both JTI + commission rather than two separate
+  // secrets). PDFs are larger than the JTI xlsx export, so this multer
+  // instance caps at 20 MB rather than 25 — still well above realistic
+  // payload size for the report (~50 KB typical) but appropriate for the
+  // expected medium.
+  const commissionUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 20 * 1024 * 1024, files: 1, fields: 30 },
+  });
+
+  router.post('/api/hub/receive-commission-archive', requireJtiSiteToken, commissionUpload.single('file'), async (req, res) => {
+    const matched = req._jtiSite;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Missing file part — POST as multipart/form-data with field name "file"' });
+    }
+
+    const f = req.body || {};
+    try {
+      const result = receiveCommissionArchive({
+        db,
+        archive: {
+          siteId: matched.id,    // trust the token-mapped id, NOT req.body.site_id
+          siteArchiveId: f.site_archive_id ? Number(f.site_archive_id) : undefined,
+          buffer: req.file.buffer,
+          filename: req.file.originalname || f.filename || 'commission.pdf',
+          periodYear: Number(f.period_year),
+          periodMonth: Number(f.period_month),
+          periodFrom: f.period_from,
+          periodTo: f.period_to,
+          generatedAt: f.generated_at,
+          generatedBy: f.generated_by || null,
+          source: f.source,
+          declaredSha256: f.sha256,
+          declaredByteSize: f.byte_size != null ? Number(f.byte_size) : undefined,
+          reportJson: f.report_json,
+          siteLabel: f.site_label || null,
+          receivedVia: 'push',
+        },
+      });
+
+      if (result.deduped) {
+        console.log(`[hub-commission] dedup hit for site=${matched.id} sha256=${result.row.sha256.slice(0, 12)}… (existing hub id ${result.row.id})`);
+      } else {
+        console.log(`[hub-commission] received from site=${matched.id} ${f.period_year}-${String(f.period_month).padStart(2, '0')} (${result.row.byte_size} bytes) → hub id ${result.row.id}`);
+      }
+
+      res.json({
+        ok: true,
+        deduped: result.deduped,
+        hubArchiveId: result.row.id,
+        siteId: matched.id,
+        sha256: result.row.sha256,
+      });
+    } catch (err) {
+      // Validation errors (sha mismatch, bad period, etc.) → 400.
+      // Anything else → 500. The site's push retry handles 5xx
+      // automatically; 4xx means the site sent something nonsensical.
+      const isValidationError = err instanceof TypeError || err instanceof RangeError;
+      const status = isValidationError ? 400 : 500;
+      console.error(`[hub-commission] receive failed for site=${matched.id}: ${err.message}`);
+      try { logError('hub.commission_receive', err, { site_id: matched.id, status }); } catch (e) { console.error('[hub.commission_receive]', { siteId: matched.id, status }, e.message); }
+      res.status(status).json({ ok: false, error: err.message });
+    }
+  });
+
+  // GET /api/hub/commission/archives — list across all sites (latest first)
+  // OR per-site if ?site_id=... given.
+  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission'), requireAllowedSite('site_id'), (req, res) => {
+    try {
+      const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
+        ? req.query.site_id : null;
+      const limitRaw = Number(req.query?.limit);
+      const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 500 ? limitRaw : 60;
+      // Scope to the user's allowed sites — the service returns every site's
+      // archives (incl. report_json), so filter both the list and the expected-
+      // sites the UI shows. requireAllowedSite already rejects a disallowed
+      // explicit ?site_id.
+      const allowedIds = getAllowedSiteIds(req, res);
+      const siteAllowed = (sid) => allowedIds === null || allowedIds.has(sid) || allowedIds.has(Number(sid)) || allowedIds.has(String(sid));
+      let archives = listHubCommissionArchives({ db, siteId, limit });
+      if (allowedIds !== null) archives = archives.filter((a) => siteAllowed(a.site_id));
+      const expected_sites = (HUB_SITES || [])
+        .filter((s) => siteAllowed(s.id))
+        .map((s) => ({ id: s.id, name: s.name || s.slug || s.id }));
+      res.json({ ok: true, archives, expected_sites, limit });
+    } catch (err) {
+      console.error('[hub-commission] list failed:', err.message);
+      try { logError('hub.commission_list', err); } catch (e) { console.error('[hub.commission_list]', e.message); }
+      res.status(500).json({ error: `Failed to list hub commission archives: ${err.message}` });
+    }
+  });
+
+  // GET /api/hub/commission/archives/:id/download — stream a previously-
+  // received .pdf back to the operator. Audited.
+  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+    const id = Number(req.params?.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid hub archive id' });
+    }
+    const row = getHubCommissionArchive({ db, id });
+    if (!row) return res.status(404).json({ error: `Hub commission archive #${id} not found` });
+    // Enforce the site allow-list — a restricted user must not download another
+    // site's archive by guessing its id. 404 (not 403) so we don't leak that
+    // the archive exists for a site they can't see.
+    const allowedIds = getAllowedSiteIds(req, res);
+    if (allowedIds !== null && !(allowedIds.has(row.site_id) || allowedIds.has(Number(row.site_id)) || allowedIds.has(String(row.site_id)))) {
+      return res.status(404).json({ error: `Hub commission archive #${id} not found` });
+    }
+    if (!fs.existsSync(row.file_path)) {
+      console.error(`[hub-commission] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
+      logAudit({
+        req, action: 'hub_commission_archive_download', resourceType: 'system', resourceName: row.filename,
+        details: `Hub archive #${id} requested but file missing`, status: 'failure',
+      });
+      return res.status(410).json({ error: `Hub commission archive #${id} record exists but file missing on disk` });
+    }
+    logAudit({
+      req, action: 'hub_commission_archive_download', resourceType: 'system', resourceName: row.filename,
+      details: `Downloaded hub commission archive #${id} (site=${row.site_id}, ${row.period_year}-${String(row.period_month).padStart(2, '0')})`,
+    });
+    const buffer = fs.readFileSync(row.file_path);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="${row.filename}"`);
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader('X-Hub-Commission-Archive-Id', String(id));
+    res.setHeader('X-Commission-Archive-Sha256', row.sha256);
+    res.end(buffer);
   });
 
   // ========================================================================
@@ -2111,12 +2607,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         FROM hub_backup_integrity WHERE site_id = ? GROUP BY filename
       `).all(siteId);
       integrityMap = new Map(rows.map(r => [r.filename, r]));
-    } catch {}
+    } catch (e) { console.warn('[hub.snapshots.integrity_query]', { siteId }, e.message); }
 
     const snapshots = dbFiles.map((dbFile) => {
       const fullDb = path.join(dir, dbFile);
       let dbStat = null;
-      try { dbStat = statSync(fullDb); } catch {}
+      try { dbStat = statSync(fullDb); } catch (e) { if (e.code !== 'ENOENT') console.warn('[hub.snapshots.db_stat]', { fullDb }, e.message); }
       // Match the timestamp suffix to find the companion previews zip.
       // .db filename: cardoso-<siteId>-YYYY-MM-DD-HH-MM-SS.db
       // zip filename: bat-previews-<siteId>-YYYY-MM-DD-HH-MM-SS.zip
@@ -2338,7 +2834,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const stream = createReadStream(filePath);
     stream.on('error', (err) => {
       console.error('[hub.restore-fetch] stream error:', err.message);
-      try { res.destroy(err); } catch {}
+      try { res.destroy(err); } catch (e) { console.warn('[hub.restore_fetch.res_destroy]', e.message); }
     });
     stream.pipe(res);
   });
@@ -2375,7 +2871,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           email_attempted: sanitizeForLog(email),
           ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
-      } catch {}
+      } catch {} // eslint-disable-line no-empty -- logError wrapper; auth_failed warn is best-effort
       return null;
     }
     const ok = await bcrypt.compare(password, user.password_hash);
@@ -2385,7 +2881,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           email_attempted: sanitizeForLog(email),
           ip: sanitizeForLog(req?.ip, 64),
         }, 'warn');
-      } catch {}
+      } catch {} // eslint-disable-line no-empty -- logError wrapper; auth_failed warn is best-effort
       return null;
     }
     if (user.role !== 'admin') return null;
@@ -2424,7 +2920,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const snapshots = dbFiles.map((dbFile) => {
         const fullDb = path.join(dir, dbFile);
         let dbStat = null;
-        try { dbStat = statSync(fullDb); } catch {}
+        try { dbStat = statSync(fullDb); } catch (e) { if (e.code !== 'ENOENT') console.warn('[hub.dr.list_snapshots.db_stat]', { fullDb }, e.message); }
         const tsMatch = dbFile.match(/-(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.db$/);
         const ts = tsMatch ? tsMatch[1] : null;
         const findCompanion = (list) => (ts ? list.find((f) => f.includes(ts)) : null) || null;
@@ -2461,7 +2957,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         status: 'success',
         userOverride: { email: user.email, full_name: user.full_name },
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.dr.list_sites.audit]', e.message); }
 
     res.json({ sites: result });
   });
@@ -2550,7 +3046,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         },
       });
     } finally {
-      try { snap.close(); } catch {}
+      try { snap.close(); } catch (e) { console.warn('[hub.dr.snapshot_meta.close]', e.message); }
     }
   });
 
@@ -2591,7 +3087,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
           status,
           userOverride: { email: user.email, full_name: user.full_name },
         });
-      } catch {}
+      } catch (e) { console.warn('[hub.dr.fetch.audit]', { siteId, filename, status }, e.message); }
     };
     res.on('finish', () => writeAudit('success'));
     res.on('close', () => { if (!res.writableFinished) writeAudit('failure'); });
@@ -2616,9 +3112,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     stream.on('data', (chunk) => { bytesStreamed += chunk.length; });
     stream.on('error', (err) => {
       console.error('[hub.dr.fetch] stream error:', err.message);
-      try { logError('hub.dr.fetch', err, { siteId, filename }); } catch {}
+      try { logError('hub.dr.fetch', err, { siteId, filename }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log
       writeAudit('failure', { error: err.message });
-      try { res.destroy(err); } catch {}
+      try { res.destroy(err); } catch (e) { console.warn('[hub.dr.fetch.res_destroy]', { siteId, filename }, e.message); }
     });
     stream.pipe(res);
   });
@@ -2658,7 +3154,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         status: 'success',
         userOverride: { email: user.email, full_name: user.full_name },
       });
-    } catch {}
+    } catch (e) { console.warn('[hub.dr.site_url_update.audit]', { siteId: site.id }, e.message); }
 
     res.json({ ok: true, site_id: site.id, old_url: oldUrl, new_url });
   });
@@ -2717,7 +3213,8 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
@@ -2732,7 +3229,12 @@ export function createReceiveUsersRouter() {
               u.can_access_customer_balances !== false ? 1 : 0,
               u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_inventory_movement ? 1 : 0,
               u.can_access_network_devices ? 1 : 0,
+              u.can_access_price_list ? 1 : 0,
+              u.can_access_stock_receipt_expiry ? 1 : 0,
+              u.can_access_creditors ? 1 : 0,
+              u.can_access_commission ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -2751,7 +3253,8 @@ export function createReceiveUsersRouter() {
             db.prepare(`
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
-                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_network_devices = ?,
+                can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
@@ -2765,7 +3268,12 @@ export function createReceiveUsersRouter() {
               u.can_access_customer_balances !== false ? 1 : 0,
               u.can_access_collections !== false ? 1 : 0,
               u.can_access_inventory !== false ? 1 : 0,
+              u.can_access_inventory_movement ? 1 : 0,
               u.can_access_network_devices ? 1 : 0,
+              u.can_access_price_list ? 1 : 0,
+              u.can_access_stock_receipt_expiry ? 1 : 0,
+              u.can_access_creditors ? 1 : 0,
+              u.can_access_commission ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -2796,11 +3304,12 @@ export function createReceiveUsersRouter() {
           }
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
-              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_network_devices,
+              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
+              can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -2812,7 +3321,12 @@ export function createReceiveUsersRouter() {
             u.can_access_customer_balances !== false ? 1 : 0,
             u.can_access_collections !== false ? 1 : 0,
             u.can_access_inventory !== false ? 1 : 0,
+            u.can_access_inventory_movement ? 1 : 0,
             u.can_access_network_devices ? 1 : 0,
+            u.can_access_price_list ? 1 : 0,
+            u.can_access_stock_receipt_expiry ? 1 : 0,
+            u.can_access_creditors ? 1 : 0,
+            u.can_access_commission ? 1 : 0,
             u.can_access_hub_metrics ? 1 : 0,
             u.can_access_hub_backups ? 1 : 0,
             u.can_access_hub_trends ? 1 : 0,
@@ -3060,7 +3574,7 @@ export function createReceiveUsersRouter() {
     } catch (err) {
       // Clean up staging on download failure — don't leave orphaned
       // partial files on disk.
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (cleanupErr) { console.warn('[site.restore.staging_cleanup_after_download_fail]', { stagingDir }, cleanupErr.message); }
       return res.status(502).json({
         ok: false,
         error: `Failed to download restore artifacts from hub: ${err.message}`,
@@ -3073,7 +3587,7 @@ export function createReceiveUsersRouter() {
     // pick up. We DON'T await it — the script runs detached and we'd
     // be killed mid-flight when the service stops.
     if (process.platform !== 'win32') {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (e) { console.warn('[site.restore.staging_cleanup_non_windows]', { stagingDir }, e.message); }
       return res.status(400).json({
         ok: false,
         error: 'Restore is only supported on Windows site installs (apply-restore.ps1 is PowerShell).',
@@ -3082,7 +3596,7 @@ export function createReceiveUsersRouter() {
 
     const applyScript = pathModule.join(appDir, 'scripts', 'apply-restore.ps1');
     if (!fsModule.existsSync(applyScript)) {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (e) { console.warn('[site.restore.staging_cleanup_no_script]', { stagingDir, applyScript }, e.message); }
       return res.status(500).json({
         ok: false,
         error: `Restore script missing at ${applyScript} — site needs to upgrade to a release that ships the restore mechanism.`,
@@ -3115,8 +3629,8 @@ export function createReceiveUsersRouter() {
       const taskName = `CardosoRestore-${restore_id}`;
       await launchViaTaskScheduler(taskName, wrapper);
     } catch (err) {
-      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch {}
-      try { logError('site.restore.task_scheduler', err, { restore_id }); } catch {}
+      try { fsModule.rmSync(stagingDir, { recursive: true, force: true }); } catch (cleanupErr) { console.warn('[site.restore.staging_cleanup_after_task_fail]', { stagingDir }, cleanupErr.message); }
+      try { logError('site.restore.task_scheduler', err, { restore_id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 below
       return res.status(500).json({
         ok: false,
         error: `Failed to schedule apply-restore task: ${err.message}`,

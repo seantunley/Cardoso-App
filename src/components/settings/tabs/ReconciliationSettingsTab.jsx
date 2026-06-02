@@ -101,7 +101,7 @@ function PerReconResetTool({ embedded = false }) {
       .then(async (r) => {
         if (!r.ok) {
           let detail = `HTTP ${r.status}`;
-          try { detail = (await r.json()).error || detail; } catch {}
+          try { detail = (await r.json()).error || detail; } catch {} // eslint-disable-line no-empty -- error-body parse fallback; default HTTP detail is the documented contract
           throw new Error(detail);
         }
         return r.json();
@@ -315,7 +315,7 @@ function ReplicateSupplierTool({ embedded = false }) {
     <div className={`space-y-6 ${embedded ? '' : 'pt-6 mt-6 border-t border-border'}`}>
       <div className="flex items-baseline justify-between border-b border-border pb-2">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">§ Section</div>
+
           <h2 className="font-display text-2xl text-foreground leading-tight mt-0.5">Cardoso replication</h2>
         </div>
       </div>
@@ -439,7 +439,7 @@ export default function ReconciliationSettingsTab() {
       <section className="space-y-6">
         <div className="flex items-baseline justify-between border-b border-border pb-2">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">§ Section</div>
+
             <h2 className="font-display text-2xl text-foreground leading-tight mt-0.5">OCR</h2>
           </div>
           <p className="font-mono text-[10px] text-muted-foreground">

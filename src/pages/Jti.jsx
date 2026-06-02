@@ -352,9 +352,7 @@ export default function Jti() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1200px] mx-auto px-8 py-10 space-y-8">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § JTI · Sales export
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             JTI Sales <em className="text-phosphor not-italic">export</em>.
           </h1>
@@ -466,6 +464,104 @@ export default function Jti() {
               {savingSettings ? 'Saving…' : 'Save defaults'}
             </button>
           </div>
+        </section>
+
+        {/* Archive panel ──────────────────────────────────────────── */}
+        <section className="bg-card border border-border p-6" style={{ borderRadius: '12px' }}>
+          <div className="flex items-start justify-between gap-4 mb-1">
+            <div>
+              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+                Past months
+              </div>
+              <h2 className="font-display text-xl text-foreground mb-1 flex items-center gap-2">
+                <Archive className="h-5 w-5 text-muted-foreground" strokeWidth={1.75} />
+                Archived exports
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Generated automatically on the 1st of every month for the previous month, plus any manual full-month exports.
+                Files are kept on disk and pushed to the hub.
+              </p>
+            </div>
+          </div>
+
+          {loadingArchives ? (
+            <div className="mt-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Loading archives…
+            </div>
+          ) : archives.length === 0 ? (
+            <div className="mt-4 border border-dashed border-border px-4 py-6 text-center" style={{ borderRadius: '8px' }}>
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                No archives yet
+              </p>
+              <p className="text-xs text-muted-foreground/70 mt-1">
+                Run a full-month export, or wait for the 1st-of-month scheduler to fire.
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+                    <th className="py-2 pr-4">Period</th>
+                    <th className="py-2 pr-4">Generated</th>
+                    <th className="py-2 pr-4">Source</th>
+                    <th className="py-2 pr-4 text-right">Rows</th>
+                    <th className="py-2 pr-4 text-right">Size</th>
+                    <th className="py-2 pr-4">Hub</th>
+                    <th className="py-2 pr-4 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archives.map(a => (
+                    <tr key={a.id} className="border-b border-border/40 last:border-b-0">
+                      <td className="py-2.5 pr-4 font-mono text-xs text-foreground">
+                        {a.period_year}-{String(a.period_month).padStart(2, '0')}
+                      </td>
+                      <td className="py-2.5 pr-4 text-muted-foreground text-xs">
+                        {formatGeneratedAt(a.generated_at)}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <span
+                          className="inline-block px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]"
+                          style={{
+                            borderRadius: '4px',
+                            background: a.source === 'scheduled' ? 'hsla(33,95%,55%,0.12)' : 'hsla(0,0%,100%,0.06)',
+                            color: a.source === 'scheduled' ? 'var(--phosphor)' : 'hsl(var(--muted-foreground))',
+                          }}
+                        >
+                          {a.source}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
+                        {a.row_count.toLocaleString()}
+                      </td>
+                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
+                        {formatBytes(a.byte_size)}
+                      </td>
+                      <td className="py-2.5 pr-4">
+                        <HubPushPill status={a.hub_push_status} attempts={a.hub_push_attempts} error={a.hub_push_error} />
+                      </td>
+                      <td className="py-2.5 pr-4 text-right">
+                        <button
+                          onClick={() => handleDownloadArchive(a.id, a.filename)}
+                          disabled={downloadingArchiveId === a.id}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-border font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-50"
+                          style={{ borderRadius: '6px' }}
+                          title={a.filename}
+                        >
+                          {downloadingArchiveId === a.id
+                            ? <Loader2 className="h-3 w-3 animate-spin" />
+                            : <Download className="h-3 w-3" strokeWidth={1.75} />}
+                          Download
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
 
         {/* Query (advanced) panel ─────────────────────────────────────
@@ -698,104 +794,6 @@ export default function Jti() {
               )}
             </button>
           </div>
-        </section>
-
-        {/* Archive panel ──────────────────────────────────────────── */}
-        <section className="bg-card border border-border p-6" style={{ borderRadius: '12px' }}>
-          <div className="flex items-start justify-between gap-4 mb-1">
-            <div>
-              <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
-                Past months
-              </div>
-              <h2 className="font-display text-xl text-foreground mb-1 flex items-center gap-2">
-                <Archive className="h-5 w-5 text-muted-foreground" strokeWidth={1.75} />
-                Archived exports
-              </h2>
-              <p className="text-sm text-muted-foreground">
-                Generated automatically on the 1st of every month for the previous month, plus any manual full-month exports.
-                Files are kept on disk and pushed to the hub.
-              </p>
-            </div>
-          </div>
-
-          {loadingArchives ? (
-            <div className="mt-4 flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-              <Loader2 className="h-3 w-3 animate-spin" />
-              Loading archives…
-            </div>
-          ) : archives.length === 0 ? (
-            <div className="mt-4 border border-dashed border-border px-4 py-6 text-center" style={{ borderRadius: '8px' }}>
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                No archives yet
-              </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
-                Run a full-month export, or wait for the 1st-of-month scheduler to fire.
-              </p>
-            </div>
-          ) : (
-            <div className="mt-4 overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    <th className="py-2 pr-4">Period</th>
-                    <th className="py-2 pr-4">Generated</th>
-                    <th className="py-2 pr-4">Source</th>
-                    <th className="py-2 pr-4 text-right">Rows</th>
-                    <th className="py-2 pr-4 text-right">Size</th>
-                    <th className="py-2 pr-4">Hub</th>
-                    <th className="py-2 pr-4 text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {archives.map(a => (
-                    <tr key={a.id} className="border-b border-border/40 last:border-b-0">
-                      <td className="py-2.5 pr-4 font-mono text-xs text-foreground">
-                        {a.period_year}-{String(a.period_month).padStart(2, '0')}
-                      </td>
-                      <td className="py-2.5 pr-4 text-muted-foreground text-xs">
-                        {formatGeneratedAt(a.generated_at)}
-                      </td>
-                      <td className="py-2.5 pr-4">
-                        <span
-                          className="inline-block px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.18em]"
-                          style={{
-                            borderRadius: '4px',
-                            background: a.source === 'scheduled' ? 'hsla(33,95%,55%,0.12)' : 'hsla(0,0%,100%,0.06)',
-                            color: a.source === 'scheduled' ? 'var(--phosphor)' : 'hsl(var(--muted-foreground))',
-                          }}
-                        >
-                          {a.source}
-                        </span>
-                      </td>
-                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
-                        {a.row_count.toLocaleString()}
-                      </td>
-                      <td className="py-2.5 pr-4 text-right font-mono text-xs text-muted-foreground">
-                        {formatBytes(a.byte_size)}
-                      </td>
-                      <td className="py-2.5 pr-4">
-                        <HubPushPill status={a.hub_push_status} attempts={a.hub_push_attempts} error={a.hub_push_error} />
-                      </td>
-                      <td className="py-2.5 pr-4 text-right">
-                        <button
-                          onClick={() => handleDownloadArchive(a.id, a.filename)}
-                          disabled={downloadingArchiveId === a.id}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 border border-border font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-50"
-                          style={{ borderRadius: '6px' }}
-                          title={a.filename}
-                        >
-                          {downloadingArchiveId === a.id
-                            ? <Loader2 className="h-3 w-3 animate-spin" />
-                            : <Download className="h-3 w-3" strokeWidth={1.75} />}
-                          Download
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
         </section>
 
         <div className="text-center pt-4 pb-8">

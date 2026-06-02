@@ -332,14 +332,14 @@ export default function Reconciliation() {
     try {
       const saved = window.localStorage.getItem('bat.viewingYear');
       if (saved) return saved;
-    } catch {}
+    } catch {} // eslint-disable-line no-empty -- localStorage read with documented fallback to ISO year
     // ISO year — disagrees with calendar year on Dec 29-31 of years
     // where Jan 1 is Mon/Tue/Wed. Without this the page would default
     // to viewing the previous year's recons in early Jan / late Dec.
     return String(isoYear(new Date()));
   });
   useEffect(() => {
-    try { window.localStorage.setItem('bat.viewingYear', viewingYear); } catch {}
+    try { window.localStorage.setItem('bat.viewingYear', viewingYear); } catch (e) { console.warn('[reconciliation.persist_viewing_year]', { viewingYear }, e.message); }
   }, [viewingYear]);
   // Legacy aliases — kept so existing JSX bindings still work. Both feed off
   // the same viewingYear so the user only sees one selector.
@@ -406,7 +406,7 @@ export default function Reconciliation() {
   const closeExtractionStream = useCallback(() => {
     const s = extractionStreamRef.current;
     s.stopped = true;
-    if (s.es) { try { s.es.close(); } catch {} s.es = null; }
+    if (s.es) { try { s.es.close(); } catch (e) { console.warn('[reconciliation.extraction_stream.close]', e.message); } s.es = null; }
     if (s.timer) { clearTimeout(s.timer); s.timer = null; }
   }, []);
   // Belt-and-suspenders cleanup: if this page unmounts or the user
@@ -576,7 +576,7 @@ export default function Reconciliation() {
             pollInterval = 15000;
           }
         }
-      } catch {}
+      } catch (e) { console.warn('[reconciliation.poll_pending_tick]', e.message); }
       if (!stopped) timer = setTimeout(tick, pollInterval);
     };
 
@@ -597,7 +597,7 @@ export default function Reconciliation() {
   const loadReconRef = useRef({ ctrl: null, latestId: null });
   const loadReconciliation = async (id) => {
     const slot = loadReconRef.current;
-    if (slot.ctrl) { try { slot.ctrl.abort(); } catch {} }
+    if (slot.ctrl) { try { slot.ctrl.abort(); } catch (e) { console.warn('[reconciliation.load_recon.abort_prev]', e.message); } }
     const ctrl = new AbortController();
     slot.ctrl = ctrl;
     slot.latestId = id;
@@ -842,11 +842,11 @@ export default function Reconciliation() {
         const es = new EventSource(`/api/bat/extraction-status-stream/${selected.id}`, { withCredentials: true });
         extractionStreamRef.current.es = es;
         es.onmessage = (ev) => {
-          try { handleProgress(JSON.parse(ev.data)); } catch {}
+          try { handleProgress(JSON.parse(ev.data)); } catch (e) { console.warn('[reconciliation.sse.parse_progress]', e.message); }
         };
         es.onerror = () => {
           // Connection dropped — close SSE and fall back to polling
-          try { es.close(); } catch {}
+          try { es.close(); } catch (e) { console.warn('[reconciliation.sse.close_on_error]', e.message); }
           if (extractionStreamRef.current.es === es) extractionStreamRef.current.es = null;
           if (!extractionStreamRef.current.stopped) startPolling();
         };
@@ -933,7 +933,6 @@ export default function Reconciliation() {
                 </button>
               )}
               {view === 'detail' && <span className="text-border">·</span>}
-              § BAT Reconciliation
               <SageStatusPill />
             </div>
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
@@ -1030,7 +1029,7 @@ export default function Reconciliation() {
 
             {/* Week status block */}
             {weekStatus && (
-              <div className="grid gap-4 sm:grid-cols-3 stagger-in">
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 stagger-in">
                 <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
                   <div
                     className="absolute left-0 right-0 bottom-0 h-[2px]"
@@ -1042,6 +1041,28 @@ export default function Reconciliation() {
                     </div>
                     <div className="font-display text-5xl leading-none text-foreground tabular-nums">
                       {weekStatus.currentWeek}
+                    </div>
+                  </div>
+                </div>
+                {/* Latest uploaded reconciliation — how current the supplier
+                    file is. Excludes synthetic marked-zero entries; this
+                    is "the most recent week we actually have a file for". */}
+                <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: '14px', boxShadow: '0 1px 2px rgba(0,0,0,0.25)' }}>
+                  <div
+                    className="absolute left-0 right-0 bottom-0 h-[2px]"
+                    style={{
+                      background: weekStatus.latestReconWeek != null ? 'hsl(210 80% 55%)' : 'hsl(var(--muted-foreground))',
+                      boxShadow: weekStatus.latestReconWeek != null ? '0 0 12px hsla(210,80%,55%,0.3)' : 'none',
+                    }}
+                  />
+                  <div>
+                    <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2">
+                      Latest Recon Uploaded
+                    </div>
+                    <div className="font-display text-5xl leading-none tabular-nums" style={{ color: weekStatus.latestReconWeek != null ? 'hsl(var(--foreground))' : 'hsl(var(--muted-foreground))' }}>
+                      {weekStatus.latestReconWeek != null
+                        ? `W${weekStatus.latestReconWeek}/${weekStatus.latestReconYear}`
+                        : '—'}
                     </div>
                   </div>
                 </div>

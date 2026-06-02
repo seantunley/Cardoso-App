@@ -149,7 +149,7 @@ export function receiveJtiArchive({ db, archive, archiveRoot = HUB_ARCHIVE_ROOT 
     return { ok: true, deduped: false, row: select.get(id) };
   } catch (err) {
     if (writtenFilePath) {
-      try { fs.unlinkSync(writtenFilePath); } catch {}
+      try { fs.unlinkSync(writtenFilePath); } catch (e) { console.warn('[hub.jti.receive.cleanup_unlink]', { writtenFilePath }, e.message); }
     }
     throw err;
   }

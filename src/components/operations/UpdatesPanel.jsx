@@ -117,7 +117,7 @@ export default function UpdatesPanel() {
             try {
               const r = await fetch("/api/app-version-status", { credentials: "include" });
               if (r.ok) setInfo(await r.json());
-            } catch {}
+            } catch (e) { console.warn('[updatesPanel.status_refresh_after_timeout]', e.message); }
             return;
           }
           setTimeout(poll, 4000);

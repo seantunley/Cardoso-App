@@ -25,6 +25,8 @@ const pagePermissions = {
   CustomerBalances: "can_access_customer_balances",
   Collections: "can_access_collections",
   Inventory: "can_access_inventory",
+  InventoryMovement: "can_access_inventory_movement",
+  PriceList: "can_access_price_list",
   NetworkDevices: "can_access_network_devices",
   HubMetrics: "can_access_hub_metrics",
   HubBackups: "can_access_hub_backups",
@@ -32,9 +34,12 @@ const pagePermissions = {
   Records: "can_access_records",
   Reconciliation: "can_access_reconciliation",
   Reports: "can_access_reports",
+  ReportingDashboard: "can_access_reports",
+  Insights: "can_access_reports",
   Connections: "can_access_connections",
   Jti: "can_access_jti",
   HubJti: "can_access_jti",
+  StockReceipts: "can_access_stock_receipt_expiry",
 };
 
 const LayoutWrapper = ({ children, currentPageName }) =>

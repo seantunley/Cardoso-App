@@ -64,14 +64,14 @@ function useColumnWidths(containerRef) {
     widthsRef.current = widths;
     if (writeTimerRef.current) clearTimeout(writeTimerRef.current);
     writeTimerRef.current = setTimeout(() => {
-      try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+      try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- hot path on every column drag; localStorage quota errors are non-fatal
       writeTimerRef.current = null;
     }, 200);
     return () => {
       if (writeTimerRef.current) {
         clearTimeout(writeTimerRef.current);
         writeTimerRef.current = null;
-        try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {}
+        try { localStorage.setItem(COLUMN_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- hot path teardown; localStorage quota errors are non-fatal
       }
     };
   }, [widths]);
@@ -453,9 +453,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
       {/* Header */}
       <div className="flex items-baseline justify-between flex-wrap gap-4 pt-2">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Invoice register
-          </div>
+
           <h3 className="font-display text-3xl leading-tight text-foreground">
             Per-invoice <em className="text-muted-foreground">audit trail</em>.
           </h3>
@@ -529,7 +527,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           try {
             const reconRes = await fetch(`/api/bat/reconciliation/${reconciliationId}`, { credentials: 'include' });
             if (reconRes.ok) onReconciliationUpdate(await reconRes.json());
-          } catch {}
+          } catch (e) { console.warn('[invoiceMatching.refresh_after_reset]', { reconciliationId }, e.message); }
         }}
       />
 

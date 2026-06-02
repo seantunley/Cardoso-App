@@ -31,7 +31,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       if (!password && connectionId) {
         const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
-          try { password = decryptPassword(stored.encrypted_password); } catch {}
+          try { password = decryptPassword(stored.encrypted_password); } catch (e) { console.error('[connection.decrypt]', { connId: connectionId, host }, e.message); }
         }
         // Use saved encryption preference if not overridden in the test request
         if (use_encryption == null && stored != null) {
@@ -85,13 +85,13 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           database: req.body?.database_name,
         });
         console.error('Test connection error:', friendly);
-        try { logError('connection.test', error, { connection_id: req.body?.connectionId, host: req.body?.host, database: req.body?.database_name, friendly }); } catch {}
+        try { logError('connection.test', error, { connection_id: req.body?.connectionId, host: req.body?.host, database: req.body?.database_name, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
         res.status(500).json({ error: friendly });
       } finally {
         if (pool) {
           try {
             await pool.close();
-          } catch {}
+          } catch (e) { console.warn('[connection.test.pool_close]', { host: req.body?.host, database: req.body?.database_name }, e.message); }
         }
       }
     }
@@ -111,7 +111,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
       if (!password && connectionId) {
         const stored = db.prepare('SELECT encrypted_password, use_encryption FROM databaseconnection WHERE id = ?').get(connectionId);
         if (stored?.encrypted_password) {
-          try { password = decryptPassword(stored.encrypted_password); } catch {}
+          try { password = decryptPassword(stored.encrypted_password); } catch (e) { console.error('[connection.decrypt]', { connId: connectionId, host }, e.message); }
         }
         if (use_encryption == null && stored != null) use_encryption = stored.use_encryption;
       }
@@ -167,10 +167,10 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           database: req.body?.database_name,
         });
         console.error('Test query error:', friendly);
-        try { logError('connection.test_query', error, { connection_id: req.body?.connectionId, host: req.body?.host, friendly }); } catch {}
+        try { logError('connection.test_query', error, { connection_id: req.body?.connectionId, host: req.body?.host, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
         res.status(500).json({ error: friendly });
       } finally {
-        if (pool) { try { await pool.close(); } catch {} }
+        if (pool) { try { await pool.close(); } catch (e) { console.warn('[connection.test_query.pool_close]', { host: req.body?.host }, e.message); } }
       }
     }
   );
@@ -237,7 +237,7 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
         });
         res.json(result);
       } catch (error) {
-        try { logError('connection.import', error, { connection_id: req.params.connectionId, name: conn?.name }); } catch {}
+        try { logError('connection.import', error, { connection_id: req.params.connectionId, name: conn?.name }); } catch {} // eslint-disable-line no-empty -- logError wrapper; failure already mirrored to audit log below
         logAudit({
           req, action: 'manual_import', resourceType: 'connection',
           resourceId: req.params.connectionId,

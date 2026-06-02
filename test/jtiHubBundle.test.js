@@ -56,16 +56,20 @@ const SITES = [
   { id: 'site-c', name: 'C' },
 ];
 
-function seedReceived({ siteId, year, month, bytes = null, source = 'scheduled', receivedAt = null }) {
+function seedReceived({ siteId, year, month, bytes = null, source = 'scheduled', receivedAt = null, filename = null }) {
   const buf = bytes || Buffer.from(`${siteId}-${year}-${month}-bytes`);
   // receivedAt override: receiveJtiArchive uses CURRENT_TIMESTAMP, but we
   // sometimes want to control ordering for "latest-version" tests.
+  // filename override: collision tests need to force two different sites
+  // to produce the same filename (the production scenario where two
+  // sites have blank site_label and buildJtiFilename falls back to
+  // "Unknown" for both).
   const result = receiveJtiArchive({
     db, archiveRoot: tmpRoot,
     archive: {
       siteId,
       buffer: buf,
-      filename: `JTI_${siteId}_${year}${String(month).padStart(2, '0')}30.xlsx`,
+      filename: filename || `JTI_${siteId}_${year}${String(month).padStart(2, '0')}30.xlsx`,
       periodYear: year, periodMonth: month,
       generatedAt: '2026-05-01 02:00:00',
       generatedBy: 'system:scheduled',
@@ -230,7 +234,7 @@ describe('streamArchiveBundle — refusals', () => {
 });
 
 describe('streamArchiveBundle — happy path', () => {
-  it('streams a ZIP containing one entry per expected site, layered as <site_id>/<filename>', async () => {
+  it('streams a ZIP containing one entry per expected site, flat at the root (filename only, no site folders)', async () => {
     seedReceived({ siteId: 'site-a', year: 2026, month: 4, bytes: Buffer.from('AAA') });
     seedReceived({ siteId: 'site-b', year: 2026, month: 4, bytes: Buffer.from('BBB') });
     seedReceived({ siteId: 'site-c', year: 2026, month: 4, bytes: Buffer.from('CCC') });
@@ -249,12 +253,47 @@ describe('streamArchiveBundle — happy path', () => {
     expect(body[1]).toBe(0x4B);
     expect(body[2]).toBe(0x03);
     expect(body[3]).toBe(0x04);
-    // Filenames appear in the central directory as plain text — sanity-
-    // check that all three site folders are represented and orphans aren't.
+    // Filenames appear in the central directory as plain text — every
+    // site's per-site filename is present at the ROOT (no `site-x/`
+    // prefix) per the flat layout introduced on 2026-05-19.
     const ascii = body.toString('latin1');
-    expect(ascii).toContain('site-a/');
-    expect(ascii).toContain('site-b/');
-    expect(ascii).toContain('site-c/');
+    expect(ascii).toContain('JTI_site-a_20260430.xlsx');
+    expect(ascii).toContain('JTI_site-b_20260430.xlsx');
+    expect(ascii).toContain('JTI_site-c_20260430.xlsx');
+    // No per-site folder prefixes any more.
+    expect(ascii).not.toContain('site-a/');
+    expect(ascii).not.toContain('site-b/');
+    expect(ascii).not.toContain('site-c/');
+  });
+
+  it('renames colliding filenames with a __<site_id> suffix so the flat layout never loses a file', async () => {
+    // Two sites that both end up with the SAME filename — this is what
+    // happens in production when site_label is blank on two sites and
+    // buildJtiFilename falls back to "Unknown" for both.
+    seedReceived({ siteId: 'site-a', year: 2026, month: 4, filename: 'JTI_Cardoso_Sales_Unknown_20260430.xlsx' });
+    seedReceived({ siteId: 'site-b', year: 2026, month: 4, filename: 'JTI_Cardoso_Sales_Unknown_20260430.xlsx' });
+    seedReceived({ siteId: 'site-c', year: 2026, month: 4 });
+    const res = makeResStub();
+    const outcome = streamArchiveBundle({ db, sites: SITES, periodYear: 2026, periodMonth: 4, res });
+    expect(outcome.ok).toBe(true);
+    const ascii = (await collect(res)).toString('latin1');
+    // First occurrence keeps its name; second is suffixed.
+    expect(ascii).toContain('JTI_Cardoso_Sales_Unknown_20260430.xlsx');
+    expect(ascii).toMatch(/JTI_Cardoso_Sales_Unknown_20260430__site-[ab]\.xlsx/);
+  });
+
+  it('treats case-only filename differences as collisions (Windows/macOS extraction safety)', async () => {
+    seedReceived({ siteId: 'site-a', year: 2026, month: 4, filename: 'JTI_Cardoso_Sales_Ermelo_20260430.xlsx' });
+    seedReceived({ siteId: 'site-b', year: 2026, month: 4, filename: 'JTI_Cardoso_Sales_ermelo_20260430.xlsx' });
+    seedReceived({ siteId: 'site-c', year: 2026, month: 4 });
+    const res = makeResStub();
+    const outcome = streamArchiveBundle({ db, sites: SITES, periodYear: 2026, periodMonth: 4, res });
+    expect(outcome.ok).toBe(true);
+    const ascii = (await collect(res)).toString('latin1');
+    // Both entries are present and the second one is suffixed because
+    // it would case-fold-collide with the first.
+    expect(ascii).toContain('JTI_Cardoso_Sales_Ermelo_20260430.xlsx');
+    expect(ascii).toMatch(/JTI_Cardoso_Sales_(?:Ermelo|ermelo)_20260430__site-[ab]\.xlsx/);
   });
 
   it('excludes orphan archives from the ZIP (sites no longer in HUB_SITES)', async () => {
@@ -270,7 +309,7 @@ describe('streamArchiveBundle — happy path', () => {
     expect(outcome.archives.map((a) => a.site_id).sort()).toEqual(['site-a', 'site-b', 'site-c']);
     const body = await collect(res);
     const ascii = body.toString('latin1');
-    expect(ascii).not.toContain('site-decommissioned/');
+    expect(ascii).not.toContain('site-decommissioned');
   });
 
   it('bundles only the LATEST version per (site, period) when re-runs exist', async () => {

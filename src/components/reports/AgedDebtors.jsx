@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCompactR, downloadCsv, BarChart, Bar, PieChart, Pie, Cell,
+  fmtR, fmtCompactR, downloadCsv, downloadReport, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
@@ -28,10 +30,25 @@ function fetchAgedDebtors(params) {
 }
 
 export default function AgedDebtors() {
-  const [salesRep, setSalesRep] = useState('all');
-  const [accountType, setAccountType] = useState('all');
-  const [site, setSite] = useState('all');
-  const [minBalance, setMinBalance] = useState(3);
+  // Filters live in the URL so a filtered view is shareable and survives a
+  // reload. Defaults are omitted from the query string to keep it clean.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const salesRep = searchParams.get('sales_rep') || 'all';
+  const accountType = searchParams.get('account_type') || 'all';
+  const site = searchParams.get('site') || 'all';
+  const minBalance = Number(searchParams.get('min_balance') ?? 3);
+  const setParam = (key, value, dflt) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value == null || value === '' || String(value) === String(dflt)) next.delete(key);
+      else next.set(key, String(value));
+      return next;
+    }, { replace: true });
+  const setSalesRep = (v) => setParam('sales_rep', v, 'all');
+  const setAccountType = (v) => setParam('account_type', v, 'all');
+  const setSite = (v) => setParam('site', v, 'all');
+  const setMinBalance = (v) => setParam('min_balance', v, 3);
+
   const [sortBy, setSortBy] = useState('balance');
   const [sortDir, setSortDir] = useState('desc');
 
@@ -92,6 +109,24 @@ export default function AgedDebtors() {
     downloadCsv(`aged-debtors-${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);
   };
 
+  // Server-side exports reuse the on-screen filters so the file matches the
+  // view. Errors are surfaced (never swallowed) per the no-silent-failures rule.
+  const exportQs = () => {
+    const qs = new URLSearchParams();
+    if (salesRep !== 'all') qs.set('sales_rep', salesRep);
+    if (accountType !== 'all') qs.set('account_type', accountType);
+    if (site !== 'all') qs.set('site', site);
+    if (minBalance) qs.set('min_balance', String(minBalance));
+    return qs.toString();
+  };
+  const stamp = () => new Date().toISOString().slice(0, 10);
+  const handleExportPdf = () =>
+    downloadReport(`/api/reports/aged-debtors/export?format=pdf&${exportQs()}`, `aged-debtors-${stamp()}.pdf`)
+      .catch((e) => toast.error("PDF export failed", { description: e.message }));
+  const handleExportExcel = () =>
+    downloadReport(`/api/reports/aged-debtors/export?format=xlsx&${exportQs()}`, `aged-debtors-${stamp()}.xlsx`)
+      .catch((e) => toast.error("Excel export failed", { description: e.message }));
+
   const generatedAt = data?.generated_at ? new Date(data.generated_at) : new Date();
   const generatedAtFmt = generatedAt.toLocaleString('en-ZA', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -110,6 +145,8 @@ export default function AgedDebtors() {
       printId="aged-debtors"
       orientation="landscape"
       onExportCsv={sortedRecords.length ? handleExportCsv : null}
+      onExportExcel={sortedRecords.length ? handleExportExcel : null}
+      onExportPdf={sortedRecords.length ? handleExportPdf : null}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error}

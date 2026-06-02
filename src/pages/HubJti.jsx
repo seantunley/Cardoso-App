@@ -75,7 +75,7 @@ export default function HubJti() {
       const r = await fetch(`/api/hub/jti/archives/${id}/download`, { credentials: 'include' });
       if (!r.ok) {
         let message = `HTTP ${r.status}`;
-        try { message = (await r.json()).error || message; } catch {}
+        try { message = (await r.json()).error || message; } catch {} // eslint-disable-line no-empty -- error-body parse fallback; default HTTP message is the documented contract
         throw new Error(message);
       }
       const blob = await r.blob();
@@ -132,9 +132,7 @@ export default function HubJti() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1200px] mx-auto px-8 py-10 space-y-8">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § JTI · Hub archives
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             JTI Sales <em className="text-phosphor not-italic">archives</em>.
           </h1>

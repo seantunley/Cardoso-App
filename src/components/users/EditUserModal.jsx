@@ -31,7 +31,7 @@ export default function EditUserModal({ user, open, onClose, onSave, isSaving })
       onSave(data);
       onClose();
     } catch (err) {
-      setError(err.message);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSaving(false);
     }

@@ -133,7 +133,7 @@ export default function HubReconciliation() {
     <div className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1600px] mx-auto px-8 py-10">
         <div className="border-b border-border pb-5 mb-6">
-          <div className="font-mono text-xs uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Hub · Reconciliation</div>
+
           <div className="flex items-end justify-between gap-4 flex-wrap">
             <div>
               <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">

@@ -1,5 +1,7 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, ChevronRight } from 'lucide-react';
+import SavedViews from '@/components/reports/SavedViews';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
 // active report is the only chunk fetched, instead of shipping all six
@@ -41,7 +43,17 @@ const REPORTS = [
 const ALL_ITEMS = REPORTS.flatMap(g => g.items);
 
 export default function Reports() {
-  const [activeId, setActiveId] = useState('aged-debtors');
+  // The active report lives in the URL (?report=<id>) so dashboard deep-links,
+  // saved views, and browser back/forward all work and the view is shareable.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get('report');
+  const activeId = ALL_ITEMS.some(i => i.id === requested) ? requested : 'aged-debtors';
+  const setActiveId = (id) =>
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('report', id);
+      return next;
+    }, { replace: true });
   const active = ALL_ITEMS.find(i => i.id === activeId);
 
   return (
@@ -50,14 +62,17 @@ export default function Reports() {
       style={{ background: 'hsl(var(--background))', color: 'hsl(var(--foreground))' }}
     >
       <div className="px-6 py-6">
-        <div className="report-print-hide border-b border-border pb-5 mb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Reports</div>
-          <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
-            The <em className="text-phosphor">printable</em> archive.
-          </h1>
-          <p className="text-sm text-muted-foreground mt-3">
-            Operational, accounting and reconciliation reports. Each report is filterable, chartable and printable.
-          </p>
+        <div className="report-print-hide border-b border-border pb-5 mb-5 flex flex-wrap items-end justify-between gap-3">
+          <div>
+
+            <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+              The <em className="text-phosphor">printable</em> archive.
+            </h1>
+            <p className="text-sm text-muted-foreground mt-3">
+              Operational, accounting and reconciliation reports. Each report is filterable, chartable and printable.
+            </p>
+          </div>
+          <SavedViews />
         </div>
 
         <div className="grid gap-5 lg:grid-cols-[260px_1fr]">

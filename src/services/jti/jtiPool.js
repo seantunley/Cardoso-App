@@ -78,7 +78,7 @@ export async function getJtiSagePool() {
   // the role assignment) or if the cached pool is no longer connected
   // (idle timeout, network blip).
   if (pool && (poolKey !== loaded.key || pool.connected === false)) {
-    try { await pool.close(); } catch {}
+    try { await pool.close(); } catch {} // eslint-disable-line no-empty -- best-effort close of stale pool; we're discarding it anyway
     pool = null;
   }
   if (pool) return pool;
@@ -87,7 +87,7 @@ export async function getJtiSagePool() {
   try {
     pool = await sql.connect(loaded.config);
   } catch (err) {
-    try { logError('jti.sage.pool', err, { source: loaded.source }); } catch {}
+    try { logError('jti.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;
   }
   poolKey = loaded.key;
@@ -102,7 +102,7 @@ export async function getJtiSagePool() {
  *     restart)
  */
 export async function resetJtiSagePool() {
-  if (pool) { try { await pool.close(); } catch {} }
+  if (pool) { try { await pool.close(); } catch {} } // eslint-disable-line no-empty -- best-effort close during pool reset
   pool = null;
   poolKey = null;
 }

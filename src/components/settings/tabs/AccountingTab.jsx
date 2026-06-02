@@ -75,7 +75,7 @@ export default function AccountingTab() {
       <section className="space-y-6">
         <div className="flex items-baseline justify-between border-b border-border pb-2">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">§ Section</div>
+
             <h2 className="font-display text-2xl text-foreground leading-tight mt-0.5">VAT</h2>
           </div>
           <p className="font-mono text-[10px] text-muted-foreground">

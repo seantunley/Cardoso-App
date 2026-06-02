@@ -181,7 +181,7 @@ export default function CreditDebug() {
   return (
     <div className="mx-auto max-w-3xl px-8 py-10 space-y-6">
       <div className="border-b border-border pb-5">
-        <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Diagnostics</div>
+
         <h1 className="font-display text-4xl leading-tight tracking-tight text-foreground">
           Trace the <em className="text-phosphor">verdict</em>.
         </h1>

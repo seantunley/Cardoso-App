@@ -58,9 +58,7 @@ export default function ReconciliationSummary({ recon }) {
 
   return (
     <section className="relative">
-      <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-5">
-        § Summary
-      </div>
+
       {matched && (
         <div className="absolute right-0 top-0 rotate-[-2deg] border border-accent/60 px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-accent shadow-[0_0_18px_hsla(33,95%,55%,0.16)]">
           Closed clean

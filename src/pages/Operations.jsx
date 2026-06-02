@@ -13,6 +13,7 @@
 // "what happened in the background?" and belong together here.
 
 import { useState, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/AuthContext";
 import { useHubMode } from "@/lib/useAppInfo";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -26,6 +27,7 @@ import UpdatesPanel from "@/components/operations/UpdatesPanel";
 import SecuritySignalsPanel from "@/components/operations/SecuritySignalsPanel";
 import OcrPanel from "@/components/operations/OcrPanel";
 import HubSyncLog from "@/pages/HubSyncLog";
+import SageHealthPanel from "@/components/health/SageHealthPanel";
 
 export default function Operations() {
   const { user } = useAuth();
@@ -33,6 +35,17 @@ export default function Operations() {
   const [activeTab, setActiveTab] = useState("jobs");
   const [detectiveMode, setDetectiveMode] = useState(false);
   const [traceMode, setTraceMode] = useState(false);
+
+  // Surface background job failures as a badge on the Job Runs tab so the
+  // operator doesn't have to open the tab to discover something broke.
+  const jobsBadgeQuery = useQuery({
+    queryKey: ["ops-jobs-badge"],
+    queryFn: () => fetch("/api/system/jobs", { credentials: "include" }).then((r) => (r.ok ? r.json() : { jobs: [] })),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    enabled: !!user,
+  });
+  const jobFailures = (jobsBadgeQuery.data?.jobs || []).reduce((s, j) => s + (j.failures_in_window || 0), 0);
 
   useEffect(() => {
     let logsIndex = 0;
@@ -105,11 +118,9 @@ export default function Operations() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <div className="max-w-[1600px] mx-auto px-8 py-10 space-y-8">
+      <div className="px-6 py-5 space-y-8">
         <div className="border-b border-border pb-5">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Operations
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             What the system is <em className="text-phosphor">doing</em>.
           </h1>
@@ -117,6 +128,10 @@ export default function Operations() {
             Background jobs{!hubMode && " · OCR worker"} · System errors · Deploy history{hubMode && " · Hub sync"}
           </p>
         </div>
+
+        {/* Site-mode Sage health at a glance — same panel as the Reporting
+            dashboard. Hidden on the hub, whose sync sources differ. */}
+        {!hubMode && <SageHealthPanel />}
 
         {detectiveMode && (
           <div className="border border-accent/50 bg-accent/10 px-4 py-3 font-mono text-[10px] uppercase tracking-[0.2em] text-accent">
@@ -133,6 +148,14 @@ export default function Operations() {
           <TabsList className="bg-muted/40">
             <TabsTrigger value="jobs" className="data-[state=active]:bg-background">
               <Activity className="w-3.5 h-3.5 mr-1.5" /> Job Runs
+              {jobFailures > 0 && (
+                <span
+                  className="ml-2 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white"
+                  title={`${jobFailures} job failure(s) in the last 24h`}
+                >
+                  {jobFailures}
+                </span>
+              )}
             </TabsTrigger>
             <TabsTrigger value="schedule" className="data-[state=active]:bg-background">
               <Calendar className="w-3.5 h-3.5 mr-1.5" /> Schedule

@@ -627,7 +627,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
       // Abort any in-flight request — its result would land on an empty
       // input box and repopulate stale suggestions.
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort of stale typeahead fetch; controller may already be settled
         abortRef.current = null;
       }
       setSuggestions([]);
@@ -645,7 +645,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
     // controller stays attached to `abortRef` so a later cancel target
     // (empty input, unmount) can find it.
     if (abortRef.current) {
-      try { abortRef.current.abort(); } catch {}
+      try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort of previous in-flight typeahead fetch
     }
     const controller = new AbortController();
     abortRef.current = controller;
@@ -696,7 +696,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
     // repopulate the just-cleared box.
     if (!query.trim()) {
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort on empty input; controller may already be settled
         abortRef.current = null;
       }
       setSuggestions([]);
@@ -720,7 +720,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
   useEffect(() => {
     return () => {
       if (abortRef.current) {
-        try { abortRef.current.abort(); } catch {}
+        try { abortRef.current.abort(); } catch {} // eslint-disable-line no-empty -- intentional abort on unmount; controller may already be settled
         abortRef.current = null;
       }
     };
@@ -987,6 +987,13 @@ export default function HubDashboard() {
         <AlertCircle className="mx-auto h-10 w-10 text-muted-foreground mb-3" />
         <p className="font-semibold text-foreground">Hub not available</p>
         <p className="text-sm text-muted-foreground mt-1">{error}</p>
+        <button
+          type="button"
+          onClick={() => fetchAll()}
+          className="mt-4 inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          Retry
+        </button>
       </div>
     </div>
   );
@@ -997,9 +1004,7 @@ export default function HubDashboard() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 border-b border-border pb-5">
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
-            § Hub Operations
-          </div>
+
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
             All sites, <em className="text-phosphor">one view</em>.
           </h1>
@@ -1038,7 +1043,7 @@ export default function HubDashboard() {
       {/* Per-site cards */}
       {sites.length > 0 ? (
         <div>
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-4">§ Sites · {sites.length}</div>
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
             {sites.map(s => (
               <SiteCard

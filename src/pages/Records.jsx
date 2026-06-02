@@ -186,7 +186,7 @@ export default function Records() {
         {/* Page header */}
         <div className="flex items-end justify-between gap-4 border-b border-border pb-5">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">§ Records</div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Raw <em className="text-phosphor">data</em>.
             </h1>
@@ -322,13 +322,26 @@ export default function Records() {
         </div>
       </div>
 
-      {!isLoading && totalRecords > 0 && (
+      {!isLoading && totalRecords > 0 && (() => {
+        const totalPages = Math.max(1, Math.ceil(totalRecords / pageSize));
+        const currentPage = page + 1;
+        return (
         <div className="max-w-6xl mx-auto px-6 pb-6 lg:px-8 lg:pb-8 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-muted-foreground">
           <p>
-            Page {page + 1} · Showing {records.length} of {totalRecords.toLocaleString("en-US")}
+            Page {currentPage} of {totalPages} · Showing {records.length} of {totalRecords.toLocaleString("en-US")}
             {isFetching ? " · Updating…" : ""}
           </p>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(0)}
+              disabled={page === 0 || isFetching}
+              className="h-8 text-xs"
+              title="First page"
+            >
+              First
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -337,8 +350,25 @@ export default function Records() {
               className="h-8 text-xs"
             >
               <ChevronLeft className="w-3.5 h-3.5 mr-1" />
-              Previous
+              Prev
             </Button>
+            <div className="flex items-center gap-1.5 text-xs">
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                key={currentPage}
+                defaultValue={currentPage}
+                onBlur={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  if (Number.isFinite(v) && v >= 1 && v <= totalPages) setPage(v - 1);
+                  else e.target.value = currentPage;
+                }}
+                onKeyDown={(e) => { if (e.key === "Enter") e.target.blur(); }}
+                disabled={isFetching}
+                className="w-14 h-7 rounded border border-border bg-card px-1.5 text-center text-xs text-foreground tabular-nums"
+              />
+            </div>
             <Button
               variant="outline"
               size="sm"
@@ -349,9 +379,20 @@ export default function Records() {
               Next
               <ChevronRight className="w-3.5 h-3.5 ml-1" />
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setPage(totalPages - 1)}
+              disabled={currentPage >= totalPages || isFetching}
+              className="h-8 text-xs"
+              title="Last page"
+            >
+              Last
+            </Button>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       <RecordEditModal
         record={editingRecord}

@@ -4,7 +4,6 @@
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  BarChart2,
   RefreshCw,
   MonitorSmartphone,
   Cpu,
@@ -335,7 +334,14 @@ function MachineHealthTab({ data, pingBySite, isLoading, isError, isFetching, re
 
       {isError && (
         <div className="rounded-xl p-4 text-red-300 text-sm bg-red-500/10 border border-red-500/30">
-          Failed to load machine health. Make sure you are logged in with access to Site Metrics.
+          <p>Failed to load machine health. Make sure you are logged in with access to Site Metrics.</p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-md border border-red-500/40 px-3 py-1.5 text-xs text-red-300 hover:bg-red-500/10"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> Retry
+          </button>
         </div>
       )}
 
@@ -381,10 +387,7 @@ export default function HubMetrics() {
       <div className="max-w-[1600px] mx-auto">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8 pb-5 border-b border-border">
           <div>
-            <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3 flex items-center gap-2">
-              <BarChart2 className="w-3 h-3 text-accent" strokeWidth={1.5} />
-              § Site Metrics
-            </div>
+
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Network <em className="text-phosphor">vitals</em>.
             </h1>

@@ -502,7 +502,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     } catch (err) {
       const friendly = describeSqlError(err, { op: 'invoice lookup' });
       console.error('[customer-by-invoice/sage] error:', friendly);
-      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice, friendly }); } catch {}
+      try { logError('customer.invoice_lookup', err, { invoice: req.query.invoice, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
       res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });
@@ -576,7 +576,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
     } catch (err) {
       const friendly = describeSqlError(err, { op: 'invoice amount lookup' });
       console.error('[customer-by-invoice-amount/sage] error:', friendly);
-      try { logError('customer.amount_lookup', err, { amount: req.query.amount, friendly }); } catch {}
+      try { logError('customer.amount_lookup', err, { amount: req.query.amount, friendly }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still return 500 with the friendly error below
       res.status(500).json({ error: `Sage lookup failed — ${friendly}` });
     }
   });
@@ -949,7 +949,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
                 { query_length: query.length, hit: false, latency_ms: elapsedMs },
                 'warn',
               );
-            } catch {}
+            } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_slow_miss' }, e.message); }
           }
           return res.json({ record: null, subAccounts: [] });
         }
@@ -957,24 +957,41 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
         const expandedRecord = expandDataRecord(record);
         const customerNumber = String(expandedRecord.customer_number || '').trim();
         const isParent = /^\d+$/.test(customerNumber);
+        const numericPrefix = (customerNumber.match(/^(\d+)/) || [])[1] || null;
 
         let subAccounts = [];
-        if (isParent) {
+        if (numericPrefix) {
           const prefixMatches = db.prepare(`
             SELECT *
             FROM datarecord
             WHERE TRIM(customer_number) LIKE ?
               AND TRIM(customer_number) != ?
             ORDER BY customer_number ASC, id ASC
-          `).all(`${customerNumber}%`, customerNumber);
+          `).all(`${numericPrefix}%`, customerNumber);
 
           subAccounts = prefixMatches
             .map(expandDataRecord)
             .filter((row) => {
               const childNumber = String(row.customer_number || '').trim();
               const match = childNumber.match(/^(\d+)/);
-              return match && match[1] === customerNumber;
+              return match && match[1] === numericPrefix;
             });
+
+          if (!isParent) {
+            const parent = db.prepare(`
+              SELECT *
+              FROM datarecord
+              WHERE TRIM(customer_number) = ?
+              LIMIT 1
+            `).get(numericPrefix);
+            if (parent) {
+              const expanded = expandDataRecord(parent);
+              const alreadyIncluded = subAccounts.some(
+                (r) => String(r.customer_number || '').trim() === numericPrefix
+              );
+              if (!alreadyIncluded) subAccounts.unshift(expanded);
+            }
+          }
         }
 
         const elapsedMs = Date.now() - startedAtMs;
@@ -986,7 +1003,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
               { query_length: query.length, hit: true, subaccount_count: subAccounts.length, latency_ms: elapsedMs },
               'warn',
             );
-          } catch {}
+          } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_slow_hit' }, e.message); }
         }
 
         res.json({
@@ -1001,7 +1018,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             latency_ms: elapsedMs,
             err_kind: error?.constructor?.name,
           });
-        } catch {}
+        } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup' }, e.message); }
         res.status(500).json({ error: 'Failed to lookup customer' });
       }
     }
@@ -1071,7 +1088,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
               { query_length: query.length, result_count: rows.length, limit, latency_ms: elapsedMs },
               'warn',
             );
-          } catch {}
+          } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_suggestions_slow' }, e.message); }
         }
 
         res.json({
@@ -1085,7 +1102,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
             latency_ms: elapsedMs,
             err_kind: error?.constructor?.name,
           });
-        } catch {}
+        } catch (e) { console.error('[records.update.log_error]', { op: 'customer_lookup_suggestions' }, e.message); }
         res.status(500).json({ error: 'Failed to load customer lookup suggestions' });
       }
     }

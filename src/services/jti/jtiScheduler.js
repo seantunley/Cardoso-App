@@ -217,7 +217,7 @@ export async function runBootCatchUp({ db, getSagePool, now = new Date(), months
       }
     } catch (err) {
       console.error(`[jti-scheduler] catch-up FAILED on ${year}-${String(month).padStart(2, '0')}: ${err.message}`);
-      try { logError('jti.scheduler.catchup', err, { year, month }); } catch {}
+      try { logError('jti.scheduler.catchup', err, { year, month }); } catch {} // eslint-disable-line no-empty -- logError wrapper; catch-up failure already logged to console above
       return { archived, skipped, failed: { year, month, error: err.message } };
     }
   }
