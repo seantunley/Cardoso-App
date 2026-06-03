@@ -364,7 +364,7 @@ import CommandPalette from "@/components/CommandPalette";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
-import { useHubMode } from "@/lib/useAppInfo";
+import { useAppInfo, useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
 import { toast } from "sonner";
 import { reportClientError } from "@/lib/clientLog";
@@ -438,6 +438,13 @@ export default function Layout({ children, currentPageName }) {
   const [isCollapsed, setIsCollapsed]       = useState(false);
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const hubMode = useHubMode();
+  // Track whether /api/app-info has settled. useHubMode() returns
+  // false until the query resolves, so the sidebar-seeder useEffect
+  // must wait for this signal — otherwise on hub installs the first
+  // pass would seed using site-mode visibleNavItems and then refuse
+  // to re-seed when hubMode flipped to true (storedRaw !== null check
+  // hits the just-written stale seed).
+  const { isSuccess: appInfoResolved } = useAppInfo();
   const [cmdOpen, setCmdOpen]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
@@ -634,6 +641,14 @@ export default function Layout({ children, currentPageName }) {
   // per-id key and the seeder bails out on subsequent loads.
   useEffect(() => {
     if (!currentUser?.id || visibleNavItems.length === 0) return;
+    // Wait for /api/app-info to settle. On hub installs the query
+    // is in-flight at first render and useHubMode() returns false,
+    // which would let us seed using the SITE-mode visibleNavItems
+    // and then refuse to re-seed when hubMode flips to true (the
+    // storedRaw branch below would just load the stale site-mode
+    // seed). Gate on appInfoResolved so we only ever seed against
+    // the correct nav set for this install.
+    if (!appInfoResolved) return;
     const key = navCollapsedGroupsKey(currentUser.id);
     let storedRaw = null;
     try { storedRaw = localStorage.getItem(key); }
@@ -664,9 +679,10 @@ export default function Layout({ children, currentPageName }) {
     // memoization), so listing it here would loop the effect forever.
     // currentUser?.id + hubMode + isAdmin uniquely determine the
     // accessible-group set; the effect's closure picks up the latest
-    // visibleNavItems naturally on each run.
+    // visibleNavItems naturally on each run. appInfoResolved gates
+    // the FIRST seed against the correct hub vs site mode (see body).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser?.id, hubMode, isAdmin]);
+  }, [currentUser?.id, hubMode, isAdmin, appInfoResolved]);
 
   // Operator-toggled group state. Writes to the same per-user key
   // the seeder uses so subsequent loads (or the seeder re-running
