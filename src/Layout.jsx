@@ -417,13 +417,21 @@ const navItems = [
 const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Infrastructure", "System"];
 
 // localStorage key for which groups the operator has collapsed.
-// v2: reset all operators to fully-expanded sidebar groups (user request
-// 2026-05-28). Existing v1 keys are abandoned, not migrated.
-const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v2";
+// v3: default to all-collapsed-except-first-accessible group (user
+// request 2026-06-03). v2 keys (which forced all-open) are abandoned,
+// not migrated; the useEffect below seeds the per-user default the
+// first time we see a missing v3 key. Operator's subsequent manual
+// toggles persist back to the same v3 key.
+const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v3";
 
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
-  const [isCollapsed, setIsCollapsed]       = useState(true);
+  // Sidebar expanded by default (user request 2026-06-03). Operator
+  // can still collapse via the header chevron; that state is local-
+  // session only and intentionally not persisted, since the previous
+  // collapsed-by-default pattern was the source of every "where do I
+  // click for X" question.
+  const [isCollapsed, setIsCollapsed]       = useState(false);
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const hubMode = useHubMode();
   const [cmdOpen, setCmdOpen]               = useState(false);
@@ -620,6 +628,30 @@ export default function Layout({ children, currentPageName }) {
     || hasPermission(currentUser, "can_access_settings")
     || hasPermission(currentUser, "can_manage_users")
     || hasPermission(currentUser, "can_manage_rules");
+
+  // First-load default for sidebar groups: collapse EVERY group except
+  // the first one the operator has access to (NAV_GROUP_ORDER order).
+  // Only fires when the v3 localStorage key is missing — once the
+  // operator manually toggles any group, toggleGroup writes their
+  // custom state to the same key and the lookup below bails out on
+  // subsequent loads, preserving their preference. Skipped while
+  // currentUser is still loading (visibleNavItems would be empty).
+  useEffect(() => {
+    if (!currentUser || visibleNavItems.length === 0) return;
+    let alreadySet = false;
+    try { alreadySet = localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY) !== null; }
+    catch (e) { console.warn('[sidebar.collapsed_groups.read] localStorage probe failed', e.message); return; }
+    if (alreadySet) return;
+    const accessibleGroups = NAV_GROUP_ORDER.filter(
+      g => visibleNavItems.some(it => it.group === g)
+    );
+    if (accessibleGroups.length === 0) return;
+    const firstAccessible = accessibleGroups[0];
+    const defaultCollapsed = new Set(accessibleGroups.filter(g => g !== firstAccessible));
+    setCollapsedGroups(defaultCollapsed);
+    try { localStorage.setItem(NAV_COLLAPSED_GROUPS_KEY, JSON.stringify([...defaultCollapsed])); }
+    catch (e) { console.warn('[sidebar.collapsed_groups.seed] localStorage write failed', e.message); }
+  }, [currentUser, visibleNavItems]);
 
   return (
     <div className="min-h-screen bg-background text-foreground">
