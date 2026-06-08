@@ -1164,7 +1164,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
          WHERE i.outstanding_amount <> 0 ORDER BY site_name`
       ).all().map(r => r.site_name).filter(Boolean);
       rows = prep(
-        `SELECT i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
+        `SELECT i.site_id, i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
                 i.outstanding_amount, i.reference, c.vendor_name, c.terms,
                 COALESCE(s.name, i.site_id) AS site_name
          FROM hub_creditor_ap_invoice i
@@ -1184,14 +1184,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       ).all(SITE_NAME);
     }
 
-    // Per-vendor metadata (name/terms/site) the engine doesn't carry, keyed by
-    // the first document seen for each vendor.
+    // Aging entity key. In hub all-sites mode the same vendor_code can exist at
+    // multiple sites as distinct AP accounts (the hub ledger is keyed by
+    // site_id + vendor_code), so the key must include the site — otherwise
+    // different sites' vendors merge into one row and the all-sites totals,
+    // vendor count and site attribution are all wrong. Site mode keys by code.
+    const keyOf = isHub
+      ? (r) => JSON.stringify([r.site_id, String(r.vendor_code || '').trim()])
+      : (r) => String(r.vendor_code || '').trim();
+
+    // Per-(site,vendor) metadata (code/name/terms/site) the engine doesn't
+    // carry, keyed by the same composite as the aging entity.
     const meta = new Map();
     const docs = rows.map((r) => {
-      const code = String(r.vendor_code || '').trim();
-      if (!meta.has(code)) meta.set(code, { vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME });
+      const key = keyOf(r);
+      if (!meta.has(key)) meta.set(key, { vendor_code: String(r.vendor_code || '').trim(), vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME });
       return {
-        entityCode: code,
+        entityCode: key,
         entityName: r.vendor_name || null,
         date: r.document_date,
         dueDate: r.due_date,
@@ -1209,7 +1218,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       .map((e) => {
         const m = meta.get(e.entityCode) || {};
         return {
-          vendor_code: e.entityCode,
+          vendor_code: m.vendor_code || e.entityCode,
           vendor_name: e.entityName || m.vendor_name || '',
           terms: m.terms || '',
           site_name: m.site_name || SITE_NAME,
