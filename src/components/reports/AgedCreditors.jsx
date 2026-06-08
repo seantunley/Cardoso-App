@@ -11,16 +11,17 @@ import {
   LEGEND_WRAPPER,
 } from './lib';
 
-// Sage aging periods — same scheme as Aged Debtors (they share the engine).
+// Sage A/P Aged Payables periods — MONTHLY (creditors age by due date), which
+// differs from the weekly A/R debtor scheme.
 const BUCKET_META = {
-  current:   { label: 'Current',     color: 'hsl(145 55% 45%)', sortOrder: 0 },
-  '1-7':     { label: '1–7 days',    color: 'hsl(80 60% 45%)',  sortOrder: 1 },
-  '8-14':    { label: '8–14 days',   color: 'hsl(50 90% 55%)',  sortOrder: 2 },
-  '15-21':   { label: '15–21 days',  color: 'hsl(33 95% 55%)',  sortOrder: 3 },
-  'over-21': { label: 'Over 21 days', color: 'hsl(0 72% 50%)',  sortOrder: 4 },
-  unknown:   { label: 'No date',     color: 'hsl(220 8% 50%)',  sortOrder: 5 },
+  current:   { label: 'Current',      color: 'hsl(145 55% 45%)', sortOrder: 0 },
+  '1-30':    { label: '1–30 days',    color: 'hsl(80 60% 45%)',  sortOrder: 1 },
+  '31-60':   { label: '31–60 days',   color: 'hsl(50 90% 55%)',  sortOrder: 2 },
+  '61-90':   { label: '61–90 days',   color: 'hsl(33 95% 55%)',  sortOrder: 3 },
+  'over-90': { label: 'Over 90 days', color: 'hsl(0 72% 50%)',   sortOrder: 4 },
+  unknown:   { label: 'No date',      color: 'hsl(220 8% 50%)',  sortOrder: 5 },
 };
-const BUCKET_ORDER = ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'];
+const BUCKET_ORDER = ['current', '1-30', '31-60', '61-90', 'over-90', 'unknown'];
 
 function fetchAgedCreditors(params) {
   const qs = new URLSearchParams();
@@ -131,7 +132,7 @@ export default function AgedCreditors() {
     <ReportFrame
       sectionLabel="Accounts Payable"
       title={<>Aged <em className="text-phosphor">Creditors</em>.</>}
-      subtitle="Each open supplier document is aged by its document date into Sage's periods (Current / 1–7 / 8–14 / 15–21 / Over 21) — matching the Sage Aged Trial Balance. Vendors may span several buckets."
+      subtitle="Each open supplier document is aged by its due date into Sage's monthly periods (Current / 1–30 / 31–60 / 61–90 / Over 90) — matching the Sage Aged Payables report. Vendors may span several buckets."
       printId="aged-creditors"
       orientation="landscape"
       onExportCsv={sortedRecords.length ? handleExportCsv : null}
@@ -181,9 +182,9 @@ export default function AgedCreditors() {
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">
             <SummaryTile label="Vendors" value={summary.total_vendors.toLocaleString('en-ZA')} accent="var(--phosphor)" />
             <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
-            <SummaryTile label="1–7 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} vend`} accent={BUCKET_META['1-7'].color} />
-            <SummaryTile label="15–21 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['15-21'])}</>} sub={`${summary.bucket_counts['15-21']} vend`} accent={BUCKET_META['15-21'].color} />
-            <SummaryTile label="Over 21 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['over-21'])}</>} sub={`${summary.bucket_counts['over-21']} vend`} accent={BUCKET_META['over-21'].color} />
+            <SummaryTile label="1–30 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['1-30'])}</>} sub={`${summary.bucket_counts['1-30']} vend`} accent={BUCKET_META['1-30'].color} />
+            <SummaryTile label="31–60 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['31-60'])}</>} sub={`${summary.bucket_counts['31-60']} vend`} accent={BUCKET_META['31-60'].color} />
+            <SummaryTile label="Over 90 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['over-90'])}</>} sub={`${summary.bucket_counts['over-90']} vend`} accent={BUCKET_META['over-90'].color} />
           </div>
 
           {/* Charts (screen only) */}

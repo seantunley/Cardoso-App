@@ -8,7 +8,7 @@
 // behaviour so a refactor can't silently regress the financial output.
 
 import { describe, it, expect } from 'vitest';
-import { ageOpenItems, BUCKET_KEYS } from '../src/services/aging.js';
+import { ageOpenItems, BUCKET_KEYS, AR_SCHEME, AP_SCHEME } from '../src/services/aging.js';
 
 const AS_OF = new Date(2026, 5, 8); // 2026-06-08, local midnight
 
@@ -46,8 +46,31 @@ describe('aging — Sage period boundaries (by document date)', () => {
     expect(r.entities[0].bucket_amounts.current).toBe(100);
   });
 
-  it('exposes the five Sage buckets plus unknown', () => {
+  it('default (AR) exposes the weekly buckets plus unknown', () => {
     expect(BUCKET_KEYS).toEqual(['current', '1-7', '8-14', '15-21', 'over-21', 'unknown']);
+    expect(AR_SCHEME.basis).toBe('document');
+  });
+});
+
+describe('aging — AP scheme (creditors): due date + monthly periods', () => {
+  it('ages by DUE date into Current/1-30/31-60/61-90/over-90', () => {
+    const cases = [
+      [0, 'current'],
+      [1, '1-30'], [30, '1-30'],
+      [31, '31-60'], [60, '31-60'],
+      [61, '61-90'], [90, '61-90'],
+      [91, 'over-90'], [400, 'over-90'],
+    ];
+    for (const [days, bucket] of cases) {
+      const r = age([doc({ dueDate: daysBefore(days), date: daysBefore(days + 5) })], { scheme: AP_SCHEME });
+      expect(r.entities[0].bucket_amounts[bucket]).toBe(100);
+    }
+  });
+  it('AP scheme defaults to the due-date basis', () => {
+    // due 5 days ago (→1-30) but document 100 days ago (→over-90); due wins.
+    const r = age([doc({ dueDate: daysBefore(5), date: daysBefore(100) })], { scheme: AP_SCHEME });
+    expect(r.entities[0].bucket_amounts['1-30']).toBe(100);
+    expect(AP_SCHEME.basis).toBe('due');
   });
 });
 

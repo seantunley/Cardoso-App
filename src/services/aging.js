@@ -1,26 +1,37 @@
 // Shared open-item aging engine — the single source of truth for how the app
 // ages accounts-receivable (debtors) AND accounts-payable (creditors), built to
-// duplicate this site's Sage 300 Aged Trial Balance, verified column-for-column
+// duplicate this site's Sage 300 reports, each verified column-for-column
 // against the live report:
 //
-//   - Each OPEN DOCUMENT is aged individually (never "whole balance in one
-//     bucket"); an entity's balance is DISTRIBUTED across the periods.
-//   - Documents are aged by DOCUMENT DATE (the basis the site's Sage report
-//     uses — confirmed: our document-date totals tie to the cent), falling back
-//     to due date only when a document date is somehow missing.
-//   - Periods match Sage exactly: Current (not yet aged, ≤0 days) / 1–7 / 8–14
-//     / 15–21 / Over 21 days.
-//   - Credit/debit notes (negative outstanding) age by their own date like any
-//     other document (the site's Sage ages them by date, not "As Current" —
-//     its Over-21 column carries the aged credits as a negative).
+//   AR (debtors)   — Sage "Aged Trial Balance by Document Date": age each open
+//                    document by its DOCUMENT date into WEEKLY periods
+//                    (Current / 1–7 / 8–14 / 15–21 / Over 21).
+//   AP (creditors) — Sage "Aged Payables by Due Date": age each open document
+//                    by its DUE date into MONTHLY periods
+//                    (Current / 1–30 / 31–60 / 61–90 / Over 90).
 //
-// Pure module: no DB, no Express, no I/O — so it's trivially unit-testable and
-// reused by both report builders in routes/reporting.js.
+// Each open document is aged individually and its amount distributed across the
+// periods (never "whole balance in one bucket"); credit notes age by their own
+// date like any other document. Pure module: no DB, no Express, no I/O.
 
-// Bucket keys are fixed (they pair with BUCKET_META in the report components and
-// BUCKET_LABELS in reportExports.js). `unknown` collects documents with no
-// usable date. Order here is the display order.
-export const BUCKET_KEYS = ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'];
+// A scheme = { keys (display order; last entry is always 'unknown'), thresholds
+// (the three day-boundaries between the four overdue periods), basis, labels }.
+// `current` holds everything not yet aged (age ≤ 0 days).
+export const AR_SCHEME = {
+  keys: ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'],
+  thresholds: [7, 14, 21],
+  basis: 'document',
+  labels: { current: 'Current', '1-7': '1–7 days', '8-14': '8–14 days', '15-21': '15–21 days', 'over-21': 'Over 21 days', unknown: 'Undated' },
+};
+export const AP_SCHEME = {
+  keys: ['current', '1-30', '31-60', '61-90', 'over-90', 'unknown'],
+  thresholds: [30, 60, 90],
+  basis: 'due',
+  labels: { current: 'Current', '1-30': '1–30 days', '31-60': '31–60 days', '61-90': '61–90 days', 'over-90': 'Over 90 days', unknown: 'Undated' },
+};
+
+// Back-compat alias: debtor reports + Customer Balances default to the AR scheme.
+export const BUCKET_KEYS = AR_SCHEME.keys;
 
 // Parse a stored date ('YYYY-MM-DD' or 'YYYYMMDD') or a Date into LOCAL
 // midnight, so day-count math against a local-midnight asOf can't drift by a
@@ -44,44 +55,45 @@ const startOfToday = () => {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
 };
 
-// Which Sage period an age-in-days lands in. Current = not yet aged (≤0 days,
-// i.e. dated on/after the as-of date); then weekly periods 1–7, 8–14, 15–21,
-// and everything older in Over 21.
-function bucketForAge(ageDays) {
+// Which period an age-in-days lands in, per the scheme. Current = not yet aged
+// (≤0 days); the three thresholds split the four overdue periods.
+function bucketForAge(ageDays, scheme) {
   if (ageDays == null) return 'unknown';
-  if (ageDays <= 0) return 'current';
-  if (ageDays <= 7) return '1-7';
-  if (ageDays <= 14) return '8-14';
-  if (ageDays <= 21) return '15-21';
-  return 'over-21';
+  const [b0, b1, b2] = scheme.thresholds;
+  const k = scheme.keys;
+  if (ageDays <= 0) return k[0];
+  if (ageDays <= b0) return k[1];
+  if (ageDays <= b1) return k[2];
+  if (ageDays <= b2) return k[3];
+  return k[4];
 }
 
-function emptyBucketMap() {
-  return Object.fromEntries(BUCKET_KEYS.map((k) => [k, 0]));
-}
+const emptyBucketMap = (scheme) => Object.fromEntries(scheme.keys.map((k) => [k, 0]));
 
 /**
  * Age a flat list of open documents and distribute each entity's balance
- * across the weekly periods.
+ * across the scheme's periods.
  *
  * @param {Array<{entityCode, entityName?, date?, dueDate?, outstanding,
  *                documentNumber?, documentType?, reference?}>} docs
  * @param {object} [opts]
- * @param {Date}    [opts.asOf]           "Age as of" date (default: today @ local midnight)
- * @param {'document'|'due'} [opts.basis]  which date to age by (default 'document')
+ * @param {Date}    [opts.asOf]    "Age as of" date (default: today @ local midnight)
+ * @param {object}  [opts.scheme]  AR_SCHEME (default) or AP_SCHEME
+ * @param {'document'|'due'} [opts.basis]  which date to age by (default: scheme.basis)
  * @returns {{ buckets, bucket_counts, total_outstanding, entities }}
  */
 export function ageOpenItems(docs, opts = {}) {
   const {
     asOf = startOfToday(),
-    basis = 'document',
+    scheme = AR_SCHEME,
+    basis = scheme.basis,
   } = opts;
 
   const asOfMid = toLocalMidnight(asOf) || startOfToday();
   const asOfMs = asOfMid.getTime();
 
-  const buckets = emptyBucketMap();
-  const bucketCounts = emptyBucketMap();
+  const buckets = emptyBucketMap(scheme);
+  const bucketCounts = emptyBucketMap(scheme);
   let totalOutstanding = 0;
 
   const byEntity = new Map();
@@ -97,7 +109,7 @@ export function ageOpenItems(docs, opts = {}) {
     const ageDays = effective ? Math.floor((asOfMs - effective.getTime()) / 86400000) : null;
 
     // Every document — invoices and credit notes alike — ages by its own date.
-    const bucketKey = bucketForAge(ageDays);
+    const bucketKey = bucketForAge(ageDays, scheme);
 
     let entity = byEntity.get(code);
     if (!entity) {
@@ -105,8 +117,8 @@ export function ageOpenItems(docs, opts = {}) {
         entityCode: code,
         entityName: (doc?.entityName ?? '').toString().trim() || null,
         total: 0,
-        bucket_amounts: emptyBucketMap(),
-        bucket_doc_counts: emptyBucketMap(),
+        bucket_amounts: emptyBucketMap(scheme),
+        bucket_doc_counts: emptyBucketMap(scheme),
         oldest_age_days: null,
         documents: [],
       };
@@ -136,11 +148,10 @@ export function ageOpenItems(docs, opts = {}) {
   }
 
   // Per-bucket entity counts: an entity is counted once per bucket it has at
-  // least one document in (matches the report copy "customers with at least
-  // one invoice in that bucket").
+  // least one document in.
   const entities = [];
   for (const entity of byEntity.values()) {
-    for (const k of BUCKET_KEYS) {
+    for (const k of scheme.keys) {
       if (entity.bucket_doc_counts[k] > 0) bucketCounts[k] += 1;
     }
     entities.push({
@@ -149,7 +160,7 @@ export function ageOpenItems(docs, opts = {}) {
       total: entity.total,
       bucket_amounts: entity.bucket_amounts,
       oldest_age_days: entity.oldest_age_days,
-      primary_bucket: bucketForAge(entity.oldest_age_days),
+      primary_bucket: bucketForAge(entity.oldest_age_days, scheme),
       documents: entity.documents,
     });
   }

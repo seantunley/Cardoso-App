@@ -22,7 +22,7 @@ import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
-import { ageOpenItems, BUCKET_KEYS } from '../services/aging.js';
+import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -1213,7 +1213,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       };
     });
 
-    const aged = ageOpenItems(docs); // document-date basis + Sage buckets (defaults)
+    const aged = ageOpenItems(docs, { scheme: AP_SCHEME }); // AP: due date + monthly periods
 
     const records = aged.entities
       .filter((e) => Math.abs(e.total) >= minBalance)
@@ -1234,7 +1234,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
 
     // Recompute summary over the filtered set so totals match the rows shown.
-    const bucketKeys = BUCKET_KEYS;
+    const bucketKeys = AP_SCHEME.keys;
     const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
     const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
     let totalOutstanding = 0;

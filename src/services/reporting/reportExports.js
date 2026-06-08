@@ -8,18 +8,12 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ExcelJS from 'exceljs';
-import { BUCKET_KEYS } from '../aging.js';
+import { AR_SCHEME, AP_SCHEME } from '../aging.js';
 
-// Display labels for the engine's Sage period keys (kept here, next to the
-// other export formatting; the keys themselves come from the engine).
-const BUCKET_LABELS = {
-  current: 'Current',
-  '1-7': '1–7 days',
-  '8-14': '8–14 days',
-  '15-21': '15–21 days',
-  'over-21': 'Over 21 days',
-  unknown: 'Undated',
-};
+// Aged Debtors uses the AR (weekly) scheme; Aged Creditors the AP (monthly)
+// scheme. Keys + labels come from the engine so they never drift.
+const BUCKET_KEYS = AR_SCHEME.keys;
+const BUCKET_LABELS = AR_SCHEME.labels;
 
 const fmtR = (n) => `R ${(Number(n) || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const num2 = (n) => Number((Number(n) || 0).toFixed(2));
@@ -116,7 +110,8 @@ export async function buildAgedDebtorsXlsx(report) {
 // Columnar per-bucket layout (the Sage Aged Trial Balance shape): every vendor
 // shows its balance distributed across the aging periods, not a single bucket.
 
-const DATED_BUCKET_KEYS = BUCKET_KEYS;
+const DATED_BUCKET_KEYS = AP_SCHEME.keys;
+const CREDITOR_LABELS = AP_SCHEME.labels;
 
 export function buildAgedCreditorsPdf(report) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
@@ -141,7 +136,7 @@ export function buildAgedCreditorsPdf(report) {
     styles: { fontSize: 8, cellPadding: 1.6 },
     headStyles: { fillColor: [33, 33, 33] },
     head: [['Bucket', 'Vendors', 'Outstanding']],
-    body: DATED_BUCKET_KEYS.map((k) => [BUCKET_LABELS[k], String(counts[k] || 0), fmtR(buckets[k])]),
+    body: DATED_BUCKET_KEYS.map((k) => [CREDITOR_LABELS[k], String(counts[k] || 0), fmtR(buckets[k])]),
     foot: [['TOTAL', String(report?.summary?.total_vendors || 0), fmtR(report?.summary?.total_outstanding)]],
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
   });
@@ -156,7 +151,7 @@ export function buildAgedCreditorsPdf(report) {
     startY: doc.lastAutoTable.finalY + 8,
     styles: { fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [50, 50, 50] },
-    head: [[...lead, ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
+    head: [[...lead, ...DATED_BUCKET_KEYS.map((k) => CREDITOR_LABELS[k]), 'Total']],
     body: (report?.records || []).map((r) => [
       String(r.vendor_code || '').trim(),
       String(r.vendor_name || '').trim(),
@@ -189,11 +184,11 @@ export async function buildAgedCreditorsXlsx(report) {
   summary.addRow([report?.site_name || '', `generated ${dateOnly(report?.generated_at)}`]);
   summary.addRow([]);
   summary.addRow(['Bucket', 'Vendors', 'Outstanding']);
-  for (const k of DATED_BUCKET_KEYS) summary.addRow([BUCKET_LABELS[k], counts[k] || 0, num2(buckets[k])]);
+  for (const k of DATED_BUCKET_KEYS) summary.addRow([CREDITOR_LABELS[k], counts[k] || 0, num2(buckets[k])]);
   summary.addRow(['TOTAL', report?.summary?.total_vendors || 0, num2(report?.summary?.total_outstanding)]);
 
   const detail = wb.addWorksheet('Detail');
-  detail.addRow(['Code', 'Vendor', 'Terms', 'Site', ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']);
+  detail.addRow(['Code', 'Vendor', 'Terms', 'Site', ...DATED_BUCKET_KEYS.map((k) => CREDITOR_LABELS[k]), 'Total']);
   for (const r of report?.records || []) {
     detail.addRow([
       String(r.vendor_code || '').trim(),
