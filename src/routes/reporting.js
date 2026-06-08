@@ -354,7 +354,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
   // VAT split out, queried LIVE from Sage. Source is the A/R invoice batches
   // (ARIBH joined to ARIBC for the batch description) — the authoritative set of
-  // POSTED documents, excluding ERROR batches; mirrors the operator's Crystal
+  // POSTED documents, excluding ERROR batches and zero-VAT documents
+  // (AMTTAX1 > 0), exactly mirroring the operator's Crystal "Sales Figures"
   // report. Document kind comes from TEXTTRX (1 = invoice, 2 = debit note,
   // 3 = credit note; all stored positive). Amounts: BASETAX1 = ex-VAT,
   // AMTTAX1 = VAT, AMTNETTOT = incl total. Aggregated in SQL Server (one row
@@ -379,7 +380,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
           SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
         FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
-        WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.DATEINVC BETWEEN @from AND @to
+        WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
         GROUP BY LEFT(CAST(h.DATEINVC AS varchar(8)), 6)
         ORDER BY ym`);
 
