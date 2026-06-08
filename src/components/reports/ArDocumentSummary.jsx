@@ -123,7 +123,6 @@ export default function ArDocumentSummary() {
   };
 
   const hasData = isHub ? (branches.length > 0 || (consolidated?.months?.length || 0) > 0) : months.length > 0;
-  const depot = data?.site_name || '';
   const generatedAtFmt = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return (
@@ -138,7 +137,7 @@ export default function ArDocumentSummary() {
       error={error?.message}
       printHeader={
         <PrintHeader
-          title={depot ? `${depot} — Monthly Sales Figures` : 'Monthly Sales Figures'}
+          title="Monthly Sales Figures"
           filters={[`Period: ${from} to ${to}`, 'Amounts in Rand (R)']}
           generatedAt={generatedAtFmt}
         />

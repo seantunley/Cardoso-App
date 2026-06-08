@@ -3,6 +3,7 @@
 // imports from here so layout and chart polish stay consistent.
 
 import React, { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend,
@@ -223,6 +224,14 @@ function buildPrintStyle(id, orientation) {
     border-bottom: 2px solid #111;
     margin-bottom: 4mm;
   }
+  .report-print-header .report-print-depot {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #111;
+    margin: 0 0 1.5mm 0;
+  }
   .report-print-header h1 {
     font-size: 22px;
     font-weight: 700;
@@ -377,6 +386,15 @@ function buildPrintStyle(id, orientation) {
 
 // ── Common print header bit ──────────────────────────────────────────────
 export function PrintHeader({ title, period, filters, generatedBy, generatedAt }) {
+  // Depot name from Settings → Depot Details, shown as a letterhead line on
+  // every report's print/PDF so they all carry consistent branding. Cached and
+  // shared across reports; degrades to no line if it isn't set/reachable.
+  const { data: depot } = useQuery({
+    queryKey: ['depot-profile-name'],
+    queryFn: () => fetch('/api/depot-profile', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    staleTime: 5 * 60_000,
+  });
+  const depotName = (depot?.profile?.name || '').trim();
   const lines = [];
   if (period) lines.push(period);
   if (filters?.length) lines.push(filters.join(' · '));
@@ -384,6 +402,7 @@ export function PrintHeader({ title, period, filters, generatedBy, generatedAt }
   return (
     <div className="report-print-header" style={{ display: 'none' }}>
       <div>
+        {depotName && <div className="report-print-depot">{depotName}</div>}
         <h1>{title}</h1>
         <p className="report-print-meta">{lines.join('  ·  ')}</p>
       </div>
