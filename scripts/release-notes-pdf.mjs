@@ -13,6 +13,113 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-08': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '08 June 2026',
+    intro:
+      'A focused update to financial reporting: your debtors and creditors now ' +
+      'age exactly the way Sage does, balances reconcile to Sage to the cent, ' +
+      'and there is a new Monthly Sales Figures report — together with a ' +
+      'refreshed, branded look when reports are printed.',
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Aged Creditors report',
+            body:
+              'See what you owe your suppliers, aged the way Sage does — ' +
+              'Current, 1–30, 31–60, 61–90 and Over 90 days — with each document ' +
+              'placed in the correct period. Reconciles to Sage and downloads as ' +
+              'a polished PDF or Excel workbook.',
+          },
+          {
+            title: 'Monthly Sales Figures report',
+            body:
+              'A month-by-month view of invoices, credit notes and debit notes ' +
+              'with VAT shown separately, matching your Sage “Sales Figures” ' +
+              'report to the cent. At head office it can be viewed per branch and ' +
+              'consolidated across the group.',
+          },
+          {
+            title: 'Monthly Reports menu',
+            body:
+              'A new Monthly Reports area groups the Monthly Sales Figures and ' +
+              'Sales Commission reports together, with its own access control so ' +
+              'you decide who can see them.',
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Balances that reconcile to Sage',
+            body:
+              'Customer and creditor balances are now built directly from Sage’s ' +
+              'open items, so the totals on screen match Sage to the cent rather ' +
+              'than a balance that could drift over time.',
+          },
+          {
+            title: 'Aging at a glance',
+            body:
+              'The Customer Balances and Creditor Balances screens now show aging ' +
+              'summary tiles that always match whatever filter you have applied.',
+          },
+          {
+            title: 'Reporting dashboard',
+            body:
+              'A new Aged Creditors summary card sits alongside Aged Debtors ' +
+              '(showing suppliers you actually pay), and the debtor headline now ' +
+              'matches the Customer Balances screen.',
+          },
+          {
+            title: 'Branded, print-ready reports',
+            body:
+              'Every report now prints with your depot name and logo, fits the ' +
+              'page cleanly, and reads clearly in black and white — ready to ' +
+              'share or file.',
+          },
+          {
+            title: 'A more consistent look',
+            body:
+              'Page headings across the application now share a single, ' +
+              'consistent style.',
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Cleaner customer view',
+            body:
+              'The customer pop-up now shows only genuinely outstanding invoices ' +
+              'and receipts — anything already paid or matched off no longer ' +
+              'clutters the view.',
+          },
+          {
+            title: 'Dormant accounts flagged correctly',
+            body:
+              'Customers who have not traded in a long time are now flagged as ' +
+              'dormant even when their balance is zero.',
+          },
+          {
+            title: 'Report figures that agree',
+            body:
+              'Corrected aging dates and bucket totals across the debtor and ' +
+              'creditor reports, so the headline figure and the detail beneath it ' +
+              'always add up.',
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-05-29': {
   product: 'Cardoso App',
   title: 'Product Update',
