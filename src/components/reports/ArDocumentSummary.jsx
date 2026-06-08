@@ -23,7 +23,7 @@ const TYPES = [
 ];
 
 const Td = ({ v, strong }) => (
-  <td className={`px-2 py-1 text-right tabular-nums ${strong ? 'font-semibold text-foreground' : 'text-foreground/90'}`}>R {fmtR(v)}</td>
+  <td className={`px-2 py-1 text-right tabular-nums ${strong ? 'font-semibold text-foreground' : 'text-foreground/90'}`}>{fmtR(v)}</td>
 );
 
 function DocTable({ months, totals, currentMonth }) {
@@ -32,7 +32,7 @@ function DocTable({ months, totals, currentMonth }) {
   }
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-sm" style={{ minWidth: 980 }}>
+      <table className="w-full text-sm report-doc-table" style={{ minWidth: 980 }}>
         <thead>
           <tr className="border-b border-border">
             <th rowSpan={2} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground align-bottom">Month</th>
@@ -62,12 +62,12 @@ function DocTable({ months, totals, currentMonth }) {
                 </td>
                 {TYPES.map((t) => (
                   <Fragment key={`${m.month}-${t.key}`}>
-                    <td className="px-2 py-1 text-right tabular-nums text-foreground/90 border-l border-border/40">R {fmtR(m[t.key].excl)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-foreground/90 border-l border-border/40">{fmtR(m[t.key].excl)}</td>
                     <Td v={m[t.key].vat} />
                     <Td v={m[t.key].incl} />
                   </Fragment>
                 ))}
-                <td className="px-2 py-1 text-right tabular-nums font-semibold text-foreground border-l border-border/40">R {fmtR(m.net_incl)}</td>
+                <td className="px-2 py-1 text-right tabular-nums font-semibold text-foreground border-l border-border/40">{fmtR(m.net_incl)}</td>
               </tr>
             );
           })}
@@ -78,12 +78,12 @@ function DocTable({ months, totals, currentMonth }) {
               <td className="px-2 py-1.5 text-left font-semibold text-foreground">TOTAL</td>
               {TYPES.map((t) => (
                 <Fragment key={`tot-${t.key}`}>
-                  <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-foreground border-l border-border/40">R {fmtR(totals[t.key].excl)}</td>
+                  <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-foreground border-l border-border/40">{fmtR(totals[t.key].excl)}</td>
                   <Td v={totals[t.key].vat} strong />
                   <Td v={totals[t.key].incl} strong />
                 </Fragment>
               ))}
-              <td className="px-2 py-1.5 text-right tabular-nums font-bold text-foreground border-l border-border/40">R {fmtR(totals.net_incl)}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums font-bold text-foreground border-l border-border/40">{fmtR(totals.net_incl)}</td>
             </tr>
           </tfoot>
         )}
@@ -140,7 +140,7 @@ export default function ArDocumentSummary() {
         <PrintHeader
           title="A/R Document Summary — Sales Figures"
           period={depot}
-          filters={[`${from} to ${to}`]}
+          filters={[`Period: ${from} to ${to}`, 'Amounts in Rand (R)']}
           generatedAt={generatedAtFmt}
         />
       }

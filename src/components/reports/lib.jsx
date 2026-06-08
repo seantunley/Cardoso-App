@@ -263,6 +263,25 @@ function buildPrintStyle(id, orientation) {
     -webkit-print-color-adjust: exact;
   }
 
+  /* Dense numeric report tables (e.g. AR Document Summary): drop the on-screen
+     min-width so the table fits the page, shrink type, tighten cells, and keep
+     every figure on one line. Header repeats if it ever breaks across pages. */
+  .report-doc-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse;
+    font-size: 8.5px !important;
+    table-layout: auto;
+  }
+  .report-doc-table thead { display: table-header-group; }
+  .report-doc-table th,
+  .report-doc-table td {
+    padding: 0.9mm 1.4mm !important;
+    white-space: nowrap;
+  }
+  .report-doc-table th { font-size: 7.5px !important; }
+  .report-doc-table tr { page-break-inside: avoid; }
+
   .report-print-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
