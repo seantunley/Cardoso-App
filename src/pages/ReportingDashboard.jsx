@@ -317,7 +317,7 @@ export default function ReportingDashboard() {
     <div className="min-h-screen bg-background px-4 py-6 text-foreground md:px-6">
       <PageHeader
         eyebrow="Reports"
-        title="Reporting Dashboard"
+        title={<>Reporting <em className="text-phosphor">Dashboard</em>.</>}
         subtitle="Headline numbers across the business at a glance. Open any card for the full, filterable report."
       />
 

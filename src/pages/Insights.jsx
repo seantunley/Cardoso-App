@@ -59,7 +59,7 @@ export default function Insights() {
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground md:px-6">
       <PageHeader
-        title="Insights"
+        title={<><em className="text-phosphor">Insights</em>.</>}
         subtitle="Automatically surfaced changes and risks across sales, customers, inventory and receivables. Open a card to act on it."
         actions={
           <>

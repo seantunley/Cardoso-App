@@ -284,11 +284,10 @@ export default function SalesCommission() {
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-3">
-          <Receipt className="w-6 h-6 text-amber-500" />
-          <h1 className="text-2xl font-semibold">Sales Commission</h1>
-        </div>
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-border pb-5">
+        <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
+          Sales <em className="text-phosphor">Commission</em>.
+        </h1>
         <button
           onClick={openSettings}
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card hover:bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground"

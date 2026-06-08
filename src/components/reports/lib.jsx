@@ -437,10 +437,10 @@ export function ReportFrame({
     <div className="space-y-5">
       <div className="report-print-hide flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-0">
-          <h2 className="font-display text-3xl leading-tight text-foreground">
+          <h2 className="font-display text-4xl leading-tight tracking-tight text-foreground lg:text-5xl">
             {title}
           </h2>
-          {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
+          {subtitle && <p className="text-sm text-muted-foreground mt-2">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-2">
           {onExportCsv && (
