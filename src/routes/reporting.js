@@ -350,66 +350,95 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   const stmts = buildStatements(db);
   const router = express.Router();
 
-  // GET /api/reports/ar-document-summary?from=YYYY-MM-DD&to=YYYY-MM-DD
-  // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
-  // VAT split out, queried LIVE from Sage. Source is the A/R invoice batches
-  // (ARIBH joined to ARIBC for the batch description) — the authoritative set of
-  // POSTED documents, excluding ERROR batches and zero-VAT documents
-  // (AMTTAX1 > 0), exactly mirroring the operator's Crystal "Sales Figures"
-  // report. Document kind comes from TEXTTRX (1 = invoice, 2 = debit note,
-  // 3 = credit note; all stored positive). Amounts: BASETAX1 = ex-VAT,
-  // AMTTAX1 = VAT, AMTNETTOT = incl total. Aggregated in SQL Server (one row
-  // per month) so the result is tiny.
+  // ── AR Document Summary (Invoices / Credit Notes / Debit Notes by month) ──
+  const arMkAmt = (excl, vat, incl) => ({ excl: Number(excl) || 0, vat: Number(vat) || 0, incl: Number(incl) || 0 });
+  const arSumTotals = (months) => {
+    const blank = () => ({ excl: 0, vat: 0, incl: 0 });
+    const t = { invoices: blank(), credit_notes: blank(), debit_notes: blank(), net_incl: 0 };
+    for (const m of months) {
+      for (const k of ['invoices', 'credit_notes', 'debit_notes']) { t[k].excl += m[k].excl; t[k].vat += m[k].vat; t[k].incl += m[k].incl; }
+      t.net_incl += m.net_incl;
+    }
+    return t;
+  };
+  // Live Sage query for one site (also used by the hub-pull endpoint). Posted
+  // A/R documents (ARIBH/ARIBC), excluding ERROR batches + zero-VAT docs
+  // (AMTTAX1 > 0), mirroring the operator's Crystal "Sales Figures" report.
+  // TEXTTRX 1/2/3 = invoice/debit note/credit note. BASETAX1 ex-VAT, AMTTAX1
+  // VAT, AMTNETTOT incl.
+  async function queryArDocSummary(from, to) {
+    const pool = await getSagePool();
+    const rs = await pool.request().input('from', from).input('to', to).query(`
+      SELECT LEFT(CAST(h.DATEINVC AS varchar(8)), 6) AS ym,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
+      FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+      WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
+      GROUP BY LEFT(CAST(h.DATEINVC AS varchar(8)), 6)
+      ORDER BY ym`);
+    const months = rs.recordset.map((r) => {
+      const invoices = arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl);
+      const debit_notes = arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl);
+      const credit_notes = arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl);
+      const ym = String(r.ym);
+      return { month: `${ym.slice(0, 4)}-${ym.slice(4, 6)}`, invoices, credit_notes, debit_notes, net_incl: invoices.incl + debit_notes.incl - credit_notes.incl };
+    });
+    return { months, totals: arSumTotals(months) };
+  }
+  const arYmdInt = (s, dflt) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(`${m[1]}${m[2]}${m[3]}`) : dflt; };
+  const arIntToYm = (n) => `${String(n).slice(0, 4)}-${String(n).slice(4, 6)}`;
+
+  // GET /api/reports/ar-document-summary?from=&to= — site mode runs the live
+  // Sage query; HUB mode reads the per-branch totals synced down into
+  // hub_ar_document_summary (hubEtl pulls each branch's /api/reporting variant).
   router.get('/api/reports/ar-document-summary', ...reportsGuard, async (req, res) => {
     try {
-      const ymd = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(`${m[1]}${m[2]}${m[3]}`) : null; };
       const now = new Date();
-      const from = ymd(req.query.from) || Number(`${now.getFullYear()}0101`);
-      const to = ymd(req.query.to) || Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`);
+      const from = arYmdInt(req.query.from, Number(`${now.getFullYear()}0101`));
+      const to = arYmdInt(req.query.to, Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`));
 
-      const pool = await getSagePool();
-      const rs = await pool.request().input('from', from).input('to', to).query(`
-        SELECT LEFT(CAST(h.DATEINVC AS varchar(8)), 6) AS ym,
-          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
-          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
-          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
-          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
-          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
-          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
-          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
-          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
-          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
-        FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
-        WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
-        GROUP BY LEFT(CAST(h.DATEINVC AS varchar(8)), 6)
-        ORDER BY ym`);
-
-      const mk = (excl, vat, incl) => ({ excl: Number(excl) || 0, vat: Number(vat) || 0, incl: Number(incl) || 0 });
-      const months = rs.recordset.map((r) => {
-        const invoices = mk(r.inv_excl, r.inv_vat, r.inv_incl);
-        const debit_notes = mk(r.dn_excl, r.dn_vat, r.dn_incl);
-        const credit_notes = mk(r.cn_excl, r.cn_vat, r.cn_incl);
-        const ym = String(r.ym);
-        return {
-          month: `${ym.slice(0, 4)}-${ym.slice(4, 6)}`,
-          invoices, credit_notes, debit_notes,
-          net_incl: invoices.incl + debit_notes.incl - credit_notes.incl,
-        };
-      });
-
-      const blank = () => ({ excl: 0, vat: 0, incl: 0 });
-      const totals = { invoices: blank(), credit_notes: blank(), debit_notes: blank(), net_incl: 0 };
-      for (const m of months) {
-        for (const k of ['invoices', 'credit_notes', 'debit_notes']) {
-          totals[k].excl += m[k].excl; totals[k].vat += m[k].vat; totals[k].incl += m[k].incl;
+      if (process.env.HUB_MODE === 'true') {
+        const rows = prep(`
+          SELECT s.site_id, COALESCE(hs.name, s.site_id) AS site_name, s.ym,
+                 s.inv_excl, s.inv_vat, s.inv_incl, s.cn_excl, s.cn_vat, s.cn_incl, s.dn_excl, s.dn_vat, s.dn_incl
+          FROM hub_ar_document_summary s LEFT JOIN hub_sites hs ON hs.id = s.site_id
+          WHERE s.ym >= ? AND s.ym <= ? ORDER BY site_name, s.ym`).all(arIntToYm(from), arIntToYm(to));
+        const toMonth = (r) => ({
+          month: r.ym,
+          invoices: arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl),
+          credit_notes: arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl),
+          debit_notes: arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl),
+          net_incl: (Number(r.inv_incl) || 0) + (Number(r.dn_incl) || 0) - (Number(r.cn_incl) || 0),
+        });
+        const bySite = new Map();
+        for (const r of rows) {
+          if (!bySite.has(r.site_id)) bySite.set(r.site_id, { site_id: r.site_id, site_name: r.site_name, months: [] });
+          bySite.get(r.site_id).months.push(toMonth(r));
         }
-        totals.net_incl += m.net_incl;
+        const branches = [...bySite.values()].map((b) => ({ ...b, totals: arSumTotals(b.months) }));
+        const consMap = new Map();
+        for (const b of branches) for (const m of b.months) {
+          if (!consMap.has(m.month)) consMap.set(m.month, { month: m.month, invoices: arMkAmt(0, 0, 0), credit_notes: arMkAmt(0, 0, 0), debit_notes: arMkAmt(0, 0, 0), net_incl: 0 });
+          const c = consMap.get(m.month);
+          for (const k of ['invoices', 'credit_notes', 'debit_notes']) { c[k].excl += m[k].excl; c[k].vat += m[k].vat; c[k].incl += m[k].incl; }
+          c.net_incl += m.net_incl;
+        }
+        const consolidatedMonths = [...consMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+        return res.json({ hub_mode: true, from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) } });
       }
 
+      const { months, totals } = await queryArDocSummary(from, to);
       res.json({ from, to, months, totals });
     } catch (err) {
-      console.error('[ar-document-summary] Sage query failed', err.message);
-      res.status(503).json({ error: 'Could not query Sage for the document summary. Check the Sage connection and try again.' });
+      console.error('[ar-document-summary] failed', err.message);
+      res.status(503).json({ error: 'Could not load the document summary. Check the Sage connection and try again.' });
     }
   });
 
@@ -1885,6 +1914,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // ==================== MULTI-SITE REPORTING API ====================
+
+  // GET /api/reporting/ar-document-summary — the hub pulls this from each branch
+  // (hubEtl) to populate hub_ar_document_summary. Returns the branch's monthly
+  // AR document totals for the current + prior financial year (back to Jan of
+  // last year covers any FY start).
+  router.get('/api/reporting/ar-document-summary', reportingRateLimiter, requireReportingToken, async (req, res) => {
+    try {
+      const now = new Date();
+      const from = Number(`${now.getFullYear() - 1}0101`);
+      const to = Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`);
+      const { months } = await queryArDocSummary(from, to);
+      res.json({ months });
+    } catch (err) {
+      console.error('[reporting.ar-document-summary] Sage query failed', err.message);
+      res.status(503).json({ error: 'Sage query failed' });
+    }
+  });
 
   // GET /api/reporting/site-info
   router.get('/api/reporting/site-info', reportingRateLimiter, requireReportingToken, (req, res) => {

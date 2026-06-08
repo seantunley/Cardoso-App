@@ -366,6 +366,40 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
+    // AR document summary (per-branch "Sales Figures") — tiny payload (one row
+    // per month over the current+prior FY), single fetch. Clear-and-reload the
+    // branch's rows each cycle so dropped months don't linger.
+    try {
+      const ctrlAr = new AbortController();
+      const tAr = setTimeout(() => ctrlAr.abort(), 20000);
+      let arData;
+      try {
+        const arRes = await fetch(`${site.url}/api/reporting/ar-document-summary`, { headers, signal: ctrlAr.signal });
+        if (!arRes.ok) throw new Error(`HTTP ${arRes.status}`);
+        arData = await arRes.json();
+      } finally { clearTimeout(tAr); }
+      const arMonths = Array.isArray(arData?.months) ? arData.months : [];
+      const upsertArDoc = db.prepare(`
+        INSERT OR REPLACE INTO hub_ar_document_summary
+          (site_id, ym, inv_excl, inv_vat, inv_incl, cn_excl, cn_vat, cn_incl, dn_excl, dn_vat, dn_incl, synced_at)
+        VALUES (@site_id, @ym, @inv_excl, @inv_vat, @inv_incl, @cn_excl, @cn_vat, @cn_incl, @dn_excl, @dn_vat, @dn_incl, @synced_at)`);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_ar_document_summary WHERE site_id = ?').run(site.id);
+        const now = new Date().toISOString();
+        for (const m of arMonths) {
+          if (!m?.month) continue;
+          upsertArDoc.run({
+            site_id: site.id, ym: m.month, synced_at: now,
+            inv_excl: Number(m.invoices?.excl) || 0, inv_vat: Number(m.invoices?.vat) || 0, inv_incl: Number(m.invoices?.incl) || 0,
+            cn_excl: Number(m.credit_notes?.excl) || 0, cn_vat: Number(m.credit_notes?.vat) || 0, cn_incl: Number(m.credit_notes?.incl) || 0,
+            dn_excl: Number(m.debit_notes?.excl) || 0, dn_vat: Number(m.debit_notes?.vat) || 0, dn_incl: Number(m.debit_notes?.incl) || 0,
+          });
+        }
+      })();
+    } catch (e) {
+      console.warn(`[HUB] AR document summary sync failed for ${site.slug || site.id}: ${e.message}`);
+    }
+
     // Inventory movement (sales velocity cache) — paginated fetch using
     // the same pattern as the inventory sync above. Each page is 1000
     // rows with a 10s timeout; large sites with many SKUs × months no
@@ -410,7 +444,7 @@ async function syncSite(site) {
       // Swap: atomic delete + insert in one transaction.
       const upsertMov = db.prepare(`
         INSERT INTO hub_inventory_sales (site_id, item_number, period, qty_sold, revenue, order_count, last_sale_date, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
         ON CONFLICT(site_id, item_number, period) DO UPDATE SET
           qty_sold=excluded.qty_sold, revenue=excluded.revenue,
           order_count=excluded.order_count, last_sale_date=excluded.last_sale_date,
@@ -468,7 +502,7 @@ async function syncSite(site) {
           qty_received, uom, unit_cost,
           expiry_date, qty_at_expiry, entered_by, entry_source, notes, expiry_created,
           synced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
       `);
       db.transaction(() => {
         db.prepare('DELETE FROM hub_stock_receipt_expiry WHERE site_id = ?').run(site.id);

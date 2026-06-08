@@ -95,6 +95,7 @@ import m89 from './v089_commission_unpaid_snapshot.js';
 import m90 from './v090_insight_rules.js';
 import m91 from './v091_debtor_ar_module.js';
 import m92 from './v092_debtor_reporting_account.js';
+import m93 from './v093_hub_ar_document_summary.js';
 
 const migrations = [
   m1,
@@ -189,6 +190,7 @@ const migrations = [
   m90,
   m91,
   m92,
+  m93,
 ];
 
 migrations.sort((a, b) => a.version - b.version);
