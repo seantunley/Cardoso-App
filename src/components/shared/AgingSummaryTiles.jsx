@@ -10,7 +10,8 @@
 
 const za = (n) => `R ${(Number(n) || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-function Tile({ label, value, sub, accent = 'var(--phosphor)', big = false }) {
+/** @param {{ label?: any, value?: any, sub?: any, accent?: string, big?: boolean }} props */
+function Tile({ label, value, sub = null, accent = 'var(--phosphor)', big = false }) {
   return (
     <div
       className="relative overflow-hidden bg-card p-4 min-h-[100px]"
