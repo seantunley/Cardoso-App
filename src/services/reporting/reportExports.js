@@ -49,27 +49,35 @@ export function buildAgedDebtorsPdf(report) {
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
   });
 
-  // Detail table — one row per customer, balance split across the period columns.
+  // Detail table — one row per customer, balance split across the period
+  // columns. In hub all-sites mode the Site column disambiguates the same
+  // customer code appearing at more than one site.
+  const hub = !!report?.hub_mode;
+  const lead = hub ? ['Code', 'Customer', 'Site', 'Rep', 'Type'] : ['Code', 'Customer', 'Rep', 'Type'];
+  const numericStart = lead.length;
   autoTable(doc, {
     startY: doc.lastAutoTable.finalY + 8,
     styles: { fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [50, 50, 50] },
-    head: [['Code', 'Customer', 'Rep', 'Type', ...BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
+    head: [[...lead, ...BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
     body: (report?.records || []).map((r) => [
       String(r.customer_number || '').trim(),
       String(r.customer_name || '').trim(),
+      ...(hub ? [String(r.site_name || '').trim()] : []),
       String(r.sales_rep || '').trim(),
       String(r.account_type || '').trim(),
       ...BUCKET_KEYS.map((k) => fmtR(r.bucket_amounts?.[k])),
       fmtR(r.parsed_balance ?? r.outstanding_balance),
     ]),
     foot: [[
-      'TOTAL', '', '', '',
+      'TOTAL', ...Array(lead.length - 1).fill(''),
       ...BUCKET_KEYS.map((k) => fmtR(buckets[k])),
       fmtR(report?.summary?.total_outstanding),
     ]],
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
-    columnStyles: Object.fromEntries([4, 5, 6, 7, 8, 9].map((i) => [i, { halign: 'right' }])),
+    columnStyles: Object.fromEntries(
+      Array.from({ length: BUCKET_KEYS.length + 1 }, (_, i) => [numericStart + i, { halign: 'right' }]),
+    ),
   });
 
   return Buffer.from(doc.output('arraybuffer'));

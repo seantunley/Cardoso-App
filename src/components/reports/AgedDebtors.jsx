@@ -101,10 +101,11 @@ export default function AgedDebtors() {
 
   const handleExportCsv = () => {
     if (!sortedRecords.length) return;
-    const headers = ['Customer No', 'Customer', 'Sales Rep', 'Account Type', 'Terms', ...BUCKET_ORDER.map(k => BUCKET_META[k].label), 'Total'];
+    const showSite = !!data?.hub_mode;
+    const headers = ['Customer No', 'Customer', 'Sales Rep', 'Account Type', 'Terms', ...(showSite ? ['Site'] : []), ...BUCKET_ORDER.map(k => BUCKET_META[k].label), 'Total'];
     const rows = sortedRecords.map(r => [
       r.customer_number || '', r.customer_name || '', r.sales_rep || '',
-      r.account_type || '', r.terms || '',
+      r.account_type || '', r.terms || '', ...(showSite ? [r.site_name || ''] : []),
       ...BUCKET_ORDER.map(k => (r.bucket_amounts?.[k] ?? 0).toFixed(2)),
       (r.parsed_balance ?? 0).toFixed(2),
     ]);
@@ -268,6 +269,7 @@ export default function AgedDebtors() {
                 <tr className="border-b border-border">
                   <SortHeader col="name" label="Customer" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Cust No</th>
+                  {data?.hub_mode && <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Site</th>}
                   <SortHeader col="rep" label="Rep" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Type</th>
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Terms</th>
@@ -279,12 +281,13 @@ export default function AgedDebtors() {
               </thead>
               <tbody>
                 {sortedRecords.length === 0 && (
-                  <tr><td colSpan={6 + BUCKET_ORDER.length} className="px-3 py-8 text-center text-muted-foreground font-mono text-[11px]">No customers match the current filters.</td></tr>
+                  <tr><td colSpan={(data?.hub_mode ? 7 : 6) + BUCKET_ORDER.length} className="px-3 py-8 text-center text-muted-foreground font-mono text-[11px]">No customers match the current filters.</td></tr>
                 )}
                 {sortedRecords.map((r) => (
                   <tr key={`${r.site_name}-${r.customer_number}`} className="border-b border-border hover:bg-muted/30">
                     <td className="px-2 py-1.5 text-foreground">{r.customer_name || '—'}</td>
                     <td className="px-2 py-1.5 font-mono text-muted-foreground tabular-nums">{r.customer_number || '—'}</td>
+                    {data?.hub_mode && <td className="px-2 py-1.5 text-muted-foreground">{r.site_name || '—'}</td>}
                     <td className="px-2 py-1.5 text-muted-foreground">{r.sales_rep || '—'}</td>
                     <td className="px-2 py-1.5 text-muted-foreground">{r.account_type || '—'}</td>
                     <td className="px-2 py-1.5 text-muted-foreground">{r.terms || '—'}</td>
@@ -305,7 +308,7 @@ export default function AgedDebtors() {
               {sortedRecords.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-                    <td className="px-2 py-2 text-foreground" colSpan={5}>Total ({sortedRecords.length} customers)</td>
+                    <td className="px-2 py-2 text-foreground" colSpan={data?.hub_mode ? 6 : 5}>Total ({sortedRecords.length} customers)</td>
                     {BUCKET_ORDER.map(k => (
                       <td key={k} className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
                         <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets[k])}
