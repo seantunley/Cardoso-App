@@ -75,7 +75,7 @@ const PriceList = React.lazy(() => import('./pages/PriceList'));
 const StockReceipts = React.lazy(() => import('./pages/StockReceipts'));
 const SalesCommission = React.lazy(() => import('./pages/SalesCommission'));
 const HubCommission = React.lazy(() => import('./pages/HubCommission'));
-const MonthlySalesFigures = React.lazy(() => import('./components/reports/ArDocumentSummary'));
+const MonthlySalesFigures = React.lazy(() => import('./pages/MonthlySalesFigures'));
 const Trends = React.lazy(() => import('./pages/Trends'));
 const CreditorSummary = React.lazy(() => import('./pages/CreditorSummary'));
 const CreditorSearch = React.lazy(() => import('./pages/CreditorSearch'));
