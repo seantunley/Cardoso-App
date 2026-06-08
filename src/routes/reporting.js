@@ -449,6 +449,37 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // GET /api/reports/debtor-balance-summary — headline debtor exposure for the
+  // dashboard tile. Positive open balances only (excludes net-credit customers),
+  // so it matches the Customer Balances page total to the cent, plus the AR
+  // aging buckets. Site reads datarecord; hub reads hub_records (which carries
+  // no per-bucket data, so buckets are null there).
+  router.get('/api/reports/debtor-balance-summary', ...reportsGuard, (req, res) => {
+    try {
+      const positiveWhere = "outstanding_balance IS NOT NULL AND outstanding_balance != '' AND outstanding_balance != '0' AND outstanding_balance_num > 0";
+      if (process.env.HUB_MODE === 'true') {
+        const r = prep(`SELECT COUNT(*) n, COALESCE(SUM(outstanding_balance_num), 0) total FROM hub_records WHERE ${positiveWhere}`).get();
+        return res.json({ total_outstanding: r.total, total_customers: r.n, buckets: null });
+      }
+      const r = prep(`
+        SELECT COUNT(*) n, COALESCE(SUM(outstanding_balance_num), 0) total,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_current')  AS REAL)), 0) b_current,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_1_7')      AS REAL)), 0) b_1_7,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_8_14')     AS REAL)), 0) b_8_14,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_15_21')    AS REAL)), 0) b_15_21,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_over_21')  AS REAL)), 0) b_over_21
+        FROM datarecord WHERE ${positiveWhere}`).get();
+      res.json({
+        total_outstanding: r.total,
+        total_customers: r.n,
+        buckets: { current: r.b_current, '1-7': r.b_1_7, '8-14': r.b_8_14, '15-21': r.b_15_21, 'over-21': r.b_over_21 },
+      });
+    } catch (err) {
+      console.error('[debtor-balance-summary] failed', err.message);
+      res.status(500).json({ error: 'Could not load the debtor balance summary.' });
+    }
+  });
+
   // Memoize prepared statements by SQL text. better-sqlite3 Statement objects
   // are reusable across calls; re-preparing the same string per request is
   // wasted CPU when the SQL is identical.

@@ -93,13 +93,16 @@ function CardError({ error, onRetry }) {
 
 function AgedDebtorsCard() {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-aged-debtors"],
-    queryFn: () => apiGet("/api/reports/aged-debtors"),
+    queryKey: ["dash-debtor-balance-summary"],
+    queryFn: () => apiGet("/api/reports/debtor-balance-summary"),
     staleTime: 60_000,
   });
-  const s = data?.summary;
+  // Positive open balances only, from the same source as the Customer Balances
+  // page — so this headline matches that page (the "who owes us" figure) rather
+  // than the net open-item ledger.
+  const s = data;
   return (
-    <ReportCard icon={Wallet} title="Aged Debtors" accent="hsl(33 95% 55%)" to="/Reports" query="aged-debtors">
+    <ReportCard icon={Wallet} title="Aged Debtors" accent="hsl(33 95% 55%)" to="/CustomerBalances">
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (

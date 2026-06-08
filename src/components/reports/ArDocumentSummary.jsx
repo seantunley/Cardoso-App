@@ -127,7 +127,7 @@ export default function ArDocumentSummary() {
 
   return (
     <ReportFrame
-      title={<>Monthly Sales <em>Figures</em>.</>}
+      title="Monthly Sales Figures"
       subtitle="Posted invoices, credit notes and debit notes by month with VAT shown separately. Net = Invoices + Debit notes − Credit notes. Matches the Sage 'Sales Figures' report (ARIBH, VAT-bearing documents)."
       printId="ar-doc-summary"
       orientation="landscape"
