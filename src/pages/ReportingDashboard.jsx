@@ -132,8 +132,8 @@ function AgedDebtorsCard() {
 
 function AgedCreditorsCard() {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-aged-creditors"],
-    queryFn: () => apiGet("/api/reports/aged-creditors"),
+    queryKey: ["dash-aged-creditors-paid"],
+    queryFn: () => apiGet("/api/reports/aged-creditors?paid_only=true"),
     staleTime: 60_000,
   });
   const s = data?.summary;

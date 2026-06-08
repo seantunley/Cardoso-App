@@ -1337,6 +1337,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(query.min_balance) || 0);
     const siteFilter = String(query.site || 'all').trim();
+    // "Has payment history" — exclude vendors that have never been paid
+    // (blank last_payment_date), matching the Creditor Balances toggle.
+    const paidOnly = String(query.paid_only).toLowerCase() === 'true';
 
     let rows;
     let sites = [];
@@ -1351,7 +1354,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       ).all().map(r => r.site_name).filter(Boolean);
       rows = prep(
         `SELECT i.site_id, i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
-                i.outstanding_amount, i.reference, c.vendor_name, c.terms,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms, c.last_payment_date,
                 COALESCE(s.name, i.site_id) AS site_name
          FROM hub_creditor_ap_invoice i
          LEFT JOIN hub_creditor c ON c.site_id = i.site_id AND c.vendor_code = i.vendor_code
@@ -1362,7 +1365,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       sites = [SITE_NAME];
       rows = prep(
         `SELECT i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
-                i.outstanding_amount, i.reference, c.vendor_name, c.terms,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms, c.last_payment_date,
                 ? AS site_name
          FROM creditor_ap_invoice i
          LEFT JOIN creditor c ON c.vendor_code = i.vendor_code
@@ -1384,7 +1387,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const meta = new Map();
     const docs = rows.map((r) => {
       const key = keyOf(r);
-      if (!meta.has(key)) meta.set(key, { vendor_code: String(r.vendor_code || '').trim(), vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME });
+      if (!meta.has(key)) meta.set(key, { vendor_code: String(r.vendor_code || '').trim(), vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME, last_payment_date: r.last_payment_date || null });
       return {
         entityCode: key,
         entityName: r.vendor_name || null,
@@ -1400,7 +1403,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const aged = ageOpenItems(docs, { scheme: AP_SCHEME }); // AP: due date + monthly periods
 
     const records = aged.entities
-      .filter((e) => Math.abs(e.total) >= minBalance)
+      .filter((e) => {
+        if (Math.abs(e.total) < minBalance) return false;
+        if (paidOnly) {
+          const m = meta.get(e.entityCode) || {};
+          if (!m.last_payment_date || !String(m.last_payment_date).trim()) return false;
+        }
+        return true;
+      })
       .map((e) => {
         const m = meta.get(e.entityCode) || {};
         return {
