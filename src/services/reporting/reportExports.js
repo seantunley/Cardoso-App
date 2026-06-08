@@ -143,26 +143,34 @@ export function buildAgedCreditorsPdf(report) {
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
   });
 
-  // Detail table — one row per vendor, balance split across the period columns.
+  // Detail table — one row per vendor, balance split across the period
+  // columns. In hub all-sites mode the Site column disambiguates the same
+  // vendor code appearing at more than one site.
+  const hub = !!report?.hub_mode;
+  const lead = hub ? ['Code', 'Vendor', 'Site', 'Terms'] : ['Code', 'Vendor', 'Terms'];
+  const numericStart = lead.length;
   autoTable(doc, {
     startY: doc.lastAutoTable.finalY + 8,
     styles: { fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [50, 50, 50] },
-    head: [['Code', 'Vendor', 'Terms', ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
+    head: [[...lead, ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
     body: (report?.records || []).map((r) => [
       String(r.vendor_code || '').trim(),
       String(r.vendor_name || '').trim(),
+      ...(hub ? [String(r.site_name || '').trim()] : []),
       String(r.terms || '').trim(),
       ...DATED_BUCKET_KEYS.map((k) => fmtR(r.bucket_amounts?.[k])),
       fmtR(r.parsed_balance),
     ]),
     foot: [[
-      'TOTAL', '', '',
+      'TOTAL', ...Array(lead.length - 1).fill(''),
       ...DATED_BUCKET_KEYS.map((k) => fmtR(buckets[k])),
       fmtR(report?.summary?.total_outstanding),
     ]],
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
-    columnStyles: Object.fromEntries([3, 4, 5, 6, 7, 8].map((i) => [i, { halign: 'right' }])),
+    columnStyles: Object.fromEntries(
+      Array.from({ length: DATED_BUCKET_KEYS.length + 1 }, (_, i) => [numericStart + i, { halign: 'right' }]),
+    ),
   });
 
   return Buffer.from(doc.output('arraybuffer'));
