@@ -969,145 +969,137 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const accountTypeFilter = String(query.account_type || 'all').trim();
     const siteFilter = String(query.site || 'all').trim();
 
-    {
-      let records;
-      let sites = [];
-      if (isHub) {
-        const dataParams = [minBalance];
-        let whereSite = '';
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; dataParams.push(siteFilter); }
-        sites = prep(
-          `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-             AND r.outstanding_balance != '0'
-             AND r.outstanding_balance_num > ?
-           ORDER BY site_name`
-        ).all(minBalance).map(r => r.site_name).filter(Boolean);
-        records = prep(
-          `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type, r.terms,
-                  r.outstanding_balance, r.unpaid_invoices,
-                  r.flag_color, r.flag_reason, r.auto_flagged,
-                  COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-             AND r.outstanding_balance != '0'
-             AND r.outstanding_balance_num > ?
-             ${whereSite}
-           ORDER BY r.outstanding_balance_num DESC
-           LIMIT 5000`
-        ).all(...dataParams).map(expandDataRecord);
-      } else {
-        sites = [SITE_NAME];
-        records = prep(
-          `SELECT customer_number, customer_name, sales_rep, account_type, terms,
-                  outstanding_balance, unpaid_invoices,
-                  flag_color, flag_reason, auto_flagged,
-                  local_fields,
-                  ? AS site_name
-           FROM datarecord
-           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
-             AND outstanding_balance != '0'
-             AND outstanding_balance_num > ?
-           ORDER BY outstanding_balance_num DESC
-           LIMIT 5000`
-        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
-      }
-      const truncated = records.length === 5000;
+    // Open AR documents (synced from Sage AROBL by services/debtorSync.js),
+    // joined back to the customer master for name / rep / type / terms. Unlike
+    // the old per-customer snapshot, each row is a single open document with a
+    // real due date and outstanding amount, so we can age it the Sage way.
+    let rows;
+    let sites = [];
+    if (isHub) {
+      const params = [];
+      let whereSite = '';
+      if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
+      sites = prep(
+        `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ORDER BY site_name`
+      ).all().map(r => r.site_name).filter(Boolean);
+      rows = prep(
+        `SELECT i.site_id, i.customer_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference,
+                d.customer_name, d.sales_rep, d.account_type, d.terms,
+                COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_debtor_ar_invoice i
+         LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.customer_code)
+         LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ${whereSite}`
+      ).all(...params);
+    } else {
+      sites = [SITE_NAME];
+      rows = prep(
+        `SELECT i.customer_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference,
+                d.customer_name, d.sales_rep, d.account_type, d.terms, d.data, d.local_fields,
+                ? AS site_name
+         FROM debtor_ar_invoice i
+         LEFT JOIN datarecord d ON TRIM(d.customer_number) = TRIM(i.customer_code)
+         WHERE i.source_table = 'AROBL' AND i.outstanding_amount <> 0`
+      ).all(SITE_NAME).map(hydrateSalesRepAndAccountType);
+    }
 
-      // Filter by sales rep / account type in JS (these can come from JSON blobs)
-      const filtered = records.filter(r => {
+    // Aging entity key: per (site,customer) in hub all-sites mode (the same
+    // customer code can exist at multiple sites), per customer in site mode.
+    const keyOf = isHub
+      ? (r) => JSON.stringify([r.site_id, String(r.customer_code || '').trim()])
+      : (r) => String(r.customer_code || '').trim();
+
+    // Customer metadata the engine doesn't carry, keyed by the same composite.
+    const meta = new Map();
+    const docs = rows.map((r) => {
+      const key = keyOf(r);
+      if (!meta.has(key)) meta.set(key, {
+        customer_code: String(r.customer_code || '').trim(),
+        customer_name: r.customer_name || null,
+        sales_rep: r.sales_rep || null,
+        account_type: r.account_type || null,
+        terms: r.terms || null,
+        site_name: r.site_name || SITE_NAME,
+      });
+      return {
+        entityCode: key,
+        entityName: r.customer_name || null,
+        date: r.document_date,
+        dueDate: r.due_date,
+        outstanding: r.outstanding_amount,
+        documentNumber: r.document_number,
+        documentType: r.document_type,
+        reference: r.reference,
+      };
+    });
+
+    const aged = ageOpenItems(docs, { basis: 'due', boundaries: WEEKLY_BUCKETS, creditNoteMode: 'current' });
+
+    const allRecords = aged.entities.map((e) => {
+      const m = meta.get(e.entityCode) || {};
+      return {
+        customer_number: m.customer_code || e.entityCode,
+        customer_name: e.entityName || m.customer_name || '',
+        sales_rep: m.sales_rep || '',
+        account_type: m.account_type || '',
+        terms: m.terms || '',
+        site_name: m.site_name || SITE_NAME,
+        parsed_balance: e.total,
+        bucket: e.primary_bucket,
+        age_days: e.oldest_age_days,
+        bucket_amounts: e.bucket_amounts,
+        doc_count: e.documents.length,
+      };
+    });
+
+    // Filter dropdown options built from the full (pre-filter) set so the user
+    // can always switch back.
+    const salesReps = Array.from(new Set(allRecords.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
+    const accountTypes = Array.from(new Set(allRecords.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
+
+    const records = allRecords
+      .filter((r) => {
+        if (Math.abs(r.parsed_balance) < minBalance) return false;
         if (salesRepFilter !== 'all' && String(r.sales_rep || '').trim() !== salesRepFilter) return false;
         if (accountTypeFilter !== 'all' && String(r.account_type || '').trim().toUpperCase() !== accountTypeFilter.toUpperCase()) return false;
         return true;
-      });
+      })
+      .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
 
-      const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
-      const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
-      const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
-      let totalOutstanding = 0;
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const ageToBucket = (days) => {
-        if (days === null || days === undefined) return 'unknown';
-        if (days < 7)  return 'current';
-        if (days < 14) return '7-13';
-        if (days < 21) return '14-20';
-        return '21+';
-      };
-
-      // Aging by OLDEST unpaid invoice age. The whole customer balance lands
-      // in one bucket (the bucket of their oldest dated unpaid invoice). This
-      // is the industry-standard aged-debtors convention.
-      //
-      // The previous implementation tried to split the balance per-invoice
-      // (each invoice amount → its own bucket). That was wrong against this
-      // data shape because `unpaid_invoices[].amount` is the running customer
-      // balance at the time of that invoice, NOT the per-invoice amount.
-      // Summing them inflated the bucket totals 3-4x.
-      const enriched = filtered.map(r => {
-        const balance = parseAmount(r.outstanding_balance);
-        totalOutstanding += balance;
-
-        // Find the oldest dated invoice across all unpaid lines.
-        let oldestAge = null;
-        const invoices = Array.isArray(r.unpaid_invoices)
-          ? r.unpaid_invoices
-          : (typeof r.unpaid_invoices === 'string' ? parseJsonSafely(r.unpaid_invoices, []) : []);
-        for (const inv of invoices) {
-          const date = parseBalanceDate(inv?.date);
-          if (!date) continue;
-          const days = Math.floor((today - date) / 86400000);
-          if (!Number.isFinite(days) || days < 0) continue;
-          if (oldestAge === null || days > oldestAge) oldestAge = days;
-        }
-        // Fallback to the flat last_unpaid_invoice_*_date columns if the JSON
-        // wasn't expanded (e.g. older code paths feeding the same query).
-        if (oldestAge === null) {
-          for (let i = 1; i <= 10; i++) {
-            const date = parseBalanceDate(r[`last_unpaid_invoice_${i}_date`]);
-            if (!date) continue;
-            const days = Math.floor((today - date) / 86400000);
-            if (!Number.isFinite(days) || days < 0) continue;
-            if (oldestAge === null || days > oldestAge) oldestAge = days;
-          }
-        }
-
-        const bucket = ageToBucket(oldestAge);
-        buckets[bucket] += balance;
-        bucketCounts[bucket]++;
-
-        return {
-          ...r,
-          age_days: oldestAge,
-          bucket,
-          parsed_balance: balance,
-          bucket_amounts: { [bucket]: balance },
-        };
-      });
-
-      // Filter dropdowns built from the unfiltered set so the user can switch back
-      const salesReps = Array.from(new Set(records.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
-      const accountTypes = Array.from(new Set(records.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
-
-      return {
-        records: enriched,
-        summary: {
-          total_customers: enriched.length,
-          total_outstanding: totalOutstanding,
-          buckets,
-          bucket_counts: bucketCounts,
-        },
-        filters: { sites, sales_reps: salesReps, account_types: accountTypes },
-        truncated,
-        truncated_at: truncated ? 5000 : null,
-        generated_at: new Date().toISOString(),
-        site_name: SITE_NAME,
-        hub_mode: isHub,
-        min_balance: minBalance,
-      };
+    // Summary recomputed over the filtered set so totals match the rows shown.
+    const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
+    const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    let totalOutstanding = 0;
+    for (const r of records) {
+      totalOutstanding += r.parsed_balance;
+      for (const k of bucketKeys) {
+        buckets[k] += r.bucket_amounts[k] || 0;
+        if ((r.bucket_amounts[k] || 0) !== 0) bucketCounts[k] += 1;
+      }
     }
+
+    return {
+      records,
+      summary: {
+        total_customers: records.length,
+        total_outstanding: totalOutstanding,
+        buckets,
+        bucket_counts: bucketCounts,
+      },
+      filters: { sites, sales_reps: salesReps, account_types: accountTypes },
+      // True when the AR open-item ledger is empty (sync not yet run/configured)
+      // — lets the UI tell "nothing outstanding" apart from "no data yet".
+      ledger_empty: docs.length === 0,
+      generated_at: new Date().toISOString(),
+      site_name: SITE_NAME,
+      hub_mode: isHub,
+      min_balance: minBalance,
+    };
   }
 
   router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {

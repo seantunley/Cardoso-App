@@ -22,29 +22,25 @@ const dateOnly = (iso) => String(iso || new Date().toISOString()).slice(0, 10);
 // ── Aged Debtors ───────────────────────────────────────────────────────────
 
 export function buildAgedDebtorsPdf(report) {
-  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
   const buckets = report?.summary?.buckets || {};
   const counts = report?.summary?.bucket_counts || {};
 
   doc.setFontSize(14);
   doc.setTextColor(0);
-  doc.text('Aged Debtors', 14, 16);
+  doc.text('Aged Debtors', 14, 14);
   doc.setFontSize(9);
   doc.setTextColor(110);
-  doc.text(`${report?.site_name || ''} · generated ${dateOnly(report?.generated_at)}`, 14, 22);
+  doc.text(`${report?.site_name || ''} · generated ${dateOnly(report?.generated_at)}`, 14, 20);
   doc.text(
     `${report?.summary?.total_customers || 0} customers · ${fmtR(report?.summary?.total_outstanding)} outstanding · min balance ${fmtR(report?.min_balance)}`,
     14,
-    27,
+    25,
   );
-  if (report?.truncated) {
-    doc.setTextColor(176, 124, 24);
-    doc.text(`Note: list truncated at ${report.truncated_at} rows.`, 14, 32);
-  }
 
   // Aging summary table
   autoTable(doc, {
-    startY: 38,
+    startY: 31,
     styles: { fontSize: 8, cellPadding: 1.6 },
     headStyles: { fillColor: [33, 33, 33] },
     head: [['Bucket', 'Customers', 'Outstanding']],
@@ -53,22 +49,27 @@ export function buildAgedDebtorsPdf(report) {
     footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
   });
 
-  // Detail table
+  // Detail table — one row per customer, balance split across the period columns.
   autoTable(doc, {
     startY: doc.lastAutoTable.finalY + 8,
     styles: { fontSize: 7.5, cellPadding: 1.3 },
     headStyles: { fillColor: [50, 50, 50] },
-    head: [['Code', 'Customer', 'Rep', 'Type', 'Age (d)', 'Bucket', 'Balance']],
+    head: [['Code', 'Customer', 'Rep', 'Type', ...BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
     body: (report?.records || []).map((r) => [
       String(r.customer_number || '').trim(),
       String(r.customer_name || '').trim(),
       String(r.sales_rep || '').trim(),
       String(r.account_type || '').trim(),
-      r.age_days == null ? '—' : String(r.age_days),
-      BUCKET_LABELS[r.bucket] || r.bucket || '',
+      ...BUCKET_KEYS.map((k) => fmtR(r.bucket_amounts?.[k])),
       fmtR(r.parsed_balance ?? r.outstanding_balance),
     ]),
-    columnStyles: { 6: { halign: 'right' } },
+    foot: [[
+      'TOTAL', '', '', '',
+      ...BUCKET_KEYS.map((k) => fmtR(buckets[k])),
+      fmtR(report?.summary?.total_outstanding),
+    ]],
+    footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+    columnStyles: Object.fromEntries([4, 5, 6, 7, 8, 9].map((i) => [i, { halign: 'right' }])),
   });
 
   return Buffer.from(doc.output('arraybuffer'));
@@ -76,32 +77,33 @@ export function buildAgedDebtorsPdf(report) {
 
 export async function buildAgedDebtorsXlsx(report) {
   const wb = new ExcelJS.Workbook();
+  const buckets = report?.summary?.buckets || {};
+  const counts = report?.summary?.bucket_counts || {};
 
   const summary = wb.addWorksheet('Summary');
   summary.addRow(['Aged Debtors']);
   summary.addRow([report?.site_name || '', `generated ${dateOnly(report?.generated_at)}`]);
   summary.addRow([]);
   summary.addRow(['Bucket', 'Customers', 'Outstanding']);
-  const buckets = report?.summary?.buckets || {};
-  const counts = report?.summary?.bucket_counts || {};
   for (const k of BUCKET_KEYS) summary.addRow([BUCKET_LABELS[k], counts[k] || 0, num2(buckets[k])]);
   summary.addRow(['TOTAL', report?.summary?.total_customers || 0, num2(report?.summary?.total_outstanding)]);
 
   const detail = wb.addWorksheet('Detail');
-  detail.addRow(['Code', 'Customer', 'Rep', 'Type', 'Site', 'Age (days)', 'Bucket', 'Balance']);
+  detail.addRow(['Code', 'Customer', 'Rep', 'Type', 'Terms', 'Site', ...BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']);
   for (const r of report?.records || []) {
     detail.addRow([
       String(r.customer_number || '').trim(),
       String(r.customer_name || '').trim(),
       String(r.sales_rep || '').trim(),
       String(r.account_type || '').trim(),
+      String(r.terms || '').trim(),
       String(r.site_name || '').trim(),
-      r.age_days == null ? null : r.age_days,
-      BUCKET_LABELS[r.bucket] || r.bucket || '',
+      ...BUCKET_KEYS.map((k) => num2(r.bucket_amounts?.[k])),
       num2(r.parsed_balance ?? r.outstanding_balance),
     ]);
   }
-  detail.getColumn(8).numFmt = '#,##0.00';
+  // Number-format the bucket + total columns (G..L).
+  for (let c = 7; c <= 12; c++) detail.getColumn(c).numFmt = '#,##0.00';
 
   return await wb.xlsx.writeBuffer();
 }

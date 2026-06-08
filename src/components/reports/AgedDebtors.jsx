@@ -18,6 +18,7 @@ const BUCKET_META = {
   '21+':   { label: '21+ days',      color: 'hsl(0 72% 50%)',   sortOrder: 3 },
   unknown: { label: 'No date',       color: 'hsl(220 8% 50%)',  sortOrder: 4 },
 };
+const BUCKET_ORDER = ['current', '7-13', '14-20', '21+', 'unknown'];
 
 function fetchAgedDebtors(params) {
   const qs = new URLSearchParams();
@@ -100,11 +101,12 @@ export default function AgedDebtors() {
 
   const handleExportCsv = () => {
     if (!sortedRecords.length) return;
-    const headers = ['Customer No', 'Customer', 'Sales Rep', 'Account Type', 'Terms', 'Bucket', 'Age (days)', 'Outstanding'];
+    const headers = ['Customer No', 'Customer', 'Sales Rep', 'Account Type', 'Terms', ...BUCKET_ORDER.map(k => BUCKET_META[k].label), 'Total'];
     const rows = sortedRecords.map(r => [
       r.customer_number || '', r.customer_name || '', r.sales_rep || '',
-      r.account_type || '', r.terms || '', r.bucket || '',
-      r.age_days ?? '', (r.parsed_balance ?? 0).toFixed(2),
+      r.account_type || '', r.terms || '',
+      ...BUCKET_ORDER.map(k => (r.bucket_amounts?.[k] ?? 0).toFixed(2)),
+      (r.parsed_balance ?? 0).toFixed(2),
     ]);
     downloadCsv(`aged-debtors-${new Date().toISOString().slice(0, 10)}.csv`, [headers, ...rows]);
   };
@@ -187,6 +189,12 @@ export default function AgedDebtors() {
         </div>
       </div>
 
+      {data?.ledger_empty && (
+        <div className="report-print-hide mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-600 dark:text-amber-400">
+          No AR open-item data yet. Aged Debtors reads the customer open-item ledger synced from Sage (AROBL). Run the debtors sync in Settings, or wait for the nightly sync, then refresh.
+        </div>
+      )}
+
       {data && summary && (
         <>
           {/* Summary tiles */}
@@ -252,7 +260,7 @@ export default function AgedDebtors() {
             </ChartCard>
           </div>
 
-          {/* Table */}
+          {/* Table — per-bucket distribution */}
           <div className="report-print-section-title hidden">Customer Detail</div>
           <div className="bg-card border border-border mt-4 overflow-auto" style={{ borderRadius: '12px' }}>
             <table className="report-print-table w-full text-xs">
@@ -263,39 +271,46 @@ export default function AgedDebtors() {
                   <SortHeader col="rep" label="Rep" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Type</th>
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Terms</th>
-                  <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Bucket</th>
-                  <SortHeader col="age" label="Age" align="right" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
-                  <SortHeader col="balance" label="Outstanding" align="right" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
+                  {BUCKET_ORDER.map(k => (
+                    <th key={k} className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: BUCKET_META[k].color }}>{BUCKET_META[k].label}</th>
+                  ))}
+                  <SortHeader col="balance" label="Total" align="right" sortBy={sortBy} sortDir={sortDir} onSort={handleSort} />
                 </tr>
               </thead>
               <tbody>
                 {sortedRecords.length === 0 && (
-                  <tr><td colSpan={8} className="px-3 py-8 text-center text-muted-foreground font-mono text-[11px]">No customers match the current filters.</td></tr>
+                  <tr><td colSpan={6 + BUCKET_ORDER.length} className="px-3 py-8 text-center text-muted-foreground font-mono text-[11px]">No customers match the current filters.</td></tr>
                 )}
-                {sortedRecords.map((r) => {
-                  const meta = BUCKET_META[r.bucket] || BUCKET_META.unknown;
-                  return (
-                    <tr key={`${r.site_name}-${r.customer_number}`} className="border-b border-border hover:bg-muted/30">
-                      <td className="px-2 py-1.5 text-foreground">{r.customer_name || '—'}</td>
-                      <td className="px-2 py-1.5 font-mono text-muted-foreground tabular-nums">{r.customer_number || '—'}</td>
-                      <td className="px-2 py-1.5 text-muted-foreground">{r.sales_rep || '—'}</td>
-                      <td className="px-2 py-1.5 text-muted-foreground">{r.account_type || '—'}</td>
-                      <td className="px-2 py-1.5 text-muted-foreground">{r.terms || '—'}</td>
-                      <td className="px-2 py-1.5">
-                        <span className="inline-flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.15em]" style={{ color: meta.color }}>● {meta.label}</span>
-                      </td>
-                      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{r.age_days ?? '—'}</td>
-                      <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.parsed_balance)}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {sortedRecords.map((r) => (
+                  <tr key={`${r.site_name}-${r.customer_number}`} className="border-b border-border hover:bg-muted/30">
+                    <td className="px-2 py-1.5 text-foreground">{r.customer_name || '—'}</td>
+                    <td className="px-2 py-1.5 font-mono text-muted-foreground tabular-nums">{r.customer_number || '—'}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{r.sales_rep || '—'}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{r.account_type || '—'}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{r.terms || '—'}</td>
+                    {BUCKET_ORDER.map(k => {
+                      const v = r.bucket_amounts?.[k] ?? 0;
+                      return (
+                        <td key={k} className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">
+                          {v ? fmtR(v) : '—'}
+                        </td>
+                      );
+                    })}
+                    <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
+                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.parsed_balance)}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
               {sortedRecords.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-border bg-muted/30 font-semibold">
-                    <td className="px-2 py-2 text-foreground" colSpan={7}>Total ({sortedRecords.length} customers)</td>
+                    <td className="px-2 py-2 text-foreground" colSpan={5}>Total ({sortedRecords.length} customers)</td>
+                    {BUCKET_ORDER.map(k => (
+                      <td key={k} className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
+                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets[k])}
+                      </td>
+                    ))}
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
                       <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}
                     </td>

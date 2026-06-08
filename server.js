@@ -32,6 +32,7 @@ import { createSageCorrectionsRouter } from './src/routes/sageCorrections.js';
 import { createInventoryMovementRouter } from './src/routes/inventoryMovement.js';
 import { createStockReceiptRouter } from './src/routes/stockReceipts.js';
 import { createCreditorRouter } from './src/routes/creditors.js';
+import { createDebtorRouter } from './src/routes/debtors.js';
 import { createPricingRouter } from './src/routes/pricing.js';
 import { createDepotProfileRouter } from './src/routes/depotProfile.js';
 import { createCommissionRouter } from './src/routes/commission.js';
@@ -240,6 +241,9 @@ app.use(createStockReceiptRouter({ requireAuth, requirePermission }));
 // from Sage. Mounted on both modes; hub branches in the router itself
 // (read-only on hub once the ETL is wired).
 app.use(createCreditorRouter({ requireAuth, requireAdmin, requirePermission }));
+// Debtors — AR open-item sync admin (the Aged Debtors report itself is served
+// by the reporting router). Sync controls are admin-only.
+app.use(createDebtorRouter({ requireAuth, requireAdmin }));
 
 // ── Price List (Sage ICPRICP per-unit prices) ──
 app.use(createPricingRouter({ requireAuth, requireAdmin, requirePermission }));

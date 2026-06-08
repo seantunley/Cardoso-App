@@ -34,6 +34,7 @@ import DepotProfileTab from "@/components/settings/tabs/DepotProfileTab";
 import PriceListSettingsTab from "@/components/settings/tabs/PriceListSettingsTab";
 import CommissionSettingsTab from "@/components/settings/tabs/CommissionSettingsTab";
 import CreditorSettingsTab from "@/components/settings/tabs/CreditorSettingsTab";
+import DebtorSettingsTab from "@/components/settings/tabs/DebtorSettingsTab";
 
 // Section/Row — tiny layout helpers used (only) by TlsTab. Kept here and
 // re-exported (rather than moved to a _shared file) per the issue brief.
@@ -105,6 +106,7 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
         !hubMode && isAdmin && { id: "pricelist", label: "Price List" },
         !hubMode && isAdmin && { id: "commission", label: "Commission" },
         !hubMode && isAdmin && { id: "creditors", label: "Creditors" },
+        !hubMode && isAdmin && { id: "debtors", label: "Debtors" },
       ],
     },
     {
@@ -217,6 +219,7 @@ export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
               {activeTab === "pricelist" && <PriceListSettingsTab />}
               {activeTab === "commission" && <CommissionSettingsTab />}
               {activeTab === "creditors" && <CreditorSettingsTab />}
+              {activeTab === "debtors" && <DebtorSettingsTab />}
               {activeTab === "accounting" && <AccountingTab />}
               {activeTab === "sagecorrections" && <SageCorrectionsTab />}
             </TabsContent>
