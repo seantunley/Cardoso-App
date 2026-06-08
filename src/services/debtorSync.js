@@ -9,26 +9,27 @@ import { logError } from '../lib/errorLog.js';
 // (name, sales rep, account type, terms) already lives in datarecord, so this
 // service only carries the open documents.
 //
-// Sage column names below are the standard AROBL schema, but — exactly like the
-// AP side — they MUST be verified against the live install (the creditor SQL was
-// verified via INFORMATION_SCHEMA.COLUMNS). Until verified, the operator can
-// override the whole query through debtor_sync_settings.ar_invoice_sql_override.
+// Column names below were verified directly against the live Sage 300 AROBL
+// schema (INFORMATION_SCHEMA.COLUMNS) — not guessed. Operators can still
+// override the whole query through debtor_sync_settings.ar_invoice_sql_override
+// if their install has been customised.
 //
-// AR vs AP column differences to watch when verifying:
-//   - customer key is IDCUST (AP used IDVEND)
-//   - due date is DATEDUE (AP used DATEINVCDU)
-//   - confirm the home-currency suffix (AMTDUEHC vs AMTDUE) and the
-//     transaction-type column (TRXTYPE numeric vs IDTRXTYPE) and reference col.
+// AR vs AP column differences (AROBL vs APOBL):
+//   - customer key  IDCUST       (AP used IDVEND)
+//   - due date      DATEDUE      (AP used DATEINVCDU)
+//   - doc type      TRXTYPEID    (AP used IDTRXTYPE) — smallint
+//   - reference     IDORDERNBR   (AP used IDPONBR)
+//   - amounts AMTINVCHC / AMTDUEHC and DATEINVC match the AP side.
 export const DEFAULT_AR_INVOICE_SQL = `
   SELECT
-    LTRIM(RTRIM(IDCUST))           AS customer_code,
-    LTRIM(RTRIM(IDINVC))           AS document_number,
-    CAST(TRXTYPE AS varchar(10))   AS document_type,
-    DATEINVC                       AS document_date_int,
-    DATEDUE                        AS due_date_int,
-    AMTINVCHC                      AS original_amount,
-    AMTDUEHC                       AS outstanding_amount,
-    LTRIM(RTRIM(ORDRNBR))          AS reference
+    LTRIM(RTRIM(IDCUST))             AS customer_code,
+    LTRIM(RTRIM(IDINVC))             AS document_number,
+    CAST(TRXTYPEID AS varchar(10))   AS document_type,
+    DATEINVC                         AS document_date_int,
+    DATEDUE                          AS due_date_int,
+    AMTINVCHC                        AS original_amount,
+    AMTDUEHC                         AS outstanding_amount,
+    LTRIM(RTRIM(IDORDERNBR))         AS reference
   FROM AROBL
   WHERE AMTDUEHC <> 0
 `;
