@@ -222,7 +222,7 @@ function buildPrintStyle(id, orientation) {
   }
 
   .report-print-header {
-    display: flex;
+    display: flex !important;
     align-items: flex-end;
     justify-content: space-between;
     padding-bottom: 4mm;
@@ -350,7 +350,7 @@ function buildPrintStyle(id, orientation) {
     color: #999;
     border-top: 0.25pt solid #ccc;
     padding-top: 1mm;
-    display: flex;
+    display: flex !important;
     justify-content: space-between;
   }
 }
