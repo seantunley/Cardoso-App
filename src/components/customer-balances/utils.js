@@ -19,6 +19,10 @@ export function formatAmount(val) {
 export function getVisibleAccountType(accountType) {
   const value = String(accountType || "").trim().toUpperCase();
   if (!value || value === "SUB_ACCOUNT") return null;
+  // Short labels so the pill fits its fixed-width slot without overlapping the
+  // customer name (NATIONAL_ACCOUNT is too long otherwise).
+  if (value.includes("NATIONAL")) return "NATIONAL";
+  if (value.includes("STANDARD")) return "STANDARD";
   return value;
 }
 

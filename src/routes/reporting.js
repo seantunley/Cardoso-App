@@ -394,6 +394,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
     const lastPurchaseDays = Math.max(parseInt(req.query.lastPurchaseDays, 10) || 0, 0);
     const dormantOnly = ['1', 'true', 'yes', 'on'].includes(String(req.query.dormantOnly || '').toLowerCase());
+    // National-account filter: 'all' | 'national' | 'standard'.
+    const accountTypeFilter = String(req.query.accountType || 'all').trim().toLowerCase();
 
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
@@ -406,7 +408,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       hideInvoiceMatchesBalance ||
       salesRepFilter !== 'all' ||
       lastPurchaseDays > 0 ||
-      dormantOnly;
+      dormantOnly ||
+      accountTypeFilter !== 'all';
 
     try {
       let sites = [];
@@ -486,7 +489,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         const fetchSql = needsInMemoryFilter
           ? `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
-                    flag_color, flag_reason, auto_flagged, terms,
+                    flag_color, flag_reason, auto_flagged,
+                    json_extract(data, '$.terms') AS terms,
+                    json_extract(data, '$.location') AS location,
+                    json_extract(data, '$.age_current') AS age_current,
+                    json_extract(data, '$.age_1_7') AS age_1_7,
+                    json_extract(data, '$.age_8_14') AS age_8_14,
+                    json_extract(data, '$.age_15_21') AS age_15_21,
+                    json_extract(data, '$.age_over_21') AS age_over_21,
                     local_fields,
                     ? AS site_name
              FROM datarecord
@@ -496,7 +506,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
              ORDER BY outstanding_balance_num DESC`
           : `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
-                    flag_color, flag_reason, auto_flagged, terms,
+                    flag_color, flag_reason, auto_flagged,
+                    json_extract(data, '$.terms') AS terms,
+                    json_extract(data, '$.location') AS location,
+                    json_extract(data, '$.age_current') AS age_current,
+                    json_extract(data, '$.age_1_7') AS age_1_7,
+                    json_extract(data, '$.age_8_14') AS age_8_14,
+                    json_extract(data, '$.age_15_21') AS age_15_21,
+                    json_extract(data, '$.age_over_21') AS age_over_21,
                     local_fields,
                     ? AS site_name,
                     COUNT(*) OVER() AS _total_count,
@@ -538,37 +555,41 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // ── In-memory pagination path (age bucket / invoice-match / sales rep active) ──
       let recordsForPage;
       let pageTotalOutstanding;
+
+      // Aging summary for the on-screen tiles. The buckets are computed in the
+      // customer sync query (so each record's buckets sum to its balance), so
+      // summing them over the SAME set as the list total makes the tiles
+      // reconcile to the displayed total by construction.
+      let aging = null;
+      const AGE_COLS = [['current', 'age_current'], ['1-7', 'age_1_7'], ['8-14', 'age_8_14'], ['15-21', 'age_15_21'], ['over-21', 'age_over_21']];
+      const sumBuckets = (rs) => {
+        const buckets = { current: 0, '1-7': 0, '8-14': 0, '15-21': 0, 'over-21': 0 };
+        const bucket_counts = { current: 0, '1-7': 0, '8-14': 0, '15-21': 0, 'over-21': 0 };
+        let total = 0;
+        for (const r of rs) for (const [k, col] of AGE_COLS) { const v = Number(r[col]) || 0; buckets[k] += v; if (v !== 0) bucket_counts[k] += 1; total += v; }
+        return { buckets, bucket_counts, total_outstanding: total };
+      };
+
       if (needsInMemoryFilter) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        // Per-customer AR aging from the open-item ledger via the SHARED engine
-        // — identical source + method to the Aged Debtors report, so the bucket
-        // filter agrees with that report's numbers (a customer is "in" a bucket
-        // iff their Aged Debtors balance for that period is non-zero). Built
-        // once per request, only when actually filtering by bucket. Site mode
-        // only; hub keeps the legacy snapshot aging until PR3's ETL populates
-        // hub_debtor_ar_invoice.
-        let arAging = null;
-        if (ageBucket !== 'all' && !isHub) {
-          const docs = prep(
-            "SELECT customer_code, document_date, due_date, outstanding_amount FROM debtor_ar_invoice WHERE source_table = 'AROBL' AND outstanding_amount <> 0"
-          ).all().map((d) => ({
-            entityCode: String(d.customer_code || '').trim(),
-            date: d.document_date,
-            dueDate: d.due_date,
-            outstanding: d.outstanding_amount,
-          }));
-          const aged = ageOpenItems(docs); // document-date basis + Sage buckets (defaults)
-          arAging = new Map(aged.entities.map((e) => [e.entityCode, e.bucket_amounts]));
-        }
-
         const filtered = allRecords.filter((row) => {
           if (ageBucket !== 'all') {
-            const inBucket = arAging
-              ? (arAging.get(String(row.customer_number || '').trim())?.[ageBucket] || 0) !== 0
-              : matchesAgeBucket(row, ageBucket); // hub fallback (legacy snapshot aging)
-            if (!inBucket) return false;
+            // Buckets come straight off the record (computed in the customer
+            // sync query, so they reconcile to the balance). 'over-21' -> age_over_21.
+            if (!isHub) {
+              const key = 'age_' + ageBucket.replace(/-/g, '_');
+              if ((Number(row[key]) || 0) === 0) return false;
+            } else if (!matchesAgeBucket(row, ageBucket)) {
+              return false; // hub fallback (legacy snapshot aging) until PR3 ETL
+            }
+          }
+          if (accountTypeFilter !== 'all') {
+            const at = String(row.account_type || '').trim().toUpperCase();
+            const isNational = at.includes('NATIONAL');
+            if (accountTypeFilter === 'national' && !isNational) return false;
+            if (accountTypeFilter === 'standard' && isNational) return false;
           }
           if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
           if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
@@ -594,11 +615,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         });
         total = filtered.length;
         filteredTotalOutstanding = filtered.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
+        if (!isHub) aging = sumBuckets(filtered);
         const start = (page - 1) * limit;
         recordsForPage = filtered.slice(start, start + limit);
         console.log(`[balances-perf] ageBucket=${ageBucket} salesRep=${salesRepFilter} hideMatch=${hideInvoiceMatchesBalance} fetched=${allRecords.length} matched=${filtered.length} pageSize=${recordsForPage.length}`);
       } else {
         recordsForPage = allRecords;
+        if (!isHub) aging = sumBuckets(allRecords);
       }
       pageTotalOutstanding = recordsForPage.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -633,23 +656,6 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         salesReps = distinctRows.map(r => r.sales_rep).filter(Boolean).sort((a, b) => a.localeCompare(b));
       }
 
-      // AR aging summary for the on-screen tiles — full site open-item ledger
-      // via the SHARED engine, so the tiles agree with the Aged Debtors report.
-      // Site mode only (hub gets it once PR3's ETL populates the hub ledger).
-      let aging = null;
-      if (!isHub) {
-        const agingDocs = prep(
-          "SELECT customer_code, document_date, due_date, outstanding_amount FROM debtor_ar_invoice WHERE source_table = 'AROBL' AND outstanding_amount <> 0"
-        ).all().map((d) => ({
-          entityCode: String(d.customer_code || '').trim(),
-          date: d.document_date,
-          dueDate: d.due_date,
-          outstanding: d.outstanding_amount,
-        }));
-        const aged = ageOpenItems(agingDocs);
-        aging = { buckets: aged.buckets, bucket_counts: aged.bucket_counts, total_outstanding: aged.total_outstanding };
-      }
-
       res.json({
         records: recordsForPage,
         total,
@@ -661,8 +667,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         salesReps,
         ageBucket,
         salesRep: salesRepFilter,
-        minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
+        accountType: accountTypeFilter,
         aging,
+        minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
       });
     } catch (err) {
       console.error('top-balances error', err);

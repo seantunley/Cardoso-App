@@ -4,7 +4,7 @@ import { parseAmount } from "./utils";
 // virtualised table (one page = PAGE_SIZE rows) and as a building block
 // for fetchAllTopBalances() below.
 /** @returns {Promise<import('@/types/api-rows').TopBalancesResponse>} */
-export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
+export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType }) {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
@@ -15,6 +15,7 @@ export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, sal
   if (hideInvoiceMatchesBalance) params.set("hideInvoiceMatchesBalance", "1");
   if (lastPurchaseDays && lastPurchaseDays !== "all") params.set("lastPurchaseDays", String(lastPurchaseDays));
   if (dormantOnly) params.set("dormantOnly", "1");
+  if (accountType && accountType !== "all") params.set("accountType", accountType);
 
   const res = await fetch(`/api/top-balances?${params.toString()}`, { credentials: "include" });
   if (!res.ok) {
@@ -44,7 +45,7 @@ export async function fetchTopBalances({ page, limit, siteFilter, ageBucket, sal
 // (the screen view caps at PAGE_SIZE). Only triggered when totalRecords
 // exceeds PAGE_SIZE, gated by the printData useQuery's `enabled`.
 /** @returns {Promise<import('@/types/api-rows').TopBalancesResponse>} */
-export async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }) {
+export async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType }) {
   const firstPage = await fetchTopBalances({
     page: 1,
     limit: 200,
@@ -54,6 +55,7 @@ export async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilte
     hideInvoiceMatchesBalance,
     lastPurchaseDays,
     dormantOnly,
+    accountType,
   });
 
   if ((firstPage?.totalPages ?? 1) <= 1) return firstPage;
@@ -69,6 +71,7 @@ export async function fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilte
       hideInvoiceMatchesBalance,
       lastPurchaseDays,
       dormantOnly,
+      accountType,
     });
     allRecords.push(...(pageData.records ?? []));
   }

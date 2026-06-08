@@ -26,7 +26,7 @@ function Tile({ label, value, sub, accent = 'var(--phosphor)', big = false }) {
   );
 }
 
-export default function AgingSummaryTiles({ aging, tiles, entityWord = 'cust', className = '' }) {
+export default function AgingSummaryTiles({ aging, tiles, entityWord = 'cust', showCount = true, className = '' }) {
   if (!aging) return null;
   return (
     <div className={`mb-4 grid gap-4 grid-cols-2 lg:grid-cols-5 ${className}`}>
@@ -36,7 +36,7 @@ export default function AgingSummaryTiles({ aging, tiles, entityWord = 'cust', c
           key={t.key}
           label={t.label}
           value={za(aging.buckets?.[t.key])}
-          sub={`${(aging.bucket_counts?.[t.key] ?? 0).toLocaleString('en-ZA')} ${entityWord}`}
+          sub={showCount ? `${(aging.bucket_counts?.[t.key] ?? 0).toLocaleString('en-ZA')} ${entityWord}` : null}
           accent={t.color}
         />
       ))}

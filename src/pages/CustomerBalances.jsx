@@ -56,6 +56,7 @@ export default function CustomerBalances() {
   // or a string number of days ("30", "60", "90", "180", "365").
   const [lastPurchaseDays, setLastPurchaseDays] = useState("all");
   const [dormantOnly, setDormantOnly] = useState(false);
+  const [accountTypeFilter, setAccountTypeFilter] = useState("all"); // all | national | standard
   // Controlled <details> open state so the filter panel stays put
   // across React re-renders (refetches, sort clicks, etc.) — without
   // this, native <details> gets unmounted by conditional rendering and
@@ -99,8 +100,8 @@ export default function CustomerBalances() {
   }, []);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
-    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter }),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -123,8 +124,8 @@ export default function CustomerBalances() {
   const totalRecords = data?.total ?? 0;
 
   const { data: printData } = useQuery({
-    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly],
-    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly }),
+    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter],
+    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter }),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
     enabled: totalRecords > PAGE_SIZE,
@@ -187,6 +188,17 @@ export default function CustomerBalances() {
     const raw = data?.records ?? [];
     return sortRows(raw);
   }, [data?.records, sortField, sortDir, creditScores]);
+
+  // Aging tiles computed over the rows actually shown, so they always match the
+  // list/total regardless of where filtering happens (server or client).
+  const arAging = useMemo(() => {
+    const cols = [["current", "age_current"], ["1-7", "age_1_7"], ["8-14", "age_8_14"], ["15-21", "age_15_21"], ["over-21", "age_over_21"]];
+    const buckets = { current: 0, "1-7": 0, "8-14": 0, "15-21": 0, "over-21": 0 };
+    const bucket_counts = { current: 0, "1-7": 0, "8-14": 0, "15-21": 0, "over-21": 0 };
+    let total = 0;
+    for (const r of rows) for (const [k, c] of cols) { const v = Number(r[c]) || 0; buckets[k] += v; if (v !== 0) bucket_counts[k] += 1; total += v; }
+    return { buckets, bucket_counts, total_outstanding: total };
+  }, [rows]);
 
   // Row virtualization — rendering 5,000 <tr>s at once paints slow and
   // makes scroll janky. The virtualizer keeps only ~30 visible rows in the
@@ -280,6 +292,8 @@ export default function CustomerBalances() {
               setLastPurchaseDays={setLastPurchaseDays}
               dormantOnly={dormantOnly}
               setDormantOnly={setDormantOnly}
+              accountTypeFilter={accountTypeFilter}
+              setAccountTypeFilter={setAccountTypeFilter}
               siteFilter={siteFilter}
               setSiteFilter={setSiteFilter}
               salesRepFilter={salesRepFilter}
@@ -294,14 +308,12 @@ export default function CustomerBalances() {
             />
           )}
 
-          {/* Aging summary tiles — the full A/R aging picture (from the same
-              open-item engine as Aged Debtors), independent of the active
-              bucket/rep filter so it stays a constant overview. */}
-          {data?.aging && (
-            <AgingSummaryTiles aging={data.aging} tiles={AR_TILES} entityWord="cust" />
+          {/* Aging tiles — summed over the rows shown, so they always match
+              the list/total under any filter. */}
+          {rows.length > 0 && (
+            <AgingSummaryTiles aging={arAging} tiles={AR_TILES} entityWord="cust" />
           )}
 
-          {/* Filtered total reflects the current selection (bucket / rep / site). */}
           {rows.length > 0 && (
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <SummaryTile
@@ -364,6 +376,8 @@ export default function CustomerBalances() {
                   <col style={{ width: pct("custId") }} />
                   <col style={{ width: pct("site") }} />
                   <col style={{ width: pct("rep") }} />
+                  <col style={{ width: pct("location") }} />
+                  <col style={{ width: pct("terms") }} />
                   <col style={{ width: pct("lastInv") }} />
                   <col style={{ width: pct("lastRec") }} />
                   <col style={{ width: pct("outstanding") }} />
@@ -376,6 +390,8 @@ export default function CustomerBalances() {
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("customer_number")} tabIndex={0} onKeyDown={sortKeyDown("customer_number")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Customer ID<SortArrow field="customer_number" /></span><ResizeHandle id="custId" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer account number — click to sort (numeric-aware)</TooltipContent></Tooltip>
                     <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Site</span><ResizeHandle id="site" startResize={startResize} resetColumn={resetColumn} /></th>
                     <th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Sales Rep</span><ResizeHandle id="rep" startResize={startResize} resetColumn={resetColumn} /></th>
+                    <Tooltip><TooltipTrigger asChild><th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Location</span><ResizeHandle id="location" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Customer location (Sage customer master)</TooltipContent></Tooltip>
+                    <Tooltip><TooltipTrigger asChild><th className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide"><span className="block truncate">Terms</span><ResizeHandle id="terms" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Payment terms code (Sage customer master)</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_invoice_date")} tabIndex={0} onKeyDown={sortKeyDown("last_invoice_date")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Last Invoice<SortArrow field="last_invoice_date" /></span><ResizeHandle id="lastInv" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Date of the most recent unpaid invoice — click to sort</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("last_receipt_date")} tabIndex={0} onKeyDown={sortKeyDown("last_receipt_date")} className="relative px-2 py-1.5 text-left text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Last Receipt<SortArrow field="last_receipt_date" /></span><ResizeHandle id="lastRec" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Date of the most recent payment received — click to sort</TooltipContent></Tooltip>
                     <Tooltip><TooltipTrigger asChild><th onClick={() => handleSort("outstanding_balance")} tabIndex={0} onKeyDown={sortKeyDown("outstanding_balance")} className="relative px-2 py-1.5 text-right text-xs font-medium text-muted-foreground uppercase tracking-wide cursor-pointer select-none hover:text-foreground transition-colors"><span className="block truncate">Outstanding Balance<SortArrow field="outstanding_balance" /></span><ResizeHandle id="outstanding" startResize={startResize} resetColumn={resetColumn} /></th></TooltipTrigger><TooltipContent>Total amount currently owed — click to sort</TooltipContent></Tooltip>
@@ -392,7 +408,7 @@ export default function CustomerBalances() {
                       : 0;
                     return (
                       <>
-                        {paddingTop > 0 && <tr aria-hidden="true"><td colSpan={9} style={{ height: paddingTop, padding: 0, border: 0 }} /></tr>}
+                        {paddingTop > 0 && <tr aria-hidden="true"><td colSpan={11} style={{ height: paddingTop, padding: 0, border: 0 }} /></tr>}
                         {virtualItems.map((v) => {
                           const idx = v.index;
                           const row = rows[idx];
@@ -413,7 +429,7 @@ export default function CustomerBalances() {
                             />
                           );
                         })}
-                        {paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={9} style={{ height: paddingBottom, padding: 0, border: 0 }} /></tr>}
+                        {paddingBottom > 0 && <tr aria-hidden="true"><td colSpan={11} style={{ height: paddingBottom, padding: 0, border: 0 }} /></tr>}
                       </>
                     );
                   })()}

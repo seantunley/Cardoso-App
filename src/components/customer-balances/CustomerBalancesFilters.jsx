@@ -10,6 +10,7 @@ export default function CustomerBalancesFilters({
   ageBucket, setAgeBucket,
   lastPurchaseDays, setLastPurchaseDays,
   dormantOnly, setDormantOnly,
+  accountTypeFilter, setAccountTypeFilter,
   siteFilter, setSiteFilter,
   salesRepFilter, setSalesRepFilter,
   hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance,
@@ -27,6 +28,7 @@ export default function CustomerBalancesFilters({
         ageBucket !== "all" && { key: "age",   label: activeAgeBucketLabel,                onClear: () => setAgeBucket("all") },
         lastPurchaseDays !== "all" && { key: "last", label: `Last purchase ${lastPurchaseDays}+ days`, onClear: () => setLastPurchaseDays("all") },
         dormantOnly && { key: "dormant", label: "Dormant only", onClear: () => setDormantOnly(false) },
+        accountTypeFilter !== "all" && { key: "acct", label: accountTypeFilter === "national" ? "National accounts" : "Standard accounts", onClear: () => setAccountTypeFilter("all") },
         siteFilter !== "all" && { key: "site", label: siteFilter, onClear: () => setSiteFilter("all") },
         salesRepFilter !== "all" && { key: "rep",  label: `Rep ${salesRepFilter}`, onClear: () => setSalesRepFilter("all") },
         hideInvoiceMatchesBalance && { key: "hide", label: "Hide invoice = balance", onClear: () => setHideInvoiceMatchesBalance(false) },
@@ -35,6 +37,7 @@ export default function CustomerBalancesFilters({
         setAgeBucket("all");
         setLastPurchaseDays("all");
         setDormantOnly(false);
+        setAccountTypeFilter("all");
         setSiteFilter("all");
         setSalesRepFilter("all");
         setHideInvoiceMatchesBalance(false);
@@ -117,6 +120,16 @@ export default function CustomerBalancesFilters({
           )}
 
           <div className="flex items-center gap-2 ml-auto flex-wrap">
+            <select
+              value={accountTypeFilter}
+              onChange={(e) => { setAccountTypeFilter(e.target.value); setPage(1); }}
+              className="rounded-md border border-border bg-card px-2 py-1.5 text-xs text-foreground"
+              title="Filter by account type (national accounts vs standard customers)"
+            >
+              <option value="all">All accounts</option>
+              <option value="national">National accounts</option>
+              <option value="standard">Standard accounts</option>
+            </select>
             <FilterToggle
               active={dormantOnly}
               onClick={() => { setDormantOnly((v) => !v); setPage(1); }}

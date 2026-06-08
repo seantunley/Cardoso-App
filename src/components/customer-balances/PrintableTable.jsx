@@ -39,6 +39,8 @@ export default function PrintableTable({
             <th>Customer Name</th>
             <th>Customer ID</th>
             {sites.length > 1 && <th>Site</th>}
+            <th>Location</th>
+            <th>Terms</th>
             <th>Last Invoice</th>
             <th>Last Receipt</th>
             <th className="td-right">Outstanding Balance</th>
@@ -62,6 +64,8 @@ export default function PrintableTable({
                 </td>
                 <td className="td-mono td-muted">{row.customer_number || "—"}</td>
                 {sites.length > 1 && <td className="td-muted">{row.site_name || "—"}</td>}
+                <td className="td-muted">{row.location || "—"}</td>
+                <td className="td-muted">{row.terms || "—"}</td>
                 <td>
                   <div className="td-mono">{row.last_unpaid_invoice_1 || "—"}</div>
                   {row.last_unpaid_invoice_1_amount && <div>R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}
