@@ -6,18 +6,30 @@
 // and the shared report formatters/tiles so styling stays consistent.
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Wallet, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb } from "lucide-react";
+import { Wallet, Receipt, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb } from "lucide-react";
 import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import PageHeader from "@/components/PageHeader";
 
+// AR (debtors) age weekly by document date; keys match the aging engine's
+// AR_SCHEME (current/1-7/8-14/15-21/over-21).
 const BUCKET_META = [
   { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
-  { key: "7-13", label: "7–13d", color: "hsl(50 90% 55%)" },
-  { key: "14-20", label: "14–20d", color: "hsl(33 95% 55%)" },
-  { key: "21+", label: "21+d", color: "hsl(0 72% 50%)" },
+  { key: "1-7", label: "1–7d", color: "hsl(80 60% 45%)" },
+  { key: "8-14", label: "8–14d", color: "hsl(50 90% 55%)" },
+  { key: "15-21", label: "15–21d", color: "hsl(33 95% 55%)" },
+  { key: "over-21", label: "Over 21d", color: "hsl(0 72% 50%)" },
+];
+
+// AP (creditors) age monthly by due date (Sage Aged Payables periods).
+const AP_BUCKET_META = [
+  { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
+  { key: "1-30", label: "1–30d", color: "hsl(80 60% 45%)" },
+  { key: "31-60", label: "31–60d", color: "hsl(50 90% 55%)" },
+  { key: "61-90", label: "61–90d", color: "hsl(33 95% 55%)" },
+  { key: "over-90", label: "Over 90d", color: "hsl(0 72% 50%)" },
 ];
 
 // A card that wraps a report summary with a header + deep-link.
@@ -103,6 +115,45 @@ function AgedDebtorsCard() {
           </div>
           <div className="space-y-1">
             {BUCKET_META.map((b) => (
+              <div key={b.key} className="flex items-center justify-between text-xs">
+                <span className="flex items-center gap-1.5 text-muted-foreground">
+                  <span className="h-2 w-2 rounded-full" style={{ background: b.color }} />
+                  {b.label}
+                </span>
+                <span className="tabular-nums text-foreground">R {fmtR(s?.buckets?.[b.key])}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </ReportCard>
+  );
+}
+
+function AgedCreditorsCard() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["dash-aged-creditors"],
+    queryFn: () => apiGet("/api/reports/aged-creditors"),
+    staleTime: 60_000,
+  });
+  const s = data?.summary;
+  return (
+    <ReportCard icon={Receipt} title="Aged Creditors" accent="hsl(280 70% 65%)" to="/Reports" query="aged-creditors">
+      {error ? (
+        <CardError error={error} onRetry={refetch} />
+      ) : isLoading ? (
+        <CardSkeleton />
+      ) : (
+        <>
+          <div className="mb-3">
+            <div className="text-2xl font-semibold tabular-nums text-foreground">
+              <span className="mr-1 text-muted-foreground/60">R</span>
+              {fmtR(s?.total_outstanding)}
+            </div>
+            <div className="text-xs text-muted-foreground">{s?.total_vendors ?? 0} vendors outstanding</div>
+          </div>
+          <div className="space-y-1">
+            {AP_BUCKET_META.map((b) => (
               <div key={b.key} className="flex items-center justify-between text-xs">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
                   <span className="h-2 w-2 rounded-full" style={{ background: b.color }} />
@@ -284,6 +335,7 @@ export default function ReportingDashboard() {
       {/* Report summary cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <AgedDebtorsCard />
+        <AgedCreditorsCard />
         <RepExposureCard />
         <InventoryValueCard />
         <BatCard />
