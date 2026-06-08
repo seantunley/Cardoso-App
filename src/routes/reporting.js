@@ -1186,8 +1186,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         // hub_debtor_ar_invoice). Use the per-customer snapshot in hub_records —
         // the same source the hub Customer Balances already reads — so the
         // report still returns balances + site filters instead of an empty
-        // page. Each customer becomes one pseudo-document aged by its most
-        // recent invoice date (snapshot precision) until the open-item ETL lands.
+        // page. Each customer becomes one pseudo-document aged by the OLDEST
+        // dated unpaid invoice in its snapshot until the open-item ETL lands.
         if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; params.push(siteFilter); }
         sites = prep(
           `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
@@ -1203,13 +1203,27 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            WHERE r.outstanding_balance_num <> 0 ${whereSite}`
         ).all(...params).map((r) => {
           const inv = parseJsonSafely(r.unpaid_invoices, []);
-          const lastDate = Array.isArray(inv) && inv.length ? (inv[0]?.date || null) : null;
+          // Scan every unpaid line for the OLDEST date — the snapshot array is
+          // not guaranteed oldest-first, and using inv[0] alone places a
+          // customer whose older invoice sits later in the array into a younger
+          // bucket, understating the aged-debtors summary. hub_records carries no
+          // flat date column, so the JSON snapshot is the only source; null when
+          // absent → the engine's "unknown" bucket (balance still counted).
+          let oldestDate = null, oldestT = Infinity;
+          if (Array.isArray(inv)) {
+            for (const it of inv) {
+              const raw = it?.date;
+              if (!raw) continue;
+              const t = Date.parse(raw);
+              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+            }
+          }
           return {
             ...r,
             document_number: r.customer_code,
             document_type: '',
-            document_date: lastDate,
-            due_date: lastDate,
+            document_date: oldestDate,
+            due_date: oldestDate,
             outstanding_amount: r.outstanding_balance_num,
             reference: '',
           };
