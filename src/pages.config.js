@@ -78,6 +78,7 @@ const HubCommission = React.lazy(() => import('./pages/HubCommission'));
 const Trends = React.lazy(() => import('./pages/Trends'));
 const CreditorSummary = React.lazy(() => import('./pages/CreditorSummary'));
 const CreditorSearch = React.lazy(() => import('./pages/CreditorSearch'));
+const CreditorAging = React.lazy(() => import('./pages/CreditorAging'));
 
 
 export const PAGES = {
@@ -113,6 +114,7 @@ export const PAGES = {
     "HubCommission": HubCommission,
     "CreditorSummary": CreditorSummary,
     "CreditorSearch": CreditorSearch,
+    "CreditorAging": CreditorAging,
 }
 
 export const pagesConfig = {

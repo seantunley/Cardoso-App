@@ -1,9 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
 import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, ChevronRight } from 'lucide-react';
 import SavedViews from '@/components/reports/SavedViews';
-import { apiGet } from '@/components/collections/utils';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
 // active report is the only chunk fetched, instead of shipping all six
@@ -29,7 +27,7 @@ const REPORTS = [
     group: 'Accounts Payable',
     accent: 'hsl(280 70% 65%)',
     items: [
-      { id: 'aged-creditors', name: 'Aged Creditors', icon: Receipt, accent: 'hsl(280 70% 65%)', component: AgedCreditors, ready: true, permission: 'can_access_creditors' },
+      { id: 'aged-creditors', name: 'Aged Creditors', icon: Receipt, accent: 'hsl(280 70% 65%)', component: AgedCreditors, ready: true },
     ],
   },
   {
@@ -50,30 +48,21 @@ const REPORTS = [
   },
 ];
 
+const ALL_ITEMS = REPORTS.flatMap(g => g.items);
+
 export default function Reports() {
   // The active report lives in the URL (?report=<id>) so dashboard deep-links,
   // saved views, and browser back/forward all work and the view is shareable.
   const [searchParams, setSearchParams] = useSearchParams();
-
-  // Some reports (e.g. Aged Creditors) are gated on a specific permission; hide
-  // them from the menu rather than show an item that 403s on click. Admins and
-  // users with the flag see them; everyone else doesn't.
-  const me = useQuery({ queryKey: ['me'], queryFn: () => apiGet('/api/auth/me'), staleTime: 300_000 });
-  const canSee = (item) => !item.permission || me.data?.role === 'admin' || !!me.data?.[item.permission];
-  const groups = REPORTS
-    .map(g => ({ ...g, items: g.items.filter(canSee) }))
-    .filter(g => g.items.length);
-  const allItems = groups.flatMap(g => g.items);
-
   const requested = searchParams.get('report');
-  const activeId = allItems.some(i => i.id === requested) ? requested : 'aged-debtors';
+  const activeId = ALL_ITEMS.some(i => i.id === requested) ? requested : 'aged-debtors';
   const setActiveId = (id) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('report', id);
       return next;
     }, { replace: true });
-  const active = allItems.find(i => i.id === activeId);
+  const active = ALL_ITEMS.find(i => i.id === activeId);
 
   return (
     <div
@@ -96,7 +85,7 @@ export default function Reports() {
 
         <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
           <aside className="report-print-hide space-y-5">
-            {groups.map(group => (
+            {REPORTS.map(group => (
               <div key={group.group}>
                 <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2 px-1">
                   {group.group}

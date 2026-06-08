@@ -339,9 +339,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // it isn't entitled to. Fallback to requireAuth-only if requirePermission
   // wasn't supplied (defensive; server.js always passes it).
   const reportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports')] : [requireAuth];
-  // Aged Creditors exposes vendor (AP) balances, so it's gated on the same
-  // permission as the Creditors module, not the general reports permission.
-  const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_creditors')] : [requireAuth];
+  // Aged Creditors is reachable from BOTH the Reports page (Reports users) and
+  // the Creditors module (Creditor users), so it accepts EITHER permission
+  // (requirePermission is OR over its keys). Keeps the API in step with both
+  // entry points instead of locking out whichever group lacks the other grant.
+  const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports', 'can_access_creditors')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
 
