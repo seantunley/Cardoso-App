@@ -22,16 +22,20 @@ import { logError } from '../lib/errorLog.js';
 //   - amounts AMTINVCHC / AMTDUEHC and DATEINVC match the AP side.
 export const DEFAULT_AR_INVOICE_SQL = `
   SELECT
-    LTRIM(RTRIM(IDCUST))             AS customer_code,
-    LTRIM(RTRIM(IDINVC))             AS document_number,
-    CAST(TRXTYPEID AS varchar(10))   AS document_type,
-    DATEINVC                         AS document_date_int,
-    DATEDUE                          AS due_date_int,
-    AMTINVCHC                        AS original_amount,
-    AMTDUEHC                         AS outstanding_amount,
-    LTRIM(RTRIM(IDORDERNBR))         AS reference
-  FROM AROBL
-  WHERE AMTDUEHC <> 0
+    LTRIM(RTRIM(o.IDCUST))           AS customer_code,
+    CASE WHEN NULLIF(LTRIM(RTRIM(c.IDNATACCT)), '') IS NOT NULL
+         THEN LTRIM(RTRIM(c.IDNATACCT))
+         ELSE LTRIM(RTRIM(o.IDCUST)) END AS reporting_account,
+    LTRIM(RTRIM(o.IDINVC))           AS document_number,
+    CAST(o.TRXTYPEID AS varchar(10)) AS document_type,
+    o.DATEINVC                       AS document_date_int,
+    o.DATEDUE                        AS due_date_int,
+    o.AMTINVCHC                      AS original_amount,
+    o.AMTDUEHC                       AS outstanding_amount,
+    LTRIM(RTRIM(o.IDORDERNBR))       AS reference
+  FROM AROBL o
+  LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
+  WHERE o.AMTDUEHC <> 0
 `;
 
 function intToDateStr(n) {
@@ -88,11 +92,12 @@ async function syncArInvoices(pool, settings) {
 
   const upsert = db.prepare(`
     INSERT INTO debtor_ar_invoice (
-      source_table, customer_code, document_number, document_type,
+      source_table, customer_code, reporting_account, document_number, document_type,
       document_date, due_date, original_amount, outstanding_amount, reference, synced_at
     )
-    VALUES ('AROBL', ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+    VALUES ('AROBL', ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
     ON CONFLICT(source_table, customer_code, document_number) DO UPDATE SET
+      reporting_account  = excluded.reporting_account,
       document_type      = excluded.document_type,
       document_date      = excluded.document_date,
       due_date           = excluded.due_date,
@@ -109,6 +114,9 @@ async function syncArInvoices(pool, settings) {
       if (!r.customer_code || !r.document_number) continue;
       upsert.run(
         r.customer_code,
+        // Fall back to the customer's own code when it isn't a national member,
+        // so every row carries a reporting account to age + join on.
+        String(r.reporting_account || r.customer_code).trim(),
         r.document_number,
         r.document_type || null,
         intToDateStr(r.document_date_int),

@@ -17,7 +17,7 @@ import { pagination } from '../lib/httpParams.js';
 // See the helpers' docstrings in src/services/batReconciliation.js for
 // the architectural rule (hub mirrors site; never inline a parallel
 // SELECT here or the two views can drift again).
-import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/batReconciliation.js';
+import { getLastPaidSageWeek, getLastBatReconciliationWeek, getSagePool } from '../services/batReconciliation.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
@@ -349,6 +349,63 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports', 'can_access_creditors')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
+
+  // GET /api/reports/ar-document-summary?from=YYYY-MM-DD&to=YYYY-MM-DD
+  // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
+  // VAT split out, queried LIVE from Sage AROBL. The query aggregates in SQL
+  // Server (one row per month) so the result is tiny. Document kind comes from
+  // TRXTYPEID (14 = invoice, 24 = debit note, 32 = credit note) — verified
+  // against this install. Tax: AMTTXBLHC + AMTNONTXHC = ex-VAT, AMTTAXHC = VAT.
+  router.get('/api/reports/ar-document-summary', ...reportsGuard, async (req, res) => {
+    try {
+      const ymd = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(`${m[1]}${m[2]}${m[3]}`) : null; };
+      const now = new Date();
+      const from = ymd(req.query.from) || Number(`${now.getFullYear()}0101`);
+      const to = ymd(req.query.to) || Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`);
+
+      const pool = await getSagePool();
+      const rs = await pool.request().input('from', from).input('to', to).query(`
+        SELECT LEFT(CAST(DATEINVC AS varchar(8)), 6) AS ym,
+          SUM(CASE WHEN TRXTYPEID = 14 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS inv_excl,
+          SUM(CASE WHEN TRXTYPEID = 14 THEN AMTTAXHC ELSE 0 END)               AS inv_vat,
+          SUM(CASE WHEN TRXTYPEID = 24 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS dn_excl,
+          SUM(CASE WHEN TRXTYPEID = 24 THEN AMTTAXHC ELSE 0 END)               AS dn_vat,
+          SUM(CASE WHEN TRXTYPEID = 32 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS cn_excl,
+          SUM(CASE WHEN TRXTYPEID = 32 THEN AMTTAXHC ELSE 0 END)               AS cn_vat
+        FROM AROBL
+        WHERE DATEINVC BETWEEN @from AND @to AND TRXTYPEID IN (14, 24, 32)
+        GROUP BY LEFT(CAST(DATEINVC AS varchar(8)), 6)
+        ORDER BY ym`);
+
+      const mk = (excl, vat) => ({ excl, vat, incl: excl + vat });
+      const months = rs.recordset.map((r) => {
+        const invoices = mk(Number(r.inv_excl) || 0, Number(r.inv_vat) || 0);
+        const debit_notes = mk(Number(r.dn_excl) || 0, Number(r.dn_vat) || 0);
+        // Credit notes post negative in Sage — flip to positive magnitudes for display.
+        const credit_notes = mk(-(Number(r.cn_excl) || 0), -(Number(r.cn_vat) || 0));
+        const ym = String(r.ym);
+        return {
+          month: `${ym.slice(0, 4)}-${ym.slice(4, 6)}`,
+          invoices, credit_notes, debit_notes,
+          net_incl: invoices.incl + debit_notes.incl - credit_notes.incl,
+        };
+      });
+
+      const blank = () => ({ excl: 0, vat: 0, incl: 0 });
+      const totals = { invoices: blank(), credit_notes: blank(), debit_notes: blank(), net_incl: 0 };
+      for (const m of months) {
+        for (const k of ['invoices', 'credit_notes', 'debit_notes']) {
+          totals[k].excl += m[k].excl; totals[k].vat += m[k].vat; totals[k].incl += m[k].incl;
+        }
+        totals.net_incl += m.net_incl;
+      }
+
+      res.json({ from, to, months, totals });
+    } catch (err) {
+      console.error('[ar-document-summary] Sage query failed', err.message);
+      res.status(503).json({ error: 'Could not query Sage for the document summary. Check the Sage connection and try again.' });
+    }
+  });
 
   // Memoize prepared statements by SQL text. better-sqlite3 Statement objects
   // are reusable across calls; re-preparing the same string per request is
@@ -1033,47 +1090,85 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     if (isHub) {
       const params = [];
       let whereSite = '';
-      if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
-      sites = prep(
-        `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
-         FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
-         WHERE i.outstanding_amount <> 0 ORDER BY site_name`
-      ).all().map(r => r.site_name).filter(Boolean);
-      rows = prep(
-        `SELECT i.site_id, i.customer_code, i.document_number, i.document_type, i.document_date, i.due_date,
-                i.outstanding_amount, i.reference,
-                d.customer_name, d.sales_rep, d.account_type, d.terms,
-                COALESCE(s.name, i.site_id) AS site_name
-         FROM hub_debtor_ar_invoice i
-         LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.customer_code)
-         LEFT JOIN hub_sites s ON s.id = i.site_id
-         WHERE i.outstanding_amount <> 0 ${whereSite}`
-      ).all(...params);
+      const ledgerReady = prep('SELECT 1 FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0 LIMIT 1').get();
+      if (ledgerReady) {
+        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
+        sites = prep(
+          `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+           FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+           WHERE i.outstanding_amount <> 0 ORDER BY site_name`
+        ).all().map(r => r.site_name).filter(Boolean);
+        rows = prep(
+          `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+                  i.outstanding_amount, i.reference,
+                  d.customer_name, d.sales_rep, d.account_type, d.terms,
+                  COALESCE(s.name, i.site_id) AS site_name
+           FROM hub_debtor_ar_invoice i
+           LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
+           LEFT JOIN hub_sites s ON s.id = i.site_id
+           WHERE i.outstanding_amount <> 0 ${whereSite}`
+        ).all(...params);
+      } else {
+        // Fallback: the hub open-item ledger isn't populated yet (no ETL into
+        // hub_debtor_ar_invoice). Use the per-customer snapshot in hub_records —
+        // the same source the hub Customer Balances already reads — so the
+        // report still returns balances + site filters instead of an empty
+        // page. Each customer becomes one pseudo-document aged by its most
+        // recent invoice date (snapshot precision) until the open-item ETL lands.
+        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; params.push(siteFilter); }
+        sites = prep(
+          `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance_num > 0 ORDER BY site_name`
+        ).all().map(r => r.site_name).filter(Boolean);
+        rows = prep(
+          `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
+                  r.customer_name, r.sales_rep, r.account_type, r.terms,
+                  r.outstanding_balance_num, r.unpaid_invoices,
+                  COALESCE(s.name, r.site_id) AS site_name
+           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+           WHERE r.outstanding_balance_num <> 0 ${whereSite}`
+        ).all(...params).map((r) => {
+          const inv = parseJsonSafely(r.unpaid_invoices, []);
+          const lastDate = Array.isArray(inv) && inv.length ? (inv[0]?.date || null) : null;
+          return {
+            ...r,
+            document_number: r.customer_code,
+            document_type: '',
+            document_date: lastDate,
+            due_date: lastDate,
+            outstanding_amount: r.outstanding_balance_num,
+            reference: '',
+          };
+        });
+      }
     } else {
       sites = [SITE_NAME];
       rows = prep(
-        `SELECT i.customer_code, i.document_number, i.document_type, i.document_date, i.due_date,
+        `SELECT i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
                 i.outstanding_amount, i.reference,
                 d.customer_name, d.sales_rep, d.account_type, d.terms, d.data, d.local_fields,
                 ? AS site_name
          FROM debtor_ar_invoice i
-         LEFT JOIN datarecord d ON TRIM(d.customer_number) = TRIM(i.customer_code)
+         LEFT JOIN datarecord d ON TRIM(d.customer_number) = TRIM(i.reporting_account)
          WHERE i.source_table = 'AROBL' AND i.outstanding_amount <> 0`
       ).all(SITE_NAME).map(hydrateSalesRepAndAccountType);
     }
 
-    // Aging entity key: per (site,customer) in hub all-sites mode (the same
-    // customer code can exist at multiple sites), per customer in site mode.
+    // Age + join on the REPORTING account (national account for a member, else
+    // the customer's own code) so national-account child invoices roll up under
+    // the parent and inherit its name/rep/type — matching Customer Balances.
+    const repOf = (r) => String(r.reporting_account || r.customer_code || '').trim();
     const keyOf = isHub
-      ? (r) => JSON.stringify([r.site_id, String(r.customer_code || '').trim()])
-      : (r) => String(r.customer_code || '').trim();
+      ? (r) => JSON.stringify([r.site_id, repOf(r)])
+      : (r) => repOf(r);
 
     // Customer metadata the engine doesn't carry, keyed by the same composite.
     const meta = new Map();
     const docs = rows.map((r) => {
       const key = keyOf(r);
       if (!meta.has(key)) meta.set(key, {
-        customer_code: String(r.customer_code || '').trim(),
+        customer_code: repOf(r),
         customer_name: r.customer_name || null,
         sales_rep: r.sales_rep || null,
         account_type: r.account_type || null,
