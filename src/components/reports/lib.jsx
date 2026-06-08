@@ -255,6 +255,13 @@ function buildPrintStyle(id, orientation) {
     letter-spacing: 0.05em;
     margin-bottom: 1mm;
   }
+  .report-print-header .report-print-logo {
+    display: block;
+    height: 13mm;
+    margin: 0 0 1.5mm auto;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 
   .report-print-summary {
     display: grid;
@@ -363,7 +370,7 @@ export function PrintHeader({ title, period, filters, generatedBy, generatedAt }
         <p className="report-print-meta">{lines.join('  ·  ')}</p>
       </div>
       <div className="report-print-brand">
-        <strong>Cardoso</strong>
+        <img src="/cardoso-logo-orange.png" alt="Cardoso" className="report-print-logo" />
         Confidential business report
       </div>
     </div>

@@ -431,11 +431,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           c.net_incl += m.net_incl;
         }
         const consolidatedMonths = [...consMap.values()].sort((a, b) => a.month.localeCompare(b.month));
-        return res.json({ hub_mode: true, from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) } });
+        return res.json({ hub_mode: true, site_name: 'All branches', from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) } });
       }
 
       const { months, totals } = await queryArDocSummary(from, to);
-      res.json({ from, to, months, totals });
+      res.json({ from, to, months, totals, site_name: SITE_NAME });
     } catch (err) {
       console.error('[ar-document-summary] failed', err.message);
       res.status(503).json({ error: 'Could not load the document summary. Check the Sage connection and try again.' });

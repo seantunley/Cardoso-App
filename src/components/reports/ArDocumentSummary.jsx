@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ReportFrame, fmtR, downloadCsv } from './lib';
+import { ReportFrame, PrintHeader, PrintFooter, fmtR, downloadCsv } from './lib';
 
 // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
 // VAT split out. Net = Invoices + Debit notes − Credit notes. Site mode queries
@@ -123,6 +123,8 @@ export default function ArDocumentSummary() {
   };
 
   const hasData = isHub ? (branches.length > 0 || (consolidated?.months?.length || 0) > 0) : months.length > 0;
+  const depot = data?.site_name || '';
+  const generatedAtFmt = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   return (
     <ReportFrame
@@ -134,6 +136,15 @@ export default function ArDocumentSummary() {
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error?.message}
+      printHeader={
+        <PrintHeader
+          title="A/R Document Summary — Sales Figures"
+          period={depot}
+          filters={[`${from} to ${to}`]}
+          generatedAt={generatedAtFmt}
+        />
+      }
+      printFooter={<PrintFooter note="A/R Document Summary · Cardoso" />}
     >
       <div className="report-print-hide flex flex-wrap items-end gap-3 mb-4">
         <label className="flex flex-col gap-1 text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">
