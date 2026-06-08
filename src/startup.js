@@ -138,9 +138,9 @@ export async function ensureSeedUsers() {
         can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list,
         can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
-        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
+        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission, can_access_monthly_reports,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'admin@example.com',
       'Admin User',
@@ -164,6 +164,7 @@ export async function ensureSeedUsers() {
       adminDefaults.can_access_stock_receipt_expiry ? 1 : 0,
       adminDefaults.can_access_creditors ? 1 : 0,
       adminDefaults.can_access_commission ? 1 : 0,
+      adminDefaults.can_access_monthly_reports ? 1 : 0,
       adminDefaults.can_manage_users ? 1 : 0,
       adminDefaults.can_manage_rules ? 1 : 0,
       adminDefaults.can_edit_records ? 1 : 0,
@@ -197,9 +198,9 @@ export async function ensureSeedUsers() {
         can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list,
         can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
         can_access_records, can_access_reports, can_access_connections, can_access_settings,
-        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
+        can_access_stock_receipt_expiry, can_access_creditors, can_access_commission, can_access_monthly_reports,
         can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       'user@example.com',
       'Regular User',
@@ -223,6 +224,7 @@ export async function ensureSeedUsers() {
       userDefaults.can_access_stock_receipt_expiry ? 1 : 0,
       userDefaults.can_access_creditors ? 1 : 0,
       userDefaults.can_access_commission ? 1 : 0,
+      userDefaults.can_access_monthly_reports ? 1 : 0,
       userDefaults.can_manage_users ? 1 : 0,
       userDefaults.can_manage_rules ? 1 : 0,
       userDefaults.can_edit_records ? 1 : 0,

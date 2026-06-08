@@ -347,6 +347,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // (requirePermission is OR over its keys). Keeps the API in step with both
   // entry points instead of locking out whichever group lacks the other grant.
   const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports', 'can_access_creditors')] : [requireAuth];
+  // Monthly Sales Figures lives in the "Monthly Reports" sidebar group, gated by
+  // its own permission rather than the general reports permission.
+  const monthlyReportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_monthly_reports')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
 
@@ -398,7 +401,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // GET /api/reports/ar-document-summary?from=&to= — site mode runs the live
   // Sage query; HUB mode reads the per-branch totals synced down into
   // hub_ar_document_summary (hubEtl pulls each branch's /api/reporting variant).
-  router.get('/api/reports/ar-document-summary', ...reportsGuard, async (req, res) => {
+  router.get('/api/reports/ar-document-summary', ...monthlyReportsGuard, async (req, res) => {
     try {
       const now = new Date();
       const from = arYmdInt(req.query.from, Number(`${now.getFullYear()}0101`));

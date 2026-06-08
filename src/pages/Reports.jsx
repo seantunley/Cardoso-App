@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, FileText, ChevronRight } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, ChevronRight } from 'lucide-react';
 import SavedViews from '@/components/reports/SavedViews';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
@@ -13,16 +13,8 @@ const BatWeekly        = lazy(() => import('@/components/reports/BatWeekly'));
 const BatYtd           = lazy(() => import('@/components/reports/BatYtd'));
 const BatExceptions    = lazy(() => import('@/components/reports/BatExceptions'));
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
-const ArDocumentSummary = lazy(() => import('@/components/reports/ArDocumentSummary'));
 
 const REPORTS = [
-  {
-    group: 'Monthly Reports',
-    accent: 'hsl(145 55% 45%)',
-    items: [
-      { id: 'ar-doc-summary', name: 'Monthly Sales Figures', icon: FileText, accent: 'hsl(145 55% 45%)', component: ArDocumentSummary, ready: true },
-    ],
-  },
   {
     group: 'Accounts Receivable',
     accent: 'hsl(33 95% 55%)',

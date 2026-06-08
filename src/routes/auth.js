@@ -68,7 +68,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
       try {
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket?.remoteAddress || null;
-        db.prepare(`INSERT INTO login_log (user_email, user_name, ip_address, logged_in_at) VALUES (?, ?, ?, datetime('now'))`).run(
+        db.prepare(`INSERT INTO login_log (user_email, user_name, ip_address, logged_in_at) VALUES (?, ?, ?, now_local())`).run(
           user.email,
           user.full_name || null,
           ip
@@ -161,7 +161,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         const defaultPermissions = defaultPermissionsForRole(roleToUse);
         db.prepare(
           `INSERT INTO "user" (email, full_name, role, permissions, password_hash, is_active, created_at)
-           VALUES (?, ?, ?, ?, 'HUB_TOKEN_AUTO', 1, datetime('now'))`
+           VALUES (?, ?, ?, ?, 'HUB_TOKEN_AUTO', 1, now_local())`
         ).run(email, name || email.split('@')[0], roleToUse, JSON.stringify(defaultPermissions));
         user = stmts.getUserByEmail.get(email);
       }
@@ -357,9 +357,9 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
           can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_price_list, can_access_network_devices,
           can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
           can_access_records, can_access_reports, can_access_connections, can_access_reconciliation, can_access_hub_reconciliation, can_access_settings,
-          can_access_jti, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
+          can_access_jti, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission, can_access_monthly_reports,
           can_manage_users, can_manage_rules, can_edit_records, can_flag_records
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         email.trim().toLowerCase(),
         full_name,
@@ -387,6 +387,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
         defaults.can_access_stock_receipt_expiry ? 1 : 0,
         defaults.can_access_creditors ? 1 : 0,
         defaults.can_access_commission ? 1 : 0,
+        defaults.can_access_monthly_reports ? 1 : 0,
         defaults.can_manage_users ? 1 : 0,
         defaults.can_manage_rules ? 1 : 0,
         defaults.can_edit_records ? 1 : 0,
@@ -434,6 +435,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_stock_receipt_expiry',
       'can_access_creditors',
       'can_access_commission',
+      'can_access_monthly_reports',
       'can_manage_users',
       'can_manage_rules',
       'can_edit_records',
@@ -562,6 +564,7 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
       'can_access_stock_receipt_expiry',
       'can_access_creditors',
       'can_access_commission',
+      'can_access_monthly_reports',
       'can_manage_users',
       'can_manage_rules',
       'can_edit_records',

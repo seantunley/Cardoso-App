@@ -1578,7 +1578,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     try {
       const deleteStmt = db.prepare(`DELETE FROM hub_user_allowed_sites WHERE email = ?`);
-      const insertStmt = db.prepare(`INSERT INTO hub_user_allowed_sites (email, site_slug, assigned_at) VALUES (?, ?, datetime('now'))`);
+      const insertStmt = db.prepare(`INSERT INTO hub_user_allowed_sites (email, site_slug, assigned_at) VALUES (?, ?, now_local())`);
       const txn = db.transaction(() => {
         deleteStmt.run(user.email);
         for (const slug of site_slugs) {
@@ -1612,7 +1612,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const usersToSync = db.prepare(`
       SELECT id, email, full_name, role, is_active, hub_redirect,
              can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
-             can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
+             can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission, can_access_monthly_reports,
              can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
              can_access_records, can_access_reports, can_access_connections, can_access_settings,
              can_manage_users, can_manage_rules, can_edit_records, can_flag_records,
@@ -1662,7 +1662,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     // Record which users were successfully pushed to which sites
     const upsertSite = db.prepare(`
       INSERT INTO hub_user_sites (email, site_slug, pushed_at)
-      VALUES (?, ?, datetime('now'))
+      VALUES (?, ?, now_local())
       ON CONFLICT(email, site_slug) DO UPDATE SET pushed_at = excluded.pushed_at
     `);
     for (const res_row of summary.filter(s => s.ok)) {
@@ -2311,7 +2311,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/commission/archives — list across all sites (latest first)
   // OR per-site if ?site_id=... given.
-  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission'), requireAllowedSite('site_id'), (req, res) => {
+  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission', 'can_access_monthly_reports'), requireAllowedSite('site_id'), (req, res) => {
     try {
       const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
         ? req.query.site_id : null;
@@ -2338,7 +2338,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/commission/archives/:id/download — stream a previously-
   // received .pdf back to the operator. Audited.
-  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_commission', 'can_access_monthly_reports'), (req, res) => {
     const id = Number(req.params?.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ error: 'Invalid hub archive id' });
@@ -3214,7 +3214,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
-                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?, can_access_monthly_reports = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?,
@@ -3235,6 +3235,7 @@ export function createReceiveUsersRouter() {
               u.can_access_stock_receipt_expiry ? 1 : 0,
               u.can_access_creditors ? 1 : 0,
               u.can_access_commission ? 1 : 0,
+              u.can_access_monthly_reports ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -3254,7 +3255,7 @@ export function createReceiveUsersRouter() {
               UPDATE "user" SET
                 full_name = ?, role = ?, is_active = ?, hub_redirect = ?,
                 can_access_customer_search = ?, can_access_customer_balances = ?, can_access_collections = ?, can_access_inventory = ?, can_access_inventory_movement = ?, can_access_network_devices = ?,
-                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?,
+                can_access_price_list = ?, can_access_stock_receipt_expiry = ?, can_access_creditors = ?, can_access_commission = ?, can_access_monthly_reports = ?,
                 can_access_hub_metrics = ?, can_access_hub_backups = ?, can_access_hub_trends = ?,
                 can_access_records = ?, can_access_reports = ?, can_access_connections = ?, can_access_settings = ?,
                 can_manage_users = ?, can_manage_rules = ?, can_edit_records = ?, can_flag_records = ?
@@ -3274,6 +3275,7 @@ export function createReceiveUsersRouter() {
               u.can_access_stock_receipt_expiry ? 1 : 0,
               u.can_access_creditors ? 1 : 0,
               u.can_access_commission ? 1 : 0,
+              u.can_access_monthly_reports ? 1 : 0,
               u.can_access_hub_metrics ? 1 : 0,
               u.can_access_hub_backups ? 1 : 0,
               u.can_access_hub_trends ? 1 : 0,
@@ -3305,11 +3307,11 @@ export function createReceiveUsersRouter() {
           db.prepare(`
             INSERT INTO "user" (email, full_name, role, is_active, hub_redirect, must_change_password,
               can_access_customer_search, can_access_customer_balances, can_access_collections, can_access_inventory, can_access_inventory_movement, can_access_network_devices,
-              can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission,
+              can_access_price_list, can_access_stock_receipt_expiry, can_access_creditors, can_access_commission, can_access_monthly_reports,
               can_access_hub_metrics, can_access_hub_backups, can_access_hub_trends,
               can_access_records, can_access_reports, can_access_connections, can_access_settings,
               can_manage_users, can_manage_rules, can_edit_records, can_flag_records, password_hash)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).run(
             u.email,
             u.full_name || null,
@@ -3327,6 +3329,7 @@ export function createReceiveUsersRouter() {
             u.can_access_stock_receipt_expiry ? 1 : 0,
             u.can_access_creditors ? 1 : 0,
             u.can_access_commission ? 1 : 0,
+            u.can_access_monthly_reports ? 1 : 0,
             u.can_access_hub_metrics ? 1 : 0,
             u.can_access_hub_backups ? 1 : 0,
             u.can_access_hub_trends ? 1 : 0,
