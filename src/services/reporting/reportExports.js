@@ -110,8 +110,8 @@ export async function buildAgedDebtorsXlsx(report) {
       num2(r.parsed_balance ?? r.outstanding_balance),
     ]);
   }
-  // Number-format the bucket + total columns (G..L).
-  for (let c = 7; c <= 12; c++) detail.getColumn(c).numFmt = '#,##0.00';
+  // Number-format the bucket + total columns (after the 6 lead columns).
+  for (let c = 7; c <= 6 + BUCKET_KEYS.length + 1; c++) detail.getColumn(c).numFmt = '#,##0.00';
 
   return await wb.xlsx.writeBuffer();
 }

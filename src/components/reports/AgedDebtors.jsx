@@ -12,13 +12,14 @@ import {
 } from './lib';
 
 const BUCKET_META = {
-  current: { label: 'Current (<7d)', color: 'hsl(145 55% 45%)', sortOrder: 0 },
-  '7-13':  { label: '7–13 days',     color: 'hsl(50 90% 55%)',  sortOrder: 1 },
-  '14-20': { label: '14–20 days',    color: 'hsl(33 95% 55%)',  sortOrder: 2 },
-  '21+':   { label: '21+ days',      color: 'hsl(0 72% 50%)',   sortOrder: 3 },
-  unknown: { label: 'No date',       color: 'hsl(220 8% 50%)',  sortOrder: 4 },
+  current:   { label: 'Current',     color: 'hsl(145 55% 45%)', sortOrder: 0 },
+  '1-7':     { label: '1–7 days',    color: 'hsl(80 60% 45%)',  sortOrder: 1 },
+  '8-14':    { label: '8–14 days',   color: 'hsl(50 90% 55%)',  sortOrder: 2 },
+  '15-21':   { label: '15–21 days',  color: 'hsl(33 95% 55%)',  sortOrder: 3 },
+  'over-21': { label: 'Over 21 days', color: 'hsl(0 72% 50%)',  sortOrder: 4 },
+  unknown:   { label: 'No date',     color: 'hsl(220 8% 50%)',  sortOrder: 5 },
 };
-const BUCKET_ORDER = ['current', '7-13', '14-20', '21+', 'unknown'];
+const BUCKET_ORDER = ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'];
 
 function fetchAgedDebtors(params) {
   const qs = new URLSearchParams();
@@ -144,7 +145,7 @@ export default function AgedDebtors() {
     <ReportFrame
       sectionLabel="Accounts Receivable"
       title={<>Aged <em className="text-phosphor">Debtors</em>.</>}
-      subtitle="Each unpaid invoice contributes its own amount to its age bucket. Customers may appear in more than one bucket; counts are customers with at least one invoice in that bucket."
+      subtitle="Each open document is aged by its document date into Sage's periods (Current / 1–7 / 8–14 / 15–21 / Over 21) — matching the Sage Aged Trial Balance. Customers may span several buckets; counts are customers with at least one document in that bucket."
       printId="aged-debtors"
       orientation="landscape"
       onExportCsv={sortedRecords.length ? handleExportCsv : null}
@@ -207,9 +208,9 @@ export default function AgedDebtors() {
               accent={data?.truncated ? 'hsl(0 72% 50%)' : 'var(--phosphor)'}
             />
             <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
-            <SummaryTile label="Current (<7d)" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets.current)}</>} sub={`${summary.bucket_counts.current} cust`} accent={BUCKET_META.current.color} />
-            <SummaryTile label="14–20 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['14-20'])}</>} sub={`${summary.bucket_counts['14-20']} cust`} accent={BUCKET_META['14-20'].color} />
-            <SummaryTile label="21+ days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['21+'])}</>} sub={`${summary.bucket_counts['21+']} cust`} accent={BUCKET_META['21+'].color} />
+            <SummaryTile label="1–7 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} cust`} accent={BUCKET_META['1-7'].color} />
+            <SummaryTile label="8–14 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['8-14'])}</>} sub={`${summary.bucket_counts['8-14']} cust`} accent={BUCKET_META['8-14'].color} />
+            <SummaryTile label="Over 21 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['over-21'])}</>} sub={`${summary.bucket_counts['over-21']} cust`} accent={BUCKET_META['over-21'].color} />
           </div>
 
           {/* Charts (screen only) */}

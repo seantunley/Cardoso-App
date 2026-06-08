@@ -130,17 +130,20 @@ function getBalanceAgeDays(record) {
   return ages.length > 0 ? Math.max(...ages) : null;
 }
 
-// Customer matches the bucket if ANY of their unpaid invoices falls in this age
-// range. A customer with a yesterday invoice AND a 35-day invoice will appear in
-// both Current and 14-20 (overlapping is fine — buckets describe the customer's
-// active exposure rather than a single classification).
+// Legacy hub fallback: customer matches a Sage period if ANY of their invoices
+// (from the unpaid_invoices snapshot, aged by document date) falls in that
+// period. Used only in hub mode until PR3's ETL populates hub_debtor_ar_invoice;
+// site mode uses the open-item ledger via the engine. Period keys match the
+// engine's (1-7 / 8-14 / 15-21 / over-21).
 function matchesAgeBucket(record, ageBucket) {
   if (!ageBucket || ageBucket === 'all') return true;
   const ages = getBalanceInvoiceAges(record);
   if (ages.length === 0) return false;
-  if (ageBucket === '7-13')  return ages.some((d) => d >  7 && d <  14);
-  if (ageBucket === '14-20') return ages.some((d) => d >= 14 && d <  21);
-  if (ageBucket === '21+')   return ages.some((d) => d >= 21);
+  if (ageBucket === '1-7')     return ages.some((d) => d >= 1  && d <= 7);
+  if (ageBucket === '8-14')    return ages.some((d) => d >= 8  && d <= 14);
+  if (ageBucket === '15-21')   return ages.some((d) => d >= 15 && d <= 21);
+  if (ageBucket === 'over-21') return ages.some((d) => d >= 22);
+  if (ageBucket === 'current') return ages.some((d) => d <= 0);
   return true;
 }
 
@@ -556,7 +559,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
             dueDate: d.due_date,
             outstanding: d.outstanding_amount,
           }));
-          const aged = ageOpenItems(docs, { basis: 'due', boundaries: WEEKLY_BUCKETS, creditNoteMode: 'current' });
+          const aged = ageOpenItems(docs); // document-date basis + Sage buckets (defaults)
           arAging = new Map(aged.entities.map((e) => [e.entityCode, e.bucket_amounts]));
         }
 
@@ -1064,7 +1067,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       };
     });
 
-    const aged = ageOpenItems(docs, { basis: 'due', boundaries: WEEKLY_BUCKETS, creditNoteMode: 'current' });
+    const aged = ageOpenItems(docs); // document-date basis + Sage buckets (defaults)
 
     const allRecords = aged.entities.map((e) => {
       const m = meta.get(e.entityCode) || {};
@@ -1098,7 +1101,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
 
     // Summary recomputed over the filtered set so totals match the rows shown.
-    const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
+    const bucketKeys = BUCKET_KEYS;
     const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
     const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
     let totalOutstanding = 0;
