@@ -22,6 +22,7 @@ import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
+import { ageOpenItems, WEEKLY_BUCKETS } from '../services/aging.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -338,6 +339,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // it isn't entitled to. Fallback to requireAuth-only if requirePermission
   // wasn't supplied (defensive; server.js always passes it).
   const reportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports')] : [requireAuth];
+  // Aged Creditors exposes vendor (AP) balances, so it's gated on the same
+  // permission as the Creditors module, not the general reports permission.
+  const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_creditors')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
 
@@ -1133,6 +1137,149 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting] aged-debtors export error:', err);
       res.status(500).json({ error: 'Failed to export aged debtors' });
+    }
+  });
+
+  // Build the full aged-creditors (AP) report object. Mirrors
+  // buildAgedDebtorsReport, but over the open-item ledger the Creditors module
+  // already syncs from Sage APOBL (creditor_ap_invoice), which — unlike the
+  // debtor snapshot — has a per-document due date and outstanding amount, so we
+  // can age it the Sage way: each document into its own bucket by due date.
+  // Shared by the JSON endpoint and the PDF/Excel export so screen and download
+  // never diverge. Throws on DB error; callers wrap in try/catch.
+  function buildAgedCreditorsReport(query) {
+    const isHub = process.env.HUB_MODE === 'true';
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || 0);
+    const siteFilter = String(query.site || 'all').trim();
+
+    let rows;
+    let sites = [];
+    if (isHub) {
+      const params = [];
+      let whereSite = '';
+      if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
+      sites = prep(
+        `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_creditor_ap_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ORDER BY site_name`
+      ).all().map(r => r.site_name).filter(Boolean);
+      rows = prep(
+        `SELECT i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms,
+                COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_creditor_ap_invoice i
+         LEFT JOIN hub_creditor c ON c.site_id = i.site_id AND c.vendor_code = i.vendor_code
+         LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ${whereSite}`
+      ).all(...params);
+    } else {
+      sites = [SITE_NAME];
+      rows = prep(
+        `SELECT i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms,
+                ? AS site_name
+         FROM creditor_ap_invoice i
+         LEFT JOIN creditor c ON c.vendor_code = i.vendor_code
+         WHERE i.source_table = 'APOBL' AND i.outstanding_amount <> 0`
+      ).all(SITE_NAME);
+    }
+
+    // Per-vendor metadata (name/terms/site) the engine doesn't carry, keyed by
+    // the first document seen for each vendor.
+    const meta = new Map();
+    const docs = rows.map((r) => {
+      const code = String(r.vendor_code || '').trim();
+      if (!meta.has(code)) meta.set(code, { vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME });
+      return {
+        entityCode: code,
+        entityName: r.vendor_name || null,
+        date: r.document_date,
+        dueDate: r.due_date,
+        outstanding: r.outstanding_amount,
+        documentNumber: r.document_number,
+        documentType: r.document_type,
+        reference: r.reference,
+      };
+    });
+
+    const aged = ageOpenItems(docs, { basis: 'due', boundaries: WEEKLY_BUCKETS, creditNoteMode: 'current' });
+
+    const records = aged.entities
+      .filter((e) => Math.abs(e.total) >= minBalance)
+      .map((e) => {
+        const m = meta.get(e.entityCode) || {};
+        return {
+          vendor_code: e.entityCode,
+          vendor_name: e.entityName || m.vendor_name || '',
+          terms: m.terms || '',
+          site_name: m.site_name || SITE_NAME,
+          parsed_balance: e.total,
+          bucket: e.primary_bucket,
+          age_days: e.oldest_age_days,
+          bucket_amounts: e.bucket_amounts,
+          doc_count: e.documents.length,
+        };
+      })
+      .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
+
+    // Recompute summary over the filtered set so totals match the rows shown.
+    const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
+    const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    let totalOutstanding = 0;
+    for (const r of records) {
+      totalOutstanding += r.parsed_balance;
+      for (const k of bucketKeys) {
+        buckets[k] += r.bucket_amounts[k] || 0;
+        if ((r.bucket_amounts[k] || 0) !== 0) bucketCounts[k] += 1;
+      }
+    }
+
+    return {
+      records,
+      summary: {
+        total_vendors: records.length,
+        total_outstanding: totalOutstanding,
+        buckets,
+        bucket_counts: bucketCounts,
+      },
+      filters: { sites },
+      generated_at: new Date().toISOString(),
+      site_name: SITE_NAME,
+      hub_mode: isHub,
+      min_balance: minBalance,
+    };
+  }
+
+  router.get('/api/reports/aged-creditors', ...creditorsGuard, (req, res) => {
+    try {
+      res.json(buildAgedCreditorsReport(req.query));
+    } catch (err) {
+      console.error('[reporting] aged-creditors error:', err);
+      res.status(500).json({ error: 'Failed to fetch aged creditors' });
+    }
+  });
+
+  // GET /api/reports/aged-creditors/export?format=pdf|xlsx
+  router.get('/api/reports/aged-creditors/export', ...creditorsGuard, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildAgedCreditorsReport(req.query);
+      const { buildAgedCreditorsPdf, buildAgedCreditorsXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildAgedCreditorsXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="aged-creditors-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildAgedCreditorsPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="aged-creditors-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] aged-creditors export error:', err);
+      res.status(500).json({ error: 'Failed to export aged creditors' });
     }
   });
 

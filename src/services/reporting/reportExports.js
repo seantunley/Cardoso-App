@@ -109,6 +109,96 @@ export async function buildAgedDebtorsXlsx(report) {
   return await wb.xlsx.writeBuffer();
 }
 
+// ── Aged Creditors ───────────────────────────────────────────────────────────
+// Columnar per-bucket layout (the Sage Aged Trial Balance shape): every vendor
+// shows its balance distributed across the aging periods, not a single bucket.
+
+const DATED_BUCKET_KEYS = ['current', '7-13', '14-20', '21+', 'unknown'];
+
+export function buildAgedCreditorsPdf(report) {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
+  const buckets = report?.summary?.buckets || {};
+  const counts = report?.summary?.bucket_counts || {};
+
+  doc.setFontSize(14);
+  doc.setTextColor(0);
+  doc.text('Aged Creditors', 14, 14);
+  doc.setFontSize(9);
+  doc.setTextColor(110);
+  doc.text(`${report?.site_name || ''} · generated ${dateOnly(report?.generated_at)}`, 14, 20);
+  doc.text(
+    `${report?.summary?.total_vendors || 0} vendors · ${fmtR(report?.summary?.total_outstanding)} outstanding`,
+    14,
+    25,
+  );
+
+  // Aging summary table
+  autoTable(doc, {
+    startY: 31,
+    styles: { fontSize: 8, cellPadding: 1.6 },
+    headStyles: { fillColor: [33, 33, 33] },
+    head: [['Bucket', 'Vendors', 'Outstanding']],
+    body: DATED_BUCKET_KEYS.map((k) => [BUCKET_LABELS[k], String(counts[k] || 0), fmtR(buckets[k])]),
+    foot: [['TOTAL', String(report?.summary?.total_vendors || 0), fmtR(report?.summary?.total_outstanding)]],
+    footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+  });
+
+  // Detail table — one row per vendor, balance split across the period columns.
+  autoTable(doc, {
+    startY: doc.lastAutoTable.finalY + 8,
+    styles: { fontSize: 7.5, cellPadding: 1.3 },
+    headStyles: { fillColor: [50, 50, 50] },
+    head: [['Code', 'Vendor', 'Terms', ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']],
+    body: (report?.records || []).map((r) => [
+      String(r.vendor_code || '').trim(),
+      String(r.vendor_name || '').trim(),
+      String(r.terms || '').trim(),
+      ...DATED_BUCKET_KEYS.map((k) => fmtR(r.bucket_amounts?.[k])),
+      fmtR(r.parsed_balance),
+    ]),
+    foot: [[
+      'TOTAL', '', '',
+      ...DATED_BUCKET_KEYS.map((k) => fmtR(buckets[k])),
+      fmtR(report?.summary?.total_outstanding),
+    ]],
+    footStyles: { fillColor: [220, 220, 220], textColor: 0, fontStyle: 'bold' },
+    columnStyles: Object.fromEntries([3, 4, 5, 6, 7, 8].map((i) => [i, { halign: 'right' }])),
+  });
+
+  return Buffer.from(doc.output('arraybuffer'));
+}
+
+export async function buildAgedCreditorsXlsx(report) {
+  const wb = new ExcelJS.Workbook();
+  const buckets = report?.summary?.buckets || {};
+  const counts = report?.summary?.bucket_counts || {};
+
+  const summary = wb.addWorksheet('Summary');
+  summary.addRow(['Aged Creditors']);
+  summary.addRow([report?.site_name || '', `generated ${dateOnly(report?.generated_at)}`]);
+  summary.addRow([]);
+  summary.addRow(['Bucket', 'Vendors', 'Outstanding']);
+  for (const k of DATED_BUCKET_KEYS) summary.addRow([BUCKET_LABELS[k], counts[k] || 0, num2(buckets[k])]);
+  summary.addRow(['TOTAL', report?.summary?.total_vendors || 0, num2(report?.summary?.total_outstanding)]);
+
+  const detail = wb.addWorksheet('Detail');
+  detail.addRow(['Code', 'Vendor', 'Terms', 'Site', ...DATED_BUCKET_KEYS.map((k) => BUCKET_LABELS[k]), 'Total']);
+  for (const r of report?.records || []) {
+    detail.addRow([
+      String(r.vendor_code || '').trim(),
+      String(r.vendor_name || '').trim(),
+      String(r.terms || '').trim(),
+      String(r.site_name || '').trim(),
+      ...DATED_BUCKET_KEYS.map((k) => num2(r.bucket_amounts?.[k])),
+      num2(r.parsed_balance),
+    ]);
+  }
+  // Number-format the bucket + total columns (E..J).
+  for (let c = 5; c <= 10; c++) detail.getColumn(c).numFmt = '#,##0.00';
+
+  return await wb.xlsx.writeBuffer();
+}
+
 // ── Rep Exposure ─────────────────────────────────────────────────────────────
 
 export function buildRepExposurePdf(report) {
