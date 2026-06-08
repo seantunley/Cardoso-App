@@ -8,13 +8,16 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import ExcelJS from 'exceljs';
+import { BUCKET_KEYS } from '../aging.js';
 
-const BUCKET_KEYS = ['current', '7-13', '14-20', '21+', 'unknown'];
+// Display labels for the engine's Sage period keys (kept here, next to the
+// other export formatting; the keys themselves come from the engine).
 const BUCKET_LABELS = {
-  current: 'Current (<7d)',
-  '7-13': '7–13 days',
-  '14-20': '14–20 days',
-  '21+': '21+ days',
+  current: 'Current',
+  '1-7': '1–7 days',
+  '8-14': '8–14 days',
+  '15-21': '15–21 days',
+  'over-21': 'Over 21 days',
   unknown: 'Undated',
 };
 
@@ -113,7 +116,7 @@ export async function buildAgedDebtorsXlsx(report) {
 // Columnar per-bucket layout (the Sage Aged Trial Balance shape): every vendor
 // shows its balance distributed across the aging periods, not a single bucket.
 
-const DATED_BUCKET_KEYS = ['current', '7-13', '14-20', '21+', 'unknown'];
+const DATED_BUCKET_KEYS = BUCKET_KEYS;
 
 export function buildAgedCreditorsPdf(report) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'landscape' });
@@ -201,8 +204,8 @@ export async function buildAgedCreditorsXlsx(report) {
       num2(r.parsed_balance),
     ]);
   }
-  // Number-format the bucket + total columns (E..J).
-  for (let c = 5; c <= 10; c++) detail.getColumn(c).numFmt = '#,##0.00';
+  // Number-format the bucket + total columns (after the 4 lead columns).
+  for (let c = 5; c <= 4 + DATED_BUCKET_KEYS.length + 1; c++) detail.getColumn(c).numFmt = '#,##0.00';
 
   return await wb.xlsx.writeBuffer();
 }

@@ -1,26 +1,26 @@
 // Shared open-item aging engine — the single source of truth for how the app
 // ages accounts-receivable (debtors) AND accounts-payable (creditors), built to
-// duplicate Sage 300's Aged Trial Balance method:
+// duplicate this site's Sage 300 Aged Trial Balance, verified column-for-column
+// against the live report:
 //
 //   - Each OPEN DOCUMENT is aged individually (never "whole balance in one
 //     bucket"); an entity's balance is DISTRIBUTED across the periods.
-//   - Documents are aged by DUE DATE (Sage's default for invoices), falling
-//     back to document date when a due date is missing.
-//   - Weekly periods: Current (<7d overdue) / 7–13 / 14–20 / 21+ — matching the
-//     buckets the site's Sage A/R is configured with.
-//   - Credit/debit notes (negative outstanding) are treated As Current by
-//     default (Sage's "Age Credit Notes And Debit Notes = As Current" option);
-//     pass creditNoteMode:'age' to age them by date instead.
+//   - Documents are aged by DOCUMENT DATE (the basis the site's Sage report
+//     uses — confirmed: our document-date totals tie to the cent), falling back
+//     to due date only when a document date is somehow missing.
+//   - Periods match Sage exactly: Current (not yet aged, ≤0 days) / 1–7 / 8–14
+//     / 15–21 / Over 21 days.
+//   - Credit/debit notes (negative outstanding) age by their own date like any
+//     other document (the site's Sage ages them by date, not "As Current" —
+//     its Over-21 column carries the aged credits as a negative).
 //
 // Pure module: no DB, no Express, no I/O — so it's trivially unit-testable and
 // reused by both report builders in routes/reporting.js.
 
-export const WEEKLY_BUCKETS = [7, 14, 21];
-
-// Bucket keys are fixed (they pair with BUCKET_META in AgedDebtors.jsx and
-// BUCKET_LABELS in reportExports.js). The four dated buckets correspond to the
-// three `boundaries`; `unknown` collects documents with no usable date.
-export const BUCKET_KEYS = ['current', '7-13', '14-20', '21+', 'unknown'];
+// Bucket keys are fixed (they pair with BUCKET_META in the report components and
+// BUCKET_LABELS in reportExports.js). `unknown` collects documents with no
+// usable date. Order here is the display order.
+export const BUCKET_KEYS = ['current', '1-7', '8-14', '15-21', 'over-21', 'unknown'];
 
 // Parse a stored date ('YYYY-MM-DD' or 'YYYYMMDD') or a Date into LOCAL
 // midnight, so day-count math against a local-midnight asOf can't drift by a
@@ -44,14 +44,16 @@ const startOfToday = () => {
   return new Date(n.getFullYear(), n.getMonth(), n.getDate());
 };
 
-// Which bucket an overdue-day count lands in. Negative days (not yet due) and
-// anything under the first boundary are Current.
-function bucketForAge(ageDays, boundaries) {
+// Which Sage period an age-in-days lands in. Current = not yet aged (≤0 days,
+// i.e. dated on/after the as-of date); then weekly periods 1–7, 8–14, 15–21,
+// and everything older in Over 21.
+function bucketForAge(ageDays) {
   if (ageDays == null) return 'unknown';
-  if (ageDays < boundaries[0]) return 'current';
-  if (ageDays < boundaries[1]) return '7-13';
-  if (ageDays < boundaries[2]) return '14-20';
-  return '21+';
+  if (ageDays <= 0) return 'current';
+  if (ageDays <= 7) return '1-7';
+  if (ageDays <= 14) return '8-14';
+  if (ageDays <= 21) return '15-21';
+  return 'over-21';
 }
 
 function emptyBucketMap() {
@@ -66,17 +68,13 @@ function emptyBucketMap() {
  *                documentNumber?, documentType?, reference?}>} docs
  * @param {object} [opts]
  * @param {Date}    [opts.asOf]           "Age as of" date (default: today @ local midnight)
- * @param {'due'|'document'} [opts.basis]  which date to age by (default 'due')
- * @param {number[]} [opts.boundaries]     three day-boundaries (default [7,14,21])
- * @param {'current'|'age'} [opts.creditNoteMode]  how to place negative docs (default 'current')
+ * @param {'document'|'due'} [opts.basis]  which date to age by (default 'document')
  * @returns {{ buckets, bucket_counts, total_outstanding, entities }}
  */
 export function ageOpenItems(docs, opts = {}) {
   const {
     asOf = startOfToday(),
-    basis = 'due',
-    boundaries = WEEKLY_BUCKETS,
-    creditNoteMode = 'current',
+    basis = 'document',
   } = opts;
 
   const asOfMid = toLocalMidnight(asOf) || startOfToday();
@@ -98,9 +96,8 @@ export function ageOpenItems(docs, opts = {}) {
 
     const ageDays = effective ? Math.floor((asOfMs - effective.getTime()) / 86400000) : null;
 
-    let bucketKey = bucketForAge(ageDays, boundaries);
-    // Sage "As Current" handling for credit/debit notes & prepayments.
-    if (creditNoteMode === 'current' && outstanding < 0) bucketKey = 'current';
+    // Every document — invoices and credit notes alike — ages by its own date.
+    const bucketKey = bucketForAge(ageDays);
 
     let entity = byEntity.get(code);
     if (!entity) {
@@ -152,7 +149,7 @@ export function ageOpenItems(docs, opts = {}) {
       total: entity.total,
       bucket_amounts: entity.bucket_amounts,
       oldest_age_days: entity.oldest_age_days,
-      primary_bucket: bucketForAge(entity.oldest_age_days, boundaries),
+      primary_bucket: bucketForAge(entity.oldest_age_days),
       documents: entity.documents,
     });
   }
