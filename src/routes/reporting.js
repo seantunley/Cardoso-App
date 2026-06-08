@@ -435,7 +435,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       }
 
       const { months, totals } = await queryArDocSummary(from, to);
-      res.json({ from, to, months, totals, site_name: SITE_NAME });
+      // Depot name from Settings → Depot Details (depot_profile.name), falling
+      // back to SITE_NAME if it hasn't been filled in.
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+      res.json({ from, to, months, totals, site_name: depotName });
     } catch (err) {
       console.error('[ar-document-summary] failed', err.message);
       res.status(503).json({ error: 'Could not load the document summary. Check the Sage connection and try again.' });
