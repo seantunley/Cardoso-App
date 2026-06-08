@@ -128,7 +128,7 @@ export default function ArDocumentSummary() {
 
   return (
     <ReportFrame
-      title={<>A/R Document <em>Summary</em>.</>}
+      title={<>Monthly Sales <em>Figures</em>.</>}
       subtitle="Posted invoices, credit notes and debit notes by month with VAT shown separately. Net = Invoices + Debit notes − Credit notes. Matches the Sage 'Sales Figures' report (ARIBH, VAT-bearing documents)."
       printId="ar-doc-summary"
       orientation="landscape"
@@ -138,8 +138,7 @@ export default function ArDocumentSummary() {
       error={error?.message}
       printHeader={
         <PrintHeader
-          title="A/R Document Summary — Sales Figures"
-          period={depot}
+          title={depot ? `${depot} — Monthly Sales Figures` : 'Monthly Sales Figures'}
           filters={[`Period: ${from} to ${to}`, 'Amounts in Rand (R)']}
           generatedAt={generatedAtFmt}
         />

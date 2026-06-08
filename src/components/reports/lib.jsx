@@ -196,6 +196,13 @@ function buildPrintStyle(id, orientation) {
   body { visibility: hidden; background: #fff; }
   .report-print-hide { display: none !important; }
 
+  /* Collapse the app shell in print. It's only visibility:hidden, so without
+     this the sidebar + min-h-screen reserve a full viewport of height and
+     paginate into a blank trailing page. The printable is re-shown above via
+     position:absolute, so removing this flow height is safe. */
+  aside { display: none !important; }
+  .min-h-screen { min-height: 0 !important; height: auto !important; }
+
   #${id}-printable {
     visibility: visible;
     position: absolute;
@@ -207,19 +214,6 @@ function buildPrintStyle(id, orientation) {
     font-size: 10px;
   }
   #${id}-printable * { visibility: visible; }
-  #${id}-printable::before {
-    content: "CARDOSO LEDGER";
-    position: fixed;
-    inset: 35% 0 auto 0;
-    z-index: -1;
-    text-align: center;
-    font-size: 72px;
-    font-weight: 800;
-    letter-spacing: 0.18em;
-    color: rgba(17, 17, 17, 0.045);
-    transform: rotate(-18deg);
-    pointer-events: none;
-  }
 
   .report-print-header {
     display: flex !important;
@@ -281,6 +275,11 @@ function buildPrintStyle(id, orientation) {
   }
   .report-doc-table th { font-size: 7.5px !important; }
   .report-doc-table tr { page-break-inside: avoid; }
+  /* Solid black in print — the on-screen greys/accents wash out on paper. */
+  .report-doc-table,
+  .report-doc-table th,
+  .report-doc-table td,
+  .report-doc-table span { color: #000 !important; }
 
   .report-print-summary {
     display: grid;

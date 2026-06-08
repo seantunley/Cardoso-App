@@ -17,11 +17,17 @@ const ArDocumentSummary = lazy(() => import('@/components/reports/ArDocumentSumm
 
 const REPORTS = [
   {
+    group: 'Monthly Reports',
+    accent: 'hsl(145 55% 45%)',
+    items: [
+      { id: 'ar-doc-summary', name: 'Monthly Sales Figures', icon: FileText, accent: 'hsl(145 55% 45%)', component: ArDocumentSummary, ready: true },
+    ],
+  },
+  {
     group: 'Accounts Receivable',
     accent: 'hsl(33 95% 55%)',
     items: [
       { id: 'aged-debtors', name: 'Aged Debtors',       icon: Wallet,   accent: 'hsl(33 95% 55%)',  component: AgedDebtors,       ready: true },
-      { id: 'ar-doc-summary', name: 'Document Summary',  icon: FileText, accent: 'hsl(145 55% 45%)', component: ArDocumentSummary, ready: true },
       { id: 'rep-exposure', name: 'Sales Rep Exposure', icon: Users,    accent: 'hsl(200 80% 55%)', component: SalesRepExposure,  ready: true },
     ],
   },
