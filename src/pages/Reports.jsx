@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, ChevronRight } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, FileText, ChevronRight } from 'lucide-react';
 import SavedViews from '@/components/reports/SavedViews';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
@@ -13,14 +13,16 @@ const BatWeekly        = lazy(() => import('@/components/reports/BatWeekly'));
 const BatYtd           = lazy(() => import('@/components/reports/BatYtd'));
 const BatExceptions    = lazy(() => import('@/components/reports/BatExceptions'));
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
+const ArDocumentSummary = lazy(() => import('@/components/reports/ArDocumentSummary'));
 
 const REPORTS = [
   {
     group: 'Accounts Receivable',
     accent: 'hsl(33 95% 55%)',
     items: [
-      { id: 'aged-debtors', name: 'Aged Debtors',       icon: Wallet, accent: 'hsl(33 95% 55%)',  component: AgedDebtors,       ready: true },
-      { id: 'rep-exposure', name: 'Sales Rep Exposure', icon: Users,  accent: 'hsl(200 80% 55%)', component: SalesRepExposure,  ready: true },
+      { id: 'aged-debtors', name: 'Aged Debtors',       icon: Wallet,   accent: 'hsl(33 95% 55%)',  component: AgedDebtors,       ready: true },
+      { id: 'ar-doc-summary', name: 'Document Summary',  icon: FileText, accent: 'hsl(145 55% 45%)', component: ArDocumentSummary, ready: true },
+      { id: 'rep-exposure', name: 'Sales Rep Exposure', icon: Users,    accent: 'hsl(200 80% 55%)', component: SalesRepExposure,  ready: true },
     ],
   },
   {
