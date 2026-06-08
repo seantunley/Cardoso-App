@@ -36,7 +36,6 @@ const pagePermissions = {
   Reports: "can_access_reports",
   ReportingDashboard: "can_access_reports",
   Insights: "can_access_reports",
-  CreditorAging: "can_access_creditors",
   Connections: "can_access_connections",
   Jti: "can_access_jti",
   HubJti: "can_access_jti",

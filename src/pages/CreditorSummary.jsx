@@ -179,6 +179,7 @@ export default function CreditorSummary() {
   const [balanceBucket, setBalanceBucket] = useState("all");
   const [lastReceiptAge, setLastReceiptAge] = useState("all");
   const [lastPaymentAge, setLastPaymentAge] = useState("all");
+  const [paidOnly, setPaidOnly] = useState(true); // default ON: only creditors with a last-payment date
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [sortKey, setSortKey] = useState("outstanding_amount");
   const [sortDir, setSortDir] = useState("desc");
@@ -207,6 +208,8 @@ export default function CreditorSummary() {
     }
     if (lastReceiptAge !== "all") src = src.filter((r) => ageMatches(lastReceiptAge, r.last_receipt_date));
     if (lastPaymentAge !== "all") src = src.filter((r) => ageMatches(lastPaymentAge, r.last_payment_date));
+    // "Historically paid" — only creditors that have a last-payment date.
+    if (paidOnly) src = src.filter((r) => r.last_payment_date && String(r.last_payment_date).trim() !== "");
     const sorted = [...src].sort((a, b) => {
       const av = a[sortKey];
       const bv = b[sortKey];
@@ -220,14 +223,26 @@ export default function CreditorSummary() {
       return sortDir === "asc" ? as.localeCompare(bs) : bs.localeCompare(as);
     });
     return sorted;
-  }, [data, sortKey, sortDir, balanceBucket, lastReceiptAge, lastPaymentAge]);
+  }, [data, sortKey, sortDir, balanceBucket, lastReceiptAge, lastPaymentAge, paidOnly]);
 
-  const totals = useMemo(() => {
-    const acc = { outstanding_amount: 0 };
+  // Aging tiles computed over the CURRENT filtered rows (each row carries its
+  // monthly buckets from the server), so the tiles follow the filters.
+  const apAging = useMemo(() => {
+    const keys = ["current", "1-30", "31-60", "61-90", "over-90"];
+    const buckets = Object.fromEntries(keys.map((k) => [k, 0]));
+    const bucket_counts = Object.fromEntries(keys.map((k) => [k, 0]));
+    let total = 0;
     for (const r of rows) {
-      acc.outstanding_amount += Number(r.outstanding_amount) || 0;
+      const b = r.aging_buckets;
+      if (!b) continue;
+      for (const k of keys) {
+        const v = Number(b[k]) || 0;
+        buckets[k] += v;
+        if (v !== 0) bucket_counts[k] += 1;
+        total += v;
+      }
     }
-    return acc;
+    return { buckets, bucket_counts, total_outstanding: total };
   }, [rows]);
 
   const toggleSort = (key) => {
@@ -317,6 +332,7 @@ export default function CreditorSummary() {
             },
             !activeOnly && { key: "act", label: "Inactive included", onClear: () => setActiveOnly(true) },
             includeZero && { key: "zero", label: "Zero balances included", onClear: () => setIncludeZero(false) },
+            paidOnly && { key: "paid", label: "Has payment history", onClear: () => setPaidOnly(false) },
           ].filter(Boolean)}
           onClearAll={() => {
             setBalanceBucket("all");
@@ -324,6 +340,7 @@ export default function CreditorSummary() {
             setLastPaymentAge("all");
             setActiveOnly(true);
             setIncludeZero(false);
+            setPaidOnly(false);
           }}
         >
           <div className="space-y-1.5">
@@ -356,38 +373,17 @@ export default function CreditorSummary() {
               ))}
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-4 pt-1">
-            <label className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none">
-              <input
-                type="checkbox"
-                checked={activeOnly}
-                onChange={(e) => setActiveOnly(e.target.checked)}
-                className="rounded border-border"
-              />
-              Active vendors only
-            </label>
-            <label
-              className="inline-flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none"
-              title="By default we hide vendors you currently owe nothing — tick to show everyone"
-            >
-              <input
-                type="checkbox"
-                checked={includeZero}
-                onChange={(e) => setIncludeZero(e.target.checked)}
-                className="rounded border-border"
-              />
-              Include zero balances
-            </label>
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <FilterPill active={paidOnly} onClick={() => setPaidOnly((v) => !v)}>Has payment history</FilterPill>
+            <FilterPill active={activeOnly} onClick={() => setActiveOnly((v) => !v)}>Active vendors only</FilterPill>
+            <FilterPill active={includeZero} onClick={() => setIncludeZero((v) => !v)}>Include zero balances</FilterPill>
           </div>
         </CollapsibleFilterBar>
 
         {/* A/P aging overview — full open-item picture from the same engine as
-            Aged Creditors (due date + monthly periods). */}
-        {data?.aging && <AgingSummaryTiles aging={data.aging} tiles={AP_TILES} entityWord="vend" />}
-
-        <div className="grid grid-cols-1 sm:max-w-md gap-3">
-          <SummaryTile label="Outstanding (filtered)" value={`R ${fmtR(totals.outstanding_amount)}`} />
-        </div>
+            Aged Creditors (due date + monthly periods). Already shows Total
+            Outstanding, so no separate outstanding tile below. */}
+        {rows.length > 0 && <AgingSummaryTiles aging={apAging} tiles={AP_TILES} showCount={false} />}
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (
@@ -459,15 +455,6 @@ export default function CreditorSummary() {
           </div>
         )}
       </div>
-    </div>
-  );
-}
-
-function SummaryTile({ label, value }) {
-  return (
-    <div className="rounded-xl border border-border bg-card p-4">
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
     </div>
   );
 }

@@ -158,6 +158,14 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
       }));
       const aged = ageOpenItems(apDocs, { scheme: AP_SCHEME });
 
+      // Attach each vendor's monthly buckets to its row so the client can
+      // recompute the aging tiles over whatever subset its filters leave —
+      // otherwise the tiles would ignore the client-side filters.
+      const bucketsByVendor = new Map(aged.entities.map((e) => [e.entityCode, e.bucket_amounts]));
+      for (const r of rows) {
+        r.aging_buckets = bucketsByVendor.get(String(r.vendor_code || '').trim()) || null;
+      }
+
       res.json({
         year: Number(year),
         count: rows.length,
