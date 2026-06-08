@@ -16,39 +16,149 @@ const RELEASES = {
   '2026-06-08': {
     product: 'Cardoso App',
     title: 'Product Update',
-    date: '08 June 2026',
+    date: '15 May to 8 June 2026',
+    slug: 'mid-May-to-08-June-2026',
     intro:
-      'A focused update to financial reporting: your debtors and creditors now ' +
-      'age exactly the way Sage does, balances reconcile to Sage to the cent, ' +
-      'and there is a new Monthly Sales Figures report — together with a ' +
-      'refreshed, branded look when reports are printed.',
+      "This update spans mid-May to early June 2026 and represents a substantial " +
+      "expansion of the platform: two new financial modules (Creditors and Sales " +
+      "Commission), a Sage-faithful aging system for both debtors and creditors, " +
+      "new inventory and sales analytics, a reporting dashboard with a proactive " +
+      "insights feed, and a broad set of usability, performance and accuracy " +
+      "improvements. Every figure is drawn from, and reconciles to, Sage.",
     sections: [
       {
         label: 'NEW',
-        heading: 'New Features',
+        heading: 'New Modules & Features',
         items: [
+          {
+            title: 'Creditors module',
+            body:
+              "A complete new area for managing supplier accounts, fed from Sage " +
+              "and refreshed automatically each night so the figures are always current.",
+            details: [
+              'Creditor Summary: outstanding balance per vendor with header totals and resizable columns.',
+              'Creditor Search: drill into an individual supplier and its full payment history.',
+              'Nightly Sage sync built on verified Sage column mappings (no guesswork), with a correct payment filter.',
+              'A Settings tab to fine-tune the Sage query and how much history is loaded.',
+              'A default filter that hides never-paid and zero-balance vendors, so the list shows who you actually trade with.',
+              'Its own access permission and sidebar group.',
+            ],
+          },
           {
             title: 'Aged Creditors report',
             body:
-              'See what you owe your suppliers, aged the way Sage does — ' +
-              'Current, 1–30, 31–60, 61–90 and Over 90 days — with each document ' +
-              'placed in the correct period. Reconciles to Sage and downloads as ' +
-              'a polished PDF or Excel workbook.',
+              "A new report that ages every open supplier document the way Sage's " +
+              "Aged Payables trial balance does, rather than dropping a whole balance into one period.",
+            details: [
+              'Sage monthly periods: Current, 1-30, 31-60, 61-90 and Over 90 days, aged by due date.',
+              'Each document is placed individually, so a vendor correctly spans several periods.',
+              'Reconciles to the live Sage open items, and downloads as a polished PDF or Excel workbook.',
+              'Available consolidated and per branch at head office.',
+            ],
+          },
+          {
+            title: 'Aged Debtors, rebuilt on the Sage open-item ledger',
+            body:
+              "The customer aging report was rebuilt on a new open-item ledger synced " +
+              "from Sage, so each invoice, credit note and debit note is aged individually " +
+              "instead of approximating from a single balance.",
+            details: [
+              'Sage weekly periods: Current, 1-7, 8-14, 15-21 and Over 21 days, by document date.',
+              'Customers in a national account roll up under the parent and inherit its sales rep and type.',
+              'Reconciles to the live Sage open items rather than a balance that could drift.',
+            ],
           },
           {
             title: 'Monthly Sales Figures report',
             body:
-              'A month-by-month view of invoices, credit notes and debit notes ' +
-              'with VAT shown separately, matching your Sage “Sales Figures” ' +
-              'report to the cent. At head office it can be viewed per branch and ' +
-              'consolidated across the group.',
+              "A new month-by-month view of posted invoices, credit notes and debit " +
+              "notes with VAT shown separately, matching your existing Sage 'Sales Figures' report to the cent.",
+            details: [
+              'Ex-VAT, VAT and Inclusive columns for each document type, plus a Net line and grand totals.',
+              'The current month is highlighted; exports to CSV and prints cleanly.',
+              'At head office it can be viewed per branch and consolidated across the group.',
+            ],
           },
           {
-            title: 'Monthly Reports menu',
+            title: 'Sales Commission reporting',
             body:
-              'A new Monthly Reports area groups the Monthly Sales Figures and ' +
-              'Sales Commission reports together, with its own access control so ' +
-              'you decide who can see them.',
+              "Monthly sales-commission reports that mirror your existing spreadsheet, " +
+              "drawn directly from Sage, with automatic archiving and per-rep accuracy.",
+            details: [
+              'Sage-native queries that reproduce the operator spreadsheet (Sweets / Cig+Tob splits).',
+              'Commission calculated on paid sales, with a clear per-rep breakdown of unpaid invoices.',
+              'A clawback workflow for invoices unpaid across periods, floored at zero so a return never credits the rep.',
+              'Automatic month-end archiving, bundled per site as PDFs and pushed to head office.',
+              'A printed report with dedicated Unpaid Invoices and Clawback pages, and an admin query-override panel.',
+            ],
+          },
+          {
+            title: 'Inventory & sales analytics (Trends)',
+            body:
+              "New reporting that compares inventory and sales year over year, highlights " +
+              "top sellers by season, and surfaces slow-moving stock, for a single site or the whole group.",
+            details: [
+              'Customer and Inventory views, with Mix and Movement sub-views.',
+              'Top ten items per South African season, with commodity codes shown as names (Sweets / Cigarettes / Tobacco / Mixed).',
+              'Dead-stock highlighting restricted to stock currently held, with a site filter.',
+              'Inventory history extended to three calendar years for year-over-year comparison.',
+            ],
+          },
+          {
+            title: 'Reorder planning',
+            body:
+              "See exactly what to order and when: items at or below their reorder point, " +
+              "grouped by supplier, with an exportable purchase sheet.",
+            details: [
+              'Click any item to view its sales trend and seasonality before ordering.',
+            ],
+          },
+          {
+            title: 'Inventory Movement & Stock Receipt Expiry',
+            body: "Two new operational tools for stock control.",
+            details: [
+              'Inventory Movement shows how quickly stock is selling, flags dead stock, and rolls figures up across sites.',
+              'Stock Receipt Expiry captures expiry dates against stock as it is received, kept in step with your Sage purchase orders (including reversed lines), to stay ahead of short-dated stock.',
+            ],
+          },
+          {
+            title: 'Reporting Dashboard & Insights',
+            body:
+              "A new at-a-glance home for reporting, plus a feed that surfaces what needs attention on its own.",
+            details: [
+              'Headline figures and a summary card per report, with a strip showing whether your Sage data is current.',
+              'A ranked Insights feed: falling sales, customers buying less, dead stock building up, and large debtor exposure.',
+              'Administrators can add their own no-code rules (for example, alert if revenue drops more than 10%).',
+              'Summary cards for Aged Debtors and Aged Creditors, each opening the full report in one click.',
+            ],
+          },
+          {
+            title: 'Monthly Reports menu, with its own access control',
+            body:
+              "A new Monthly Reports area groups the Monthly Sales Figures and Sales " +
+              "Commission reports together, behind a single permission so you decide who can see them.",
+            details: [],
+          },
+          {
+            title: 'Collections, price lists and account families',
+            body: "Day-to-day tools to chase money and find the right account.",
+            details: [
+              'Collections worklists keep each rep on their assigned outstanding accounts, with bulk actions.',
+              'A printable price list for quick reference.',
+              'Linked customer accounts: sub-accounts now show their full account family from either side.',
+              'A tool that tidies up Sage credit-note descriptions for cleaner records.',
+            ],
+          },
+          {
+            title: 'Downloadable reports & faster navigation',
+            body:
+              "Reports can now be shared and filed easily, and the whole application is quicker to move around.",
+            details: [
+              'Aged Debtors and Sales Rep Exposure download as a polished PDF or an Excel workbook that matches your on-screen filters.',
+              'A command palette (Ctrl/Cmd-K) jumps to any page or report instantly.',
+              'A notifications bell flags anything needing attention from anywhere in the app.',
+              'Report filters are kept in the page link, so a view can be bookmarked or shared, and favourite views can be saved.',
+            ],
           },
         ],
       },
@@ -59,61 +169,81 @@ const RELEASES = {
           {
             title: 'Balances that reconcile to Sage',
             body:
-              'Customer and creditor balances are now built directly from Sage’s ' +
-              'open items, so the totals on screen match Sage to the cent rather ' +
-              'than a balance that could drift over time.',
-          },
-          {
-            title: 'Aging at a glance',
-            body:
-              'The Customer Balances and Creditor Balances screens now show aging ' +
-              'summary tiles that always match whatever filter you have applied.',
-          },
-          {
-            title: 'Reporting dashboard',
-            body:
-              'A new Aged Creditors summary card sits alongside Aged Debtors ' +
-              '(showing suppliers you actually pay), and the debtor headline now ' +
-              'matches the Customer Balances screen.',
+              "Customer and creditor balances are now built directly from Sage's open " +
+              "items, so on-screen totals match Sage to the cent.",
+            details: [
+              'Aging summary tiles on the Customer Balances and Creditor Balances screens that always match the filter applied.',
+              'Location and Terms shown per customer, with a National / Standard account filter.',
+            ],
           },
           {
             title: 'Branded, print-ready reports',
             body:
-              'Every report now prints with your depot name and logo, fits the ' +
-              'page cleanly, and reads clearly in black and white — ready to ' +
-              'share or file.',
+              "Every report now prints with your depot name and logo, fits the page " +
+              "cleanly, and reads clearly in black and white, ready to share or file.",
+            details: [],
           },
           {
-            title: 'A more consistent look',
+            title: 'Clearer navigation and tidier screens',
             body:
-              'Page headings across the application now share a single, ' +
-              'consistent style.',
+              "Menus were reorganised into logical groups, the sidebar was tidied into " +
+              "an account menu, and explanatory tooltips were added across the new modules.",
+            details: [
+              'Pagination now includes first/last page jumps and a go-to-page box for long lists.',
+              'Summary tables support resizable columns and tidier layouts.',
+              'Page headings share a single consistent style across the application.',
+            ],
+          },
+          {
+            title: 'Faster, smoother performance',
+            body:
+              "Reports and dashboards load noticeably faster, show tidy loading " +
+              "placeholders instead of blank screens, and offer a one-click retry if something fails to load.",
+            details: [
+              'A dedicated frontend performance pass and several database query optimisations.',
+              'Configurable data sync: administrators can tune how supplier data is retrieved and how much history is loaded.',
+            ],
           },
         ],
       },
       {
         label: 'FIXED',
-        heading: 'Fixes',
+        heading: 'Fixes & Reliability',
         items: [
           {
-            title: 'Cleaner customer view',
+            title: 'Accurate local timestamps',
             body:
-              'The customer pop-up now shows only genuinely outstanding invoices ' +
-              'and receipts — anything already paid or matched off no longer ' +
-              'clutters the view.',
+              "Recorded dates and times now consistently reflect local (UTC+2) time " +
+              "across the application, enforced centrally so it cannot drift back.",
+            details: [],
           },
           {
-            title: 'Dormant accounts flagged correctly',
+            title: 'Problems are surfaced, not hidden',
             body:
-              'Customers who have not traded in a long time are now flagged as ' +
-              'dormant even when their balance is zero.',
+              "Issues that previously went unreported are now raised clearly, with " +
+              "system-log telemetry across modules, so they can be resolved sooner.",
+            details: [
+              'Several boot and runtime errors exposed when switching between single-site and head-office views were resolved.',
+            ],
           },
           {
-            title: 'Report figures that agree',
+            title: 'Commission report accuracy',
             body:
-              'Corrected aging dates and bucket totals across the debtor and ' +
-              'creditor reports, so the headline figure and the detail beneath it ' +
-              'always add up.',
+              "The printed commission report now includes dedicated Unpaid Invoices and " +
+              "Clawback pages; clawback no longer treats returns or credit notes as a " +
+              "credit to the rep, and the commission-at-risk total adds up correctly.",
+            details: [],
+          },
+          {
+            title: 'Cleaner, correct report figures',
+            body:
+              "Balance, payment and aging figures were corrected across a number of " +
+              "reports and screens so the headline and the detail always agree.",
+            details: [
+              'The customer pop-up shows only genuinely outstanding invoices and receipts; anything paid or matched off is no longer listed.',
+              'Customers who have not traded in a long time are flagged dormant even at a zero balance.',
+              'Corrected aging dates and bucket totals across the debtor and creditor reports, and aligned the dashboard debtor headline with the Customer Balances screen.',
+            ],
           },
         ],
       },
@@ -475,7 +605,23 @@ for (const section of RELEASE.sections) {
     doc.setFontSize(9.5);
     doc.setTextColor(...SLATE);
     doc.text(bodyLines, M + 4, y);
-    y += bodyLines.length * 4.8 + 4.5;
+    y += bodyLines.length * 4.8 + (item.details ? 2.5 : 4.5);
+
+    // Optional detail sub-points — used to itemise what a module/fix delivers.
+    if (Array.isArray(item.details)) {
+      for (const d of item.details) {
+        const dLines = doc.splitTextToSize(d, contentW - 11);
+        ensure(dLines.length * 4.3 + 1.6);
+        doc.setFillColor(...lc);
+        doc.circle(M + 6, y - 1.4, 0.5, 'F');
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(...SLATE);
+        doc.text(dLines, M + 9, y);
+        y += dLines.length * 4.3 + 1.4;
+      }
+      y += 4;
+    }
   }
   y += 4;
 }
@@ -494,7 +640,7 @@ for (let p = 1; p <= pages; p++) {
   doc.text(`Page ${p} of ${pages}`, W - M, H - 7, { align: 'right' });
 }
 
-const slug = RELEASE.date.replace(/\s+/g, '-');
+const slug = RELEASE.slug || RELEASE.date.replace(/\s+/g, '-');
 const outPath = path.join('docs', `release-notes-${slug}.pdf`);
 writeFileSync(outPath, Buffer.from(doc.output('arraybuffer')));
 console.log(`Wrote ${RELEASE.sections.length} sections → ${outPath}`);
