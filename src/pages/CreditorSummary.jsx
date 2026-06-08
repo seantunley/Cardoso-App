@@ -9,6 +9,15 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
+import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
+
+// A/P monthly periods for the aging tiles (matches the Aged Creditors report).
+const AP_TILES = [
+  { key: "1-30", label: "1–30 days", color: "hsl(80 60% 45%)" },
+  { key: "31-60", label: "31–60 days", color: "hsl(50 90% 55%)" },
+  { key: "61-90", label: "61–90 days", color: "hsl(33 95% 55%)" },
+  { key: "over-90", label: "Over 90 days", color: "hsl(0 72% 50%)" },
+];
 
 const BALANCE_BUCKETS = [
   { value: "all",      label: "All" },
@@ -372,8 +381,12 @@ export default function CreditorSummary() {
           </div>
         </CollapsibleFilterBar>
 
+        {/* A/P aging overview — full open-item picture from the same engine as
+            Aged Creditors (due date + monthly periods). */}
+        {data?.aging && <AgingSummaryTiles aging={data.aging} tiles={AP_TILES} entityWord="vend" />}
+
         <div className="grid grid-cols-1 sm:max-w-md gap-3">
-          <SummaryTile label="Outstanding" value={`R ${fmtR(totals.outstanding_amount)}`} />
+          <SummaryTile label="Outstanding (filtered)" value={`R ${fmtR(totals.outstanding_amount)}`} />
         </div>
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}

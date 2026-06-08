@@ -12,6 +12,7 @@ import {
   DEFAULT_PO_LINE_SQL,
 } from '../services/creditorSync.js';
 import { logError } from '../lib/errorLog.js';
+import { ageOpenItems, AP_SCHEME } from '../services/aging.js';
 
 function isHub() { return process.env.HUB_MODE === 'true'; }
 
@@ -144,10 +145,24 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         ORDER BY COALESCE(pay.ytd_paid, 0) + COALESCE(po.ytd_po_amount, 0) DESC, c.vendor_name ASC
       `).all(year, year, year, ...params);
 
+      // A/P aging summary for the on-screen tiles — open-item ledger aged by
+      // the SHARED engine with the AP scheme (due date + monthly periods), so
+      // the tiles agree with the Aged Creditors report.
+      const apDocs = db.prepare(
+        "SELECT vendor_code, document_date, due_date, outstanding_amount FROM creditor_ap_invoice WHERE source_table = 'APOBL' AND outstanding_amount <> 0"
+      ).all().map((d) => ({
+        entityCode: String(d.vendor_code || '').trim(),
+        date: d.document_date,
+        dueDate: d.due_date,
+        outstanding: d.outstanding_amount,
+      }));
+      const aged = ageOpenItems(apDocs, { scheme: AP_SCHEME });
+
       res.json({
         year: Number(year),
         count: rows.length,
         records: rows,
+        aging: { buckets: aged.buckets, bucket_counts: aged.bucket_counts, total_outstanding: aged.total_outstanding },
       });
     } catch (err) {
       logError('routes.creditors.list', err);

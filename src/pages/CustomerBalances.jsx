@@ -4,6 +4,15 @@ import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Scale } from "lucide-react";
 import SummaryTile from "@/components/shared/SummaryTile";
+import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
+
+// A/R weekly periods for the aging tiles (matches the Aged Debtors report).
+const AR_TILES = [
+  { key: "1-7", label: "1–7 days", color: "hsl(80 60% 45%)" },
+  { key: "8-14", label: "8–14 days", color: "hsl(50 90% 55%)" },
+  { key: "15-21", label: "15–21 days", color: "hsl(33 95% 55%)" },
+  { key: "over-21", label: "Over 21 days", color: "hsl(0 72% 50%)" },
+];
 import CustomerBalancesFilters from "@/components/customer-balances/CustomerBalancesFilters";
 import { analyseInvoiceCredit } from "@/lib/creditAnalysis";
 import { DEFAULT_CREDIT_LOGIC_CONFIG } from "@/lib/creditLogic";
@@ -285,9 +294,14 @@ export default function CustomerBalances() {
             />
           )}
 
-          {/* Summary tile — uses shared SummaryTile so layout matches
-              Inventory and Collections. Half-width grid for visual
-              consistency across the inventory modules and customer pages. */}
+          {/* Aging summary tiles — the full A/R aging picture (from the same
+              open-item engine as Aged Debtors), independent of the active
+              bucket/rep filter so it stays a constant overview. */}
+          {data?.aging && (
+            <AgingSummaryTiles aging={data.aging} tiles={AR_TILES} entityWord="cust" />
+          )}
+
+          {/* Filtered total reflects the current selection (bucket / rep / site). */}
           {rows.length > 0 && (
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <SummaryTile

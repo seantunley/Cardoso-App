@@ -633,6 +633,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         salesReps = distinctRows.map(r => r.sales_rep).filter(Boolean).sort((a, b) => a.localeCompare(b));
       }
 
+      // AR aging summary for the on-screen tiles — full site open-item ledger
+      // via the SHARED engine, so the tiles agree with the Aged Debtors report.
+      // Site mode only (hub gets it once PR3's ETL populates the hub ledger).
+      let aging = null;
+      if (!isHub) {
+        const agingDocs = prep(
+          "SELECT customer_code, document_date, due_date, outstanding_amount FROM debtor_ar_invoice WHERE source_table = 'AROBL' AND outstanding_amount <> 0"
+        ).all().map((d) => ({
+          entityCode: String(d.customer_code || '').trim(),
+          date: d.document_date,
+          dueDate: d.due_date,
+          outstanding: d.outstanding_amount,
+        }));
+        const aged = ageOpenItems(agingDocs);
+        aging = { buckets: aged.buckets, bucket_counts: aged.bucket_counts, total_outstanding: aged.total_outstanding };
+      }
+
       res.json({
         records: recordsForPage,
         total,
@@ -645,6 +662,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         ageBucket,
         salesRep: salesRepFilter,
         minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
+        aging,
       });
     } catch (err) {
       console.error('top-balances error', err);
