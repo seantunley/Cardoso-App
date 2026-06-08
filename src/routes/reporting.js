@@ -538,8 +538,35 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       if (needsInMemoryFilter) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+
+        // Per-customer AR aging from the open-item ledger via the SHARED engine
+        // — identical source + method to the Aged Debtors report, so the bucket
+        // filter agrees with that report's numbers (a customer is "in" a bucket
+        // iff their Aged Debtors balance for that period is non-zero). Built
+        // once per request, only when actually filtering by bucket. Site mode
+        // only; hub keeps the legacy snapshot aging until PR3's ETL populates
+        // hub_debtor_ar_invoice.
+        let arAging = null;
+        if (ageBucket !== 'all' && !isHub) {
+          const docs = prep(
+            "SELECT customer_code, document_date, due_date, outstanding_amount FROM debtor_ar_invoice WHERE source_table = 'AROBL' AND outstanding_amount <> 0"
+          ).all().map((d) => ({
+            entityCode: String(d.customer_code || '').trim(),
+            date: d.document_date,
+            dueDate: d.due_date,
+            outstanding: d.outstanding_amount,
+          }));
+          const aged = ageOpenItems(docs, { basis: 'due', boundaries: WEEKLY_BUCKETS, creditNoteMode: 'current' });
+          arAging = new Map(aged.entities.map((e) => [e.entityCode, e.bucket_amounts]));
+        }
+
         const filtered = allRecords.filter((row) => {
-          if (!matchesAgeBucket(row, ageBucket)) return false;
+          if (ageBucket !== 'all') {
+            const inBucket = arAging
+              ? (arAging.get(String(row.customer_number || '').trim())?.[ageBucket] || 0) !== 0
+              : matchesAgeBucket(row, ageBucket); // hub fallback (legacy snapshot aging)
+            if (!inBucket) return false;
+          }
           if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
           if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
           // "Haven't bought in N+ days" — uses the last invoice date.
