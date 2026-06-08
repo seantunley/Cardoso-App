@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
-  fmtR, fmtCompactR, downloadCsv, downloadReport, BarChart, Bar, PieChart, Pie, Cell,
+  fmtR, fmtRSigned, fmtCompactR, downloadCsv, downloadReport, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   AXIS_TICK, AXIS_LINE, AXIS_LABEL,
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
@@ -181,10 +181,10 @@ export default function AgedCreditors() {
           {/* Summary tiles */}
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">
             <SummaryTile label="Vendors" value={summary.total_vendors.toLocaleString('en-ZA')} accent="var(--phosphor)" />
-            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
-            <SummaryTile label="1–30 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['1-30'])}</>} sub={`${summary.bucket_counts['1-30']} vend`} accent={BUCKET_META['1-30'].color} />
-            <SummaryTile label="31–60 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['31-60'])}</>} sub={`${summary.bucket_counts['31-60']} vend`} accent={BUCKET_META['31-60'].color} />
-            <SummaryTile label="Over 90 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets['over-90'])}</>} sub={`${summary.bucket_counts['over-90']} vend`} accent={BUCKET_META['over-90'].color} />
+            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
+            <SummaryTile label="1–30 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['1-30'])}</>} sub={`${summary.bucket_counts['1-30']} vend`} accent={BUCKET_META['1-30'].color} />
+            <SummaryTile label="31–60 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['31-60'])}</>} sub={`${summary.bucket_counts['31-60']} vend`} accent={BUCKET_META['31-60'].color} />
+            <SummaryTile label="Over 90 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['over-90'])}</>} sub={`${summary.bucket_counts['over-90']} vend`} accent={BUCKET_META['over-90'].color} />
           </div>
 
           {/* Charts (screen only) */}
@@ -245,12 +245,12 @@ export default function AgedCreditors() {
                       const v = r.bucket_amounts?.[k] ?? 0;
                       return (
                         <td key={k} className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">
-                          {v ? fmtR(v) : '—'}
+                          {v ? fmtRSigned(v) : '—'}
                         </td>
                       );
                     })}
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.parsed_balance)}
+                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(r.parsed_balance)}
                     </td>
                   </tr>
                 ))}
@@ -261,11 +261,11 @@ export default function AgedCreditors() {
                     <td className="px-2 py-2 text-foreground" colSpan={data?.hub_mode ? 4 : 3}>Total ({sortedRecords.length} vendors)</td>
                     {BUCKET_ORDER.map(k => (
                       <td key={k} className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.buckets[k])}
+                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets[k])}
                       </td>
                     ))}
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}
+                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}
                     </td>
                   </tr>
                 </tfoot>

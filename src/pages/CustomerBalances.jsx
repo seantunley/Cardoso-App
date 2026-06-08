@@ -190,8 +190,12 @@ export default function CustomerBalances() {
   }, [data?.records, sortField, sortDir, creditScores]);
 
   // Aging tiles computed over the rows actually shown, so they always match the
-  // list/total regardless of where filtering happens (server or client).
+  // list/total regardless of where filtering happens (server or client). The
+  // per-row bucket fields only exist in site mode (the hub /api/top-balances
+  // rows come from hub_records and carry no age_* columns) — so return null in
+  // hub mode rather than render misleading all-zero tiles.
   const arAging = useMemo(() => {
+    if (!rows.some((r) => r.age_current !== undefined)) return null;
     const cols = [["current", "age_current"], ["1-7", "age_1_7"], ["8-14", "age_8_14"], ["15-21", "age_15_21"], ["over-21", "age_over_21"]];
     const buckets = { current: 0, "1-7": 0, "8-14": 0, "15-21": 0, "over-21": 0 };
     const bucket_counts = { current: 0, "1-7": 0, "8-14": 0, "15-21": 0, "over-21": 0 };
@@ -309,8 +313,9 @@ export default function CustomerBalances() {
           )}
 
           {/* Aging tiles — summed over the rows shown, so they always match
-              the list/total under any filter. */}
-          {rows.length > 0 && (
+              the list/total under any filter. Null in hub mode (no bucket
+              fields), so the tiles are hidden rather than showing zeros. */}
+          {arAging && (
             <AgingSummaryTiles aging={arAging} tiles={AR_TILES} entityWord="cust" />
           )}
 

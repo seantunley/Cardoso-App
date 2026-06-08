@@ -352,10 +352,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/ar-document-summary?from=YYYY-MM-DD&to=YYYY-MM-DD
   // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
-  // VAT split out, queried LIVE from Sage AROBL. The query aggregates in SQL
-  // Server (one row per month) so the result is tiny. Document kind comes from
-  // TRXTYPEID (14 = invoice, 24 = debit note, 32 = credit note) — verified
-  // against this install. Tax: AMTTXBLHC + AMTNONTXHC = ex-VAT, AMTTAXHC = VAT.
+  // VAT split out, queried LIVE from Sage. Source is the A/R invoice batches
+  // (ARIBH joined to ARIBC for the batch description) — the authoritative set of
+  // POSTED documents, excluding ERROR batches; mirrors the operator's Crystal
+  // report. Document kind comes from TEXTTRX (1 = invoice, 2 = debit note,
+  // 3 = credit note; all stored positive). Amounts: BASETAX1 = ex-VAT,
+  // AMTTAX1 = VAT, AMTNETTOT = incl total. Aggregated in SQL Server (one row
+  // per month) so the result is tiny.
   router.get('/api/reports/ar-document-summary', ...reportsGuard, async (req, res) => {
     try {
       const ymd = (s) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(`${m[1]}${m[2]}${m[3]}`) : null; };
@@ -365,24 +368,26 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
       const pool = await getSagePool();
       const rs = await pool.request().input('from', from).input('to', to).query(`
-        SELECT LEFT(CAST(DATEINVC AS varchar(8)), 6) AS ym,
-          SUM(CASE WHEN TRXTYPEID = 14 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS inv_excl,
-          SUM(CASE WHEN TRXTYPEID = 14 THEN AMTTAXHC ELSE 0 END)               AS inv_vat,
-          SUM(CASE WHEN TRXTYPEID = 24 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS dn_excl,
-          SUM(CASE WHEN TRXTYPEID = 24 THEN AMTTAXHC ELSE 0 END)               AS dn_vat,
-          SUM(CASE WHEN TRXTYPEID = 32 THEN AMTTXBLHC + AMTNONTXHC ELSE 0 END) AS cn_excl,
-          SUM(CASE WHEN TRXTYPEID = 32 THEN AMTTAXHC ELSE 0 END)               AS cn_vat
-        FROM AROBL
-        WHERE DATEINVC BETWEEN @from AND @to AND TRXTYPEID IN (14, 24, 32)
-        GROUP BY LEFT(CAST(DATEINVC AS varchar(8)), 6)
+        SELECT LEFT(CAST(h.DATEINVC AS varchar(8)), 6) AS ym,
+          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
+          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
+          SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
+          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
+          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
+          SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
+          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
+          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
+          SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
+        FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+        WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.DATEINVC BETWEEN @from AND @to
+        GROUP BY LEFT(CAST(h.DATEINVC AS varchar(8)), 6)
         ORDER BY ym`);
 
-      const mk = (excl, vat) => ({ excl, vat, incl: excl + vat });
+      const mk = (excl, vat, incl) => ({ excl: Number(excl) || 0, vat: Number(vat) || 0, incl: Number(incl) || 0 });
       const months = rs.recordset.map((r) => {
-        const invoices = mk(Number(r.inv_excl) || 0, Number(r.inv_vat) || 0);
-        const debit_notes = mk(Number(r.dn_excl) || 0, Number(r.dn_vat) || 0);
-        // Credit notes post negative in Sage — flip to positive magnitudes for display.
-        const credit_notes = mk(-(Number(r.cn_excl) || 0), -(Number(r.cn_vat) || 0));
+        const invoices = mk(r.inv_excl, r.inv_vat, r.inv_incl);
+        const debit_notes = mk(r.dn_excl, r.dn_vat, r.dn_incl);
+        const credit_notes = mk(r.cn_excl, r.cn_vat, r.cn_incl);
         const ym = String(r.ym);
         return {
           month: `${ym.slice(0, 4)}-${ym.slice(4, 6)}`,

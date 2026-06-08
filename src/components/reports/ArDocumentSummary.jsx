@@ -36,6 +36,7 @@ export default function ArDocumentSummary() {
 
   const months = data?.months || [];
   const totals = data?.totals;
+  const currentMonth = (() => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; })();
 
   const exportCsv = () => {
     const header = [
@@ -116,9 +117,14 @@ export default function ArDocumentSummary() {
               </tr>
             </thead>
             <tbody>
-              {months.map((m) => (
-                <tr key={m.month} className="border-b border-border/50 hover:bg-muted/30">
-                  <td className="px-2 py-1 text-left font-mono text-foreground">{m.month}</td>
+              {months.map((m) => {
+                const isCurrent = m.month === currentMonth;
+                return (
+                <tr key={m.month} className={`border-b border-border/50 ${isCurrent ? "bg-[hsla(33,95%,55%,0.10)]" : "hover:bg-muted/30"}`}>
+                  <td className="px-2 py-1 text-left font-mono text-foreground">
+                    {m.month}
+                    {isCurrent && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider" style={{ color: "var(--phosphor)" }}>current</span>}
+                  </td>
                   {TYPES.map((t) => (
                     <Fragment key={`${m.month}-${t.key}`}>
                       <td className="px-2 py-1 text-right tabular-nums text-foreground/90 border-l border-border/40">R {fmtR(m[t.key].excl)}</td>
@@ -128,7 +134,8 @@ export default function ArDocumentSummary() {
                   ))}
                   <td className="px-2 py-1 text-right tabular-nums font-semibold text-foreground border-l border-border/40">R {fmtR(m.net_incl)}</td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
             {totals && (
               <tfoot>
