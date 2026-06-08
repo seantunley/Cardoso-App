@@ -2311,7 +2311,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/commission/archives — list across all sites (latest first)
   // OR per-site if ?site_id=... given.
-  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_commission', 'can_access_monthly_reports'), requireAllowedSite('site_id'), (req, res) => {
+  router.get('/api/hub/commission/archives', requireAuth, requirePermission('can_access_monthly_reports'), requireAllowedSite('site_id'), (req, res) => {
     try {
       const siteId = typeof req.query?.site_id === 'string' && req.query.site_id.length > 0
         ? req.query.site_id : null;
@@ -2338,7 +2338,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
   // GET /api/hub/commission/archives/:id/download — stream a previously-
   // received .pdf back to the operator. Audited.
-  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_commission', 'can_access_monthly_reports'), (req, res) => {
+  router.get('/api/hub/commission/archives/:id/download', requireAuth, requirePermission('can_access_monthly_reports'), (req, res) => {
     const id = Number(req.params?.id);
     if (!Number.isInteger(id) || id <= 0) {
       return res.status(400).json({ error: 'Invalid hub archive id' });
