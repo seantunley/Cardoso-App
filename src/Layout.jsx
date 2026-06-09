@@ -418,9 +418,10 @@ const navItems = [
 const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Monthly Reports", "Infrastructure", "System"];
 
 // localStorage key for which groups the operator has collapsed.
-// v2: reset all operators to fully-expanded sidebar groups (user request
-// 2026-05-28). Existing v1 keys are abandoned, not migrated.
-const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v2";
+// v3: default to all groups COLLAPSED so the rail starts tidy — the operator
+// opens the group they need, and the group containing the current page always
+// auto-expands (user request 2026-06-09). Older keys are abandoned, not migrated.
+const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v3";
 // localStorage key for the rail's expanded/collapsed state, so it survives
 // reloads instead of resetting to collapsed on every load.
 const NAV_SIDEBAR_COLLAPSED_KEY = "cardoso.sidebar.collapsed";
@@ -441,15 +442,18 @@ export default function Layout({ children, currentPageName }) {
   const [settingsInitialTab, setSettingsInitialTab] = useState(null);
 
   // Sidebar group open/closed state. Initialised from localStorage so the
-  // operator's preference survives reloads. A group is "collapsed" when
-  // its name is present in the set; default is all-open.
+  // operator's preference survives reloads. A group is "collapsed" when its
+  // name is present in the set; the first-visit default is all-collapsed.
   const [collapsedGroups, setCollapsedGroups] = useState(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY) || "[]");
-      return new Set(Array.isArray(stored) ? stored : []);
+      const raw = localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY);
+      // First visit (no stored preference) → start with every group collapsed.
+      if (raw === null) return new Set(NAV_GROUP_ORDER);
+      const stored = JSON.parse(raw);
+      return new Set(Array.isArray(stored) ? stored : NAV_GROUP_ORDER);
     } catch (e) {
       console.warn('[sidebar.collapsed_groups.read] localStorage parse failed', e.message);
-      return new Set();
+      return new Set(NAV_GROUP_ORDER);
     }
   });
   const toggleGroup = (name) => {
