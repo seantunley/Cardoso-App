@@ -3,6 +3,7 @@ import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
+import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 
 // Default SQL for Sage 300 PO Receipt of Goods. Operators can override
 // this via the stock_receipt_settings table (same pattern as the JTI
@@ -13,24 +14,10 @@ import { logError } from '../lib/errorLog.js';
 // the RCPHSEQ surrogate key. Note this is RCP*, not POPOR* — POPOR*
 // are the Purchase Order tables (orders placed), PORCP* are the actual
 // goods received against those POs which is what stock-expiry tracks.
-export const DEFAULT_RECEIPT_SQL = `
-  SELECT
-    LTRIM(RTRIM(h.RCPNUMBER))  AS receipt_number,
-    LTRIM(RTRIM(h.VDCODE))     AS supplier_code,
-    LTRIM(RTRIM(h.VDNAME))     AS supplier_name,
-    h.DATE                     AS receipt_date_int,
-    l.RCPLSEQ                  AS line_no,
-    LTRIM(RTRIM(l.ITEMNO))     AS item_number,
-    LTRIM(RTRIM(l.ITEMDESC))   AS item_description,
-    l.RQRECEIVED               AS qty_received,
-    LTRIM(RTRIM(l.RCPUNIT))    AS uom,
-    l.UNITCOST                 AS unit_cost
-  FROM PORCPH1 h
-  INNER JOIN PORCPL l ON l.RCPHSEQ = h.RCPHSEQ
-  WHERE h.DATE BETWEEN @from AND @to
-    AND l.RQRECEIVED > 0
-  ORDER BY h.DATE DESC, h.RCPNUMBER, l.RCPLSEQ
-`;
+// The default receipt query now lives in the central Sage query registry
+// (src/services/sage/queryRegistry.js, key 'stock_receipts.receipt').
+// Re-exported here so callers showing the shipped default keep working.
+export const DEFAULT_RECEIPT_SQL = getSageQuery('stock_receipts.receipt').defaultSql;
 
 function toYyyymmdd(d) {
   const y = d.getFullYear();
@@ -80,8 +67,7 @@ export async function syncReceiptsFromSage({ fromDate, toDate } = {}) {
   const fromInt = parseInt(toYyyymmdd(from), 10);
   const toInt = parseInt(toYyyymmdd(to), 10);
 
-  const override = getReceiptSqlOverride();
-  const queryText = (override && override.trim()) || DEFAULT_RECEIPT_SQL;
+  const queryText = resolveSageQuery('stock_receipts.receipt');
 
   const result = await pool.request()
     .input('from', sql.Int, fromInt)

@@ -1,6 +1,7 @@
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { logError } from '../lib/errorLog.js';
+import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 
 // AR open-item sync — pulls the customer open documents Sage exposes in AROBL
 // into debtor_ar_invoice, so the Aged Debtors report can age each document
@@ -20,23 +21,10 @@ import { logError } from '../lib/errorLog.js';
 //   - doc type      TRXTYPEID    (AP used IDTRXTYPE) — smallint
 //   - reference     IDORDERNBR   (AP used IDPONBR)
 //   - amounts AMTINVCHC / AMTDUEHC and DATEINVC match the AP side.
-export const DEFAULT_AR_INVOICE_SQL = `
-  SELECT
-    LTRIM(RTRIM(o.IDCUST))           AS customer_code,
-    CASE WHEN NULLIF(LTRIM(RTRIM(c.IDNATACCT)), '') IS NOT NULL
-         THEN LTRIM(RTRIM(c.IDNATACCT))
-         ELSE LTRIM(RTRIM(o.IDCUST)) END AS reporting_account,
-    LTRIM(RTRIM(o.IDINVC))           AS document_number,
-    CAST(o.TRXTYPEID AS varchar(10)) AS document_type,
-    o.DATEINVC                       AS document_date_int,
-    o.DATEDUE                        AS due_date_int,
-    o.AMTINVCHC                      AS original_amount,
-    o.AMTDUEHC                       AS outstanding_amount,
-    LTRIM(RTRIM(o.IDORDERNBR))       AS reference
-  FROM AROBL o
-  LEFT JOIN ARCUS c ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
-  WHERE o.AMTDUEHC <> 0
-`;
+// The default AR open-item query now lives in the central Sage query registry
+// (src/services/sage/queryRegistry.js, key 'debtor.ar_invoice'). Re-exported
+// here so the sync-settings route can still surface the shipped default.
+export const DEFAULT_AR_INVOICE_SQL = getSageQuery('debtor.ar_invoice').defaultSql;
 
 function intToDateStr(n) {
   if (!n) return null;
@@ -85,8 +73,8 @@ export function getSyncMeta() {
 // documents fully paid since the last sync drop out of the query result and
 // must be removed here too (the query already succeeded by this point, so an
 // empty result is authoritative — "no open AR documents"). Mirrors APOBL.
-async function syncArInvoices(pool, settings) {
-  const queryText = (settings.ar_invoice_sql_override?.trim()) || DEFAULT_AR_INVOICE_SQL;
+async function syncArInvoices(pool) {
+  const queryText = resolveSageQuery('debtor.ar_invoice');
   const result = await pool.request().query(queryText);
   const rows = result.recordset || [];
 
@@ -142,7 +130,7 @@ export async function syncDebtorsFromSage() {
   const summary = { sources: {} };
 
   for (const [source, fn] of [
-    ['ar_invoices', () => syncArInvoices(pool, getSyncSettings())],
+    ['ar_invoices', () => syncArInvoices(pool)],
   ]) {
     try {
       summary.sources[source] = await fn();
