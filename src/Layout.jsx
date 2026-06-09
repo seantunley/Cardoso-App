@@ -372,7 +372,7 @@ import { reportClientError } from "@/lib/clientLog";
 const ChangePasswordModal = lazy(() => import("@/components/users/ChangePasswordModal"));
 const SettingsPanel = lazy(() => import("@/components/settings/SettingsPanel"));
 
-const APP_VERSION = "2026.3.9";
+const APP_VERSION = "2026.5.9";
 
 const navItems = [
   { name: "Customer Search",     icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true, group: "Customers" },
