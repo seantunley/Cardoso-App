@@ -26,77 +26,61 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
     testing:  "hsla(33, 95%, 55%, 0.35)",
   }[connection.status] || "transparent";
 
+  const lastSync = connection.last_sync
+    ? formatDistanceToNow(new Date(connection.last_sync), { addSuffix: true })
+    : "never";
+
   return (
-    <div className="group relative overflow-hidden bg-card border border-border p-6 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "12px" }}>
+    <div className="group relative overflow-hidden bg-card border border-border p-4 transition-colors hover:border-[var(--phosphor)]" style={{ borderRadius: "12px" }}>
       <div
         className="absolute left-0 top-0 bottom-0 w-[2px]"
         style={{ background: accentBar, boxShadow: `0 0 12px ${accentGlow}` }}
       />
 
-      <div className="relative space-y-5 pl-2">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-3 min-w-0">
+      <div className="relative space-y-3 pl-2">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0">
             <Database className="w-4 h-4 text-muted-foreground shrink-0" strokeWidth={1.5} />
             <div className="min-w-0">
-              <h3 className="font-display text-xl text-foreground leading-tight truncate">{connection.name}</h3>
+              <h3 className="font-display text-base text-foreground leading-tight truncate">{connection.name}</h3>
               <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-0.5 truncate">{connection.host}</p>
             </div>
           </div>
-          <Badge className={cn("border font-mono text-[10px] uppercase tracking-[0.15em]", statusColors[connection.status])} style={{ borderRadius: "12px" }}>
+          <Badge className={cn("border font-mono text-[10px] uppercase tracking-[0.15em] shrink-0", statusColors[connection.status])} style={{ borderRadius: "12px" }}>
             {connection.status}
           </Badge>
         </div>
 
-        <div className="grid grid-cols-2 gap-4 py-4 border-y border-border">
-          <InfoBlock label="Database" value={connection.database_name} />
-          <InfoBlock label="Tables" value={(connection.table_configs?.length || 0).toString()} mono />
-          <div className="col-span-2">
-            <InfoBlock label="Port" value={(connection.port || 1433).toString()} mono />
-          </div>
-          <InfoBlock label="Records" value={connection.record_count?.toLocaleString('en-US') || "0"} mono />
-          <InfoBlock
-            label="Last Sync"
-            value={connection.last_sync ? formatDistanceToNow(new Date(connection.last_sync), { addSuffix: true }) : "Never"}
-          />
-          {connection.status === "error" && connection.last_error && (
-            <div className="col-span-2">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Error</p>
-              <p className="text-xs font-medium text-destructive mt-1 break-words font-mono">{connection.last_error}</p>
-            </div>
-          )}
+        {/* Compact single-row stats — db / port / tables / records / last sync */}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-2.5 font-mono text-[11px] text-muted-foreground">
+          <span className="truncate max-w-[40%]"><span className="text-muted-foreground/50">db </span><span className="text-foreground">{connection.database_name}</span></span>
+          <span><span className="text-muted-foreground/50">port </span><span className="text-foreground tabular-nums">{connection.port || 1433}</span></span>
+          <span><span className="text-foreground tabular-nums">{connection.table_configs?.length || 0}</span> tables</span>
+          <span><span className="text-foreground tabular-nums">{connection.record_count?.toLocaleString("en-US") || "0"}</span> records</span>
+          <span><span className="text-muted-foreground/50">synced </span><span className="text-foreground">{lastSync}</span></span>
         </div>
 
+        {connection.status === "error" && connection.last_error && (
+          <p className="text-[11px] text-destructive/90 break-words leading-relaxed">{connection.last_error}</p>
+        )}
+
         <div className="flex items-center gap-2">
-          <Button
-            onClick={() => onSync(connection)}
-            disabled={isSyncing}
-            variant="outline"
-            className="flex-1"
-          >
+          <Button onClick={() => onSync(connection)} disabled={isSyncing} variant="outline" size="sm" className="flex-1">
             <RefreshCw className={cn("w-4 h-4 mr-2", isSyncing && "animate-spin")} />
             {isSyncing ? "Syncing…" : "Sync Now"}
           </Button>
           {typeof onEdit === "function" && (
-            <Button variant="outline" size="icon" onClick={() => onEdit(connection)}>
+            <Button variant="outline" size="icon" className="h-9 w-9" onClick={() => onEdit(connection)}>
               <Settings className="w-4 h-4" />
             </Button>
           )}
           {typeof onDelete === "function" && (
-            <Button variant="outline" size="icon" onClick={() => onDelete(connection)} className="text-destructive hover:border-[hsl(var(--destructive))] hover:bg-[hsla(0,72%,50%,0.18)] hover:shadow-[0_0_12px_hsla(0,72%,50%,0.35)]">
+            <Button variant="outline" size="icon" className="h-9 w-9 text-destructive hover:border-[hsl(var(--destructive))] hover:bg-[hsla(0,72%,50%,0.18)]" onClick={() => onDelete(connection)}>
               <Trash2 className="w-4 h-4" />
             </Button>
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function InfoBlock({ label, value, mono }) {
-  return (
-    <div>
-      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className={cn("text-sm font-medium text-foreground mt-1 truncate", mono && "font-mono tabular-nums")}>{value}</p>
     </div>
   );
 }

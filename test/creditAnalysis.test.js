@@ -292,14 +292,15 @@ describe('analyseInvoiceCredit — exposure cap', () => {
 });
 
 describe('analyseInvoiceCredit — dormant reactivation', () => {
-  it('long-inactive customer with zero balance returns approve (zero path) with dormantMonths populated', () => {
-    // 300 days ago > dormantThresholdDays (180). Zero balance still wins.
+  it('long-inactive customer with zero balance now returns dormant (inactivity drives it)', () => {
+    // 290 days inactive > dormantThresholdDays (90), so even at a zero balance
+    // the account reads dormant rather than approve.
     const r = analyseInvoiceCredit([makeRecord({
       outstanding_balance: 0,
       invoices: [{ number: 'I1', amount: 100, date: dateNDaysAgo(300) }],
       receipts: [{ number: 'R1', amount: 100, date: dateNDaysAgo(290) }],
     })]);
-    expect(r.verdict).toBe('approve');
+    expect(r.verdict).toBe('dormant');
     expect(r.dormantMonths).toBe(9);    // 290 / 30 floored
   });
 
@@ -316,13 +317,14 @@ describe('analyseInvoiceCredit — dormant reactivation', () => {
     expect(r.title).toMatch(/Dormant Account/);
   });
 
-  it('long-inactive (>2 yrs) adds the inactive-note suffix to summary', () => {
+  it('long-inactive (>2 yrs) at zero balance → dormant verdict + summary', () => {
     const r = analyseInvoiceCredit([makeRecord({
       outstanding_balance: 0,
       invoices: [{ number: 'I1', amount: 100, date: dateNDaysAgo(800) }],   // > 2 years
       receipts: [],
     })]);
-    expect(r.summary).toMatch(/inactive for a long time|year.*new account/i);
+    expect(r.verdict).toBe('dormant');
+    expect(r.summary).toMatch(/not bought in over/i);
   });
 });
 

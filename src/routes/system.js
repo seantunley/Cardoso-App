@@ -534,10 +534,76 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   router.get('/api/system/scheduled-jobs', requireAuth, requireAdmin, async (req, res) => {
     try {
       const { listScheduledJobs } = await import('../lib/scheduledJobs.js');
-      res.json({ jobs: listScheduledJobs(), serverTime: new Date().toISOString() });
+      const jobs = listScheduledJobs();
+      // Attach each job's most recent run (from job_runs) so the Schedule tab
+      // can show last-run + status beside next-run. This reads the same source
+      // the alert engine uses, so the operator sees the exact data behind a
+      // "stale sync" alert (e.g. last run 3d ago against a daily schedule) —
+      // no parallel staleness calculation, just the latest run fact.
+      const lastRunStmt = db.prepare(
+        `SELECT status, started_at, ended_at, duration_ms, error_message
+         FROM job_runs WHERE name = ? ORDER BY started_at DESC LIMIT 1`,
+      );
+      for (const j of jobs) {
+        j.lastRun = lastRunStmt.get(j.name) || null;
+      }
+      res.json({ jobs, serverTime: new Date().toISOString() });
     } catch (err) {
       console.error('[system.scheduled-jobs] failed:', err.message);
       res.status(500).json({ error: 'Failed to load scheduled jobs' });
+    }
+  });
+
+  // GET /api/sage-queries
+  //
+  // Lists every Sage 300 query the app runs (the central registry), with each
+  // query's shipped default, whether an operator override is active, its params,
+  // required output columns, pool and tables. Backs Settings → Sage Queries.
+  router.get('/api/sage-queries', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { listSageQueries } = await import('../services/sage/queryRegistry.js');
+      res.json({ queries: listSageQueries() });
+    } catch (err) {
+      console.error('[sage-queries] list failed:', err.message);
+      res.status(500).json({ error: 'Failed to load Sage queries' });
+    }
+  });
+
+  // PUT /api/sage-queries/:key  { sql }
+  //
+  // Set the operator override for one query (validated against the registry's
+  // declared params + required columns), or clear it back to the shipped default
+  // when sql is empty. Writes the unified sage_query_override table.
+  router.put('/api/sage-queries/:key', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { setSageQueryOverride, getSageQuery } = await import('../services/sage/queryRegistry.js');
+      const key = req.params.key;
+      if (!getSageQuery(key)) return res.status(404).json({ error: `Unknown Sage query: ${key}` });
+      // Require an explicit string `sql` (use "" to clear). A missing/null/wrong
+      // field would otherwise coerce to "" and silently revert the override.
+      if (typeof req.body?.sql !== 'string') {
+        return res.status(400).json({ error: 'Body must include "sql" as a string (use "" to clear back to the default).' });
+      }
+      let result;
+      try {
+        result = setSageQueryOverride(key, req.body.sql, req.currentUser?.id ?? null);
+      } catch (validationErr) {
+        // setSageQueryOverride throws the validator's message for a bad override.
+        return res.status(400).json({ error: validationErr.message || 'Invalid override SQL' });
+      }
+      logAudit({
+        req,
+        action: result.cleared ? 'sage_query_override_clear' : 'sage_query_override_set',
+        resourceType: 'sage_query',
+        resourceName: key,
+        details: result.cleared
+          ? `Cleared override for ${key} — reverted to the shipped default`
+          : `Set operator override for ${key}`,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error('[sage-queries] save failed:', err.message);
+      res.status(500).json({ error: 'Failed to save Sage query override' });
     }
   });
 

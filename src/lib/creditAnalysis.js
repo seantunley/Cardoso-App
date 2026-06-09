@@ -119,7 +119,9 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
       avgLag: null,
       lagData: [],
       timelineData: [],
-      isDormantReactivation: false,
+      // A long-dormant account is dormant even at a zero (or netted-to-zero)
+      // balance — inactivity, not balance, drives this verdict.
+      isDormantReactivation: inactiveDays !== null && inactiveDays > config.thresholds.dormantThresholdDays,
       dormantMonths: inactiveDays !== null ? Math.floor(inactiveDays / 30) : null,
       logicVersionUsed: null,
     };
@@ -139,6 +141,14 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
         title: config.wording.manualOverrides.orangeTitle,
         summary: formatTemplate(config.wording.manualOverrides.orangeSummary, { createdByClause }),
         factors: [makeFactor("warn", formatTemplate(config.wording.manualOverrides.orangeFactor, { createdByClause })), ...result.factors],
+      };
+    } else if (result.isDormantReactivation) {
+      result = {
+        ...result,
+        verdict: "dormant",
+        title: config.wording.verdicts.dormant.title,
+        summary: formatTemplate(config.wording.verdicts.dormant.summary, { dormantMonths: result.dormantMonths }),
+        factors: [makeFactor("warn", formatTemplate(config.wording.scenarios.dormantFactor, { dormantMonths: result.dormantMonths })), ...result.factors],
       };
     }
 

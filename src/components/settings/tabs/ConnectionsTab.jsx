@@ -98,13 +98,11 @@ function ModuleRoutingCard({ connections, isAdmin }) {
 
   return (
     <Card className="border-border bg-card">
-      <CardContent className="p-5 space-y-4">
-        <div className="flex items-center gap-2 border-b border-border pb-3">
-          <Workflow className="w-4 h-4 text-muted-foreground" />
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-center gap-2">
+          <Workflow className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <h2 className="text-sm font-medium text-foreground">Module routing</h2>
-          <span className="text-xs text-muted-foreground">
-            Pin each module to a specific connection. Leave on "Auto-pick" to use the default selection logic.
-          </span>
+          <span className="text-xs text-muted-foreground/70 truncate">— pin a module to a connection, or leave on Auto-pick</span>
         </div>
         {isLoading || !routing ? (
           <p className="text-xs text-muted-foreground">Loading routing settings…</p>
@@ -237,8 +235,8 @@ export default function ConnectionsTab({ currentUser }) {
       {error && <div className="rounded-xl border border-rose-700 bg-rose-900/20 p-4 text-sm text-rose-300">{error.message}</div>}
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[1,2].map(i => <div key={i} className="h-48 rounded-2xl bg-muted animate-pulse" />)}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[1,2,3].map(i => <div key={i} className="h-32 rounded-xl bg-muted animate-pulse" />)}
         </div>
       ) : connections.length === 0 ? (
         <div className="text-center py-12 rounded-2xl border border-border bg-card">
@@ -260,10 +258,10 @@ export default function ConnectionsTab({ currentUser }) {
               </CardContent>
             </Card>
           )}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
             {connections.map(conn => (
               <div key={conn.id} onClick={() => setSelectedConnectionId(conn.id)}
-                className={`cursor-pointer transition-opacity ${selectedConnectionId === conn.id ? "opacity-100" : "opacity-75 hover:opacity-100"}`}>
+                className={`cursor-pointer rounded-xl transition-shadow ${selectedConnectionId === conn.id ? "ring-1 ring-[var(--phosphor)]/60" : ""}`}>
                 <ConnectionCard connection={conn} onSync={handleSync}
                   onEdit={isAdmin ? handleEdit : null} onDelete={isAdmin ? handleDelete : null}
                   isSyncing={syncingId === conn.id} />

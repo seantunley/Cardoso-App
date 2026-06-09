@@ -372,7 +372,7 @@ import { reportClientError } from "@/lib/clientLog";
 const ChangePasswordModal = lazy(() => import("@/components/users/ChangePasswordModal"));
 const SettingsPanel = lazy(() => import("@/components/settings/SettingsPanel"));
 
-const APP_VERSION = "2026.3.9";
+const APP_VERSION = "2026.5.9";
 
 const navItems = [
   { name: "Customer Search",     icon: IconCustomerSearch,        page: "CustomerSearch",   permission: "can_access_customer_search", siteOnly: true, group: "Customers" },
@@ -394,8 +394,9 @@ const navItems = [
   { name: "Reporting Dashboard", icon: IconDashboard,             page: "ReportingDashboard", permission: "can_access_reports", group: "Reports" },
   { name: "Insights",            icon: IconInsights,              page: "Insights",         permission: "can_access_reports", group: "Reports" },
   { name: "Reports",             icon: IconReports,               page: "Reports",          permission: "can_access_reports", group: "Reports" },
-  { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_commission", siteOnly: true, group: "Reports" },
-  { name: "Sales Commission",    icon: IconCommission,            page: "HubCommission",    permission: "can_access_commission", hubOnly: true,  group: "Reports" },
+  { name: "Monthly Sales Figures", icon: IconReports,             page: "MonthlySalesFigures", permission: "can_access_monthly_reports", group: "Monthly Reports" },
+  { name: "Sales Commission",    icon: IconCommission,            page: "SalesCommission",  permission: "can_access_monthly_reports", siteOnly: true, group: "Monthly Reports" },
+  { name: "Sales Commission",    icon: IconCommission,            page: "HubCommission",    permission: "can_access_monthly_reports", hubOnly: true,  group: "Monthly Reports" },
   { name: "Site Metrics",        icon: IconSiteMetrics,           page: "HubMetrics",       permission: "can_access_hub_metrics", hubOnly: true, group: "Infrastructure" },
   { name: "Site Backups",        icon: IconSiteBackups,           page: "HubBackups",       permission: "can_access_hub_backups", hubOnly: true, group: "Infrastructure" },
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true,  group: "Reports" },
@@ -414,7 +415,7 @@ const navItems = [
 // Render order for groups in the expanded sidebar. Each group becomes a
 // collapsible section header with the items underneath. Groups whose
 // items are all hidden (by hub/site mode or permissions) collapse away.
-const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Infrastructure", "System"];
+const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Monthly Reports", "Infrastructure", "System"];
 
 // localStorage key for which groups the operator has collapsed.
 // v3: per-user, default to all-collapsed-except-first-accessible

@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   parseAmount, formatAmount,
   getVisibleAccountType, getAccountTypePillClasses,
@@ -13,11 +14,26 @@ export default function PrintableTable({
   siteFilter, ageBucket, activeAgeBucketLabel,
   filteredGrandTotal, printRows, printData, sites,
 }) {
+  // Depot name from Settings → Depot Details, shown as the print letterhead so
+  // the Customer Balances printout carries the same branding as the reports.
+  const { data: depot } = useQuery({
+    queryKey: ["depot-profile-name"],
+    queryFn: () => fetch("/api/depot-profile", { credentials: "include" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    staleTime: 5 * 60_000,
+  });
+  const depotName = (depot?.profile?.name || "").trim();
   return (
     <div id="customer-balances-printable" style={{ visibility: "hidden", position: "absolute" }}>
       <div className="cb-print-header">
-        <h1>{printTitle}</h1>
-        <p>Printed: {printDate} · {totalRecords} customer{totalRecords !== 1 ? "s" : ""}</p>
+        <div className="cb-print-headmain">
+          {depotName && <div className="cb-print-depot">{depotName}</div>}
+          <h1>{printTitle}</h1>
+          <p>Printed: {printDate} · {totalRecords} customer{totalRecords !== 1 ? "s" : ""}</p>
+        </div>
+        <div className="cb-print-brand">
+          <img src="/cardoso-logo-orange.png" alt="Cardoso" className="cb-print-logo" />
+          Confidential business report
+        </div>
       </div>
       <div className="cb-print-summary">
         <div>
@@ -39,6 +55,8 @@ export default function PrintableTable({
             <th>Customer Name</th>
             <th>Customer ID</th>
             {sites.length > 1 && <th>Site</th>}
+            <th>Location</th>
+            <th>Terms</th>
             <th>Last Invoice</th>
             <th>Last Receipt</th>
             <th className="td-right">Outstanding Balance</th>
@@ -62,6 +80,8 @@ export default function PrintableTable({
                 </td>
                 <td className="td-mono td-muted">{row.customer_number || "—"}</td>
                 {sites.length > 1 && <td className="td-muted">{row.site_name || "—"}</td>}
+                <td className="td-muted">{row.location || "—"}</td>
+                <td className="td-muted">{row.terms || "—"}</td>
                 <td>
                   <div className="td-mono">{row.last_unpaid_invoice_1 || "—"}</div>
                   {row.last_unpaid_invoice_1_amount && <div>R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}

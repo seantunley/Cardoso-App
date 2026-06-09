@@ -1,7 +1,7 @@
 {
   "name": "cardoso-app",
   "private": true,
-  "version": "2026.5.8",
+  "version": "2026.5.9",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run server\" \"vite\"",
@@ -21,6 +21,10 @@
     "check:migrations": "node scripts/check-migration-versions.mjs",
     "schema:dump": "node scripts/dump-schema-snapshot.mjs",
     "prepare": "node scripts/install-git-hooks.mjs"
+  },
+  "overrides": {
+    "qs": "^6.15.2",
+    "shell-quote": "^1.8.4"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",

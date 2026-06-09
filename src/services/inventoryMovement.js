@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
+import { resolveSageQuery } from './sage/queryRegistry.js';
 
 function toYyyymmdd(d) {
   const y = d.getFullYear();
@@ -31,42 +32,11 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
     pool.request()
       .input('from', sql.Int, fromInt)
       .input('to', sql.Int, toInt)
-      .query(`
-        SELECT
-          LTRIM(RTRIM(OESHDT.ITEM))         AS item_number,
-          FORMAT(CAST(CAST(OESHDT.TRANDATE AS VARCHAR(8)) AS DATE), 'yyyy-MM') AS period,
-          SUM(OESHDT.QTYSOLD)               AS qty_sold,
-          SUM(OESHDT.FAMTSALES)             AS revenue,
-          COUNT(*)                           AS order_count,
-          MAX(OESHDT.TRANDATE)              AS last_sale_int
-        FROM OESHDT
-        INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-        WHERE OESHDT.TRANDATE BETWEEN @from AND @to
-          AND OESHDT.QTYSOLD > 0
-        GROUP BY LTRIM(RTRIM(OESHDT.ITEM)),
-                 FORMAT(CAST(CAST(OESHDT.TRANDATE AS VARCHAR(8)) AS DATE), 'yyyy-MM')
-        ORDER BY item_number, period
-      `),
+      .query(resolveSageQuery('inventory.sales_agg')),
     pool.request()
       .input('from', sql.Int, fromInt)
       .input('to', sql.Int, toInt)
-      .query(`
-        SELECT
-          LTRIM(RTRIM(OESHDT.ITEM))         AS item_number,
-          OESHDT.TRANDATE                   AS transaction_date_int,
-          LTRIM(RTRIM(OESHDT.TRANNUM))      AS order_number,
-          LTRIM(RTRIM(OESHDT.CUSTOMER))     AS customer_code,
-          LTRIM(RTRIM(ARCUS.NAMECUST))      AS customer_name,
-          OESHDT.QTYSOLD                    AS qty_sold,
-          CASE WHEN OESHDT.QTYSOLD > 0 THEN OESHDT.FAMTSALES / OESHDT.QTYSOLD ELSE NULL END AS unit_price,
-          OESHDT.FAMTSALES                  AS line_amount
-        FROM OESHDT
-        INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-        LEFT JOIN ARCUS ON OESHDT.CUSTOMER = ARCUS.IDCUST
-        WHERE OESHDT.TRANDATE BETWEEN @from AND @to
-          AND OESHDT.QTYSOLD > 0
-        ORDER BY OESHDT.TRANDATE DESC, OESHDT.ITEM
-      `),
+      .query(resolveSageQuery('inventory.sales_txn')),
   ]);
 
   const aggRows = aggResult.recordset || [];
@@ -94,12 +64,13 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
 
   // Monthly aggregates → inventory_sales_cache (upsert)
   const upsertAgg = db.prepare(`
-    INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(item_number, period) DO UPDATE SET
       qty_sold = excluded.qty_sold,
       revenue = excluded.revenue,
       order_count = excluded.order_count,
+      item_description = excluded.item_description,
       last_sale_date = CASE
         WHEN excluded.last_sale_date > inventory_sales_cache.last_sale_date
           THEN excluded.last_sale_date
@@ -132,6 +103,7 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
         Math.round((r.revenue || 0) * 100) / 100,
         r.order_count || 0,
         intToDate(r.last_sale_int),
+        r.item_description || null,
       );
     }
     // Replace transaction rows for the synced window to avoid duplicates.

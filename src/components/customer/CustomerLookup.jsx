@@ -800,7 +800,11 @@ export default function CustomerLookup({
     dateField: `last_receipt_${i}_date`,
   }));
 
-  const renderGroupedTable = ({ title, icon: Icon, iconColor, accounts, slots }) => {
+  const renderGroupedTable = ({ title, icon: Icon, iconColor, accounts: allAccts, slots }) => {
+    // Only show accounts with a real net balance. If the open items net to
+    // ~zero (e.g. an invoice offset by an unapplied credit), nothing is truly
+    // outstanding, so show nothing for that account.
+    const accounts = allAccts.filter(({ record: r }) => Math.abs(parseAmount(r?.outstanding_balance)) > 0.02);
     const activeSlots = slots.filter(({ numField }) =>
       accounts.some(({ record: r }) => r?.[numField])
     );
@@ -827,7 +831,10 @@ export default function CustomerLookup({
                     const ref = r?.[numField];
                     const amt = r?.[amtField];
                     const date = r?.[dateField];
-                    if (!ref && !amt && !date) return null;
+                    // Only show genuine open items: must have a document number,
+                    // and skip rounding-level residue (|amount| <= R0.02). This
+                    // also drops stale member rows that carry a date but no doc.
+                    if (!ref || Math.abs(parseAmount(amt)) <= 0.02) return null;
                     return (
                       <tr key={`${label}-${i}`} className="border-b border-border/50 last:border-0">
                         <td className={cn("text-sm py-1 pr-4 font-mono max-w-[120px] truncate", iconColor)}>{ref || "—"}</td>

@@ -50,6 +50,8 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       <td className="px-2 py-1 text-xs text-muted-foreground font-mono">{row.customer_number || "—"}</td>
       <td className="px-2 py-1 text-xs text-muted-foreground">{row.site_name || "—"}</td>
       <td className="px-2 py-1 text-xs text-muted-foreground">{row.sales_rep || "—"}</td>
+      <td className="px-2 py-1 text-xs text-muted-foreground"><span className="block truncate">{row.location || "—"}</span></td>
+      <td className="px-2 py-1 text-xs text-muted-foreground"><span className="block truncate">{row.terms || "—"}</span></td>
       <td className="px-2 py-1 text-xs">
         <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
         {row.last_unpaid_invoice_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}

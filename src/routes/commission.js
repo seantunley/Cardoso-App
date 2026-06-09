@@ -51,7 +51,7 @@ function validateOverrideSql(sql, { expectedParams }) {
 
 export function createCommissionRouter({ requireAuth, requireAdmin, requirePermission }) {
   const router = Router();
-  const reportGuard = [requireAuth, requirePermission('can_access_commission')];
+  const reportGuard = [requireAuth, requirePermission('can_access_monthly_reports')];
   const settingsGuard = [requireAuth, requirePermission('can_access_settings')];
 
   router.get('/api/commission/report', ...reportGuard, async (req, res) => {
@@ -239,7 +239,7 @@ export function createCommissionRouter({ requireAuth, requireAdmin, requirePermi
   // monthly cron; the unique partial index on (period_year, period_month)
   // WHERE source='scheduled' prevents a duplicate scheduled row. Surfaces
   // status ({archived, skipped, failed}) so the UI can toast the outcome.
-  router.post('/api/commission/archives/run-now', requireAuth, requireAdmin, requirePermission('can_access_commission'), async (req, res) => {
+  router.post('/api/commission/archives/run-now', requireAuth, requireAdmin, requirePermission('can_access_monthly_reports'), async (req, res) => {
     const period = latestClosedCommissionPeriod(new Date());
     const tag = `${period.year}-${String(period.month).padStart(2, '0')}`;
     try {

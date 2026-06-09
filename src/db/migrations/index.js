@@ -94,6 +94,13 @@ import m88 from './v088_commission_unpaid_override.js';
 import m89 from './v089_commission_unpaid_snapshot.js';
 import m90 from './v090_insight_rules.js';
 import m91 from './v091_commission_vat_rate_15_default.js';
+import m92 from './v092_debtor_ar_module.js';
+import m93 from './v093_debtor_reporting_account.js';
+import m94 from './v094_hub_ar_document_summary.js';
+import m95 from './v095_monthly_reports_permission.js';
+import m96 from './v096_sage_query_override.js';
+import m97 from './v097_inventory_sales_cache_description.js';
+import m98 from './v098_hub_inventory_sales_aggregates.js';
 
 const migrations = [
   m1,
@@ -187,6 +194,13 @@ const migrations = [
   m89,
   m90,
   m91,
+  m92,
+  m93,
+  m94,
+  m95,
+  m96,
+  m97,
+  m98,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

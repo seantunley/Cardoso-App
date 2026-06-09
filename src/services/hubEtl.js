@@ -366,6 +366,40 @@ async function syncSite(site) {
       ).run(site.id, ...syncedItemNumbers);
     }
 
+    // AR document summary (per-branch "Sales Figures") — tiny payload (one row
+    // per month over the current+prior FY), single fetch. Clear-and-reload the
+    // branch's rows each cycle so dropped months don't linger.
+    try {
+      const ctrlAr = new AbortController();
+      const tAr = setTimeout(() => ctrlAr.abort(), 20000);
+      let arData;
+      try {
+        const arRes = await fetch(`${site.url}/api/reporting/ar-document-summary`, { headers, signal: ctrlAr.signal });
+        if (!arRes.ok) throw new Error(`HTTP ${arRes.status}`);
+        arData = await arRes.json();
+      } finally { clearTimeout(tAr); }
+      const arMonths = Array.isArray(arData?.months) ? arData.months : [];
+      const upsertArDoc = db.prepare(`
+        INSERT OR REPLACE INTO hub_ar_document_summary
+          (site_id, ym, inv_excl, inv_vat, inv_incl, cn_excl, cn_vat, cn_incl, dn_excl, dn_vat, dn_incl, synced_at)
+        VALUES (@site_id, @ym, @inv_excl, @inv_vat, @inv_incl, @cn_excl, @cn_vat, @cn_incl, @dn_excl, @dn_vat, @dn_incl, @synced_at)`);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_ar_document_summary WHERE site_id = ?').run(site.id);
+        const now = new Date().toISOString();
+        for (const m of arMonths) {
+          if (!m?.month) continue;
+          upsertArDoc.run({
+            site_id: site.id, ym: m.month, synced_at: now,
+            inv_excl: Number(m.invoices?.excl) || 0, inv_vat: Number(m.invoices?.vat) || 0, inv_incl: Number(m.invoices?.incl) || 0,
+            cn_excl: Number(m.credit_notes?.excl) || 0, cn_vat: Number(m.credit_notes?.vat) || 0, cn_incl: Number(m.credit_notes?.incl) || 0,
+            dn_excl: Number(m.debit_notes?.excl) || 0, dn_vat: Number(m.debit_notes?.vat) || 0, dn_incl: Number(m.debit_notes?.incl) || 0,
+          });
+        }
+      })();
+    } catch (e) {
+      console.warn(`[HUB] AR document summary sync failed for ${site.slug || site.id}: ${e.message}`);
+    }
+
     // Inventory movement (sales velocity cache) — paginated fetch using
     // the same pattern as the inventory sync above. Each page is 1000
     // rows with a 10s timeout; large sites with many SKUs × months no
@@ -410,7 +444,7 @@ async function syncSite(site) {
       // Swap: atomic delete + insert in one transaction.
       const upsertMov = db.prepare(`
         INSERT INTO hub_inventory_sales (site_id, item_number, period, qty_sold, revenue, order_count, last_sale_date, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
         ON CONFLICT(site_id, item_number, period) DO UPDATE SET
           qty_sold=excluded.qty_sold, revenue=excluded.revenue,
           order_count=excluded.order_count, last_sale_date=excluded.last_sale_date,
@@ -424,6 +458,98 @@ async function syncSite(site) {
       })();
     } catch (movErr) {
       console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
+    }
+
+    // Inventory item sales (inter-branch transfers excluded) → for the dashboard
+    // Top Items + Dead Stock tiles. Same paginate → stage → atomic-swap pattern.
+    try {
+      const fetchItemPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-item-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory item-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allItemRecords = [];
+      let itemOffset = 0;
+      let nextItemPromise = guardOrphan(fetchItemPage(0));
+      while (true) {
+        const itemData = await nextItemPromise;
+        const recs = itemData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = itemData?.has_more === true && consumed > 0;
+        nextItemPromise = willHaveMore ? guardOrphan(fetchItemPage(itemOffset + consumed)) : null;
+        for (const r of recs) allItemRecords.push(r);
+        itemOffset += consumed;
+        if (!nextItemPromise) break;
+      }
+      const upsertItem = db.prepare(`
+        INSERT INTO hub_inventory_item_sales (site_id, item_number, item_description, period, qty_sold, revenue, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, item_number, period) DO UPDATE SET
+          item_description=excluded.item_description, qty_sold=excluded.qty_sold,
+          revenue=excluded.revenue, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_item_sales WHERE site_id = ?').run(site.id);
+        for (const r of allItemRecords) {
+          upsertItem.run(site.id, r.item_number, r.item_description || null, r.period, r.qty_sold || 0, r.revenue || 0);
+        }
+      })();
+    } catch (itemErr) {
+      console.log(`[hub-etl] Inventory item-sales sync skipped for ${site.id}: ${itemErr.message}`);
+    }
+
+    // Inventory customer sales (inter-branch transfers excluded) → for the
+    // dashboard Top Customers tile (summed over the selected timeline).
+    try {
+      const fetchCustPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-customer-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory customer-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allCustRecords = [];
+      let custOffset = 0;
+      let nextCustPromise = guardOrphan(fetchCustPage(0));
+      while (true) {
+        const custData = await nextCustPromise;
+        const recs = custData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = custData?.has_more === true && consumed > 0;
+        nextCustPromise = willHaveMore ? guardOrphan(fetchCustPage(custOffset + consumed)) : null;
+        for (const r of recs) allCustRecords.push(r);
+        custOffset += consumed;
+        if (!nextCustPromise) break;
+      }
+      const upsertCust = db.prepare(`
+        INSERT INTO hub_inventory_customer_sales (site_id, customer_code, customer_name, period, revenue, qty, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, customer_code, period) DO UPDATE SET
+          customer_name=excluded.customer_name, revenue=excluded.revenue,
+          qty=excluded.qty, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_customer_sales WHERE site_id = ?').run(site.id);
+        for (const r of allCustRecords) {
+          upsertCust.run(site.id, r.customer_code, r.customer_name || null, r.period, r.revenue || 0, r.qty || 0);
+        }
+      })();
+    } catch (custErr) {
+      console.log(`[hub-etl] Inventory customer-sales sync skipped for ${site.id}: ${custErr.message}`);
     }
 
     // Stock receipt expiry — read-only hub copy for cross-site visibility.
@@ -468,7 +594,7 @@ async function syncSite(site) {
           qty_received, uom, unit_cost,
           expiry_date, qty_at_expiry, entered_by, entry_source, notes, expiry_created,
           synced_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
       `);
       db.transaction(() => {
         db.prepare('DELETE FROM hub_stock_receipt_expiry WHERE site_id = ?').run(site.id);

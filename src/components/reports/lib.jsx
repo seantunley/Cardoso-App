@@ -3,6 +3,7 @@
 // imports from here so layout and chart polish stay consistent.
 
 import React, { useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   ResponsiveContainer, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend,
@@ -196,6 +197,13 @@ function buildPrintStyle(id, orientation) {
   body { visibility: hidden; background: #fff; }
   .report-print-hide { display: none !important; }
 
+  /* Collapse the app shell in print. It's only visibility:hidden, so without
+     this the sidebar + min-h-screen reserve a full viewport of height and
+     paginate into a blank trailing page. The printable is re-shown above via
+     position:absolute, so removing this flow height is safe. */
+  aside { display: none !important; }
+  .min-h-screen { min-height: 0 !important; height: auto !important; }
+
   #${id}-printable {
     visibility: visible;
     position: absolute;
@@ -207,27 +215,22 @@ function buildPrintStyle(id, orientation) {
     font-size: 10px;
   }
   #${id}-printable * { visibility: visible; }
-  #${id}-printable::before {
-    content: "CARDOSO LEDGER";
-    position: fixed;
-    inset: 35% 0 auto 0;
-    z-index: -1;
-    text-align: center;
-    font-size: 72px;
-    font-weight: 800;
-    letter-spacing: 0.18em;
-    color: rgba(17, 17, 17, 0.045);
-    transform: rotate(-18deg);
-    pointer-events: none;
-  }
 
   .report-print-header {
-    display: flex;
+    display: flex !important;
     align-items: flex-end;
     justify-content: space-between;
     padding-bottom: 4mm;
     border-bottom: 2px solid #111;
     margin-bottom: 4mm;
+  }
+  .report-print-header .report-print-depot {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #111;
+    margin: 0 0 1.5mm 0;
   }
   .report-print-header h1 {
     font-size: 22px;
@@ -255,6 +258,37 @@ function buildPrintStyle(id, orientation) {
     letter-spacing: 0.05em;
     margin-bottom: 1mm;
   }
+  .report-print-header .report-print-logo {
+    display: block;
+    height: 13mm;
+    margin: 0 0 1.5mm auto;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  /* Dense numeric report tables (e.g. AR Document Summary): drop the on-screen
+     min-width so the table fits the page, shrink type, tighten cells, and keep
+     every figure on one line. Header repeats if it ever breaks across pages. */
+  .report-doc-table {
+    width: 100% !important;
+    min-width: 0 !important;
+    border-collapse: collapse;
+    font-size: 8.5px !important;
+    table-layout: auto;
+  }
+  .report-doc-table thead { display: table-header-group; }
+  .report-doc-table th,
+  .report-doc-table td {
+    padding: 0.9mm 1.4mm !important;
+    white-space: nowrap;
+  }
+  .report-doc-table th { font-size: 7.5px !important; }
+  .report-doc-table tr { page-break-inside: avoid; }
+  /* Solid black in print — the on-screen greys/accents wash out on paper. */
+  .report-doc-table,
+  .report-doc-table th,
+  .report-doc-table td,
+  .report-doc-table span { color: #000 !important; }
 
   .report-print-summary {
     display: grid;
@@ -343,7 +377,7 @@ function buildPrintStyle(id, orientation) {
     color: #999;
     border-top: 0.25pt solid #ccc;
     padding-top: 1mm;
-    display: flex;
+    display: flex !important;
     justify-content: space-between;
   }
 }
@@ -352,6 +386,15 @@ function buildPrintStyle(id, orientation) {
 
 // ── Common print header bit ──────────────────────────────────────────────
 export function PrintHeader({ title, period, filters, generatedBy, generatedAt }) {
+  // Depot name from Settings → Depot Details, shown as a letterhead line on
+  // every report's print/PDF so they all carry consistent branding. Cached and
+  // shared across reports; degrades to no line if it isn't set/reachable.
+  const { data: depot } = useQuery({
+    queryKey: ['depot-profile-name'],
+    queryFn: () => fetch('/api/depot-profile', { credentials: 'include' }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    staleTime: 5 * 60_000,
+  });
+  const depotName = (depot?.profile?.name || '').trim();
   const lines = [];
   if (period) lines.push(period);
   if (filters?.length) lines.push(filters.join(' · '));
@@ -359,11 +402,12 @@ export function PrintHeader({ title, period, filters, generatedBy, generatedAt }
   return (
     <div className="report-print-header" style={{ display: 'none' }}>
       <div>
+        {depotName && <div className="report-print-depot">{depotName}</div>}
         <h1>{title}</h1>
         <p className="report-print-meta">{lines.join('  ·  ')}</p>
       </div>
       <div className="report-print-brand">
-        <strong>Cardoso</strong>
+        <img src="/cardoso-logo-orange.png" alt="Cardoso" className="report-print-logo" />
         Confidential business report
       </div>
     </div>
@@ -393,10 +437,10 @@ export function ReportFrame({
     <div className="space-y-5">
       <div className="report-print-hide flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-0">
-          <h2 className="font-display text-3xl leading-tight text-foreground">
+          <h2 className="font-display text-4xl leading-tight tracking-tight text-foreground lg:text-5xl">
             {title}
           </h2>
-          {subtitle && <p className="text-xs text-muted-foreground mt-2">{subtitle}</p>}
+          {subtitle && <p className="text-sm text-muted-foreground mt-2">{subtitle}</p>}
         </div>
         <div className="flex items-center gap-2">
           {onExportCsv && (
@@ -468,11 +512,11 @@ export function ReportFrame({
 }
 
 // Small chart-card wrapper with a title.
-export function ChartCard({ title, sub, children, height = 260 }) {
+export function ChartCard({ title, sub, children, height = 260, hint }) {
   return (
     <div className="bg-card p-4" style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}>
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{title}</div>
+      <div className="flex items-baseline justify-between mb-3" title={hint}>
+        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground" style={hint ? { cursor: 'help' } : undefined}>{title}</div>
         {sub && <div className="font-mono text-[10px] text-muted-foreground/60">{sub}</div>}
       </div>
       <ResponsiveContainer width="100%" height={height}>

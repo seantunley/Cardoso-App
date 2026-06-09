@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── Resizable columns ────────────────────────────────────────────────────
 export const CB_COLUMN_DEFAULTS = {
-  idx: 40, name: 476, custId: 105, site: 54, rep: 83,
+  idx: 40, name: 412, custId: 105, site: 54, rep: 83, location: 74, terms: 74,
   lastInv: 107, lastRec: 104, outstanding: 132, credit: 90,
 };
 // v4: switched table from absolute-pixel widths + JS auto-fit to a CSS

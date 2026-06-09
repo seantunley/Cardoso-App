@@ -26,6 +26,7 @@ import { syncSalesFromSage } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
 import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
 import { syncCreditorsFromSage } from './services/creditorSync.js';
+import { syncDebtorsFromSage } from './services/debtorSync.js';
 
 let scheduledSyncInProgress = false;
 let shuttingDown = false;
@@ -461,6 +462,17 @@ export function startSchedulers() {
       }));
       cronTasks.push(t);
       registerJob({ name: 'creditors-sync', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'site', description: 'Nightly creditors sync from Sage APVEN/APOBL/APTCR/POPORH1' });
+    }
+
+    // Debtors — nightly Sage pull of AROBL open AR documents into
+    // debtor_ar_invoice, so the Aged Debtors report ages per-document by due
+    // date. 04:45, 15 min after the creditors pull.
+    {
+      const t = cron.schedule('45 4 * * *', track('debtors-sync', async () => {
+        await syncDebtorsFromSage();
+      }));
+      cronTasks.push(t);
+      registerJob({ name: 'debtors-sync', type: 'cron', cronExpression: '45 4 * * *', taskRef: t, mode: 'site', description: 'Nightly debtors AR open-item sync from Sage AROBL' });
     }
   }
 

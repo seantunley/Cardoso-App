@@ -1,6 +1,7 @@
 import sql from 'mssql';
 import { getSagePool } from '../batReconciliation.js';
 import { logError } from '../../lib/errorLog.js';
+import { resolveSageQuery } from '../sage/queryRegistry.js';
 
 const TEXTDESC_MAX_LEN = 60;
 const PRINTABLE_ASCII = /^[\x20-\x7E]+$/;
@@ -110,76 +111,7 @@ export async function queryProblematicLines(year) {
     const pool = await getSagePool();
     const result = await pool.request()
     .input('year', sql.Int, year)
-    .query(`
-      ;WITH all_bat_lines AS (
-        SELECT
-          d.CNTBTCH,
-          d.CNTITEM,
-          d.CNTLINE,
-          h.IDVEND,
-          h.IDINVC,
-          h.DATEINVC,
-          CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE) AS doc_date,
-          bc.BTCHDESC,
-          bc.BTCHSTTS,
-          LTRIM(RTRIM(d.TEXTDESC)) AS textdesc,
-          d.AMTDISTHC,
-          CASE
-            WHEN d.TEXTDESC LIKE '%WEEK [0-9]%'
-              THEN CAST(LTRIM(RTRIM(SUBSTRING(d.TEXTDESC,
-                   PATINDEX('%WEEK [0-9]%', d.TEXTDESC) + 5, 2))) AS INT)
-            ELSE NULL
-          END AS desc_week,
-          CASE
-            WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
-            WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
-            WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
-            WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
-            ELSE 'OTHER'
-          END AS fee_type
-        FROM APIBH h
-        INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
-        LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
-        WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
-          AND YEAR(CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE)) = @year
-          -- Purchases Clearing Account lines are the auto-generated AP
-          -- offsets, not the human-typed fee descriptions we need to
-          -- correct. They will always score as 'OTHER' / 'BAD_FEE_TYPE'
-          -- but they are not actually problems — drop them at source.
-          AND LTRIM(RTRIM(d.TEXTDESC)) NOT LIKE '%Purchases Clearing Account%'
-      )
-      SELECT
-        CNTBTCH   AS batch_number,
-        CNTITEM   AS item_number,
-        CNTLINE   AS line_number,
-        LTRIM(RTRIM(IDVEND)) AS vendor_number,
-        LTRIM(RTRIM(IDINVC)) AS document_number,
-        DATEINVC  AS document_date,
-        doc_date,
-        LTRIM(RTRIM(COALESCE(BTCHDESC, ''))) AS batch_description,
-        CASE BTCHSTTS
-          WHEN 1 THEN 'Open'
-          WHEN 3 THEN 'Posted'
-          WHEN 4 THEN 'Deleted'
-          WHEN 7 THEN 'Posted'
-          WHEN NULL THEN 'Archived'
-          ELSE 'Unknown'
-        END AS batch_status,
-        textdesc  AS line_description,
-        desc_week AS week_number,
-        fee_type,
-        AMTDISTHC AS line_amount,
-        CASE
-          WHEN desc_week IS NULL THEN 'NO_WEEK'
-          ELSE 'OK'
-        END AS problem_type
-      FROM all_bat_lines
-      -- Drop lines whose fee type couldn't be classified (anything not
-      -- DELIVERY / DISCOUNT / PRICING / PRICE). These are typically
-      -- system-generated AP offsets, not human-typed fees we can correct.
-      WHERE fee_type <> 'OTHER'
-      ORDER BY CNTBTCH, CNTITEM, CNTLINE
-    `);
+    .query(resolveSageQuery('bat.sage_corrections'));
 
   // Post-process to catch spelling mistakes that SQL alone can't see:
   //   - NO_WEEK rows where the line actually has "WEREK 12" / "WEK 12" etc.

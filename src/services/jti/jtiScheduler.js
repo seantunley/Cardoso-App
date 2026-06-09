@@ -17,6 +17,7 @@ import {
   hasScheduledArchive,
 } from './jtiArchive.js';
 import { getJtiSettings } from './jtiSettings.js';
+import { resolveSageQuery } from '../sage/queryRegistry.js';
 import { queryJtiSales } from './jtiQuery.js';
 import { buildJtiWorkbook } from './jtiSpreadsheet.js';
 import { buildJtiFilename } from './jtiFilename.js';
@@ -67,7 +68,11 @@ export async function generateAndArchivePeriod({ db, getSagePool, year, month, p
   }
 
   const settings = getJtiSettings({ db });
-  const sqlOverride = settings.queryOverride || undefined;
+  // Resolve the export SQL through the central Sage query registry (unified
+  // override store, key 'jti.export'). Returns the operator override when set,
+  // else DEFAULT_JTI_SQL — same result as the old settings.queryOverride path,
+  // but edits made in Settings → Sage Queries now take effect here.
+  const sqlOverride = resolveSageQuery('jti.export');
 
   let pool;
   try {

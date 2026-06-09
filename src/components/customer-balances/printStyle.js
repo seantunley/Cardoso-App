@@ -29,9 +29,39 @@ export const PRINT_STYLE = `
   }
   #customer-balances-printable * { visibility: visible; }
 
-  .cb-print-header { margin-bottom: 5mm; border-bottom: 2px solid #000; padding-bottom: 3mm; }
-  .cb-print-header h1 { font-size: 16px; font-weight: 700; margin: 0 0 2px 0; }
-  .cb-print-header p  { font-size: 11px; color: #555; margin: 0; }
+  .cb-print-header {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    margin-bottom: 5mm;
+    border-bottom: 2px solid #111;
+    padding-bottom: 3mm;
+  }
+  .cb-print-header .cb-print-depot {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: #111;
+    margin: 0 0 1.5mm 0;
+  }
+  .cb-print-header h1 { font-size: 18px; font-weight: 700; margin: 0 0 1mm 0; letter-spacing: -0.01em; }
+  .cb-print-header p  { font-size: 10px; color: #666; margin: 0; }
+  .cb-print-header .cb-print-brand {
+    text-align: right;
+    font-size: 9px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    white-space: nowrap;
+  }
+  .cb-print-header .cb-print-logo {
+    display: block;
+    height: 13mm;
+    margin: 0 0 1.5mm auto;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
 
   .cb-print-summary {
     display: flex;

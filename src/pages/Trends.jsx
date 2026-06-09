@@ -210,8 +210,131 @@ function EmptyState({ children }) {
   );
 }
 
+// Customer-area sub-tabs (mirrors the Inventory tab): record-volume/flag trends,
+// and customers ranked by sales value over a selectable timeline.
 function CustomerTrends() {
+  const [innerTab, setInnerTab] = useState("trends");
   const [period, setPeriod] = useState("weekly");
+  const [months, setMonths] = useState(12);
+  return (
+    <>
+      {/* Header row with the active sub-tab's filter on the right — mirrors the
+          Inventory tab's "Year-over-year comparison" header for consistent spacing. */}
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <div className="text-xs text-muted-foreground">
+          {innerTab === "sales"
+            ? "Customers ranked by sales value · inter-branch transfers excluded"
+            : "Customer record volume + flag rate over time"}
+        </div>
+        {innerTab === "sales" ? (
+          <select
+            value={months}
+            onChange={(e) => setMonths(Number(e.target.value))}
+            title="Limit the customers-by-sales ranking to this time window — sales value is summed over the selected period (inter-branch transfers excluded)."
+            className="rounded-xl border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+          >
+            {SALES_TIMELINES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        ) : (
+          <div className="inline-flex rounded-xl border border-border bg-card p-1">
+            {[{ value: "weekly", label: "Weekly" }, { value: "monthly", label: "Monthly" }].map((option) => (
+              <button
+                key={option.value}
+                onClick={() => setPeriod(option.value)}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+                  period === option.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                }`}
+                title={`Bucket the trend by ${option.value} periods`}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <Tabs value={innerTab} onValueChange={setInnerTab} className="space-y-4">
+        <TabsList className="inline-flex h-10 rounded-2xl border border-border bg-muted p-1 gap-1">
+          <TabsTrigger value="trends" title="Customer record volume + flag rate over time" className="rounded-xl px-4 py-1.5 text-sm">
+            Record trends
+          </TabsTrigger>
+          <TabsTrigger value="sales" title="Customers ranked by sales value, by timeline" className="rounded-xl px-4 py-1.5 text-sm">
+            By sales
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="trends" className="space-y-6"><CustomerRecordTrends period={period} /></TabsContent>
+        <TabsContent value="sales" className="space-y-6"><CustomersBySales months={months} /></TabsContent>
+      </Tabs>
+    </>
+  );
+}
+
+const SALES_TIMELINES = [
+  { value: 3, label: "Last 3 months" },
+  { value: 6, label: "Last 6 months" },
+  { value: 12, label: "Last 12 months" },
+  { value: 24, label: "Last 24 months" },
+  { value: 0, label: "All time" },
+];
+
+// Full customers-by-sales table, filterable by timeline. Inter-branch transfers
+// are excluded server-side. Reuses the dashboard top-customers endpoint.
+function CustomersBySales({ months }) {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["site-trends-customers-by-sales", months],
+    queryFn: async () => {
+      const r = await fetch(`/api/reports/dashboard/top-customers?months=${months}&limit=100`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Failed to load customers by sales");
+      return d;
+    },
+    staleTime: 60_000,
+  });
+  const rows = data?.rows || [];
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.revenue) || 0));
+  return (
+    <div className="space-y-4">
+      {isLoading && <LoadingSkeleton />}
+      {!isLoading && error && <ErrorBanner message={error.message} />}
+      {!isLoading && !error && data?.site_only && (
+        <EmptyState>Customer sales figures are available on branch (site) installs.</EmptyState>
+      )}
+      {!isLoading && !error && !data?.site_only && rows.length === 0 && (
+        <EmptyState>No customer sales recorded in this period.</EmptyState>
+      )}
+      {!isLoading && !error && rows.length > 0 && (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                <th className="px-3 py-2 w-8 text-right" title="Rank by sales value over the selected period">#</th>
+                <th className="px-3 py-2" title="Customer name (code shown if no name). The bar length is relative to the top customer.">Customer</th>
+                <th className="px-3 py-2 text-right" title="Total units sold to this customer over the selected period">Units</th>
+                <th className="px-3 py-2 text-right" title="Total sales value in Rand (R) over the selected period — the column the list is ranked by">Sales (R)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.customer_code} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground/60">{i + 1}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-foreground">{r.customer_name || r.customer_code}</div>
+                    <div className="mt-1 h-1 max-w-[260px] overflow-hidden rounded-full bg-muted/40">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(2, (Math.abs(r.revenue) / max) * 100)}%`, background: "hsl(200 80% 55%)" }} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/90">{formatQty(r.qty)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-foreground">{formatRand(r.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerRecordTrends({ period }) {
   const { data, isLoading, error } = useQuery({
     queryKey: ["site-trends-customer", period],
     queryFn: () => fetchCustomerTrends(period),
@@ -224,27 +347,6 @@ function CustomerTrends() {
 
   return (
     <>
-      <div className="flex justify-end mb-4">
-        <div className="inline-flex rounded-xl border border-border bg-card p-1">
-          {[
-            { value: "weekly", label: "Weekly" },
-            { value: "monthly", label: "Monthly" },
-          ].map((option) => (
-            <button
-              key={option.value}
-              onClick={() => setPeriod(option.value)}
-              className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
-                period === option.value
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-              title={`Bucket the trend by ${option.value} periods`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
       {isLoading && <LoadingSkeleton />}
       {!isLoading && error && <ErrorBanner message={error.message} />}
       {!isLoading && !error && rows.length === 0 && (

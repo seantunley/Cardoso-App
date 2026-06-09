@@ -1,17 +1,19 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
 export const AGE_BUCKETS = [
-  { value: "all",   label: "All" },
-  { value: "7-13",  label: "7–13 days" },
-  { value: "14-20", label: "14–20 days" },
-  { value: "21+",   label: "21+ days" },
+  { value: "all",     label: "All" },
+  { value: "1-7",     label: "1–7 days" },
+  { value: "8-14",    label: "8–14 days" },
+  { value: "15-21",   label: "15–21 days" },
+  { value: "over-21", label: "Over 21 days" },
 ];
 
 export const AGE_BUCKET_TOOLTIPS = {
-  all:     "Show all customers with outstanding balances",
-  "7-13":  "Customer has at least one unpaid invoice that's 7–13 days old",
-  "14-20": "Customer has at least one unpaid invoice that's 14–20 days old",
-  "21+":   "Customer has at least one unpaid invoice that's 21 or more days old",
+  all:       "Show all customers with outstanding balances",
+  "1-7":     "Customer has at least one open document aged 1–7 days (Sage aging, by document date)",
+  "8-14":    "Customer has at least one open document aged 8–14 days",
+  "15-21":   "Customer has at least one open document aged 15–21 days",
+  "over-21": "Customer has at least one open document aged over 21 days",
 };
 
 export default function AgeBucketPill({ active, onClick, children, value }) {

@@ -2,93 +2,16 @@ import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { logError } from '../lib/errorLog.js';
+import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 
-// Sage 300 default SQL for each source. Operators can override any of
-// these via creditor_sync_settings (the Settings page surfaces a textarea
-// per source) — same pattern as stockReceipts and JTI. Column aliases
-// must match exactly because the upsert maps by name.
-
-// Column names below were verified directly against Sage 300 schema
-// via INFORMATION_SCHEMA.COLUMNS — not guessed. Operator can still
-// override any source through creditor_sync_settings if their Sage
-// install has been customised.
-
-export const DEFAULT_VENDOR_SQL = `
-  SELECT
-    LTRIM(RTRIM(VENDORID))  AS vendor_code,
-    LTRIM(RTRIM(VENDNAME))  AS vendor_name,
-    LTRIM(RTRIM(TERMSCODE)) AS terms,
-    LTRIM(RTRIM(NAMECTAC))  AS contact,
-    LTRIM(RTRIM(TEXTPHON1)) AS phone,
-    LTRIM(RTRIM(EMAIL1))    AS email,
-    CASE WHEN SWACTV = 1 THEN 1 ELSE 0 END AS is_active
-  FROM APVEN
-`;
-
-export const DEFAULT_AP_INVOICE_SQL = `
-  SELECT
-    LTRIM(RTRIM(IDVEND))    AS vendor_code,
-    LTRIM(RTRIM(IDINVC))    AS document_number,
-    CAST(IDTRXTYPE AS varchar(10)) AS document_type,
-    DATEINVC                AS document_date_int,
-    DATEINVCDU              AS due_date_int,
-    AMTINVCHC               AS original_amount,
-    AMTDUEHC                AS outstanding_amount,
-    LTRIM(RTRIM(IDPONBR))   AS reference
-  FROM APOBL
-  WHERE AMTDUEHC <> 0
-`;
-
-// CNTPAYMENT is the count of invoice allocations applied to this cheque
-// (always >= 1 for a real payment row, NOT a "is-this-the-header" flag).
-// AMTRMITHC > 0 is enough to keep cheques (and exclude reversals).
-export const DEFAULT_AP_PAYMENT_SQL = `
-  SELECT
-    LTRIM(RTRIM(IDVEND))     AS vendor_code,
-    LTRIM(RTRIM(IDRMIT))     AS payment_number,
-    DATERMIT                 AS payment_date_int,
-    LTRIM(RTRIM(PAYMCODE))   AS payment_method,
-    AMTRMITHC                AS amount,
-    LTRIM(RTRIM(TXTRMITREF)) AS reference,
-    LTRIM(RTRIM(IDBANK))     AS bank_code
-  FROM APTCR
-  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMITHC > 0
-`;
-
-// POPORH1 has no STATUS column — derive an operator-friendly label from
-// ISCOMPLETE + ONHOLD. EXPARRIVAL is the expected arrival date.
-// DOCTOTAL is the PO grand total.
-export const DEFAULT_PO_HEADER_SQL = `
-  SELECT
-    LTRIM(RTRIM(PONUMBER))  AS po_number,
-    LTRIM(RTRIM(VDCODE))    AS vendor_code,
-    LTRIM(RTRIM(VDNAME))    AS vendor_name,
-    DATE                    AS po_date_int,
-    EXPARRIVAL              AS expected_date_int,
-    CASE
-      WHEN ISCOMPLETE = 1 THEN 'COMPLETE'
-      WHEN ONHOLD     = 1 THEN 'ON HOLD'
-      ELSE 'OPEN'
-    END                     AS status,
-    DOCTOTAL                AS total_amount
-  FROM POPORH1
-  WHERE DATE BETWEEN @from AND @to
-`;
-
-export const DEFAULT_PO_LINE_SQL = `
-  SELECT
-    LTRIM(RTRIM(h.PONUMBER))  AS po_number,
-    l.PORLSEQ                 AS line_no,
-    LTRIM(RTRIM(l.ITEMNO))    AS item_number,
-    LTRIM(RTRIM(l.ITEMDESC))  AS item_description,
-    l.OQORDERED               AS qty_ordered,
-    l.OQRECEIVED              AS qty_received,
-    l.UNITCOST                AS unit_cost,
-    l.EXTENDED                AS extended_cost
-  FROM POPORH1 h
-  INNER JOIN POPORL l ON l.PORHSEQ = h.PORHSEQ
-  WHERE h.DATE BETWEEN @from AND @to
-`;
+// Default SQL for each Creditors source now lives in the central Sage query
+// registry (src/services/sage/queryRegistry.js, keys 'creditor.*'). Re-exported
+// here so the sync-settings route can still surface the shipped defaults.
+export const DEFAULT_VENDOR_SQL     = getSageQuery('creditor.vendor').defaultSql;
+export const DEFAULT_AP_INVOICE_SQL = getSageQuery('creditor.ap_invoice').defaultSql;
+export const DEFAULT_AP_PAYMENT_SQL = getSageQuery('creditor.ap_payment').defaultSql;
+export const DEFAULT_PO_HEADER_SQL  = getSageQuery('creditor.po_header').defaultSql;
+export const DEFAULT_PO_LINE_SQL    = getSageQuery('creditor.po_line').defaultSql;
 
 function toYyyymmddInt(d) {
   const y = d.getFullYear();
@@ -160,8 +83,8 @@ export function getSyncMeta() {
 // Each source-runner returns { rows, upserted } so the orchestrator can
 // report a per-source summary even when one source fails (caught
 // separately so a permission error on APTCR doesn't wipe vendor sync).
-async function syncVendors(pool, settings) {
-  const queryText = (settings.vendor_sql_override?.trim()) || DEFAULT_VENDOR_SQL;
+async function syncVendors(pool) {
+  const queryText = resolveSageQuery('creditor.vendor');
   const result = await pool.request().query(queryText);
   const rows = result.recordset || [];
 
@@ -198,8 +121,8 @@ async function syncVendors(pool, settings) {
   return { rows: rows.length, upserted };
 }
 
-async function syncApInvoices(pool, settings) {
-  const queryText = (settings.ap_invoice_sql_override?.trim()) || DEFAULT_AP_INVOICE_SQL;
+async function syncApInvoices(pool) {
+  const queryText = resolveSageQuery('creditor.ap_invoice');
   const result = await pool.request().query(queryText);
   const rows = result.recordset || [];
 
@@ -243,8 +166,8 @@ async function syncApInvoices(pool, settings) {
   return { rows: rows.length, upserted };
 }
 
-async function syncApPayments(pool, settings, fromInt, toInt) {
-  const queryText = (settings.ap_payment_sql_override?.trim()) || DEFAULT_AP_PAYMENT_SQL;
+async function syncApPayments(pool, fromInt, toInt) {
+  const queryText = resolveSageQuery('creditor.ap_payment');
   const result = await pool.request()
     .input('from', sql.Int, fromInt)
     .input('to', sql.Int, toInt)
@@ -297,11 +220,11 @@ async function syncApPayments(pool, settings, fromInt, toInt) {
   return { rows: rows.length, upserted };
 }
 
-async function syncPos(pool, settings, fromInt, toInt) {
+async function syncPos(pool, fromInt, toInt) {
   // Two queries — header then lines. We upsert headers first, look up
   // their local ids, then upsert lines keyed by po_id.
-  const hQuery = (settings.po_header_sql_override?.trim()) || DEFAULT_PO_HEADER_SQL;
-  const lQuery = (settings.po_line_sql_override?.trim()) || DEFAULT_PO_LINE_SQL;
+  const hQuery = resolveSageQuery('creditor.po_header');
+  const lQuery = resolveSageQuery('creditor.po_line');
 
   const [hRes, lRes] = await Promise.all([
     pool.request().input('from', sql.Int, fromInt).input('to', sql.Int, toInt).query(hQuery),
@@ -469,10 +392,10 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
   const summary = { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), sources: {} };
 
   for (const [source, fn] of [
-    ['vendors',     () => syncVendors(pool, settings)],
-    ['ap_invoices', () => syncApInvoices(pool, settings)],
-    ['ap_payments', () => syncApPayments(pool, settings, fromInt, toInt)],
-    ['pos',         () => syncPos(pool, settings, fromInt, toInt)],
+    ['vendors',     () => syncVendors(pool)],
+    ['ap_invoices', () => syncApInvoices(pool)],
+    ['ap_payments', () => syncApPayments(pool, fromInt, toInt)],
+    ['pos',         () => syncPos(pool, fromInt, toInt)],
   ]) {
     try {
       summary.sources[source] = await fn();

@@ -25,6 +25,12 @@ const MODE_META = {
   hub:  { icon: Cloud,  label: 'Hub' },
   all:  { icon: null,   label: 'Both' },
 };
+// Last-run status dot colours — from job_runs.status.
+const STATUS_DOT = {
+  succeeded: 'hsl(145 55% 45%)',
+  failed:    'hsl(0 72% 50%)',
+  started:   'hsl(50 90% 55%)',
+};
 
 function humanizeMs(ms) {
   if (!Number.isFinite(ms)) return '—';
@@ -177,6 +183,7 @@ export default function SchedulePanel() {
                 <th className="py-2 px-3">Type</th>
                 <th className="py-2 px-3">Mode</th>
                 <th className="py-2 px-3">Schedule</th>
+                <th className="py-2 px-3">Last run</th>
                 <th className="py-2 px-3">Next run</th>
                 <th className="py-2 px-3">When</th>
               </tr>
@@ -228,6 +235,28 @@ export default function SchedulePanel() {
                         <span className="font-mono text-xs text-foreground">
                           +{humanizeMs(j.delayMs)} after boot
                         </span>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      {j.lastRun ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ background: STATUS_DOT[j.lastRun.status] || 'hsl(var(--muted-foreground))' }} />
+                              <span className={`text-xs ${j.lastRun.status === 'failed' ? 'text-rose-400' : 'text-muted-foreground'}`}>
+                                {formatRelative(j.lastRun.started_at, serverTime)}
+                              </span>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>
+                            <p className="font-mono text-xs">
+                              {j.lastRun.status} · {formatAbsolute(j.lastRun.started_at)}
+                              {j.lastRun.error_message ? ` · ${j.lastRun.error_message}` : ''}
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        <span className="text-xs text-muted-foreground/60">never</span>
                       )}
                     </td>
                     <td className="py-2.5 px-3">

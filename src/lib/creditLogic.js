@@ -96,8 +96,8 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
   thresholds: {
     paymentTermDays: 14,
     breachDays: 21,
-    dormantThresholdDays: 180,
-    dormantThresholdMonths: 6,
+    dormantThresholdDays: 90,
+    dormantThresholdMonths: 3,
     zeroBalanceCutoff: 1,
     cautionScoreBelow: 70,
     holdScoreBelow: 40,

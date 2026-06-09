@@ -17,11 +17,12 @@ import { pagination } from '../lib/httpParams.js';
 // See the helpers' docstrings in src/services/batReconciliation.js for
 // the architectural rule (hub mirrors site; never inline a parallel
 // SELECT here or the two views can drift again).
-import { getLastPaidSageWeek, getLastBatReconciliationWeek } from '../services/batReconciliation.js';
+import { getLastPaidSageWeek, getLastBatReconciliationWeek, getSagePool } from '../services/batReconciliation.js';
 import { buildStatements } from '../db/statements.js';
 import { expandDataRecord, getFirstNonEmptyObjectValue, parseJsonSafely, SALES_REP_ALIASES, ACCOUNT_TYPE_ALIASES } from '../helpers.js';
 import { analyseInvoiceCredit } from '../lib/creditAnalysis.js';
 import { getCreditLogicForAnalysis } from '../services/creditLogic.js';
+import { ageOpenItems, BUCKET_KEYS, AP_SCHEME } from '../services/aging.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -129,17 +130,20 @@ function getBalanceAgeDays(record) {
   return ages.length > 0 ? Math.max(...ages) : null;
 }
 
-// Customer matches the bucket if ANY of their unpaid invoices falls in this age
-// range. A customer with a yesterday invoice AND a 35-day invoice will appear in
-// both Current and 14-20 (overlapping is fine — buckets describe the customer's
-// active exposure rather than a single classification).
+// Legacy hub fallback: customer matches a Sage period if ANY of their invoices
+// (from the unpaid_invoices snapshot, aged by document date) falls in that
+// period. Used only in hub mode until PR3's ETL populates hub_debtor_ar_invoice;
+// site mode uses the open-item ledger via the engine. Period keys match the
+// engine's (1-7 / 8-14 / 15-21 / over-21).
 function matchesAgeBucket(record, ageBucket) {
   if (!ageBucket || ageBucket === 'all') return true;
   const ages = getBalanceInvoiceAges(record);
   if (ages.length === 0) return false;
-  if (ageBucket === '7-13')  return ages.some((d) => d >  7 && d <  14);
-  if (ageBucket === '14-20') return ages.some((d) => d >= 14 && d <  21);
-  if (ageBucket === '21+')   return ages.some((d) => d >= 21);
+  if (ageBucket === '1-7')     return ages.some((d) => d >= 1  && d <= 7);
+  if (ageBucket === '8-14')    return ages.some((d) => d >= 8  && d <= 14);
+  if (ageBucket === '15-21')   return ages.some((d) => d >= 15 && d <= 21);
+  if (ageBucket === 'over-21') return ages.some((d) => d >= 22);
+  if (ageBucket === 'current') return ages.some((d) => d <= 0);
   return true;
 }
 
@@ -338,8 +342,212 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // it isn't entitled to. Fallback to requireAuth-only if requirePermission
   // wasn't supplied (defensive; server.js always passes it).
   const reportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports')] : [requireAuth];
+  // Aged Creditors is reachable from BOTH the Reports page (Reports users) and
+  // the Creditors module (Creditor users), so it accepts EITHER permission
+  // (requirePermission is OR over its keys). Keeps the API in step with both
+  // entry points instead of locking out whichever group lacks the other grant.
+  const creditorsGuard = requirePermission ? [requireAuth, requirePermission('can_access_reports', 'can_access_creditors')] : [requireAuth];
+  // Monthly Sales Figures lives in the "Monthly Reports" sidebar group, gated by
+  // its own permission rather than the general reports permission.
+  const monthlyReportsGuard = requirePermission ? [requireAuth, requirePermission('can_access_monthly_reports')] : [requireAuth];
   const stmts = buildStatements(db);
   const router = express.Router();
+
+  // ── AR Document Summary (Invoices / Credit Notes / Debit Notes by month) ──
+  const arMkAmt = (excl, vat, incl) => ({ excl: Number(excl) || 0, vat: Number(vat) || 0, incl: Number(incl) || 0 });
+  const arSumTotals = (months) => {
+    const blank = () => ({ excl: 0, vat: 0, incl: 0 });
+    const t = { invoices: blank(), credit_notes: blank(), debit_notes: blank(), net_incl: 0 };
+    for (const m of months) {
+      for (const k of ['invoices', 'credit_notes', 'debit_notes']) { t[k].excl += m[k].excl; t[k].vat += m[k].vat; t[k].incl += m[k].incl; }
+      t.net_incl += m.net_incl;
+    }
+    return t;
+  };
+  // Live Sage query for one site (also used by the hub-pull endpoint). Posted
+  // A/R documents (ARIBH/ARIBC), excluding ERROR batches + zero-VAT docs
+  // (AMTTAX1 > 0), mirroring the operator's Crystal "Sales Figures" report.
+  // TEXTTRX 1/2/3 = invoice/debit note/credit note. BASETAX1 ex-VAT, AMTTAX1
+  // VAT, AMTNETTOT incl.
+  async function queryArDocSummary(from, to) {
+    const pool = await getSagePool();
+    const rs = await pool.request().input('from', from).input('to', to).query(`
+      SELECT LEFT(CAST(h.DATEINVC AS varchar(8)), 6) AS ym,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
+      FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+      WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
+      GROUP BY LEFT(CAST(h.DATEINVC AS varchar(8)), 6)
+      ORDER BY ym`);
+    const months = rs.recordset.map((r) => {
+      const invoices = arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl);
+      const debit_notes = arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl);
+      const credit_notes = arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl);
+      const ym = String(r.ym);
+      return { month: `${ym.slice(0, 4)}-${ym.slice(4, 6)}`, invoices, credit_notes, debit_notes, net_incl: invoices.incl + debit_notes.incl - credit_notes.incl };
+    });
+    return { months, totals: arSumTotals(months) };
+  }
+  const arYmdInt = (s, dflt) => { const m = String(s || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? Number(`${m[1]}${m[2]}${m[3]}`) : dflt; };
+  const arIntToYm = (n) => `${String(n).slice(0, 4)}-${String(n).slice(4, 6)}`;
+
+  // GET /api/reports/ar-document-summary?from=&to= — site mode runs the live
+  // Sage query; HUB mode reads the per-branch totals synced down into
+  // hub_ar_document_summary (hubEtl pulls each branch's /api/reporting variant).
+  router.get('/api/reports/ar-document-summary', ...monthlyReportsGuard, async (req, res) => {
+    try {
+      const now = new Date();
+      const from = arYmdInt(req.query.from, Number(`${now.getFullYear()}0101`));
+      const to = arYmdInt(req.query.to, Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`));
+
+      if (process.env.HUB_MODE === 'true') {
+        // Optional single-branch filter (matched on the branch's display name);
+        // 'all' keeps the consolidated table + per-branch sections.
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, s.site_id) = ?' : '';
+        const siteParams = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = prep(`
+          SELECT DISTINCT COALESCE(hs.name, s.site_id) AS site_name
+          FROM hub_ar_document_summary s LEFT JOIN hub_sites hs ON hs.id = s.site_id
+          ORDER BY site_name`).all().map(r => r.site_name).filter(Boolean);
+        const rows = prep(`
+          SELECT s.site_id, COALESCE(hs.name, s.site_id) AS site_name, s.ym,
+                 s.inv_excl, s.inv_vat, s.inv_incl, s.cn_excl, s.cn_vat, s.cn_incl, s.dn_excl, s.dn_vat, s.dn_incl
+          FROM hub_ar_document_summary s LEFT JOIN hub_sites hs ON hs.id = s.site_id
+          WHERE s.ym >= ? AND s.ym <= ? ${siteWhere} ORDER BY site_name, s.ym`).all(arIntToYm(from), arIntToYm(to), ...siteParams);
+        const toMonth = (r) => ({
+          month: r.ym,
+          invoices: arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl),
+          credit_notes: arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl),
+          debit_notes: arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl),
+          net_incl: (Number(r.inv_incl) || 0) + (Number(r.dn_incl) || 0) - (Number(r.cn_incl) || 0),
+        });
+        const bySite = new Map();
+        for (const r of rows) {
+          if (!bySite.has(r.site_id)) bySite.set(r.site_id, { site_id: r.site_id, site_name: r.site_name, months: [] });
+          bySite.get(r.site_id).months.push(toMonth(r));
+        }
+        const branches = [...bySite.values()].map((b) => ({ ...b, totals: arSumTotals(b.months) }));
+        const consMap = new Map();
+        for (const b of branches) for (const m of b.months) {
+          if (!consMap.has(m.month)) consMap.set(m.month, { month: m.month, invoices: arMkAmt(0, 0, 0), credit_notes: arMkAmt(0, 0, 0), debit_notes: arMkAmt(0, 0, 0), net_incl: 0 });
+          const c = consMap.get(m.month);
+          for (const k of ['invoices', 'credit_notes', 'debit_notes']) { c[k].excl += m[k].excl; c[k].vat += m[k].vat; c[k].incl += m[k].incl; }
+          c.net_incl += m.net_incl;
+        }
+        const consolidatedMonths = [...consMap.values()].sort((a, b) => a.month.localeCompare(b.month));
+        return res.json({ hub_mode: true, site_name: siteFilter !== 'all' ? siteFilter : 'All branches', from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) }, filters: { sites } });
+      }
+
+      const { months, totals } = await queryArDocSummary(from, to);
+      // Depot name from Settings → Depot Details (depot_profile.name), falling
+      // back to SITE_NAME if it hasn't been filled in.
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+      res.json({ from, to, months, totals, site_name: depotName });
+    } catch (err) {
+      console.error('[ar-document-summary] failed', err.message);
+      res.status(503).json({ error: 'Could not load the document summary. Check the Sage connection and try again.' });
+    }
+  });
+
+  // Same ARIBH/ARIBC query as the monthly summary, but grouped by full day
+  // (YYYYMMDD) instead of month — used by the Daily Sales Figures report for the
+  // current month. Filters/joins identical so the daily rows reconcile to the
+  // month total.
+  async function queryArDailySummary(from, to) {
+    const pool = await getSagePool();
+    const rs = await pool.request().input('from', from).input('to', to).query(`
+      SELECT CAST(h.DATEINVC AS varchar(8)) AS ymd,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
+      FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+      WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
+      GROUP BY CAST(h.DATEINVC AS varchar(8))
+      ORDER BY ymd`);
+    const days = rs.recordset.map((r) => {
+      const invoices = arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl);
+      const debit_notes = arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl);
+      const credit_notes = arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl);
+      const ymd = String(r.ymd);
+      return { day: `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`, invoices, credit_notes, debit_notes, net_incl: invoices.incl + debit_notes.incl - credit_notes.incl };
+    });
+    return { days, totals: arSumTotals(days) };
+  }
+
+  // GET /api/reports/daily-sales-figures — current month's posted A/R documents
+  // broken down by day (same VAT split + Net as the monthly Sales Figures).
+  // Site-only: the hub stores monthly totals, not daily, so HUB_MODE returns an
+  // explicit "unavailable" flag the UI surfaces as a note.
+  // Gated by monthlyReportsGuard (same as ar-document-summary above): it exposes
+  // the same posted-document figures, so Reports-only users must not reach it.
+  router.get('/api/reports/daily-sales-figures', ...monthlyReportsGuard, async (req, res) => {
+    try {
+      const now = new Date();
+      const y = now.getFullYear();
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const from = Number(`${y}${mo}01`);
+      const to = Number(`${y}${mo}${String(now.getDate()).padStart(2, '0')}`);
+      const month = `${y}-${mo}`;
+
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_mode: true, unavailable: true, month, from, to, days: [], totals: null });
+      }
+
+      const { days, totals } = await queryArDailySummary(from, to);
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+      res.json({ month, from, to, days, totals, site_name: depotName });
+    } catch (err) {
+      console.error('[daily-sales-figures] failed', err.message);
+      res.status(503).json({ error: 'Could not load the daily sales figures. Check the Sage connection and try again.' });
+    }
+  });
+
+  // GET /api/reports/debtor-balance-summary — headline debtor exposure for the
+  // dashboard tile. Positive open balances only (excludes net-credit customers),
+  // so it matches the Customer Balances page total to the cent, plus the AR
+  // aging buckets. Site reads datarecord; hub reads hub_records (which carries
+  // no per-bucket data, so buckets are null there).
+  router.get('/api/reports/debtor-balance-summary', ...reportsGuard, (req, res) => {
+    try {
+      const positiveWhere = "outstanding_balance IS NOT NULL AND outstanding_balance != '' AND outstanding_balance != '0' AND outstanding_balance_num > 0";
+      if (process.env.HUB_MODE === 'true') {
+        const r = prep(`SELECT COUNT(*) n, COALESCE(SUM(outstanding_balance_num), 0) total FROM hub_records WHERE ${positiveWhere}`).get();
+        return res.json({ total_outstanding: r.total, total_customers: r.n, buckets: null });
+      }
+      const r = prep(`
+        SELECT COUNT(*) n, COALESCE(SUM(outstanding_balance_num), 0) total,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_current')  AS REAL)), 0) b_current,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_1_7')      AS REAL)), 0) b_1_7,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_8_14')     AS REAL)), 0) b_8_14,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_15_21')    AS REAL)), 0) b_15_21,
+          COALESCE(SUM(CAST(json_extract(data, '$.age_over_21')  AS REAL)), 0) b_over_21
+        FROM datarecord WHERE ${positiveWhere}`).get();
+      res.json({
+        total_outstanding: r.total,
+        total_customers: r.n,
+        buckets: { current: r.b_current, '1-7': r.b_1_7, '8-14': r.b_8_14, '15-21': r.b_15_21, 'over-21': r.b_over_21 },
+      });
+    } catch (err) {
+      console.error('[debtor-balance-summary] failed', err.message);
+      res.status(500).json({ error: 'Could not load the debtor balance summary.' });
+    }
+  });
 
   // Memoize prepared statements by SQL text. better-sqlite3 Statement objects
   // are reusable across calls; re-preparing the same string per request is
@@ -354,10 +562,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // GET /api/kpis
   router.get('/api/kpis', requireAuth, (req, res) => {
     try {
+      const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
+      // Hub: KPIs come from the consolidated hub_records (all branches), with an
+      // optional ?site= branch filter and the full branch list for the selector.
+      // (Site-mode datarecord is empty on a hub install, so the prior path read 0.)
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'WHERE COALESCE(hs.name, r.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const total = prep(`SELECT COUNT(*) AS count FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ${where}`).get(...params);
+        const byFlag = prep(`SELECT r.flag_color, COUNT(*) AS count FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ${where} GROUP BY r.flag_color`).all(...params);
+        for (const row of byFlag) if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
+        const sites = prep(`SELECT DISTINCT COALESCE(hs.name, r.site_id) AS site_name FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ORDER BY site_name`).all().map(x => x.site_name).filter(Boolean);
+        return res.json({ total_records: total.count, records_by_flag: flagCounts, last_sync_at: null, hub_mode: true, filters: { sites } });
+      }
       const total = stmts.kpiTotalRecords.get();
       const byFlag = stmts.kpiFlagCounts.all();
       const lastSync = stmts.kpiLastSync.get();
-      const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
       for (const row of byFlag) {
         if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
       }
@@ -385,6 +606,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const hideInvoiceMatchesBalance = ['1', 'true', 'yes', 'on'].includes(String(req.query.hideInvoiceMatchesBalance || '').toLowerCase());
     const lastPurchaseDays = Math.max(parseInt(req.query.lastPurchaseDays, 10) || 0, 0);
     const dormantOnly = ['1', 'true', 'yes', 'on'].includes(String(req.query.dormantOnly || '').toLowerCase());
+    // National-account filter: 'all' | 'national' | 'standard'.
+    const accountTypeFilter = String(req.query.accountType || 'all').trim().toLowerCase();
 
     const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
@@ -397,7 +620,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       hideInvoiceMatchesBalance ||
       salesRepFilter !== 'all' ||
       lastPurchaseDays > 0 ||
-      dormantOnly;
+      dormantOnly ||
+      accountTypeFilter !== 'all';
 
     try {
       let sites = [];
@@ -477,7 +701,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         const fetchSql = needsInMemoryFilter
           ? `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
-                    flag_color, flag_reason, auto_flagged, terms,
+                    flag_color, flag_reason, auto_flagged,
+                    json_extract(data, '$.terms') AS terms,
+                    json_extract(data, '$.location') AS location,
+                    json_extract(data, '$.age_current') AS age_current,
+                    json_extract(data, '$.age_1_7') AS age_1_7,
+                    json_extract(data, '$.age_8_14') AS age_8_14,
+                    json_extract(data, '$.age_15_21') AS age_15_21,
+                    json_extract(data, '$.age_over_21') AS age_over_21,
                     local_fields,
                     ? AS site_name
              FROM datarecord
@@ -487,7 +718,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
              ORDER BY outstanding_balance_num DESC`
           : `SELECT id, customer_number, customer_name, sales_rep, account_type,
                     outstanding_balance, unpaid_invoices, receipts,
-                    flag_color, flag_reason, auto_flagged, terms,
+                    flag_color, flag_reason, auto_flagged,
+                    json_extract(data, '$.terms') AS terms,
+                    json_extract(data, '$.location') AS location,
+                    json_extract(data, '$.age_current') AS age_current,
+                    json_extract(data, '$.age_1_7') AS age_1_7,
+                    json_extract(data, '$.age_8_14') AS age_8_14,
+                    json_extract(data, '$.age_15_21') AS age_15_21,
+                    json_extract(data, '$.age_over_21') AS age_over_21,
                     local_fields,
                     ? AS site_name,
                     COUNT(*) OVER() AS _total_count,
@@ -529,11 +767,42 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // ── In-memory pagination path (age bucket / invoice-match / sales rep active) ──
       let recordsForPage;
       let pageTotalOutstanding;
+
+      // Aging summary for the on-screen tiles. The buckets are computed in the
+      // customer sync query (so each record's buckets sum to its balance), so
+      // summing them over the SAME set as the list total makes the tiles
+      // reconcile to the displayed total by construction.
+      let aging = null;
+      const AGE_COLS = [['current', 'age_current'], ['1-7', 'age_1_7'], ['8-14', 'age_8_14'], ['15-21', 'age_15_21'], ['over-21', 'age_over_21']];
+      const sumBuckets = (rs) => {
+        const buckets = { current: 0, '1-7': 0, '8-14': 0, '15-21': 0, 'over-21': 0 };
+        const bucket_counts = { current: 0, '1-7': 0, '8-14': 0, '15-21': 0, 'over-21': 0 };
+        let total = 0;
+        for (const r of rs) for (const [k, col] of AGE_COLS) { const v = Number(r[col]) || 0; buckets[k] += v; if (v !== 0) bucket_counts[k] += 1; total += v; }
+        return { buckets, bucket_counts, total_outstanding: total };
+      };
+
       if (needsInMemoryFilter) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
+
         const filtered = allRecords.filter((row) => {
-          if (!matchesAgeBucket(row, ageBucket)) return false;
+          if (ageBucket !== 'all') {
+            // Buckets come straight off the record (computed in the customer
+            // sync query, so they reconcile to the balance). 'over-21' -> age_over_21.
+            if (!isHub) {
+              const key = 'age_' + ageBucket.replace(/-/g, '_');
+              if ((Number(row[key]) || 0) === 0) return false;
+            } else if (!matchesAgeBucket(row, ageBucket)) {
+              return false; // hub fallback (legacy snapshot aging) until PR3 ETL
+            }
+          }
+          if (accountTypeFilter !== 'all') {
+            const at = String(row.account_type || '').trim().toUpperCase();
+            const isNational = at.includes('NATIONAL');
+            if (accountTypeFilter === 'national' && !isNational) return false;
+            if (accountTypeFilter === 'standard' && isNational) return false;
+          }
           if (hideInvoiceMatchesBalance && isInvoiceBalanceMatch(row)) return false;
           if (salesRepFilter !== 'all' && String(row.sales_rep || '').trim() !== salesRepFilter) return false;
           // "Haven't bought in N+ days" — uses the last invoice date.
@@ -558,11 +827,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         });
         total = filtered.length;
         filteredTotalOutstanding = filtered.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
+        if (!isHub) aging = sumBuckets(filtered);
         const start = (page - 1) * limit;
         recordsForPage = filtered.slice(start, start + limit);
         console.log(`[balances-perf] ageBucket=${ageBucket} salesRep=${salesRepFilter} hideMatch=${hideInvoiceMatchesBalance} fetched=${allRecords.length} matched=${filtered.length} pageSize=${recordsForPage.length}`);
       } else {
         recordsForPage = allRecords;
+        if (!isHub) aging = sumBuckets(allRecords);
       }
       pageTotalOutstanding = recordsForPage.reduce((s, row) => s + parseAmount(row.outstanding_balance), 0);
       const totalPages = Math.max(1, Math.ceil(total / limit));
@@ -608,6 +879,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         salesReps,
         ageBucket,
         salesRep: salesRepFilter,
+        accountType: accountTypeFilter,
+        aging,
         minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
       });
     } catch (err) {
@@ -877,6 +1150,198 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // ── Reporting Dashboard mini-tiles (compact top-10 lists) ─────────────────
+  // Smaller versions of the Trends inventory graphs for the dashboard. Site-mode
+  // (the inventory sales cache + transactions live on sites); HUB_MODE returns
+  // an empty, site_only payload the tiles surface as a note.
+  const dashMonth = (n = 0) => { const d = new Date(); const t = new Date(d.getFullYear(), d.getMonth() - n, 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; };
+  // Inter-branch stock transfers aren't real customer sales — exclude them from
+  // every dashboard sales figure (matched on customer name, separator-agnostic).
+  // Hard-coded fragment (no user input) referencing the unqualified customer_name.
+  const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
+
+  // Top 10 items sold this month (by units), from the monthly sales cache.
+  router.get('/api/reports/dashboard/top-items-mtd', ...reportsGuard, (req, res) => {
+    try {
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, t.site_id) AS site_name FROM hub_inventory_item_sales t LEFT JOIN hub_sites hs ON hs.id = t.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.revenue) AS revenue, MAX(t.item_description) AS item_description
+          FROM hub_inventory_item_sales t LEFT JOIN hub_sites hs ON hs.id = t.site_id
+          WHERE t.period = ? ${where}
+          GROUP BY TRIM(t.item_number)
+          ORDER BY qty DESC
+          LIMIT 10
+        `).all(month, ...params).map((r) => ({
+          item_number: r.item_number,
+          item_description: r.item_description || null,
+          qty: Number(r.qty) || 0,
+          revenue: Number(r.revenue) || 0,
+        }));
+        return res.json({ month, rows, hub_mode: true, filters: { sites } });
+      }
+      const from = `${month}-01`;
+      const to = `${month}-${String(now.getDate()).padStart(2, '0')}`;
+      const rows = db.prepare(`
+        SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS revenue,
+               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
+        FROM inventory_sales_transactions t
+        LEFT JOIN (
+          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+          FROM inventory_sales_cache
+          WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+          GROUP BY TRIM(item_number)
+        ) ic ON ic.item_number = TRIM(t.item_number)
+        LEFT JOIN (
+          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
+        WHERE t.transaction_date >= ? AND t.transaction_date <= ?
+          AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(t.item_number)
+        ORDER BY qty DESC
+        LIMIT 10
+      `).all(from, to).map((r) => ({
+        item_number: r.item_number,
+        item_description: r.item_description || null,
+        qty: Number(r.qty) || 0,
+        revenue: Number(r.revenue) || 0,
+      }));
+      res.json({ month, rows });
+    } catch (err) {
+      logError('reports.dashboard.top_items_mtd', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Top 10 dead-stock items (held value, no sale in 3+ months) by held value.
+  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (req, res) => {
+    try {
+      const threshold = dashMonth(3);
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, i.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, i.site_id) AS site_name FROM hub_inventory i LEFT JOIN hub_sites hs ON hs.id = i.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          WITH last_sale AS (
+            SELECT site_id, TRIM(item_number) AS item_number, MAX(period) AS last_period
+            FROM hub_inventory_item_sales GROUP BY site_id, TRIM(item_number)
+          )
+          SELECT TRIM(i.item_number) AS item_number, i.item_description,
+                 COALESCE(CAST(REPLACE(REPLACE(i.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+                 ls.last_period,
+                 COALESCE(hs.name, i.site_id) AS site_name
+          FROM hub_inventory i
+          LEFT JOIN hub_sites hs ON hs.id = i.site_id
+          LEFT JOIN last_sale ls ON ls.site_id = i.site_id AND ls.item_number = TRIM(i.item_number)
+          WHERE COALESCE(CAST(REPLACE(REPLACE(i.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
+            AND (ls.last_period IS NULL OR ls.last_period < ?) ${where}
+          ORDER BY inv_value DESC
+          LIMIT 10
+        `).all(threshold, ...params).map((r) => ({
+          item_number: r.item_number,
+          item_description: r.item_description || null,
+          inv_value: Number(r.inv_value) || 0,
+          last_period: r.last_period || null,
+          site_name: r.site_name || null,
+        }));
+        return res.json({ threshold_months: 3, rows, hub_mode: true, filters: { sites } });
+      }
+      const rows = db.prepare(`
+        WITH last_sale AS (
+          SELECT TRIM(item_number) AS item_number, MAX(SUBSTR(transaction_date, 1, 7)) AS last_period
+          FROM inventory_sales_transactions
+          WHERE transaction_date IS NOT NULL AND NOT ${EXCL_INTER_BRANCH}
+          GROUP BY TRIM(item_number)
+        )
+        SELECT TRIM(ir.item_number) AS item_number, ir.item_description,
+               COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM inventoryrecord ir
+        LEFT JOIN last_sale ls ON ls.item_number = TRIM(ir.item_number)
+        WHERE COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
+          AND (ls.last_period IS NULL OR ls.last_period < ?)
+        ORDER BY inv_value DESC
+        LIMIT 10
+      `).all(threshold).map((r) => ({
+        item_number: r.item_number,
+        item_description: r.item_description || null,
+        inv_value: Number(r.inv_value) || 0,
+        last_period: r.last_period || null,
+      }));
+      res.json({ threshold_months: 3, rows });
+    } catch (err) {
+      logError('reports.dashboard.dead_stock_items', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Top 10 customers by sales value, from the per-transaction sales table.
+  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (req, res) => {
+    try {
+      const months = Math.max(0, parseInt(req.query.months, 10) || 12); // default last 12 months; 0 = all time
+      const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 10));
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, c.site_id) = ?' : '';
+        const hubConds = ["c.customer_code IS NOT NULL AND TRIM(c.customer_code) <> ''"];
+        const hubParams = [];
+        if (months > 0) {
+          const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - (months - 1), 1);
+          hubConds.push('c.period >= ?'); hubParams.push(`${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}`);
+        }
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, c.site_id) AS site_name FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          SELECT TRIM(c.customer_code) AS customer_code, MAX(c.customer_name) AS customer_name,
+                 SUM(c.revenue) AS revenue, SUM(c.qty) AS qty
+          FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id
+          WHERE ${hubConds.join(' AND ')} ${siteWhere}
+          GROUP BY TRIM(c.customer_code)
+          ORDER BY revenue DESC
+          LIMIT ?
+        `).all(...hubParams, ...(siteFilter !== 'all' ? [siteFilter] : []), limit).map((r) => ({
+          customer_code: r.customer_code,
+          customer_name: r.customer_name || null,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        }));
+        return res.json({ months, rows, hub_mode: true, filters: { sites } });
+      }
+      const where = ["customer_code IS NOT NULL AND TRIM(customer_code) <> ''", `NOT ${EXCL_INTER_BRANCH}`];
+      const params = [];
+      if (months > 0) {
+        const d = new Date();
+        const t = new Date(d.getFullYear(), d.getMonth() - (months - 1), 1);
+        where.push('transaction_date >= ?');
+        params.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`);
+      }
+      const rows = db.prepare(`
+        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
+               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
+        FROM inventory_sales_transactions
+        WHERE ${where.join(' AND ')}
+        GROUP BY TRIM(customer_code)
+        ORDER BY revenue DESC
+        LIMIT ?
+      `).all(...params, limit).map((r) => ({
+        customer_code: r.customer_code,
+        customer_name: r.customer_name || null,
+        revenue: Number(r.revenue) || 0,
+        qty: Number(r.qty) || 0,
+      }));
+      res.json({ months, rows });
+    } catch (err) {
+      logError('reports.dashboard.top_customers', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/reports/trends/inventory/top-movers — site-mode top-10 SKUs by
   // lifetime revenue with last-12-months vs prior-12-months delta.
   router.get('/api/reports/trends/inventory/top-movers', ...reportsGuard, (_req, res) => {
@@ -963,145 +1428,189 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const accountTypeFilter = String(query.account_type || 'all').trim();
     const siteFilter = String(query.site || 'all').trim();
 
-    {
-      let records;
-      let sites = [];
-      if (isHub) {
-        const dataParams = [minBalance];
-        let whereSite = '';
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; dataParams.push(siteFilter); }
+    // Open AR documents (synced from Sage AROBL by services/debtorSync.js),
+    // joined back to the customer master for name / rep / type / terms. Unlike
+    // the old per-customer snapshot, each row is a single open document with a
+    // real due date and outstanding amount, so we can age it the Sage way.
+    let rows;
+    let sites = [];
+    if (isHub) {
+      const params = [];
+      let whereSite = '';
+      const ledgerReady = prep('SELECT 1 FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0 LIMIT 1').get();
+      if (ledgerReady) {
+        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
+        sites = prep(
+          `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+           FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+           WHERE i.outstanding_amount <> 0 ORDER BY site_name`
+        ).all().map(r => r.site_name).filter(Boolean);
+        rows = prep(
+          `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+                  i.outstanding_amount, i.reference,
+                  d.customer_name, d.sales_rep, d.account_type, d.terms,
+                  COALESCE(s.name, i.site_id) AS site_name
+           FROM hub_debtor_ar_invoice i
+           LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
+           LEFT JOIN hub_sites s ON s.id = i.site_id
+           WHERE i.outstanding_amount <> 0 ${whereSite}`
+        ).all(...params);
+      } else {
+        // Fallback: the hub open-item ledger isn't populated yet (no ETL into
+        // hub_debtor_ar_invoice). Use the per-customer snapshot in hub_records —
+        // the same source the hub Customer Balances already reads — so the
+        // report still returns balances + site filters instead of an empty
+        // page. Each customer becomes one pseudo-document aged by the OLDEST
+        // dated unpaid invoice in its snapshot until the open-item ETL lands.
+        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; params.push(siteFilter); }
         sites = prep(
           `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-             AND r.outstanding_balance != '0'
-             AND r.outstanding_balance_num > ?
-           ORDER BY site_name`
-        ).all(minBalance).map(r => r.site_name).filter(Boolean);
-        records = prep(
-          `SELECT r.customer_number, r.customer_name, r.sales_rep, r.account_type, r.terms,
-                  r.outstanding_balance, r.unpaid_invoices,
-                  r.flag_color, r.flag_reason, r.auto_flagged,
+           WHERE r.outstanding_balance_num > 0 ORDER BY site_name`
+        ).all().map(r => r.site_name).filter(Boolean);
+        rows = prep(
+          `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
+                  r.customer_name, r.sales_rep, r.account_type, r.terms,
+                  r.outstanding_balance_num, r.unpaid_invoices,
                   COALESCE(s.name, r.site_id) AS site_name
            FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance IS NOT NULL AND r.outstanding_balance != ''
-             AND r.outstanding_balance != '0'
-             AND r.outstanding_balance_num > ?
-             ${whereSite}
-           ORDER BY r.outstanding_balance_num DESC
-           LIMIT 5000`
-        ).all(...dataParams).map(expandDataRecord);
-      } else {
-        sites = [SITE_NAME];
-        records = prep(
-          `SELECT customer_number, customer_name, sales_rep, account_type, terms,
-                  outstanding_balance, unpaid_invoices,
-                  flag_color, flag_reason, auto_flagged,
-                  local_fields,
-                  ? AS site_name
-           FROM datarecord
-           WHERE outstanding_balance IS NOT NULL AND outstanding_balance != ''
-             AND outstanding_balance != '0'
-             AND outstanding_balance_num > ?
-           ORDER BY outstanding_balance_num DESC
-           LIMIT 5000`
-        ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType).map(expandDataRecord);
+           WHERE r.outstanding_balance_num <> 0 ${whereSite}`
+        ).all(...params).map((r) => {
+          const inv = parseJsonSafely(r.unpaid_invoices, []);
+          // Scan every unpaid line for the OLDEST date — the snapshot array is
+          // not guaranteed oldest-first, and using inv[0] alone places a
+          // customer whose older invoice sits later in the array into a younger
+          // bucket, understating the aged-debtors summary. hub_records carries no
+          // flat date column, so the JSON snapshot is the only source; null when
+          // absent → the engine's "unknown" bucket (balance still counted).
+          let oldestDate = null, oldestT = Infinity;
+          if (Array.isArray(inv)) {
+            for (const it of inv) {
+              const raw = it?.date;
+              if (!raw) continue;
+              const t = Date.parse(raw);
+              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+            }
+          }
+          return {
+            ...r,
+            document_number: r.customer_code,
+            document_type: '',
+            document_date: oldestDate,
+            due_date: oldestDate,
+            outstanding_amount: r.outstanding_balance_num,
+            reference: '',
+          };
+        });
       }
-      const truncated = records.length === 5000;
+    } else {
+      sites = [SITE_NAME];
+      rows = prep(
+        `SELECT i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference,
+                d.customer_name, d.sales_rep, d.account_type, d.terms, d.data, d.local_fields,
+                ? AS site_name
+         FROM debtor_ar_invoice i
+         LEFT JOIN datarecord d ON TRIM(d.customer_number) = TRIM(i.reporting_account)
+         WHERE i.source_table = 'AROBL' AND i.outstanding_amount <> 0`
+      ).all(SITE_NAME).map(hydrateSalesRepAndAccountType);
+    }
 
-      // Filter by sales rep / account type in JS (these can come from JSON blobs)
-      const filtered = records.filter(r => {
+    // Age + join on the REPORTING account (national account for a member, else
+    // the customer's own code) so national-account child invoices roll up under
+    // the parent and inherit its name/rep/type — matching Customer Balances.
+    const repOf = (r) => String(r.reporting_account || r.customer_code || '').trim();
+    const keyOf = isHub
+      ? (r) => JSON.stringify([r.site_id, repOf(r)])
+      : (r) => repOf(r);
+
+    // Customer metadata the engine doesn't carry, keyed by the same composite.
+    const meta = new Map();
+    const docs = rows.map((r) => {
+      const key = keyOf(r);
+      if (!meta.has(key)) meta.set(key, {
+        customer_code: repOf(r),
+        customer_name: r.customer_name || null,
+        sales_rep: r.sales_rep || null,
+        account_type: r.account_type || null,
+        terms: r.terms || null,
+        site_name: r.site_name || SITE_NAME,
+      });
+      return {
+        entityCode: key,
+        entityName: r.customer_name || null,
+        date: r.document_date,
+        dueDate: r.due_date,
+        outstanding: r.outstanding_amount,
+        documentNumber: r.document_number,
+        documentType: r.document_type,
+        reference: r.reference,
+      };
+    });
+
+    const aged = ageOpenItems(docs); // document-date basis + Sage buckets (defaults)
+
+    const allRecords = aged.entities.map((e) => {
+      const m = meta.get(e.entityCode) || {};
+      return {
+        customer_number: m.customer_code || e.entityCode,
+        customer_name: e.entityName || m.customer_name || '',
+        sales_rep: m.sales_rep || '',
+        account_type: m.account_type || '',
+        terms: m.terms || '',
+        site_name: m.site_name || SITE_NAME,
+        parsed_balance: e.total,
+        bucket: e.primary_bucket,
+        age_days: e.oldest_age_days,
+        bucket_amounts: e.bucket_amounts,
+        doc_count: e.documents.length,
+      };
+    });
+
+    // Filter dropdown options built from the full (pre-filter) set so the user
+    // can always switch back.
+    const salesReps = Array.from(new Set(allRecords.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
+    const accountTypes = Array.from(new Set(allRecords.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
+
+    const records = allRecords
+      .filter((r) => {
+        if (Math.abs(r.parsed_balance) < minBalance) return false;
         if (salesRepFilter !== 'all' && String(r.sales_rep || '').trim() !== salesRepFilter) return false;
         if (accountTypeFilter !== 'all' && String(r.account_type || '').trim().toUpperCase() !== accountTypeFilter.toUpperCase()) return false;
         return true;
-      });
+      })
+      .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
 
-      const bucketKeys = ['current', '7-13', '14-20', '21+', 'unknown'];
-      const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
-      const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
-      let totalOutstanding = 0;
-
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      const ageToBucket = (days) => {
-        if (days === null || days === undefined) return 'unknown';
-        if (days < 7)  return 'current';
-        if (days < 14) return '7-13';
-        if (days < 21) return '14-20';
-        return '21+';
-      };
-
-      // Aging by OLDEST unpaid invoice age. The whole customer balance lands
-      // in one bucket (the bucket of their oldest dated unpaid invoice). This
-      // is the industry-standard aged-debtors convention.
-      //
-      // The previous implementation tried to split the balance per-invoice
-      // (each invoice amount → its own bucket). That was wrong against this
-      // data shape because `unpaid_invoices[].amount` is the running customer
-      // balance at the time of that invoice, NOT the per-invoice amount.
-      // Summing them inflated the bucket totals 3-4x.
-      const enriched = filtered.map(r => {
-        const balance = parseAmount(r.outstanding_balance);
-        totalOutstanding += balance;
-
-        // Find the oldest dated invoice across all unpaid lines.
-        let oldestAge = null;
-        const invoices = Array.isArray(r.unpaid_invoices)
-          ? r.unpaid_invoices
-          : (typeof r.unpaid_invoices === 'string' ? parseJsonSafely(r.unpaid_invoices, []) : []);
-        for (const inv of invoices) {
-          const date = parseBalanceDate(inv?.date);
-          if (!date) continue;
-          const days = Math.floor((today - date) / 86400000);
-          if (!Number.isFinite(days) || days < 0) continue;
-          if (oldestAge === null || days > oldestAge) oldestAge = days;
-        }
-        // Fallback to the flat last_unpaid_invoice_*_date columns if the JSON
-        // wasn't expanded (e.g. older code paths feeding the same query).
-        if (oldestAge === null) {
-          for (let i = 1; i <= 10; i++) {
-            const date = parseBalanceDate(r[`last_unpaid_invoice_${i}_date`]);
-            if (!date) continue;
-            const days = Math.floor((today - date) / 86400000);
-            if (!Number.isFinite(days) || days < 0) continue;
-            if (oldestAge === null || days > oldestAge) oldestAge = days;
-          }
-        }
-
-        const bucket = ageToBucket(oldestAge);
-        buckets[bucket] += balance;
-        bucketCounts[bucket]++;
-
-        return {
-          ...r,
-          age_days: oldestAge,
-          bucket,
-          parsed_balance: balance,
-          bucket_amounts: { [bucket]: balance },
-        };
-      });
-
-      // Filter dropdowns built from the unfiltered set so the user can switch back
-      const salesReps = Array.from(new Set(records.map(r => String(r.sales_rep || '').trim()).filter(Boolean))).sort();
-      const accountTypes = Array.from(new Set(records.map(r => String(r.account_type || '').trim().toUpperCase()).filter(Boolean))).sort();
-
-      return {
-        records: enriched,
-        summary: {
-          total_customers: enriched.length,
-          total_outstanding: totalOutstanding,
-          buckets,
-          bucket_counts: bucketCounts,
-        },
-        filters: { sites, sales_reps: salesReps, account_types: accountTypes },
-        truncated,
-        truncated_at: truncated ? 5000 : null,
-        generated_at: new Date().toISOString(),
-        site_name: SITE_NAME,
-        hub_mode: isHub,
-        min_balance: minBalance,
-      };
+    // Summary recomputed over the filtered set so totals match the rows shown.
+    const bucketKeys = BUCKET_KEYS;
+    const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    let totalOutstanding = 0;
+    for (const r of records) {
+      totalOutstanding += r.parsed_balance;
+      for (const k of bucketKeys) {
+        buckets[k] += r.bucket_amounts[k] || 0;
+        if ((r.bucket_amounts[k] || 0) !== 0) bucketCounts[k] += 1;
+      }
     }
+
+    return {
+      records,
+      summary: {
+        total_customers: records.length,
+        total_outstanding: totalOutstanding,
+        buckets,
+        bucket_counts: bucketCounts,
+      },
+      filters: { sites, sales_reps: salesReps, account_types: accountTypes },
+      // True when the AR open-item ledger is empty (sync not yet run/configured)
+      // — lets the UI tell "nothing outstanding" apart from "no data yet".
+      ledger_empty: docs.length === 0,
+      generated_at: new Date().toISOString(),
+      site_name: SITE_NAME,
+      hub_mode: isHub,
+      min_balance: minBalance,
+    };
   }
 
   router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
@@ -1136,6 +1645,168 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // Build the full aged-creditors (AP) report object. Mirrors
+  // buildAgedDebtorsReport, but over the open-item ledger the Creditors module
+  // already syncs from Sage APOBL (creditor_ap_invoice), which — unlike the
+  // debtor snapshot — has a per-document due date and outstanding amount, so we
+  // can age it the Sage way: each document into its own bucket by due date.
+  // Shared by the JSON endpoint and the PDF/Excel export so screen and download
+  // never diverge. Throws on DB error; callers wrap in try/catch.
+  function buildAgedCreditorsReport(query) {
+    const isHub = process.env.HUB_MODE === 'true';
+    const minBalance = Math.max(0, parseFloat(query.min_balance) || 0);
+    const siteFilter = String(query.site || 'all').trim();
+    // "Has payment history" — exclude vendors that have never been paid
+    // (blank last_payment_date), matching the Creditor Balances toggle.
+    const paidOnly = String(query.paid_only).toLowerCase() === 'true';
+
+    let rows;
+    let sites = [];
+    if (isHub) {
+      const params = [];
+      let whereSite = '';
+      if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
+      sites = prep(
+        `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_creditor_ap_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ORDER BY site_name`
+      ).all().map(r => r.site_name).filter(Boolean);
+      rows = prep(
+        `SELECT i.site_id, i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms, c.last_payment_date,
+                COALESCE(s.name, i.site_id) AS site_name
+         FROM hub_creditor_ap_invoice i
+         LEFT JOIN hub_creditor c ON c.site_id = i.site_id AND c.vendor_code = i.vendor_code
+         LEFT JOIN hub_sites s ON s.id = i.site_id
+         WHERE i.outstanding_amount <> 0 ${whereSite}`
+      ).all(...params);
+    } else {
+      sites = [SITE_NAME];
+      rows = prep(
+        `SELECT i.vendor_code, i.document_number, i.document_type, i.document_date, i.due_date,
+                i.outstanding_amount, i.reference, c.vendor_name, c.terms, c.last_payment_date,
+                ? AS site_name
+         FROM creditor_ap_invoice i
+         LEFT JOIN creditor c ON c.vendor_code = i.vendor_code
+         WHERE i.source_table = 'APOBL' AND i.outstanding_amount <> 0`
+      ).all(SITE_NAME);
+    }
+
+    // Aging entity key. In hub all-sites mode the same vendor_code can exist at
+    // multiple sites as distinct AP accounts (the hub ledger is keyed by
+    // site_id + vendor_code), so the key must include the site — otherwise
+    // different sites' vendors merge into one row and the all-sites totals,
+    // vendor count and site attribution are all wrong. Site mode keys by code.
+    const keyOf = isHub
+      ? (r) => JSON.stringify([r.site_id, String(r.vendor_code || '').trim()])
+      : (r) => String(r.vendor_code || '').trim();
+
+    // Per-(site,vendor) metadata (code/name/terms/site) the engine doesn't
+    // carry, keyed by the same composite as the aging entity.
+    const meta = new Map();
+    const docs = rows.map((r) => {
+      const key = keyOf(r);
+      if (!meta.has(key)) meta.set(key, { vendor_code: String(r.vendor_code || '').trim(), vendor_name: r.vendor_name || null, terms: r.terms || null, site_name: r.site_name || SITE_NAME, last_payment_date: r.last_payment_date || null });
+      return {
+        entityCode: key,
+        entityName: r.vendor_name || null,
+        date: r.document_date,
+        dueDate: r.due_date,
+        outstanding: r.outstanding_amount,
+        documentNumber: r.document_number,
+        documentType: r.document_type,
+        reference: r.reference,
+      };
+    });
+
+    const aged = ageOpenItems(docs, { scheme: AP_SCHEME }); // AP: due date + monthly periods
+
+    const records = aged.entities
+      .filter((e) => {
+        if (Math.abs(e.total) < minBalance) return false;
+        if (paidOnly) {
+          const m = meta.get(e.entityCode) || {};
+          if (!m.last_payment_date || !String(m.last_payment_date).trim()) return false;
+        }
+        return true;
+      })
+      .map((e) => {
+        const m = meta.get(e.entityCode) || {};
+        return {
+          vendor_code: m.vendor_code || e.entityCode,
+          vendor_name: e.entityName || m.vendor_name || '',
+          terms: m.terms || '',
+          site_name: m.site_name || SITE_NAME,
+          parsed_balance: e.total,
+          bucket: e.primary_bucket,
+          age_days: e.oldest_age_days,
+          bucket_amounts: e.bucket_amounts,
+          doc_count: e.documents.length,
+        };
+      })
+      .sort((a, b) => Math.abs(b.parsed_balance) - Math.abs(a.parsed_balance));
+
+    // Recompute summary over the filtered set so totals match the rows shown.
+    const bucketKeys = AP_SCHEME.keys;
+    const buckets = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    const bucketCounts = Object.fromEntries(bucketKeys.map(k => [k, 0]));
+    let totalOutstanding = 0;
+    for (const r of records) {
+      totalOutstanding += r.parsed_balance;
+      for (const k of bucketKeys) {
+        buckets[k] += r.bucket_amounts[k] || 0;
+        if ((r.bucket_amounts[k] || 0) !== 0) bucketCounts[k] += 1;
+      }
+    }
+
+    return {
+      records,
+      summary: {
+        total_vendors: records.length,
+        total_outstanding: totalOutstanding,
+        buckets,
+        bucket_counts: bucketCounts,
+      },
+      filters: { sites },
+      generated_at: new Date().toISOString(),
+      site_name: SITE_NAME,
+      hub_mode: isHub,
+      min_balance: minBalance,
+    };
+  }
+
+  router.get('/api/reports/aged-creditors', ...creditorsGuard, (req, res) => {
+    try {
+      res.json(buildAgedCreditorsReport(req.query));
+    } catch (err) {
+      console.error('[reporting] aged-creditors error:', err);
+      res.status(500).json({ error: 'Failed to fetch aged creditors' });
+    }
+  });
+
+  // GET /api/reports/aged-creditors/export?format=pdf|xlsx
+  router.get('/api/reports/aged-creditors/export', ...creditorsGuard, async (req, res) => {
+    const format = String(req.query.format || 'pdf').toLowerCase();
+    try {
+      const report = buildAgedCreditorsReport(req.query);
+      const { buildAgedCreditorsPdf, buildAgedCreditorsXlsx } = await import('../services/reporting/reportExports.js');
+      const stamp = new Date().toISOString().slice(0, 10);
+      if (format === 'xlsx') {
+        const buf = await buildAgedCreditorsXlsx(report);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.setHeader('Content-Disposition', `attachment; filename="aged-creditors-${stamp}.xlsx"`);
+        return res.send(buf);
+      }
+      const buf = buildAgedCreditorsPdf(report);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="aged-creditors-${stamp}.pdf"`);
+      return res.send(buf);
+    } catch (err) {
+      console.error('[reporting] aged-creditors export error:', err);
+      res.status(500).json({ error: 'Failed to export aged creditors' });
+    }
+  });
+
   // GET /api/reports/rep-exposure — total outstanding & flag mix per sales rep,
   // with the top customers per rep for the printable detail rows.
   //
@@ -1151,9 +1822,22 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // healthy rows + one JSON.parse pair for the laggards".
   // Build the rep-exposure report object. Shared by the JSON endpoint and
   // the PDF/Excel export so screen and download never diverge.
+  // Hub branch filter: from rows that each carry a `site_name`, return the
+  // distinct branch list (dropdown options) and the rows narrowed to the chosen
+  // branch. siteFilter 'all' (or site mode) = consolidated across all branches.
+  function applyBranchFilter(rows, isHub, siteFilter) {
+    if (!isHub) return { sites: [], filtered: rows };
+    const sites = Array.from(new Set(rows.map((r) => String(r.site_name || '').trim()).filter(Boolean))).sort();
+    const filtered = siteFilter && siteFilter !== 'all'
+      ? rows.filter((r) => String(r.site_name || '').trim() === siteFilter)
+      : rows;
+    return { sites, filtered };
+  }
+
   function buildRepExposureReport(query) {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    const siteFilter = String(query.site || 'all').trim();
     {
       let records;
       if (isHub) {
@@ -1178,6 +1862,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
              AND outstanding_balance_num > ?`
         ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType);
       }
+      const branch = applyBranchFilter(records, isHub, siteFilter);
+      records = branch.filtered;
       const repMap = new Map();
       for (const r of records) {
         const rep = String(r.sales_rep || '').trim() || '— Unassigned';
@@ -1214,7 +1900,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         total_orange: reps.reduce((s, r) => s + r.flag_counts.orange, 0),
       };
 
-      return { reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance };
+      return {
+        reps, summary, generated_at: new Date().toISOString(),
+        site_name: isHub ? (siteFilter !== 'all' ? siteFilter : 'All branches') : SITE_NAME,
+        min_balance: minBalance,
+        hub_mode: isHub,
+        filters: { sites: branch.sites },
+      };
     }
   }
 
@@ -1255,6 +1947,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reports/bat-weekly', requireAuth, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
+      // BAT reconciliation is a per-branch operational process — there is no hub
+      // BAT data to consolidate. Flag it so the hub shows a "site only" note.
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, weeks: [], summary: null, year, available_years: [], generated_at: new Date().toISOString() });
+      }
       const yearWhere = year ? 'WHERE r.year = ?' : '';
       const params = year ? [year] : [];
       const rows = prep(
@@ -1340,6 +2037,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // ISO year that bat_reconciliations is keyed on.
     const year = req.query.year ? parseInt(req.query.year, 10) : isoYear(new Date());
     try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, year, fees: [], summary: null, available_years: [], generated_at: new Date().toISOString() });
+      }
       const supplierAgg = prep(
         `SELECT
            COALESCE(SUM(supplier_discount), 0) AS discount,
@@ -1392,6 +2092,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reports/bat-exceptions', requireAuth, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, year, summary: null, by_reason: [], by_store: [], available_years: [], generated_at: new Date().toISOString() });
+      }
       const yearJoin = year ? 'AND r.year = ?' : '';
       const params = year ? [year] : [];
       const rows = prep(
@@ -1465,14 +2168,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
                                   CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)
                                   * CAST(REPLACE(REPLACE(COALESCE(last_cost, '0'), ',', ''), ' ', '') AS REAL))`;
       const qtyExpr = `CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)`;
+      // Hub branch filter (matched on the branch's display name): narrow to one
+      // branch, or consolidate across all when 'all'. valueExprI/qtyExprI are the
+      // same value/qty expressions qualified for the joined hub_inventory (alias i).
+      const siteFilter = String(req.query.site || 'all').trim();
+      const valueExprI = valueExpr.replace(/\binventory_value\b/g, 'i.inventory_value').replace(/\bqty_on_hand\b/g, 'i.qty_on_hand').replace(/\blast_cost\b/g, 'i.last_cost');
+      const qtyExprI = qtyExpr.replace(/\bqty_on_hand\b/g, 'i.qty_on_hand');
+      const hubSiteWhere = siteFilter !== 'all' ? 'WHERE COALESCE(s.name, i.site_id) = ?' : '';
+      const hubSiteParams = siteFilter !== 'all' ? [siteFilter] : [];
       const commoditySql = isHub
         ? `SELECT
-             COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
+             COALESCE(NULLIF(TRIM(i.commodity), ''), '— Uncategorised') AS commodity,
              COUNT(*)         AS item_count,
-             SUM(${valueExpr}) AS total_value,
-             SUM(${qtyExpr})   AS total_qty
-           FROM hub_inventory
-           GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
+             SUM(${valueExprI}) AS total_value,
+             SUM(${qtyExprI})   AS total_qty
+           FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+           ${hubSiteWhere}
+           GROUP BY COALESCE(NULLIF(TRIM(i.commodity), ''), '— Uncategorised')
            ORDER BY total_value DESC`
         : `SELECT
              COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
@@ -1482,7 +2194,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            FROM inventoryrecord
            GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
            ORDER BY total_value DESC`;
-      const byCommodity = prep(commoditySql).all().map(r => ({
+      const byCommodity = prep(commoditySql).all(...(isHub ? hubSiteParams : [])).map(r => ({
         commodity: r.commodity,
         item_count: r.item_count,
         total_value: num(r.total_value),
@@ -1495,6 +2207,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
                   ${valueExpr.replace(/\binventory_value\b/g, 'i.inventory_value').replace(/\bqty_on_hand\b/g, 'i.qty_on_hand').replace(/\blast_cost\b/g, 'i.last_cost')} AS inventory_value,
                   COALESCE(s.name, i.site_id) AS site_name
            FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+           ${hubSiteWhere}
            ORDER BY inventory_value DESC
            LIMIT ?`
         : `SELECT item_number, item_description, qty_on_hand, last_cost, price,
@@ -1504,7 +2217,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            FROM inventoryrecord
            ORDER BY inventory_value DESC
            LIMIT ?`;
-      const topItems = (isHub ? prep(topItemsSql).all(topN) : prep(topItemsSql).all(SITE_NAME, topN)).map(r => ({
+      const topItems = (isHub ? prep(topItemsSql).all(...hubSiteParams, topN) : prep(topItemsSql).all(SITE_NAME, topN)).map(r => ({
         item_number: r.item_number,
         item_description: r.item_description,
         qty_on_hand: num(r.qty_on_hand),
@@ -1518,6 +2231,12 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const totalValue = byCommodity.reduce((s, c) => s + c.total_value, 0);
       const totalItems = byCommodity.reduce((s, c) => s + c.item_count, 0);
 
+      const sites = isHub
+        ? prep(`SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+                FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+                ORDER BY site_name`).all().map(r => r.site_name).filter(Boolean)
+        : [];
+
       res.json({
         summary: {
           total_items: totalItems,
@@ -1528,7 +2247,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         top_items: topItems,
         top_n: topN,
         generated_at: new Date().toISOString(),
-        site_name: SITE_NAME,
+        site_name: isHub ? (siteFilter !== 'all' ? siteFilter : 'All branches') : SITE_NAME,
+        hub_mode: isHub,
+        filters: { sites },
       });
     } catch (err) {
       console.error('[reporting] inventory-value error:', err);
@@ -1579,6 +2300,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // ==================== MULTI-SITE REPORTING API ====================
+
+  // GET /api/reporting/ar-document-summary — the hub pulls this from each branch
+  // (hubEtl) to populate hub_ar_document_summary. Returns the branch's monthly
+  // AR document totals for the current + prior financial year (back to Jan of
+  // last year covers any FY start).
+  router.get('/api/reporting/ar-document-summary', reportingRateLimiter, requireReportingToken, async (req, res) => {
+    try {
+      const now = new Date();
+      const from = Number(`${now.getFullYear() - 1}0101`);
+      const to = Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`);
+      const { months } = await queryArDocSummary(from, to);
+      res.json({ months });
+    } catch (err) {
+      console.error('[reporting.ar-document-summary] Sage query failed', err.message);
+      res.status(503).json({ error: 'Sage query failed' });
+    }
+  });
 
   // GET /api/reporting/site-info
   router.get('/api/reporting/site-info', reportingRateLimiter, requireReportingToken, (req, res) => {
@@ -1975,6 +2713,65 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         records: rows,
         sync_meta: meta || {},
       });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
+  // this for the Top Items + Dead Stock tiles. Description comes from the sales
+  // cache (v096) falling back to the item master. Trailing 24 months.
+  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      const rows = prep(`
+        SELECT TRIM(t.item_number) AS item_number,
+               SUBSTR(t.transaction_date, 1, 7) AS period,
+               SUM(t.qty_sold) AS qty_sold,
+               SUM(t.line_amount) AS revenue,
+               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
+        FROM inventory_sales_transactions t
+        LEFT JOIN (
+          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+          FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+          GROUP BY TRIM(item_number)
+        ) ic ON ic.item_number = TRIM(t.item_number)
+        LEFT JOIN (
+          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
+        WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
+        ORDER BY period, item_number
+        LIMIT ? OFFSET ?
+      `).all(from, limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-customer monthly sales with inter-branch transfers EXCLUDED — the hub
+  // pulls this for the Top Customers tile (summed over the selected timeline).
+  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      const rows = prep(`
+        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
+               SUBSTR(transaction_date, 1, 7) AS period,
+               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
+        FROM inventory_sales_transactions
+        WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+          AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
+        ORDER BY period, customer_code
+        LIMIT ? OFFSET ?
+      `).all(from, limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
