@@ -1,4 +1,9 @@
 import db from '../../db/index.js';
+// JTI's query module is intentionally pure (unit-testable without a DB), so it
+// must NOT import this registry. We import ITS default instead — one direction,
+// no circular dependency, no duplicated SQL. JTI keeps resolving locally; the
+// registry just registers its default + override store for visibility/management.
+import { DEFAULT_JTI_SQL, JTI_REQUIRED_COLUMNS } from '../jti/jtiQuery.js';
 
 // ── Central Sage 300 query registry ─────────────────────────────────────────
 //
@@ -305,6 +310,18 @@ GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))),
          LTRIM(RTRIM(ISNULL(cu.NAMECUST, '')))
 ORDER BY sales_rep, MIN(OESHDT.TRANDATE), invoice_number
 `.trim(),
+});
+
+define({
+  key: 'jti.export',
+  label: 'JTI Export — OE shipments',
+  purpose: 'OE shipment lines for the JTI vendor export, filtered to the JTI vendor via ICITMV.',
+  pool: 'jti',
+  tables: ['OESHDT', 'ICITEM', 'ICITMV', 'ARCUS'],
+  params: ['from', 'to', 'vendor'],
+  requiredColumns: JTI_REQUIRED_COLUMNS,
+  getOverride: readerSql("SELECT value AS v FROM jti_settings WHERE key = 'query_override'"),
+  defaultSql: DEFAULT_JTI_SQL,
 });
 
 // ── Public API ──────────────────────────────────────────────────────────────
