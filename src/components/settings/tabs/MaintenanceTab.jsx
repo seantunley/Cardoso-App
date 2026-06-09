@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 
 // Icons
-import { RefreshCw, AlertCircle, CheckCircle2, Save, Database, ShieldAlert, Trash2 } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, Save, Database, ShieldAlert } from "lucide-react";
 
 // ─── Update Tab ─────────────────────────────────────────────────────────────
 export default function MaintenanceTab() {
@@ -30,15 +30,13 @@ export default function MaintenanceTab() {
   const [reconTotalsLoadingPreview, setReconTotalsLoadingPreview] = useState(false);
   const [reconTotalsApplying, setReconTotalsApplying] = useState(false);
 
-  // BAT integrity diagnostics + orphan-extraction prune. The integrity report
-  // is read-only diagnosis (which weeks fail which invariant, with detail). The
-  // orphan prune heals the `no_orphan_extractions` failure (stale extraction
-  // rows not in BAT's Overview pivot) with the same dry-run/apply safety.
+  // BAT integrity diagnostics — read-only report of which reconciliations fail
+  // which invariant, with the diagnostic detail. (An auto-prune of "orphan"
+  // extraction rows was deliberately NOT shipped: it cannot be made safe on
+  // needs-reupload or multi-branch weeks, where legitimate rows look like
+  // orphans. The safe fix for a drifting week is to re-upload its spreadsheet.)
   const [integrity, setIntegrity] = useState(null);
   const [integrityLoading, setIntegrityLoading] = useState(false);
-  const [orphanPreview, setOrphanPreview] = useState(null);
-  const [orphanLoadingPreview, setOrphanLoadingPreview] = useState(false);
-  const [orphanApplying, setOrphanApplying] = useState(false);
 
   // Backup-now state. Mirrors the compact-database / clear-imported
   // pattern: password-confirmed, modal-gated, sticky result panel
@@ -242,32 +240,6 @@ export default function MaintenanceTab() {
       toast.error(e.message || 'Integrity report failed');
     } finally {
       setIntegrityLoading(false);
-    }
-  };
-
-  const runOrphanPrune = async (dryRun) => {
-    const setLoading = dryRun ? setOrphanLoadingPreview : setOrphanApplying;
-    setLoading(true);
-    try {
-      const r = await fetch('/api/maintenance/prune-orphan-extractions', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dryRun }),
-      });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Orphan prune failed');
-      setOrphanPreview(d);
-      if (dryRun) {
-        toast.success(`Dry-run complete. ${d.total || 0} orphan extraction(s) across ${d.byRecon?.length || 0} recon(s).`);
-      } else {
-        toast.success(`Removed ${d.removed || 0} orphan extraction(s). Re-run the integrity report to confirm.`);
-        handleIntegrityReport();
-      }
-    } catch (e) {
-      toast.error(e.message || 'Orphan prune failed');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -566,62 +538,13 @@ export default function MaintenanceTab() {
             )}
           </div>
         )}
-      </div>
-
-      {/* Prune orphan extractions — heals the no_orphan_extractions failure. */}
-      <div>
-        <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
-          <Trash2 className="h-4 w-4 text-rose-500" /> Prune orphan extractions
-        </h3>
-        <p className="text-xs text-muted-foreground mb-3">
-          Removes extracted invoice rows whose order number is not in BAT&apos;s Overview pivot for their week —
-          usually stale rows left from an upload before the automatic prune existed. These cause the{' '}
-          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">no_orphan_extractions</code> integrity failure
-          and skew the week&apos;s totals. The dry-run lists every row that would be removed before anything is deleted.
+        <p className="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+          To resolve a week that fails on orphan extractions or a totals mismatch,{' '}
+          <strong className="text-foreground">re-upload that week&apos;s spreadsheet</strong> — the upload rebuilds
+          the Overview pivot and clears stale rows safely. A headline-total drift can also be healed with the{' '}
+          <em>Recompute BAT recon totals</em> tool above. (Bulk auto-deletion of &quot;orphan&quot; rows is
+          intentionally not offered: on multi-branch or pre-Overview weeks, legitimate rows can look like orphans.)
         </p>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => runOrphanPrune(true)} disabled={orphanLoadingPreview || orphanApplying}>
-            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${orphanLoadingPreview ? 'animate-spin' : ''}`} />
-            {orphanLoadingPreview ? 'Running dry-run...' : 'Dry-run orphan prune'}
-          </Button>
-          <Button size="sm" variant="destructive" onClick={() => runOrphanPrune(false)} disabled={orphanApplying || orphanLoadingPreview || !orphanPreview || (orphanPreview?.total || 0) === 0}>
-            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
-            {orphanApplying ? 'Removing...' : 'Apply prune'}
-          </Button>
-        </div>
-        {orphanPreview && (
-          <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
-            <div className="text-xs">
-              <span className="font-medium text-foreground">{orphanPreview.dryRun ? 'Dry-run' : 'Applied'}:</span>{' '}
-              <span className="tabular-nums">{orphanPreview.total}</span> orphan(s) across {orphanPreview.byRecon?.length || 0} recon(s)
-              {!orphanPreview.dryRun && (<>; removed <span className="text-emerald-400 tabular-nums">{orphanPreview.removed}</span></>)}.
-            </div>
-            {(orphanPreview.orphans?.length || 0) > 0 && (
-              <div className="max-h-56 overflow-y-auto pr-1">
-                <table className="w-full text-[11px] tabular-nums">
-                  <thead>
-                    <tr className="text-muted-foreground border-b border-border">
-                      <th className="text-left pr-2 pb-1 font-medium">Week</th>
-                      <th className="text-left px-2 pb-1 font-medium">Order #</th>
-                      <th className="text-right px-2 pb-1 font-medium">Amount</th>
-                      <th className="text-left pl-2 pb-1 font-medium">PDF</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {orphanPreview.orphans.map((o) => (
-                      <tr key={o.ext_id} className="border-b border-border/40 last:border-0">
-                        <td className="pr-2 py-1 font-mono">W{String(o.week_number).padStart(2, '0')}/{o.year}</td>
-                        <td className="px-2 py-1 font-mono">{o.order_number}</td>
-                        <td className="text-right px-2 py-1">R {Number(o.order_amount || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td className="pl-2 py-1 text-muted-foreground truncate max-w-[160px]" title={o.pdf_url || ''}>{o.pdf_url ? o.pdf_url.split('/').pop() : '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        )}
       </div>
 
       <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>
