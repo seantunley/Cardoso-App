@@ -22,6 +22,7 @@
 
 import db from '../db/index.js';
 import { runCustomerSqlQuery } from './customerSqlPool.js';
+import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 import { logError } from '../lib/errorLog.js';
 
 /**
@@ -107,67 +108,19 @@ export function updateCommissionSettings({
 // query below is informational only (a tracking report alongside the
 // commission totals, not a filter on them).
 
-export const DEFAULT_COMMISSION_SALES_SQL = `
-SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
-       SUM(ISNULL(OESHDT.FAMTSALES, 0)) AS gross_amount,
-       SUM(ISNULL(OESHDT.FRETSALES, 0)) AS credit_amount
-FROM OESHDT
--- No ICITMV join: COMMODIM = '1' on ICITEM already filters to sweets, and
--- nothing here reads a vendor column. Joining the vendor table on ITEMNO
--- multiplies each shipment line by an item's vendor count, overstating sales,
--- credits and commission (same Sage cardinality trap jtiQuery.js avoids with EXISTS).
-INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-WHERE OESHDT.TRANDATE BETWEEN @from AND @to
-  AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
-GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, '')))
-`.trim();
+// Default Sage SQL for the commission queries now lives in the central Sage
+// query registry (src/services/sage/queryRegistry.js, keys 'commission.*').
+// Re-exported here so the Settings UI's "view default" keeps working.
+export const DEFAULT_COMMISSION_SALES_SQL = getSageQuery('commission.sales').defaultSql;
 
-export const DEFAULT_COMMISSION_RECEIPTS_SQL = `
-SELECT LTRIM(RTRIM(ISNULL(c.CODESLSP1, ''))) AS sales_rep,
-       SUM(ISNULL(o.AMTPAYMHC, 0)) / @vat AS receipt_amount
-FROM AROBP o
-INNER JOIN ARCUS c
-  ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
- AND c.CODECURN = o.CODECURN
-WHERE o.DATERMIT BETWEEN @from AND @to
-  AND LTRIM(RTRIM(o.IDINVC)) LIKE 'PY%'
-GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
-`.trim();
+export const DEFAULT_COMMISSION_RECEIPTS_SQL = getSageQuery('commission.receipts').defaultSql;
 
 // Per-invoice list of sweets invoices in the period that haven't been
 // fully paid (AROBL.SWPAID = 0). Informational tracking report shown
 // alongside the commission totals — NOT a filter on them. The
 // commission report counts every sweets invoice in the period; this
 // list just surfaces which of those are still outstanding from AR.
-export const DEFAULT_COMMISSION_UNPAID_SQL = `
-SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
-       LTRIM(RTRIM(OESHDT.TRANNUM))              AS invoice_number,
-       LTRIM(RTRIM(OESHDT.CUSTOMER))             AS customer_code,
-       LTRIM(RTRIM(ISNULL(cu.NAMECUST, '')))     AS customer_name,
-       MIN(OESHDT.TRANDATE)                      AS invoice_date,
-       MAX(ar.AMTINVCHC)                         AS original_amount,
-       MAX(ar.AMTDUEHC)                          AS outstanding_amount,
-       SUM(ISNULL(OESHDT.FAMTSALES, 0))
-         - SUM(ISNULL(OESHDT.FRETSALES, 0))      AS net_sweet_amount
-FROM OESHDT
--- No ICITMV join (see sales query): joining the vendor table multiplies
--- shipment lines for multi-vendor items and would inflate the per-invoice
--- net sweet amount and the clawback snapshots built from it.
-INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
-INNER JOIN AROBL ar
-  ON LTRIM(RTRIM(ar.IDINVC))  = LTRIM(RTRIM(OESHDT.TRANNUM))
- AND LTRIM(RTRIM(ar.IDCUST)) = LTRIM(RTRIM(OESHDT.CUSTOMER))
-LEFT JOIN ARCUS cu
-  ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(OESHDT.CUSTOMER))
-WHERE OESHDT.TRANDATE BETWEEN @from AND @to
-  AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
-  AND ar.SWPAID = 0
-GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))),
-         LTRIM(RTRIM(OESHDT.TRANNUM)),
-         LTRIM(RTRIM(OESHDT.CUSTOMER)),
-         LTRIM(RTRIM(ISNULL(cu.NAMECUST, '')))
-ORDER BY sales_rep, MIN(OESHDT.TRANDATE), invoice_number
-`.trim();
+export const DEFAULT_COMMISSION_UNPAID_SQL = getSageQuery('commission.unpaid').defaultSql;
 
 // Compute the previous commission period for clawback lookup. The
 // period_year/month uses the END month convention (commissionPeriodForRun).
@@ -345,15 +298,9 @@ export async function buildCommissionReport({ from, to }) {
   // defaults. All three queries take @from, @to, @vat — overrides MUST
   // keep those param names or the bind step throws (validated at save).
   const vatDivisor = 1 + (Number.isFinite(settings.vat_rate) ? settings.vat_rate : 0.14);
-  const salesAndCreditsSql = (settings.sales_query_override || '').trim().length > 0
-    ? settings.sales_query_override
-    : DEFAULT_COMMISSION_SALES_SQL;
-  const receiptsSql = (settings.receipts_query_override || '').trim().length > 0
-    ? settings.receipts_query_override
-    : DEFAULT_COMMISSION_RECEIPTS_SQL;
-  const unpaidSql = (settings.unpaid_query_override || '').trim().length > 0
-    ? settings.unpaid_query_override
-    : DEFAULT_COMMISSION_UNPAID_SQL;
+  const salesAndCreditsSql = resolveSageQuery('commission.sales');
+  const receiptsSql = resolveSageQuery('commission.receipts');
+  const unpaidSql = resolveSageQuery('commission.unpaid');
 
   const params = { from: fromInt, to: toInt, vat: vatDivisor };
 

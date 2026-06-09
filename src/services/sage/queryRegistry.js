@@ -220,6 +220,93 @@ define({
 `,
 });
 
+define({
+  key: 'commission.sales',
+  label: 'Sales Commission — sweets sales',
+  purpose: 'Sweets sales + credits per rep for the commission report (earned when raised).',
+  pool: 'customer',
+  tables: ['OESHDT', 'ICITEM'],
+  params: ['from', 'to'],
+  requiredColumns: ['sales_rep', 'gross_amount', 'credit_amount'],
+  getOverride: readerSql('SELECT sales_query_override AS v FROM commission_settings WHERE id = 1'),
+  defaultSql: `
+SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
+       SUM(ISNULL(OESHDT.FAMTSALES, 0)) AS gross_amount,
+       SUM(ISNULL(OESHDT.FRETSALES, 0)) AS credit_amount
+FROM OESHDT
+-- No ICITMV join: COMMODIM = '1' on ICITEM already filters to sweets, and
+-- nothing here reads a vendor column. Joining the vendor table on ITEMNO
+-- multiplies each shipment line by an item's vendor count, overstating sales,
+-- credits and commission (same Sage cardinality trap jtiQuery.js avoids with EXISTS).
+INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
+WHERE OESHDT.TRANDATE BETWEEN @from AND @to
+  AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
+GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, '')))
+`.trim(),
+});
+
+define({
+  key: 'commission.receipts',
+  label: 'Sales Commission — customer receipts',
+  purpose: 'Customer payment receipts per rep (ex-VAT via @vat divisor).',
+  pool: 'customer',
+  tables: ['AROBP', 'ARCUS'],
+  params: ['from', 'to', 'vat'],
+  requiredColumns: ['sales_rep', 'receipt_amount'],
+  getOverride: readerSql('SELECT receipts_query_override AS v FROM commission_settings WHERE id = 1'),
+  defaultSql: `
+SELECT LTRIM(RTRIM(ISNULL(c.CODESLSP1, ''))) AS sales_rep,
+       SUM(ISNULL(o.AMTPAYMHC, 0)) / @vat AS receipt_amount
+FROM AROBP o
+INNER JOIN ARCUS c
+  ON LTRIM(RTRIM(c.IDCUST)) = LTRIM(RTRIM(o.IDCUST))
+ AND c.CODECURN = o.CODECURN
+WHERE o.DATERMIT BETWEEN @from AND @to
+  AND LTRIM(RTRIM(o.IDINVC)) LIKE 'PY%'
+GROUP BY LTRIM(RTRIM(ISNULL(c.CODESLSP1, '')))
+`.trim(),
+});
+
+define({
+  key: 'commission.unpaid',
+  label: 'Sales Commission — unpaid sweets invoices',
+  purpose: 'Per-invoice list of sweets invoices in the period not fully paid (clawback tracking).',
+  pool: 'customer',
+  tables: ['OESHDT', 'ICITEM', 'AROBL', 'ARCUS'],
+  params: ['from', 'to'],
+  requiredColumns: ['sales_rep', 'invoice_number', 'customer_code', 'outstanding_amount', 'net_sweet_amount'],
+  getOverride: readerSql('SELECT unpaid_query_override AS v FROM commission_settings WHERE id = 1'),
+  defaultSql: `
+SELECT LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))) AS sales_rep,
+       LTRIM(RTRIM(OESHDT.TRANNUM))              AS invoice_number,
+       LTRIM(RTRIM(OESHDT.CUSTOMER))             AS customer_code,
+       LTRIM(RTRIM(ISNULL(cu.NAMECUST, '')))     AS customer_name,
+       MIN(OESHDT.TRANDATE)                      AS invoice_date,
+       MAX(ar.AMTINVCHC)                         AS original_amount,
+       MAX(ar.AMTDUEHC)                          AS outstanding_amount,
+       SUM(ISNULL(OESHDT.FAMTSALES, 0))
+         - SUM(ISNULL(OESHDT.FRETSALES, 0))      AS net_sweet_amount
+FROM OESHDT
+-- No ICITMV join (see sales query): joining the vendor table multiplies
+-- shipment lines for multi-vendor items and would inflate the per-invoice
+-- net sweet amount and the clawback snapshots built from it.
+INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
+INNER JOIN AROBL ar
+  ON LTRIM(RTRIM(ar.IDINVC))  = LTRIM(RTRIM(OESHDT.TRANNUM))
+ AND LTRIM(RTRIM(ar.IDCUST)) = LTRIM(RTRIM(OESHDT.CUSTOMER))
+LEFT JOIN ARCUS cu
+  ON LTRIM(RTRIM(cu.IDCUST)) = LTRIM(RTRIM(OESHDT.CUSTOMER))
+WHERE OESHDT.TRANDATE BETWEEN @from AND @to
+  AND LTRIM(RTRIM(ICITEM.COMMODIM)) = '1'
+  AND ar.SWPAID = 0
+GROUP BY LTRIM(RTRIM(ISNULL(OESHDT.SALESPER, ''))),
+         LTRIM(RTRIM(OESHDT.TRANNUM)),
+         LTRIM(RTRIM(OESHDT.CUSTOMER)),
+         LTRIM(RTRIM(ISNULL(cu.NAMECUST, '')))
+ORDER BY sales_rep, MIN(OESHDT.TRANDATE), invoice_number
+`.trim(),
+});
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 const BANNED_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
