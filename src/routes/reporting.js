@@ -562,10 +562,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // GET /api/kpis
   router.get('/api/kpis', requireAuth, (req, res) => {
     try {
+      const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
+      // Hub: KPIs come from the consolidated hub_records (all branches), with an
+      // optional ?site= branch filter and the full branch list for the selector.
+      // (Site-mode datarecord is empty on a hub install, so the prior path read 0.)
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'WHERE COALESCE(hs.name, r.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const total = prep(`SELECT COUNT(*) AS count FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ${where}`).get(...params);
+        const byFlag = prep(`SELECT r.flag_color, COUNT(*) AS count FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ${where} GROUP BY r.flag_color`).all(...params);
+        for (const row of byFlag) if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
+        const sites = prep(`SELECT DISTINCT COALESCE(hs.name, r.site_id) AS site_name FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id ORDER BY site_name`).all().map(x => x.site_name).filter(Boolean);
+        return res.json({ total_records: total.count, records_by_flag: flagCounts, last_sync_at: null, hub_mode: true, filters: { sites } });
+      }
       const total = stmts.kpiTotalRecords.get();
       const byFlag = stmts.kpiFlagCounts.all();
       const lastSync = stmts.kpiLastSync.get();
-      const flagCounts = { none: 0, red: 0, orange: 0, green: 0 };
       for (const row of byFlag) {
         if (row.flag_color in flagCounts) flagCounts[row.flag_color] = row.count;
       }

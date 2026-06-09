@@ -5,11 +5,12 @@
 // link into the matching report. Reuses the existing /api/reports/* endpoints
 // and the shared report formatters/tiles so styling stays consistent.
 import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Wallet, Receipt, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb, TrendingUp, PackageX, UserRound } from "lucide-react";
 import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
+import BranchFilter from "@/components/reports/BranchFilter";
 import { Skeleton } from "@/components/ui/skeleton";
 import PageHeader from "@/components/PageHeader";
 
@@ -33,6 +34,11 @@ const AP_BUCKET_META = [
 ];
 
 // A card that wraps a report summary with a header + deep-link.
+// Append the hub branch filter to a card's endpoint URL when a specific branch
+// is selected (no-op for "All branches" / site mode).
+const withSite = (url, site) =>
+  site && site !== "all" ? `${url}${url.includes("?") ? "&" : "?"}site=${encodeURIComponent(site)}` : url;
+
 function ReportCard({ icon: Icon, title, accent, to, children, query, hint }) {
   const navigate = useNavigate();
   return (
@@ -91,10 +97,10 @@ function CardError({ error, onRetry }) {
   );
 }
 
-function AgedDebtorsCard() {
+function AgedDebtorsCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-debtor-balance-summary"],
-    queryFn: () => apiGet("/api/reports/debtor-balance-summary"),
+    queryKey: ["dash-debtor-balance-summary", site],
+    queryFn: () => apiGet(withSite("/api/reports/debtor-balance-summary", site)),
     staleTime: 60_000,
   });
   // Positive open balances only, from the same source as the Customer Balances
@@ -139,10 +145,10 @@ function AgedDebtorsCard() {
   );
 }
 
-function AgedCreditorsCard() {
+function AgedCreditorsCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-aged-creditors-paid"],
-    queryFn: () => apiGet("/api/reports/aged-creditors?paid_only=true"),
+    queryKey: ["dash-aged-creditors-paid", site],
+    queryFn: () => apiGet(withSite("/api/reports/aged-creditors?paid_only=true", site)),
     staleTime: 60_000,
   });
   const s = data?.summary;
@@ -178,10 +184,10 @@ function AgedCreditorsCard() {
   );
 }
 
-function RepExposureCard() {
+function RepExposureCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-rep-exposure"],
-    queryFn: () => apiGet("/api/reports/rep-exposure"),
+    queryKey: ["dash-rep-exposure", site],
+    queryFn: () => apiGet(withSite("/api/reports/rep-exposure", site)),
     staleTime: 60_000,
   });
   const reps = (data?.reps || []).slice(0, 4);
@@ -214,10 +220,10 @@ function RepExposureCard() {
   );
 }
 
-function InventoryValueCard() {
+function InventoryValueCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-inventory-value"],
-    queryFn: () => apiGet("/api/reports/inventory-value"),
+    queryKey: ["dash-inventory-value", site],
+    queryFn: () => apiGet(withSite("/api/reports/inventory-value", site)),
     staleTime: 60_000,
   });
   const s = data?.summary;
@@ -415,9 +421,11 @@ function TopCustomersCard() {
 }
 
 export default function ReportingDashboard() {
+  const [searchParams] = useSearchParams();
+  const site = searchParams.get("site") || "all";
   const { data: kpis } = useQuery({
-    queryKey: ["dash-kpis"],
-    queryFn: () => apiGet("/api/kpis"),
+    queryKey: ["dash-kpis", site],
+    queryFn: () => apiGet(withSite("/api/kpis", site)),
     staleTime: 60_000,
   });
   const flags = kpis?.records_by_flag || {};
@@ -429,6 +437,12 @@ export default function ReportingDashboard() {
         title={<>Reporting <em className="text-phosphor">Dashboard</em>.</>}
         subtitle="Headline numbers across the business at a glance. Open any card for the full, filterable report."
       />
+
+      {kpis?.hub_mode && (
+        <div className="mb-5 max-w-xs">
+          <BranchFilter hubMode={kpis?.hub_mode} sites={kpis?.filters?.sites} />
+        </div>
+      )}
 
       <div className="mb-5">
         <SageHealthPanel />
@@ -446,10 +460,10 @@ export default function ReportingDashboard() {
 
       {/* Report summary cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <AgedDebtorsCard />
-        <AgedCreditorsCard />
-        <RepExposureCard />
-        <InventoryValueCard />
+        <AgedDebtorsCard site={site} />
+        <AgedCreditorsCard site={site} />
+        <RepExposureCard site={site} />
+        <InventoryValueCard site={site} />
         <BatCard />
       </div>
 
