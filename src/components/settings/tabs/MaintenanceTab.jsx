@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 
 // Icons
-import { RefreshCw, AlertCircle, CheckCircle2, Save, Database } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, Save, Database, ShieldAlert, Trash2 } from "lucide-react";
 
 // ─── Update Tab ─────────────────────────────────────────────────────────────
 export default function MaintenanceTab() {
@@ -29,6 +29,16 @@ export default function MaintenanceTab() {
   const [reconTotalsPreview, setReconTotalsPreview] = useState(null);
   const [reconTotalsLoadingPreview, setReconTotalsLoadingPreview] = useState(false);
   const [reconTotalsApplying, setReconTotalsApplying] = useState(false);
+
+  // BAT integrity diagnostics + orphan-extraction prune. The integrity report
+  // is read-only diagnosis (which weeks fail which invariant, with detail). The
+  // orphan prune heals the `no_orphan_extractions` failure (stale extraction
+  // rows not in BAT's Overview pivot) with the same dry-run/apply safety.
+  const [integrity, setIntegrity] = useState(null);
+  const [integrityLoading, setIntegrityLoading] = useState(false);
+  const [orphanPreview, setOrphanPreview] = useState(null);
+  const [orphanLoadingPreview, setOrphanLoadingPreview] = useState(false);
+  const [orphanApplying, setOrphanApplying] = useState(false);
 
   // Backup-now state. Mirrors the compact-database / clear-imported
   // pattern: password-confirmed, modal-gated, sticky result panel
@@ -215,6 +225,49 @@ export default function MaintenanceTab() {
       toast.error(e.message || 'Recompute failed');
     } finally {
       setReconTotalsApplying(false);
+    }
+  };
+
+  const handleIntegrityReport = async () => {
+    setIntegrityLoading(true);
+    try {
+      const r = await fetch('/api/bat/integrity-report', { credentials: 'include' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Integrity report failed');
+      setIntegrity(d);
+      const failing = d.summary?.failing || 0;
+      if (failing === 0) toast.success(`All ${d.summary?.total || 0} reconciliation(s) pass integrity.`);
+      else toast.warning(`${failing} of ${d.summary?.total || 0} reconciliation(s) have integrity drift.`);
+    } catch (e) {
+      toast.error(e.message || 'Integrity report failed');
+    } finally {
+      setIntegrityLoading(false);
+    }
+  };
+
+  const runOrphanPrune = async (dryRun) => {
+    const setLoading = dryRun ? setOrphanLoadingPreview : setOrphanApplying;
+    setLoading(true);
+    try {
+      const r = await fetch('/api/maintenance/prune-orphan-extractions', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dryRun }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Orphan prune failed');
+      setOrphanPreview(d);
+      if (dryRun) {
+        toast.success(`Dry-run complete. ${d.total || 0} orphan extraction(s) across ${d.byRecon?.length || 0} recon(s).`);
+      } else {
+        toast.success(`Removed ${d.removed || 0} orphan extraction(s). Re-run the integrity report to confirm.`);
+        handleIntegrityReport();
+      }
+    } catch (e) {
+      toast.error(e.message || 'Orphan prune failed');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -460,6 +513,111 @@ export default function MaintenanceTab() {
                 <div className="text-[10px] text-muted-foreground">
                   Order amounts for these recons get filled in by a later week's upload (the cross-week backfill pass). Re-run after the next upload completes — incomplete weeks will move out of this list once their amounts land.
                 </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* BAT reconciliation integrity — read-only diagnosis of "integrity drift". */}
+      <div>
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
+          <ShieldAlert className="h-4 w-4 text-amber-500" /> BAT reconciliation integrity
+        </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Scans every reconciliation for integrity drift — weeks whose numbers do not reconcile to BAT&apos;s
+          source-of-truth — and shows exactly which invariant failed and why. Read-only; nothing is changed.
+        </p>
+        <Button variant="outline" size="sm" onClick={handleIntegrityReport} disabled={integrityLoading}>
+          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${integrityLoading ? 'animate-spin' : ''}`} />
+          {integrityLoading ? 'Scanning...' : 'Run integrity report'}
+        </Button>
+        {integrity && (
+          <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
+            <div className="text-xs">
+              <span className="font-medium text-foreground tabular-nums">{integrity.summary.total}</span> recon(s):
+              <span className="text-emerald-400 tabular-nums ml-1">{integrity.summary.passing} passing</span>,
+              <span className="text-rose-400 tabular-nums ml-1">{integrity.summary.failing} failing</span>
+              {integrity.summary.needs_reupload > 0 && (
+                <span className="text-amber-400 ml-1">, {integrity.summary.needs_reupload} need re-upload</span>
+              )}.
+            </div>
+            {integrity.recons.filter((r) => !r.passed).length === 0 ? (
+              <div className="text-xs text-emerald-400">No integrity drift — every reconciliation ties out.</div>
+            ) : (
+              <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+                {integrity.recons.filter((r) => !r.passed).map((r) => (
+                  <div key={r.id} className="rounded border border-rose-500/30 bg-rose-500/5 p-2">
+                    <div className="font-mono text-[11px] font-semibold text-foreground">
+                      W{String(r.week_number).padStart(2, '0')}/{r.year} — {r.failed_check_ids.join(', ')}
+                    </div>
+                    {r.checks.filter((c) => !c.passed && !c.skipped).map((c) => (
+                      <div key={c.id} className="mt-1 text-[10px] text-muted-foreground leading-relaxed pl-2" style={{ borderLeft: '2px solid hsl(var(--destructive))' }}>
+                        <span className="text-foreground/90">{c.name}.</span>{' '}
+                        {c.expected != null && c.actual != null && (
+                          <span>Expected {c.expected} → <span className="text-rose-400">{c.actual}</span>. </span>
+                        )}
+                        {c.detail}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Prune orphan extractions — heals the no_orphan_extractions failure. */}
+      <div>
+        <h3 className="text-sm font-semibold mb-1 flex items-center gap-1.5">
+          <Trash2 className="h-4 w-4 text-rose-500" /> Prune orphan extractions
+        </h3>
+        <p className="text-xs text-muted-foreground mb-3">
+          Removes extracted invoice rows whose order number is not in BAT&apos;s Overview pivot for their week —
+          usually stale rows left from an upload before the automatic prune existed. These cause the{' '}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">no_orphan_extractions</code> integrity failure
+          and skew the week&apos;s totals. The dry-run lists every row that would be removed before anything is deleted.
+        </p>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => runOrphanPrune(true)} disabled={orphanLoadingPreview || orphanApplying}>
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${orphanLoadingPreview ? 'animate-spin' : ''}`} />
+            {orphanLoadingPreview ? 'Running dry-run...' : 'Dry-run orphan prune'}
+          </Button>
+          <Button size="sm" variant="destructive" onClick={() => runOrphanPrune(false)} disabled={orphanApplying || orphanLoadingPreview || !orphanPreview || (orphanPreview?.total || 0) === 0}>
+            <AlertCircle className="h-3.5 w-3.5 mr-1.5" />
+            {orphanApplying ? 'Removing...' : 'Apply prune'}
+          </Button>
+        </div>
+        {orphanPreview && (
+          <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
+            <div className="text-xs">
+              <span className="font-medium text-foreground">{orphanPreview.dryRun ? 'Dry-run' : 'Applied'}:</span>{' '}
+              <span className="tabular-nums">{orphanPreview.total}</span> orphan(s) across {orphanPreview.byRecon?.length || 0} recon(s)
+              {!orphanPreview.dryRun && (<>; removed <span className="text-emerald-400 tabular-nums">{orphanPreview.removed}</span></>)}.
+            </div>
+            {(orphanPreview.orphans?.length || 0) > 0 && (
+              <div className="max-h-56 overflow-y-auto pr-1">
+                <table className="w-full text-[11px] tabular-nums">
+                  <thead>
+                    <tr className="text-muted-foreground border-b border-border">
+                      <th className="text-left pr-2 pb-1 font-medium">Week</th>
+                      <th className="text-left px-2 pb-1 font-medium">Order #</th>
+                      <th className="text-right px-2 pb-1 font-medium">Amount</th>
+                      <th className="text-left pl-2 pb-1 font-medium">PDF</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orphanPreview.orphans.map((o) => (
+                      <tr key={o.ext_id} className="border-b border-border/40 last:border-0">
+                        <td className="pr-2 py-1 font-mono">W{String(o.week_number).padStart(2, '0')}/{o.year}</td>
+                        <td className="px-2 py-1 font-mono">{o.order_number}</td>
+                        <td className="text-right px-2 py-1">R {Number(o.order_amount || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                        <td className="pl-2 py-1 text-muted-foreground truncate max-w-[160px]" title={o.pdf_url || ''}>{o.pdf_url ? o.pdf_url.split('/').pop() : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
