@@ -1,6 +1,6 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Archive, Calendar, Code2, Download, FileSpreadsheet, Loader2, PlayCircle, Receipt, RotateCcw, Save, Settings } from "lucide-react";
+import { Archive, Calendar, Download, FileSpreadsheet, Loader2, PlayCircle, Receipt, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/AuthContext";
 
@@ -446,7 +446,13 @@ export default function SalesCommission() {
         onDownload={downloadArchive}
       />
 
-      {isAdmin && <SqlOverridePanel />}
+      {isAdmin && (
+        <div className="rounded-xl border border-border bg-card mb-4 px-4 py-3 text-xs text-muted-foreground">
+          The Sage SQL for this report (sales, receipts, unpaid invoices) is now managed centrally in{" "}
+          <span className="text-foreground font-medium">Settings → Sage Queries</span> (keys{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">commission.sales / receipts / unpaid</code>).
+        </div>
+      )}
     </div>
   );
 }
@@ -866,198 +872,3 @@ function ReportTable({ title, sectionHeader, columns, reps, totalRow }) {
 // SQL override viewer/editor — admin-only. Mirrors the JTI page's
 // "Query (advanced)" panel: lets an admin inspect the SQL the report
 // runs against Sage, copy/paste for ad-hoc diagnosis, and override.
-function SqlOverridePanel() {
-  const queryClient = useQueryClient();
-  const settings = useQuery({
-    queryKey: ["commission-settings"],
-    queryFn: async () => {
-      const r = await fetch("/api/commission/settings", { credentials: "include" });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
-      return r.json();
-    },
-    staleTime: 60_000,
-  });
-
-  if (settings.isLoading) {
-    return (
-      <div className="rounded-xl border border-border bg-card mb-4 px-4 py-6 text-center text-muted-foreground text-sm">
-        <Loader2 className="w-4 h-4 animate-spin inline mr-1" />
-        Loading SQL…
-      </div>
-    );
-  }
-  if (settings.isError) {
-    return (
-      <div className="rounded-xl border border-red-500/40 bg-red-500/10 mb-4 px-4 py-3 text-sm text-red-300">
-        Failed to load commission SQL: {String(settings.error?.message)}
-      </div>
-    );
-  }
-
-  const s = settings.data || {};
-
-  return (
-    <div className="rounded-xl border border-border bg-card mb-4 overflow-hidden">
-      <details className="group">
-        <summary className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 cursor-pointer list-none">
-          <div className="flex items-center gap-2">
-            <Code2 className="w-4 h-4 text-muted-foreground" />
-            <span className="text-sm font-semibold text-foreground">Query (advanced)</span>
-            <span className="text-xs text-muted-foreground">SQL the report runs against Sage</span>
-          </div>
-          <span className="text-xs text-muted-foreground group-open:rotate-180 transition-transform">▾</span>
-        </summary>
-
-        <div className="px-4 py-3 space-y-4 text-sm">
-          <p className="text-xs text-muted-foreground">
-            Three queries: <strong>Sales + Credits</strong> (OESHDT joined to AROBL, SWPAID=1),{" "}
-            <strong>Receipts</strong> (AROBP) and <strong>Unpaid invoices</strong> (OESHDT joined to AROBL, SWPAID=0 — sweets only).
-            Each can be overridden independently — leave blank to use the bundled default.
-            Overrides must keep <code className="text-amber-400">@from</code>, <code className="text-amber-400">@to</code>, and (receipts only){" "}
-            <code className="text-amber-400">@vat</code> parameters. SELECT/WITH only — no DML or DDL.
-          </p>
-
-          <SqlEditor
-            label="Sales + Credits query (paid only)"
-            defaultSql={s.defaultSalesSql || ""}
-            overrideSql={s.sales_query_override || ""}
-            fieldKey="sales_query_override"
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["commission-settings"] })}
-          />
-          <SqlEditor
-            label="Receipts query"
-            defaultSql={s.defaultReceiptsSql || ""}
-            overrideSql={s.receipts_query_override || ""}
-            fieldKey="receipts_query_override"
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["commission-settings"] })}
-          />
-          <SqlEditor
-            label="Unpaid invoices query"
-            defaultSql={s.defaultUnpaidSql || ""}
-            overrideSql={s.unpaid_query_override || ""}
-            fieldKey="unpaid_query_override"
-            onSaved={() => queryClient.invalidateQueries({ queryKey: ["commission-settings"] })}
-          />
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function SqlEditor({ label, defaultSql, overrideSql, fieldKey, onSaved }) {
-  const [draft, setDraft] = useState(overrideSql || defaultSql || "");
-  const [editing, setEditing] = useState(false);
-  const usingOverride = (overrideSql || "").trim().length > 0;
-
-  useEffect(() => {
-    setDraft(overrideSql || defaultSql || "");
-  }, [overrideSql, defaultSql]);
-
-  const save = useMutation({
-    mutationFn: async () => {
-      const r = await fetch("/api/commission/settings", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [fieldKey]: draft }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
-      return r.json();
-    },
-    onSuccess: () => {
-      toast.success(label + " saved");
-      setEditing(false);
-      onSaved?.();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  const reset = useMutation({
-    mutationFn: async () => {
-      const r = await fetch("/api/commission/settings", {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [fieldKey]: "" }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || "HTTP " + r.status);
-      return r.json();
-    },
-    onSuccess: () => {
-      toast.success(label + " reset to default");
-      setEditing(false);
-      onSaved?.();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  return (
-    <div className="border border-border rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between px-3 py-2 bg-muted/30 border-b border-border">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-semibold text-foreground">{label}</span>
-          <span className={"text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded " + (usingOverride ? "bg-amber-500/15 text-amber-400 border border-amber-500/40" : "bg-emerald-500/15 text-emerald-400 border border-emerald-500/40")}>
-            {usingOverride ? "Override" : "Default"}
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          {!editing && (
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1 rounded border border-border bg-card"
-            >
-              {usingOverride ? "Edit override" : "Override"}
-            </button>
-          )}
-          {usingOverride && (
-            <button
-              type="button"
-              onClick={() => reset.mutate()}
-              disabled={reset.isPending}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-amber-400 px-2 py-1 rounded border border-border bg-card disabled:opacity-50"
-              title="Clear the override and revert to the bundled default"
-            >
-              <RotateCcw className="w-3 h-3" />
-              Reset
-            </button>
-          )}
-        </div>
-      </div>
-
-      {editing ? (
-        <div className="p-3 space-y-2">
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            spellCheck={false}
-            rows={12}
-            className="w-full font-mono text-xs bg-background border border-border rounded-md p-2 resize-y"
-          />
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => save.mutate()}
-              disabled={save.isPending}
-              className="inline-flex items-center gap-1.5 rounded-md bg-amber-500 text-black hover:bg-amber-400 px-3 py-1.5 text-xs font-medium disabled:opacity-60"
-            >
-              {save.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={() => { setDraft(overrideSql || defaultSql || ""); setEditing(false); }}
-              className="text-xs text-muted-foreground hover:text-foreground px-2 py-1"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <pre className="p-3 font-mono text-xs text-foreground/80 whitespace-pre-wrap break-words bg-background/40 max-h-80 overflow-auto m-0">
-          {(overrideSql || defaultSql || "").trim() || "(no SQL)"}
-        </pre>
-      )}
-    </div>
-  );
-}
