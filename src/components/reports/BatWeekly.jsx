@@ -33,14 +33,23 @@ export default function BatWeekly() {
   const summary = data?.summary;
 
   // Reverse for chart so weeks ascend left → right
-  const chartData = useMemo(() => weeks.slice().reverse().map(w => ({
-    label: `W${w.week_number}`,
-    week: w.week_number,
-    bat:  w.supplier_total,
-    sage: w.sage_total,
-    variance: w.variance,
-    exc: w.exc_amount,
-  })), [weeks]);
+  const chartData = useMemo(() => {
+    let cumBat = 0, cumSage = 0;
+    return weeks.slice().reverse().map(w => {
+      cumBat += w.supplier_total;
+      cumSage += w.sage_total;
+      return {
+        label: `W${w.week_number}`,
+        week: w.week_number,
+        bat:  w.supplier_total,
+        sage: w.sage_total,
+        variance: w.variance,
+        exc: w.exc_amount,
+        cum_bat: cumBat,
+        cum_sage: cumSage,
+      };
+    });
+  }, [weeks]);
 
   const handleExportCsv = () => {
     if (!weeks.length) return;
@@ -128,17 +137,19 @@ export default function BatWeekly() {
                 <Bar dataKey="sage" name="Credit Notes" fill={REPORT_COLORS.secondary} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ChartCard>
-            <ChartCard title="Weekly Variance" sub="BAT − Credit Notes; ideal = 0">
+            <ChartCard title="Total value over the weeks" sub="Cumulative BAT vs Credit Notes">
               <LineChart data={chartData} margin={{ top: 10, right: 16, left: 6, bottom: 32 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="label" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE}
                   interval={Math.floor(chartData.length / 12) || 0}
                   label={{ value: 'Week', position: 'insideBottom', offset: -5, style: AXIS_LABEL }} />
                 <YAxis tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE} tickFormatter={fmtCompactR} width={70}
-                  label={{ value: 'Variance (R)', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }} />
+                  label={{ value: 'Cumulative (R)', angle: -90, position: 'insideLeft', offset: 10, style: AXIS_LABEL }} />
                 <Tooltip contentStyle={TOOLTIP_CONTENT} labelStyle={TOOLTIP_LABEL} itemStyle={TOOLTIP_ITEM} cursor={TOOLTIP_CURSOR}
-                  formatter={(v) => [`R ${fmtRSigned(v)}`, 'Variance']} />
-                <Line type="monotone" dataKey="variance" stroke={REPORT_COLORS.danger} strokeWidth={2} dot={{ r: 3, fill: REPORT_COLORS.danger }} />
+                  formatter={(v) => `R ${fmtR(v)}`} />
+                <Legend wrapperStyle={LEGEND_WRAPPER} iconType="square" />
+                <Line type="monotone" dataKey="cum_bat" name="BAT" stroke={REPORT_COLORS.primary} strokeWidth={2} dot={{ r: 2, fill: REPORT_COLORS.primary }} />
+                <Line type="monotone" dataKey="cum_sage" name="Credit Notes" stroke={REPORT_COLORS.secondary} strokeWidth={2} dot={{ r: 2, fill: REPORT_COLORS.secondary }} />
               </LineChart>
             </ChartCard>
           </div>
