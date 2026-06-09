@@ -408,11 +408,20 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const to = arYmdInt(req.query.to, Number(`${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`));
 
       if (process.env.HUB_MODE === 'true') {
+        // Optional single-branch filter (matched on the branch's display name);
+        // 'all' keeps the consolidated table + per-branch sections.
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, s.site_id) = ?' : '';
+        const siteParams = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = prep(`
+          SELECT DISTINCT COALESCE(hs.name, s.site_id) AS site_name
+          FROM hub_ar_document_summary s LEFT JOIN hub_sites hs ON hs.id = s.site_id
+          ORDER BY site_name`).all().map(r => r.site_name).filter(Boolean);
         const rows = prep(`
           SELECT s.site_id, COALESCE(hs.name, s.site_id) AS site_name, s.ym,
                  s.inv_excl, s.inv_vat, s.inv_incl, s.cn_excl, s.cn_vat, s.cn_incl, s.dn_excl, s.dn_vat, s.dn_incl
           FROM hub_ar_document_summary s LEFT JOIN hub_sites hs ON hs.id = s.site_id
-          WHERE s.ym >= ? AND s.ym <= ? ORDER BY site_name, s.ym`).all(arIntToYm(from), arIntToYm(to));
+          WHERE s.ym >= ? AND s.ym <= ? ${siteWhere} ORDER BY site_name, s.ym`).all(arIntToYm(from), arIntToYm(to), ...siteParams);
         const toMonth = (r) => ({
           month: r.ym,
           invoices: arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl),
@@ -434,7 +443,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           c.net_incl += m.net_incl;
         }
         const consolidatedMonths = [...consMap.values()].sort((a, b) => a.month.localeCompare(b.month));
-        return res.json({ hub_mode: true, site_name: 'All branches', from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) } });
+        return res.json({ hub_mode: true, site_name: siteFilter !== 'all' ? siteFilter : 'All branches', from, to, branches, consolidated: { months: consolidatedMonths, totals: arSumTotals(consolidatedMonths) }, filters: { sites } });
       }
 
       const { months, totals } = await queryArDocSummary(from, to);

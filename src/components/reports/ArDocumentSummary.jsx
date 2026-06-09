@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ReportFrame, PrintHeader, PrintFooter, downloadCsv } from './lib';
 import SalesFiguresTable from './SalesFiguresTable';
+import BranchFilter from './BranchFilter';
 
 // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
 // VAT split out. Net = Invoices + Debit notes − Credit notes. Site mode queries
@@ -11,8 +13,9 @@ import SalesFiguresTable from './SalesFiguresTable';
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const yearStartStr = () => `${new Date().getFullYear()}-01-01`;
 
-function fetchSummary({ from, to }) {
+function fetchSummary({ from, to, site }) {
   const qs = new URLSearchParams({ from, to });
+  if (site && site !== 'all') qs.set('site', site);
   return fetch(`/api/reports/ar-document-summary?${qs.toString()}`, { credentials: 'include' })
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
@@ -20,10 +23,12 @@ function fetchSummary({ from, to }) {
 export default function ArDocumentSummary() {
   const [from, setFrom] = useState(yearStartStr());
   const [to, setTo] = useState(todayStr());
+  const [searchParams] = useSearchParams();
+  const site = searchParams.get('site') || 'all';
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['ar-document-summary', from, to],
-    queryFn: () => fetchSummary({ from, to }),
+    queryKey: ['ar-document-summary', from, to, site],
+    queryFn: () => fetchSummary({ from, to, site }),
     staleTime: 60_000,
     enabled: Boolean(from && to),
   });
@@ -80,6 +85,7 @@ export default function ArDocumentSummary() {
           <input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)}
             className="rounded-md border border-border bg-card px-2 py-1.5 text-sm text-foreground font-sans tracking-normal" />
         </label>
+        <div className="min-w-[10rem]"><BranchFilter hubMode={data?.hub_mode} sites={data?.filters?.sites} /></div>
       </div>
 
       {!isLoading && !error && !hasData && (
