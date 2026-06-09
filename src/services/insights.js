@@ -14,6 +14,14 @@
 import db from '../db/index.js';
 import { logError } from '../lib/errorLog.js';
 import { getDeadStock } from './inventoryMovement.js';
+import { INVENTORY_MOVEMENT_TABS, TREND_TABS, TREND_INVENTORY_VIEWS } from '../lib/tabIds.js';
+
+// Deep-link targets for cards, built from the shared tab ids so a tab rename
+// on a page breaks here at the same source of truth instead of silently
+// landing the operator on the wrong tab.
+const LINK_TREND_REVENUE = `/Trends?tab=${TREND_TABS.INVENTORY}&view=${TREND_INVENTORY_VIEWS.SALES}`;
+const LINK_TREND_MIX = `/Trends?tab=${TREND_TABS.INVENTORY}&view=${TREND_INVENTORY_VIEWS.MIX}`;
+const LINK_DEAD_STOCK = `/InventoryMovement?tab=${INVENTORY_MOVEMENT_TABS.DEAD_STOCK}`;
 
 const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
 const pct = (cur, base) => (base > 0 ? ((cur - base) / base) * 100 : 0);
@@ -115,11 +123,11 @@ function buildInsights() {
     if (change <= -15) {
       add({ id: 'revenue-decline', category: 'Sales', severity: change <= -30 ? 'high' : 'medium',
         title: `Revenue down ${Math.abs(change).toFixed(0)}% month-on-month`,
-        detail: `${rZA(last)} in ${lastM} vs ${rZA(prev)} in ${prevM}.`, value: Math.abs(change), link: '/Trends' });
+        detail: `${rZA(last)} in ${lastM} vs ${rZA(prev)} in ${prevM}.`, value: Math.abs(change), link: LINK_TREND_REVENUE });
     } else if (change >= 15) {
       add({ id: 'revenue-up', category: 'Sales', severity: 'info',
         title: `Revenue up ${change.toFixed(0)}% month-on-month`,
-        detail: `${rZA(last)} in ${lastM} vs ${rZA(prev)} in ${prevM}.`, value: change, link: '/Trends' });
+        detail: `${rZA(last)} in ${lastM} vs ${rZA(prev)} in ${prevM}.`, value: change, link: LINK_TREND_REVENUE });
     }
   });
 
@@ -138,7 +146,7 @@ function buildInsights() {
       if (change <= -20) {
         add({ id: `commodity-decline-${comm}`, category: 'Sales', severity: 'medium',
           title: `${COMMODITY_LABELS[comm] || `Commodity ${comm}`} sales down ${Math.abs(change).toFixed(0)}%`,
-          detail: `${rZA(v.last)} in ${lastM} vs ${rZA(v.prev)} in ${prevM}.`, value: Math.abs(change), link: '/Trends' });
+          detail: `${rZA(v.last)} in ${lastM} vs ${rZA(v.prev)} in ${prevM}.`, value: Math.abs(change), link: LINK_TREND_MIX });
       }
     }
   });
@@ -202,7 +210,7 @@ function buildInsights() {
     if (capital < 10000) return;
     add({ id: 'dead-stock', category: 'Inventory', severity: capital >= 100000 ? 'high' : 'medium',
       title: `${rZA(capital)} tied up in dead stock`,
-      detail: `${rows.length} item${rows.length === 1 ? '' : 's'} with no sale in 90+ days.`, value: capital, link: '/InventoryMovement' });
+      detail: `${rows.length} item${rows.length === 1 ? '' : 's'} with no sale in 90+ days.`, value: capital, link: LINK_DEAD_STOCK });
   });
 
   // 6. Debtor exposure -------------------------------------------------------
@@ -232,7 +240,10 @@ function buildInsights() {
         title: rule.name,
         detail: `${label} is ${fmtMetric(rule.metric, value)} (rule: ${OP_LABEL[rule.operator]} ${fmtMetric(rule.metric, rule.threshold)}).`,
         value: typeof value === 'number' ? Math.abs(value) : 0,
-        link: '/Insights', custom: true,
+        // No link: a custom rule has no specific page to act on, and linking to
+        // /Insights (the page the card already lives on) would render a
+        // misleading "go somewhere" arrow that navigates nowhere.
+        link: null, custom: true,
       });
     }
   });
