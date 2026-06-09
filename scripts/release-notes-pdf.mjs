@@ -13,6 +13,182 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-09': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '9 June 2026',
+    slug: '09-June-2026',
+    intro:
+      "This update brings head-office reporting across branches to the whole " +
+      "reporting suite: every report and the Reporting Dashboard can now be viewed " +
+      "for all branches consolidated, or narrowed to a single branch, and the " +
+      "dashboard's sales and inventory highlights now work at head office. It also " +
+      "adds at-a-glance dashboard tiles, a daily sales report, a new customers-by-" +
+      "sales view, clearer charts, on-screen help, and several accuracy and " +
+      "permission fixes. Every figure continues to be drawn from, and reconcile " +
+      "to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Head-office branch filtering across the reporting suite',
+            body:
+              "At head office, every report and the Reporting Dashboard now show all " +
+              "branches consolidated by default, with a Branch selector to focus on a " +
+              "single branch.",
+            details: [
+              "A consistent 'All branches / pick one' Branch selector on Aged Debtors, Aged Creditors, Sales Rep Exposure, Inventory Value and Monthly Sales Figures.",
+              "The Reporting Dashboard gains one Branch selector that filters every card and the headline customer figures together.",
+              "Consolidated is the default everywhere: totals sum across every branch that has reported in, and choosing a branch narrows the same view.",
+              "The dashboard's customer counts and flag totals now read from the consolidated head-office data (previously they could show as zero at head office).",
+              "BAT reconciliation, an operational per-branch process, shows a clear 'open on a branch' note rather than an empty page.",
+            ],
+          },
+          {
+            title: 'Reporting Dashboard — sales & inventory highlights',
+            body:
+              "Three new at-a-glance tiles on the Reporting Dashboard surface the " +
+              "month's best sellers, the costliest dead stock and the biggest " +
+              "customers, each as a compact ranked list.",
+            details: [
+              "Top Items Sold this month by units, showing the item code and description.",
+              "Top Dead Stock: the highest-value items still in stock with no sale in the last three months.",
+              "Top Customers by sales value over the last 12 months.",
+              "Inter-branch stock transfers are excluded from all three, so the figures reflect real customer trade.",
+              "At head office these consolidate across branches and follow the dashboard's Branch selector; the underlying figures are brought up from each branch automatically.",
+              "Each tile links through to the fuller view in Trends.",
+            ],
+          },
+          {
+            title: 'Daily Sales Figures report',
+            body:
+              "A new report breaking the current month's posted invoices, credit " +
+              "notes and debit notes down by day, with VAT shown separately — the " +
+              "daily companion to the Monthly Sales Figures report.",
+            details: [
+              "Day-by-day rows for the current month with a Net column (Invoices + Debit notes - Credit notes) and a totals row.",
+              "Same Sage source as the Monthly Sales Figures, so the two reconcile.",
+              "Amounts in Rand, exportable to CSV, and printable with the standard header.",
+              "Grouped under the Monthly Reports permission, alongside Monthly Sales Figures.",
+            ],
+          },
+          {
+            title: 'Customers by Sales (Trends)',
+            body:
+              "A new view under Trends > Customers that ranks customers by sales " +
+              "value over a timeline you choose.",
+            details: [
+              "Full ranked table of customers by sales value, with a units column and a relative bar.",
+              "Timeline filter: last 3, 6, 12 or 24 months, or all time.",
+              "Inter-branch transfers excluded so the ranking reflects real customers.",
+              "The Customer area now uses the same tabbed layout as Inventory (Record trends / By sales), with the filter in a consistent place.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Aged Creditors - filter by payment history',
+            body:
+              "The Aged Creditors report gains a Payments filter, on by default, " +
+              "matching the Creditor Balances page and the dashboard tile.",
+            details: [
+              "'With payment history' (default) hides never-paid accounts; switch to 'All vendors' to include them.",
+              "The choice flows through to the PDF and Excel exports and the printed filter line.",
+            ],
+          },
+          {
+            title: 'BAT weekly chart - total value per week',
+            body:
+              "The second chart on the BAT Weekly Reconciliation report now shows " +
+              "each week's BAT and Sage credit-note totals, replacing a variance line " +
+              "that sat flat at zero on a clean reconciliation and carried no useful scale.",
+            details: [
+              "Per-week BAT supplier total and Sage credit-notes total, in Rand.",
+              "The two lines track closely when a week reconciles; a visible gap is that week's variance.",
+            ],
+          },
+          {
+            title: 'On-screen help across the new screens',
+            body:
+              "Hover tooltips explain the new dashboard tiles, filters, charts and " +
+              "table columns, so it is clear what each figure means and how it is derived.",
+            details: [
+              "Each dashboard tile explains what it ranks and that inter-branch transfers are excluded.",
+              "Filters and table headers (units vs sales value, timelines, the branch selector) carry short explanations.",
+            ],
+          },
+          {
+            title: 'Item descriptions on sold-item figures',
+            body:
+              "Sold-item figures now carry the item description alongside the code, " +
+              "captured automatically as sales are synced from Sage.",
+            details: [
+              "The Top Items tile shows 'code - description' once a sales sync has run.",
+              "Descriptions travel with the sales data, so they are available even where the item master has not been loaded.",
+            ],
+          },
+          {
+            title: 'Rand symbols on the sales reports',
+            body:
+              "The Monthly and Daily Sales Figures reports now show the Rand (R) " +
+              "symbol against every amount, for South African currency clarity.",
+            details: [
+              "Consistent 'R' prefix on every figure and the totals row, on screen and in exports.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Inter-branch transfers excluded from sales figures',
+            body:
+              "Internal stock transfers between branches are no longer counted as " +
+              "customer sales in the dashboard sales tiles or the customers-by-sales view.",
+            details: [
+              "Previously the largest 'customer' could be an inter-branch transfer account; these are now filtered out so the figures reflect real trade.",
+            ],
+          },
+          {
+            title: 'Daily Sales Figures access aligned with Monthly Reports',
+            body:
+              "The Daily Sales Figures report is now governed by the same Monthly " +
+              "Reports permission as the Monthly Sales Figures report.",
+            details: [
+              "Users without the Monthly Reports permission no longer see or can reach the daily figures, closing a gap where the same posted-document totals were otherwise reachable.",
+            ],
+          },
+          {
+            title: "Sage query 'Reset to default' now reverts fully",
+            body:
+              "In Settings > Sage Queries, resetting a query to its default now " +
+              "reliably restores the shipped query.",
+            details: [
+              "On installs upgraded from the older per-module settings, a reset could fall back to a previously saved query; it now clears cleanly to the default.",
+              "The editor also accepts the shipped defaults that begin with a leading semicolon, so they can be copied, adjusted and saved.",
+            ],
+          },
+          {
+            title: 'Aged Debtors data sync reports failures honestly',
+            body:
+              "When the nightly Aged Debtors open-item sync cannot reach Sage or hits " +
+              "a bad query, it now reports a failure instead of recording a successful run.",
+            details: [
+              "Previously a failed run could still stamp a 'last synced' time, making stale data look fresh; the sync now surfaces the error to the screen and to the scheduled-job status.",
+            ],
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-08': {
     product: 'Cardoso App',
     title: 'Product Update',
