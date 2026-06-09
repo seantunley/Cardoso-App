@@ -1434,10 +1434,17 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         details: dryRun
           ? `Dry-run: ${orphans.length} orphan extraction(s) across ${byRecon.length} recon(s)`
           : `Removed ${removed} orphan extraction(s) across ${byRecon.length} recon(s)`,
-        changes: { orphans: orphans.slice(0, 200).map((o) => ({ ext_id: o.ext_id, order_number: o.order_number, week: o.week_number, year: o.year, amount: o.order_amount, pdf_url: o.pdf_url })) },
+        changes: {
+          orphan_count: orphans.length,
+          orphans: orphans.slice(0, 500).map((o) => ({ ext_id: o.ext_id, order_number: o.order_number, week: o.week_number, year: o.year, amount: o.order_amount, pdf_url: o.pdf_url })),
+        },
       });
 
-      res.json({ dryRun, total: orphans.length, removed, byRecon, orphans: orphans.slice(0, 200) });
+      // Return the FULL candidate set (not a slice): the dry-run must show every
+      // row the apply will delete, or the operator could approve a prune larger
+      // than they saw. The needs-reupload guard above keeps this set to genuine
+      // orphans, so it stays small.
+      res.json({ dryRun, total: orphans.length, removed, byRecon, orphans });
     } catch (error) {
       console.error('[maintenance] prune-orphan-extractions failed:', error.message);
       res.status(500).json({ error: error.message || 'Failed to prune orphan extractions' });
