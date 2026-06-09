@@ -50,7 +50,7 @@ export function getCommissionSettings() {
   // would render as NaN%.
   if (!row) {
     return {
-      sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, vat_rate: 0.14,
+      sweets_rate: 0.015, cigtob_rate: 0.0017, reference_rate: 0.01, vat_rate: 0.15,
       sales_query_override: null, receipts_query_override: null, unpaid_query_override: null,
       updated_at: null, updated_by_user_id: null,
     };
@@ -297,7 +297,7 @@ export async function buildCommissionReport({ from, to }) {
   // Use admin-supplied SQL overrides when present, otherwise the bundled
   // defaults. All three queries take @from, @to, @vat — overrides MUST
   // keep those param names or the bind step throws (validated at save).
-  const vatDivisor = 1 + (Number.isFinite(settings.vat_rate) ? settings.vat_rate : 0.14);
+  const vatDivisor = 1 + (Number.isFinite(settings.vat_rate) ? settings.vat_rate : 0.15);
   const salesAndCreditsSql = resolveSageQuery('commission.sales');
   const receiptsSql = resolveSageQuery('commission.receipts');
   const unpaidSql = resolveSageQuery('commission.unpaid');
