@@ -1131,23 +1131,32 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // (the inventory sales cache + transactions live on sites); HUB_MODE returns
   // an empty, site_only payload the tiles surface as a note.
   const dashMonth = (n = 0) => { const d = new Date(); const t = new Date(d.getFullYear(), d.getMonth() - n, 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; };
+  // Inter-branch stock transfers aren't real customer sales — exclude them from
+  // every dashboard sales figure (matched on customer name, separator-agnostic).
+  // Hard-coded fragment (no user input) referencing the unqualified customer_name.
+  const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
 
   // Top 10 items sold this month (by units), from the monthly sales cache.
   router.get('/api/reports/dashboard/top-items-mtd', ...reportsGuard, (_req, res) => {
     try {
-      const month = dashMonth(0);
+      const now = new Date();
+      const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, month, rows: [] });
+      const from = `${month}-01`;
+      const to = `${month}-${String(now.getDate()).padStart(2, '0')}`;
       const rows = db.prepare(`
-        SELECT TRIM(sc.item_number) AS item_number, sc.qty_sold AS qty, sc.revenue AS revenue, ir.item_description
-        FROM inventory_sales_cache sc
+        SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS revenue, ir.item_description
+        FROM inventory_sales_transactions t
         LEFT JOIN (
           SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
           FROM inventoryrecord
-        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
-        WHERE sc.period = ?
-        ORDER BY sc.qty_sold DESC
+        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
+        WHERE t.transaction_date >= ? AND t.transaction_date <= ?
+          AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(t.item_number)
+        ORDER BY qty DESC
         LIMIT 10
-      `).all(month).map((r) => ({
+      `).all(from, to).map((r) => ({
         item_number: r.item_number,
         item_description: r.item_description || null,
         qty: Number(r.qty) || 0,
@@ -1167,8 +1176,10 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const threshold = dashMonth(3);
       const rows = db.prepare(`
         WITH last_sale AS (
-          SELECT TRIM(item_number) AS item_number, MAX(period) AS last_period
-          FROM inventory_sales_cache WHERE period IS NOT NULL GROUP BY TRIM(item_number)
+          SELECT TRIM(item_number) AS item_number, MAX(SUBSTR(transaction_date, 1, 7)) AS last_period
+          FROM inventory_sales_transactions
+          WHERE transaction_date IS NOT NULL AND NOT ${EXCL_INTER_BRANCH}
+          GROUP BY TRIM(item_number)
         )
         SELECT TRIM(ir.item_number) AS item_number, ir.item_description,
                COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
@@ -1193,24 +1204,34 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 customers by sales value, from the per-transaction sales table.
-  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (_req, res) => {
+  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (req, res) => {
     try {
-      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, rows: [] });
+      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, months: 12, rows: [] });
+      const months = Math.max(0, parseInt(req.query.months, 10) || 12); // default last 12 months; 0 = all time
+      const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 10));
+      const where = ["customer_code IS NOT NULL AND TRIM(customer_code) <> ''", `NOT ${EXCL_INTER_BRANCH}`];
+      const params = [];
+      if (months > 0) {
+        const d = new Date();
+        const t = new Date(d.getFullYear(), d.getMonth() - (months - 1), 1);
+        where.push('transaction_date >= ?');
+        params.push(`${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-01`);
+      }
       const rows = db.prepare(`
         SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
                SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
         FROM inventory_sales_transactions
-        WHERE customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+        WHERE ${where.join(' AND ')}
         GROUP BY TRIM(customer_code)
         ORDER BY revenue DESC
-        LIMIT 10
-      `).all().map((r) => ({
+        LIMIT ?
+      `).all(...params, limit).map((r) => ({
         customer_code: r.customer_code,
         customer_name: r.customer_name || null,
         revenue: Number(r.revenue) || 0,
         qty: Number(r.qty) || 0,
       }));
-      res.json({ rows });
+      res.json({ months, rows });
     } catch (err) {
       logError('reports.dashboard.top_customers', err);
       res.status(500).json({ error: err.message });

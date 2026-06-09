@@ -388,7 +388,7 @@ function DeadStockItemsCard() {
 function TopCustomersCard() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["dash-top-customers"],
-    queryFn: () => apiGet("/api/reports/dashboard/top-customers"),
+    queryFn: () => apiGet("/api/reports/dashboard/top-customers?months=12"),
     staleTime: 60_000,
   });
   const accent = "hsl(200 80% 55%)";
@@ -399,7 +399,7 @@ function TopCustomersCard() {
     value: r.revenue,
   }));
   return (
-    <ReportCard icon={UserRound} title="Top Customers by Sales" accent={accent} to="/Trends">
+    <ReportCard icon={UserRound} title="Top Customers · 12 mo" accent={accent} to="/Trends">
       {data?.site_only
         ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
         : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
