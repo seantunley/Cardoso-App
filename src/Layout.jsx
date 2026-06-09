@@ -364,7 +364,7 @@ import CommandPalette from "@/components/CommandPalette";
 import NotificationsBell from "@/components/NotificationsBell";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { useAuth } from "@/lib/AuthContext";
-import { useHubMode } from "@/lib/useAppInfo";
+import { useAppInfo, useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
 import { toast } from "sonner";
 import { reportClientError } from "@/lib/clientLog";
@@ -418,58 +418,48 @@ const navItems = [
 const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "Reports", "Monthly Reports", "Infrastructure", "System"];
 
 // localStorage key for which groups the operator has collapsed.
-// v3: default to all groups COLLAPSED so the rail starts tidy — the operator
-// opens the group they need, and the group containing the current page always
-// auto-expands (user request 2026-06-09). Older keys are abandoned, not migrated.
-const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v3";
-// localStorage key for the rail's expanded/collapsed state, so it survives
-// reloads instead of resetting to collapsed on every load.
-const NAV_SIDEBAR_COLLAPSED_KEY = "cardoso.sidebar.collapsed";
+// v3: per-user, default to all-collapsed-except-first-accessible
+// group (user request 2026-06-03). The key MUST be namespaced by
+// user id — different accounts sharing a browser have different
+// permission sets, and a one-key-per-browser scheme would let the
+// first user's seeded set (which only includes the groups THEY can
+// see) survive logout and wrongly serve as the seed for the next
+// user's session. v2 keys (which forced all-open, globally) are
+// abandoned, not migrated.
+const navCollapsedGroupsKey = (userId) =>
+  `cardoso.sidebar.collapsedGroups.v3.user-${userId}`;
 
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
-  const [isCollapsed, setIsCollapsed]       = useState(() => {
-    try {
-      const stored = localStorage.getItem(NAV_SIDEBAR_COLLAPSED_KEY);
-      return stored === null ? false : stored === "true"; // default expanded on first visit
-    } catch { return false; }
-  });
+  // Sidebar expanded by default (user request 2026-06-03). Operator
+  // can still collapse via the header chevron; that state is local-
+  // session only and intentionally not persisted, since the previous
+  // collapsed-by-default pattern was the source of every "where do I
+  // click for X" question.
+  const [isCollapsed, setIsCollapsed]       = useState(false);
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const hubMode = useHubMode();
+  // Track whether /api/app-info has settled. useHubMode() returns
+  // false until the query resolves, so the sidebar-seeder useEffect
+  // must wait for this signal — otherwise on hub installs the first
+  // pass would seed using site-mode visibleNavItems and then refuse
+  // to re-seed when hubMode flipped to true (storedRaw !== null check
+  // hits the just-written stale seed).
+  const { isSuccess: appInfoResolved } = useAppInfo();
   const [cmdOpen, setCmdOpen]               = useState(false);
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [settingsOpen, setSettingsOpen]     = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState(null);
 
-  // Sidebar group open/closed state. Initialised from localStorage so the
-  // operator's preference survives reloads. A group is "collapsed" when its
-  // name is present in the set; the first-visit default is all-collapsed.
-  const [collapsedGroups, setCollapsedGroups] = useState(() => {
-    try {
-      const raw = localStorage.getItem(NAV_COLLAPSED_GROUPS_KEY);
-      // First visit (no stored preference) → start with every group collapsed.
-      if (raw === null) return new Set(NAV_GROUP_ORDER);
-      const stored = JSON.parse(raw);
-      return new Set(Array.isArray(stored) ? stored : NAV_GROUP_ORDER);
-    } catch (e) {
-      console.warn('[sidebar.collapsed_groups.read] localStorage parse failed', e.message);
-      return new Set(NAV_GROUP_ORDER);
-    }
-  });
-  const toggleGroup = (name) => {
-    setCollapsedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      try { localStorage.setItem(NAV_COLLAPSED_GROUPS_KEY, JSON.stringify([...next])); }
-      catch (e) { console.warn('[sidebar.collapsed_groups.write] localStorage write failed', e.message); }
-      return next;
-    });
-  };
-  // Persist the rail's collapsed/expanded state so it doesn't reset on reload.
-  useEffect(() => {
-    try { localStorage.setItem(NAV_SIDEBAR_COLLAPSED_KEY, String(isCollapsed)); }
-    catch (e) { console.warn('[sidebar.collapsed.write] localStorage write failed', e.message); }
-  }, [isCollapsed]);
+  // Sidebar group open/closed state. Per-user; loaded lazily by the
+  // useEffect below once currentUser.id is known. Starts empty (all
+  // groups open) for the brief render before currentUser arrives —
+  // the seeder rewrites it as soon as we have an id.
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  // toggleGroup needs currentUser.id to write to the correct per-user
+  // localStorage key; defined lower in the function body (after the
+  // useAuth() call) so currentUser is in scope. See `toggleGroup`
+  // below the useEffect seeder.
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus]   = useState({
     currentVersion: APP_VERSION,
@@ -638,6 +628,83 @@ export default function Layout({ children, currentPageName }) {
     || hasPermission(currentUser, "can_access_settings")
     || hasPermission(currentUser, "can_manage_users")
     || hasPermission(currentUser, "can_manage_rules");
+
+  // Per-user load + first-time seed for the sidebar group collapsed
+  // state. Reacts to currentUser.id changing — so switching accounts
+  // in the same browser correctly swaps to the new user's stored
+  // preference (or seeds a fresh default for them) instead of
+  // inheriting the previous account's persisted set.
+  //
+  // Seed rule: every group EXCEPT the first one (NAV_GROUP_ORDER
+  // order) the user has access to is collapsed. Only fires when the
+  // user's per-id key is missing. Once they manually toggle any
+  // group, the writer below stores their preference under the same
+  // per-id key and the seeder bails out on subsequent loads.
+  useEffect(() => {
+    if (!currentUser?.id || visibleNavItems.length === 0) return;
+    // Wait for /api/app-info to settle. On hub installs the query
+    // is in-flight at first render and useHubMode() returns false,
+    // which would let us seed using the SITE-mode visibleNavItems
+    // and then refuse to re-seed when hubMode flips to true (the
+    // storedRaw branch below would just load the stale site-mode
+    // seed). Gate on appInfoResolved so we only ever seed against
+    // the correct nav set for this install.
+    if (!appInfoResolved) return;
+    const key = navCollapsedGroupsKey(currentUser.id);
+    let storedRaw = null;
+    try { storedRaw = localStorage.getItem(key); }
+    catch (e) { console.warn('[sidebar.collapsed_groups.read] localStorage probe failed', e.message); return; }
+    if (storedRaw !== null) {
+      // Existing preference — load it as-is, no re-seed.
+      try {
+        const parsed = JSON.parse(storedRaw);
+        setCollapsedGroups(new Set(Array.isArray(parsed) ? parsed : []));
+      } catch (e) {
+        console.warn('[sidebar.collapsed_groups.read] parse failed, falling back to empty', e.message);
+        setCollapsedGroups(new Set());
+      }
+      return;
+    }
+    // Missing key → seed default for this user.
+    const accessibleGroups = NAV_GROUP_ORDER.filter(
+      g => visibleNavItems.some(it => it.group === g)
+    );
+    if (accessibleGroups.length === 0) return;
+    const firstAccessible = accessibleGroups[0];
+    const defaultCollapsed = new Set(accessibleGroups.filter(g => g !== firstAccessible));
+    setCollapsedGroups(defaultCollapsed);
+    try { localStorage.setItem(key, JSON.stringify([...defaultCollapsed])); }
+    catch (e) { console.warn('[sidebar.collapsed_groups.seed] localStorage write failed', e.message); }
+    // Depend on stable primitives only — visibleNavItems is a fresh
+    // array reference every render (it's navItems.filter(...) without
+    // memoization), so listing it here would loop the effect forever.
+    // currentUser?.id + hubMode + isAdmin uniquely determine the
+    // accessible-group set; the effect's closure picks up the latest
+    // visibleNavItems naturally on each run. appInfoResolved gates
+    // the FIRST seed against the correct hub vs site mode (see body).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.id, hubMode, isAdmin, appInfoResolved]);
+
+  // Operator-toggled group state. Writes to the same per-user key
+  // the seeder uses so subsequent loads (or the seeder re-running
+  // on the same currentUser.id) skip re-seeding and load the
+  // operator's preference verbatim. No-op when currentUser hasn't
+  // loaded yet — clicking a group header in that brief window
+  // updates UI state but won't persist; the seeder will then assign
+  // a fresh default on first user load, which is the right answer
+  // because we have nowhere to write the pre-auth click anyway.
+  const toggleGroup = (name) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name); else next.add(name);
+      const uid = currentUser?.id;
+      if (uid != null) {
+        try { localStorage.setItem(navCollapsedGroupsKey(uid), JSON.stringify([...next])); }
+        catch (e) { console.warn('[sidebar.collapsed_groups.write] localStorage write failed', e.message); }
+      }
+      return next;
+    });
+  };
 
   return (
     <div className="min-h-screen bg-background text-foreground">

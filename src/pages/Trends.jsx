@@ -11,6 +11,8 @@ import {
 } from "recharts";
 
 import { CHART_SERIES as COLORS } from "@/lib/chartColors";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { TREND_TABS, TREND_INVENTORY_VIEWS } from "@/lib/tabIds";
 const COMMODITY_LABELS = { '1': 'Sweets', '2': 'Cigarettes', '3': 'Tobacco', '4': 'Mixed' };
 const MONTH_LABELS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -691,7 +693,8 @@ function TopMoversTable() {
 }
 
 function InventoryTrends() {
-  const [innerTab, setInnerTab] = useState("sales");
+  // ?view=sales|mix|movement|seasonal deep-links straight to an inner tab.
+  const [innerTab, setInnerTab] = useUrlTab("view", Object.values(TREND_INVENTORY_VIEWS), TREND_INVENTORY_VIEWS.SALES);
   const { data, isLoading, error } = useQuery({
     queryKey: ["site-trends-inventory"],
     queryFn: fetchInventoryTrends,
@@ -822,7 +825,10 @@ function InventoryTrends() {
 }
 
 export default function Trends() {
-  const [tab, setTab] = useState("customers");
+  // Deep-link support: ?tab=customers|inventory selects the outer tab; the
+  // inventory inner tab is driven by ?view= inside InventoryTrends. Insights
+  // cards (e.g. a revenue drop) use both to land on the relevant view.
+  const [tab, setTab] = useUrlTab("tab", Object.values(TREND_TABS), TREND_TABS.CUSTOMERS);
   return (
     <div className="min-h-screen bg-background px-4 py-6 text-foreground sm:px-6">
       <div className="mx-auto max-w-[1600px] space-y-6">

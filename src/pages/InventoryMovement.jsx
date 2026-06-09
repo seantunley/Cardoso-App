@@ -11,6 +11,20 @@ import ForecastSettingsModal from "@/components/inventory/ForecastSettingsModal"
 import ReorderPlanView from "@/components/inventory/ReorderPlanView";
 import EmptyState from "@/components/EmptyState";
 import { Settings } from "lucide-react";
+import { useUrlTab } from "@/lib/useUrlTab";
+import { INVENTORY_MOVEMENT_TABS } from "@/lib/tabIds";
+
+// Print-only header shown above the table when the page is printed. One
+// component for every tab (kept in sync with the on-screen table) so a print
+// is never mislabelled or — for tabs without a dedicated block — headerless.
+function InvPrintHeader({ subtitle, details }) {
+  return (
+    <div className="inv-print-header hidden border-b border-border mb-3 pb-2">
+      <h1 className="text-lg font-bold">Inventory Movement — {subtitle}</h1>
+      <p className="text-xs text-gray-600">{details}</p>
+    </div>
+  );
+}
 
 async function apiFetch(url) {
   const res = await fetch(url, { credentials: "include" });
@@ -186,7 +200,9 @@ function HeaderWithTip({ label, tooltip, className = "" }) {
 
 export default function InventoryMovement() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState("topMovers");
+  // Deep-link support: ?tab=topMovers|deadStock|forecast lets Insights cards
+  // (e.g. a dead-stock alert) open straight onto the relevant tab.
+  const [tab, setTab] = useUrlTab("tab", Object.values(INVENTORY_MOVEMENT_TABS), INVENTORY_MOVEMENT_TABS.TOP_MOVERS);
   const [search, setSearch] = useState("");
   const [siteFilter, setSiteFilter] = useState("all");
 
@@ -410,14 +426,33 @@ export default function InventoryMovement() {
           @page { size: landscape; margin: 10mm; }
         }
       `}</style>
-      {/* Print-only header */}
-      <div className="inv-print-header hidden border-b border-border mb-3 pb-2">
-        <h1 className="text-lg font-bold">Inventory Movement — Demand Forecast</h1>
-        <p className="text-xs text-gray-600">
-          Printed: {new Date().toLocaleString("en-ZA")} · {forecastRows.length} items
-          {abcFilter !== "all" ? ` · ABC: ${abcFilter}` : ""}
-        </p>
-      </div>
+      {/* Print-only header. Title + row count switch by active tab (including
+          the item-trend detail view) so a print is correctly labelled and
+          never headerless. The timestamp is computed once for the print. */}
+      {(() => {
+        const printedAt = new Date().toLocaleString("en-ZA");
+        const commodityMeta = commodity !== "all" ? ` · Commodity: ${commodity}` : "";
+        const headers = {
+          forecast: {
+            subtitle: "Demand Forecast",
+            details: `Printed: ${printedAt} · ${forecastRows.length} items${abcFilter !== "all" ? ` · ABC: ${abcFilter}` : ""}`,
+          },
+          topMovers: {
+            subtitle: "Top Movers",
+            details: `Printed: ${printedAt} · ${sortedTopMovers.length} items · ${from} to ${to}${commodityMeta}`,
+          },
+          deadStock: {
+            subtitle: "Dead Stock",
+            details: `Printed: ${printedAt} · ${sortedDeadStock.length} items · no sales in ${threshold}+ days · Capital tied up: ${formatCurrency(totalDeadCapital)}${commodityMeta}`,
+          },
+          trend: {
+            subtitle: selectedItem ? `Item Trend — ${selectedItem}` : "Item Trend",
+            details: `Printed: ${printedAt} · ${from} to ${to}`,
+          },
+        };
+        const h = headers[tab] || headers.topMovers;
+        return <InvPrintHeader subtitle={h.subtitle} details={h.details} />;
+      })()}
       {/* Header */}
       <div className="border-b border-border pb-5 mb-5 no-print">
 
@@ -542,6 +577,27 @@ export default function InventoryMovement() {
                 : "Never synced — click to pull sales data from Sage"}
             </TooltipContent>
           </Tooltip>
+          )}
+
+          {/* Print — always visible top-level on Top Movers and Dead
+              Stock so the operator can hit it regardless of data
+              state. (Forecast has its own Print button down in the
+              forecast toolbar next to Recompute / Settings.) */}
+          {(tab === "topMovers" || tab === "deadStock") && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => window.print()}
+                  className="no-print flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Printer className="h-3.5 w-3.5" />
+                  Print
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                Print the {tab === "topMovers" ? "Top Movers" : "Dead Stock"} table as PDF
+              </TooltipContent>
+            </Tooltip>
           )}
         </div>
 
@@ -682,7 +738,7 @@ export default function InventoryMovement() {
               <div className="text-xs text-muted-foreground px-3 py-2 border-b border-border">
                 {sortedTopMovers.length} items · {from} to {to}
               </div>
-              <div className="overflow-x-auto max-h-[calc(100vh-320px)] overflow-y-auto">
+              <div className="print-table-wrap overflow-x-auto max-h-[calc(100vh-320px)] overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-card border-b border-border">
                     <tr>
@@ -756,7 +812,7 @@ export default function InventoryMovement() {
                 <span>{sortedDeadStock.length} items with no sales in {threshold}+ days</span>
                 <span className="text-red-400 font-semibold">Capital tied up: {formatCurrency(totalDeadCapital)}</span>
               </div>
-              <div className="overflow-x-auto max-h-[calc(100vh-320px)] overflow-y-auto">
+              <div className="print-table-wrap overflow-x-auto max-h-[calc(100vh-320px)] overflow-y-auto">
                 <table className="w-full text-xs">
                   <thead className="sticky top-0 z-10 bg-card border-b border-border">
                     <tr>

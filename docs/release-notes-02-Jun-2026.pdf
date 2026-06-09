@@ -1,0 +1,474 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 7085
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+489.6563779527558609 773.8585039370078675 Td
+(02 Jun 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(A performance-focused update: the app is noticeably faster across data-heavy screens, search inputs, and) Tj
+T* (report loading. This release also ships a set of accuracy and reliability fixes to commission reporting, sales) Tj
+T* (forecasting, and stock-receipt sync.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 655.9372440944881646 Td
+(Improvements) Tj
+ET
+0.15 0.39 0.64 rg
+490.8250787401573803 668.4096850393700606 m
+540.8548031496061412 668.4096850393700606 l
+542.7334410387943535 668.4096850393700606 544.2563779527557699 666.8867481254086442 544.2563779527557699 665.0081102362204319 c
+544.2563779527557699 654.8033858267716596 l
+544.2563779527557699 652.9247479375834473 542.3777400635675576 651.4018110236220309 540.8548031496061412 651.4018110236220309 c
+490.8250787401573803 651.4018110236220309 l
+488.946440850969168 651.4018110236220309 487.4235039370078084 653.2804489128101295 487.4235039370078084 654.8033858267716596 c
+487.4235039370078084 665.0081102362204319 l
+487.4235039370078084 666.8867481254086442 489.3021418261960207 668.4096850393700606 490.8250787401573803 668.4096850393700606 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+495.9274409448818233 655.9372440944881646 Td
+(IMPROVED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 647.4333070866141497 m
+544.2563779527558836 647.4333070866141497 l
+S
+0.15 0.39 0.64 rg
+51.0236220472441033 638.9293700787401349 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 630.42543307086612 Td
+(Faster, more responsive screens) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 616.2522047244094665 Td
+(A dedicated performance pass has eliminated unnecessary re-renders throughout the app.) Tj
+T* (Typing in search boxes, sorting tables, and scrolling large lists is now smooth and immediate,) Tj
+T* (with no perceptible lag.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 571.1813385826770855 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 562.6774015748030706 Td
+(Reports load on demand) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 548.5041732283464171 Td
+(Individual reports are now fetched only when you open them, rather than all at once on page) Tj
+T* (load. The first screen you see after logging in loads significantly faster as a result.) Tj
+ET
+0.15 0.39 0.64 rg
+51.0236220472441033 517.0396062992125508 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 508.5356692913385359 Td
+(Insights feed loads instantly) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 494.3624409448818824 Td
+(The Insights cache is pre-warmed automatically after each nightly sync, so your proactive alerts) Tj
+T* (and baselines are ready the moment you open the feed.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 443.055354330708667 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 455.5277952755905062 m
+540.8548031496061412 455.5277952755905062 l
+542.7334410387943535 455.5277952755905062 544.2563779527557699 454.0048583616291467 544.2563779527557699 452.1262204724409344 c
+544.2563779527557699 441.921496062992162 l
+544.2563779527557699 440.0428581738039497 542.3777400635675576 438.5199212598425902 540.8548031496061412 438.5199212598425902 c
+508.6750787401573461 438.5199212598425902 l
+506.7964408509691339 438.5199212598425902 505.2735039370077743 440.3985591490308025 505.2735039370077743 441.921496062992162 c
+505.2735039370077743 452.1262204724409344 l
+505.2735039370077743 454.0048583616291467 507.1521418261959866 455.5277952755905062 508.6750787401573461 455.5277952755905062 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 443.055354330708667 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 434.5514173228345953 m
+544.2563779527558836 434.5514173228345953 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 426.0474803149605805 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 417.5435433070865656 Td
+(Commission totals now accurate) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 403.3703149606299121 Td
+(A row-multiplication issue that could cause commission figures to appear higher than correct) Tj
+T* (has been resolved. All commission reports now show accurate amounts.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 371.9057480314960458 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 363.4018110236220309 Td
+(Reliable commission archiving for closed periods) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 349.2285826771653205 Td
+(Archiving commission for a closed period can now be triggered on demand and retries) Tj
+T* (automatically if interrupted, preventing gaps in historical commission records.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 317.7640157480314542 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 309.2600787401574962 Td
+(Forecast calendar gaps corrected) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 295.086850393700729 Td
+(Sales forecasts now account for all calendar periods correctly, giving you complete and) Tj
+T* (consistent projections without missing intervals.) Tj
+ET
+0.69 0.49 0.09 rg
+51.0236220472441033 263.6222834645669195 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 255.1183464566929615 Td
+(Stock-receipt sync handles reversed lines) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 240.9451181102361943 Td
+(The stock-receipt sync now correctly reconciles reversed or cancelled purchase lines, keeping) Tj
+T* (your inventory records in step with Sage.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 02 Jun 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 1) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R ]
+/Count 1
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+6 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 5 0 R
+/F2 6 0 R
+/F3 7 0 R
+/F4 8 0 R
+/F5 9 0 R
+/F6 10 0 R
+/F7 11 0 R
+/F8 12 0 R
+/F9 13 0 R
+/F10 14 0 R
+/F11 15 0 R
+/F12 16 0 R
+/F13 17 0 R
+/F14 18 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+19 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260603060845-00'00')
+>>
+endobj
+20 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 21
+0000000000 65535 f 
+0000007289 00000 n 
+0000009106 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000007346 00000 n 
+0000007471 00000 n 
+0000007601 00000 n 
+0000007734 00000 n 
+0000007871 00000 n 
+0000007994 00000 n 
+0000008123 00000 n 
+0000008255 00000 n 
+0000008391 00000 n 
+0000008519 00000 n 
+0000008646 00000 n 
+0000008775 00000 n 
+0000008908 00000 n 
+0000009010 00000 n 
+0000009354 00000 n 
+0000009440 00000 n 
+trailer
+<<
+/Size 21
+/Root 20 0 R
+/Info 19 0 R
+/ID [ <9493F40EDC34FD9D6FC1EA7F72B6AB65> <9493F40EDC34FD9D6FC1EA7F72B6AB65> ]
+>>
+startxref
+9544
+%%EOF
