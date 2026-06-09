@@ -513,7 +513,7 @@ export default function MaintenanceTab() {
           <div className="mt-3 rounded-md border border-border bg-muted/20 p-3 space-y-2">
             <div className="text-xs">
               <span className="font-medium text-foreground tabular-nums">{integrity.summary.total}</span> recon(s):
-              <span className="text-emerald-400 tabular-nums ml-1">{integrity.summary.passing} passing</span>,
+              <span className="text-emerald-400 tabular-nums ml-1">{integrity.summary.passing - (integrity.summary.needs_reupload || 0)} passing</span>,
               <span className="text-rose-400 tabular-nums ml-1">{integrity.summary.failing} failing</span>
               {integrity.summary.needs_reupload > 0 && (
                 <span className="text-amber-400 ml-1">, {integrity.summary.needs_reupload} need re-upload</span>

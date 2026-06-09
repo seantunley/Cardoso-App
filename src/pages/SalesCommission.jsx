@@ -868,7 +868,3 @@ function ReportTable({ title, sectionHeader, columns, reps, totalRow }) {
     </div>
   );
 }
-
-// SQL override viewer/editor — admin-only. Mirrors the JTI page's
-// "Query (advanced)" panel: lets an admin inspect the SQL the report
-// runs against Sage, copy/paste for ad-hoc diagnosis, and override.

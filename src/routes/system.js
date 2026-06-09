@@ -579,9 +579,14 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
       const { setSageQueryOverride, getSageQuery } = await import('../services/sage/queryRegistry.js');
       const key = req.params.key;
       if (!getSageQuery(key)) return res.status(404).json({ error: `Unknown Sage query: ${key}` });
+      // Require an explicit string `sql` (use "" to clear). A missing/null/wrong
+      // field would otherwise coerce to "" and silently revert the override.
+      if (typeof req.body?.sql !== 'string') {
+        return res.status(400).json({ error: 'Body must include "sql" as a string (use "" to clear back to the default).' });
+      }
       let result;
       try {
-        result = setSageQueryOverride(key, req.body?.sql ?? '', req.currentUser?.id ?? null);
+        result = setSageQueryOverride(key, req.body.sql, req.currentUser?.id ?? null);
       } catch (validationErr) {
         // setSageQueryOverride throws the validator's message for a bad override.
         return res.status(400).json({ error: validationErr.message || 'Invalid override SQL' });

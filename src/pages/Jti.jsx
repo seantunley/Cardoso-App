@@ -78,7 +78,7 @@ export default function Jti() {
   // Used to detect "dirty" state on the defaults form so the Save
   // button can be disabled when nothing changed.
   const [savedDefaults, setSavedDefaults] = useState({
-    townCity: '', region: '', country: '', siteLabel: '', queryOverride: '',
+    townCity: '', region: '', country: '', siteLabel: '',
   });
   // The defaults panel's editable copy (what the user is about to save).
   const [defaultsForm, setDefaultsForm] = useState({
