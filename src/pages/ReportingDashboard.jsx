@@ -41,6 +41,16 @@ const withSite = (url, site) =>
 
 function ReportCard({ icon: Icon, title, accent, to, children, query, hint }) {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  // Carry the dashboard's selected branch into the full report, so the
+  // branch-filtered view continues instead of resetting to all branches
+  // (the reports read ?site= the same way the dashboard does).
+  const openReport = () => {
+    let url = query ? `${to}?report=${query}` : to;
+    const site = searchParams.get("site");
+    if (site && site !== "all") url += `${url.includes("?") ? "&" : "?"}site=${encodeURIComponent(site)}`;
+    navigate(url);
+  };
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
@@ -51,7 +61,7 @@ function ReportCard({ icon: Icon, title, accent, to, children, query, hint }) {
         {to && (
           <button
             type="button"
-            onClick={() => navigate(query ? `${to}?report=${query}` : to)}
+            onClick={openReport}
             title={`Open the full ${title} report`}
             className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
