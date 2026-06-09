@@ -93,6 +93,7 @@ import m87 from './v087_creditors_module.js';
 import m88 from './v088_commission_unpaid_override.js';
 import m89 from './v089_commission_unpaid_snapshot.js';
 import m90 from './v090_insight_rules.js';
+import m91 from './v091_commission_vat_rate_15_default.js';
 
 const migrations = [
   m1,
@@ -185,6 +186,7 @@ const migrations = [
   m88,
   m89,
   m90,
+  m91,
 ];
 
 migrations.sort((a, b) => a.version - b.version);
