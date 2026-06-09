@@ -1126,6 +1126,97 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // ── Reporting Dashboard mini-tiles (compact top-10 lists) ─────────────────
+  // Smaller versions of the Trends inventory graphs for the dashboard. Site-mode
+  // (the inventory sales cache + transactions live on sites); HUB_MODE returns
+  // an empty, site_only payload the tiles surface as a note.
+  const dashMonth = (n = 0) => { const d = new Date(); const t = new Date(d.getFullYear(), d.getMonth() - n, 1); return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}`; };
+
+  // Top 10 items sold this month (by units), from the monthly sales cache.
+  router.get('/api/reports/dashboard/top-items-mtd', ...reportsGuard, (_req, res) => {
+    try {
+      const month = dashMonth(0);
+      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, month, rows: [] });
+      const rows = db.prepare(`
+        SELECT TRIM(sc.item_number) AS item_number, sc.qty_sold AS qty, sc.revenue AS revenue, ir.item_description
+        FROM inventory_sales_cache sc
+        LEFT JOIN (
+          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(sc.item_number) AND ir.rn = 1
+        WHERE sc.period = ?
+        ORDER BY sc.qty_sold DESC
+        LIMIT 10
+      `).all(month).map((r) => ({
+        item_number: r.item_number,
+        item_description: r.item_description || null,
+        qty: Number(r.qty) || 0,
+        revenue: Number(r.revenue) || 0,
+      }));
+      res.json({ month, rows });
+    } catch (err) {
+      logError('reports.dashboard.top_items_mtd', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Top 10 dead-stock items (held value, no sale in 3+ months) by held value.
+  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (_req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, rows: [] });
+      const threshold = dashMonth(3);
+      const rows = db.prepare(`
+        WITH last_sale AS (
+          SELECT TRIM(item_number) AS item_number, MAX(period) AS last_period
+          FROM inventory_sales_cache WHERE period IS NOT NULL GROUP BY TRIM(item_number)
+        )
+        SELECT TRIM(ir.item_number) AS item_number, ir.item_description,
+               COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+               ls.last_period
+        FROM inventoryrecord ir
+        LEFT JOIN last_sale ls ON ls.item_number = TRIM(ir.item_number)
+        WHERE COALESCE(CAST(REPLACE(REPLACE(ir.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
+          AND (ls.last_period IS NULL OR ls.last_period < ?)
+        ORDER BY inv_value DESC
+        LIMIT 10
+      `).all(threshold).map((r) => ({
+        item_number: r.item_number,
+        item_description: r.item_description || null,
+        inv_value: Number(r.inv_value) || 0,
+        last_period: r.last_period || null,
+      }));
+      res.json({ threshold_months: 3, rows });
+    } catch (err) {
+      logError('reports.dashboard.dead_stock_items', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Top 10 customers by sales value, from the per-transaction sales table.
+  router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (_req, res) => {
+    try {
+      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, rows: [] });
+      const rows = db.prepare(`
+        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
+               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
+        FROM inventory_sales_transactions
+        WHERE customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+        GROUP BY TRIM(customer_code)
+        ORDER BY revenue DESC
+        LIMIT 10
+      `).all().map((r) => ({
+        customer_code: r.customer_code,
+        customer_name: r.customer_name || null,
+        revenue: Number(r.revenue) || 0,
+        qty: Number(r.qty) || 0,
+      }));
+      res.json({ rows });
+    } catch (err) {
+      logError('reports.dashboard.top_customers', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // GET /api/reports/trends/inventory/top-movers — site-mode top-10 SKUs by
   // lifetime revenue with last-12-months vs prior-12-months delta.
   router.get('/api/reports/trends/inventory/top-movers', ...reportsGuard, (_req, res) => {

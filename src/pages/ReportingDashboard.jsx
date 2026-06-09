@@ -6,7 +6,7 @@
 // and the shared report formatters/tiles so styling stays consistent.
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { Wallet, Receipt, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb } from "lucide-react";
+import { Wallet, Receipt, Users, Boxes, BarChart3, ArrowRight, RefreshCw, Lightbulb, TrendingUp, PackageX, UserRound } from "lucide-react";
 import SageHealthPanel from "@/components/health/SageHealthPanel";
 import { SummaryTile, fmtR, fmtCompactR } from "@/components/reports/lib";
 import { apiGet } from "@/components/collections/utils";
@@ -311,6 +311,103 @@ function BatCard() {
   );
 }
 
+// Compact ranked bar list — a smaller version of the Trends top-10 graphs.
+function MiniRankList({ rows, accent, isLoading, error, refetch, empty, fmtValue }) {
+  if (error) return <CardError error={error} onRetry={refetch} />;
+  if (isLoading) return <CardSkeleton />;
+  if (!rows?.length) return <p className="py-2 text-xs text-muted-foreground">{empty}</p>;
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.value) || 0));
+  return (
+    <ol className="space-y-1.5">
+      {rows.map((r, i) => (
+        <li key={r.key ?? i} className="flex items-center gap-2">
+          <span className="w-3.5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground/50">{i + 1}</span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="truncate text-foreground/90" title={r.title || r.label}>{r.label}</span>
+              <span className="shrink-0 tabular-nums text-foreground">{fmtValue(r.value)}</span>
+            </div>
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-muted/40">
+              <div className="h-full rounded-full" style={{ width: `${Math.max(3, (Math.abs(r.value) / max) * 100)}%`, background: accent }} />
+            </div>
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+const SITE_ONLY_NOTE = "Inventory & sales figures are available on branch (site) installs.";
+
+function TopItemsMtdCard() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["dash-top-items-mtd"],
+    queryFn: () => apiGet("/api/reports/dashboard/top-items-mtd"),
+    staleTime: 60_000,
+  });
+  const accent = "hsl(145 55% 45%)";
+  const rows = (data?.rows || []).map((r) => ({
+    key: r.item_number,
+    label: r.item_description || r.item_number,
+    title: `${r.item_number}${r.item_description ? " · " + r.item_description : ""}`,
+    value: r.qty,
+  }));
+  return (
+    <ReportCard icon={TrendingUp} title="Top Items Sold (MTD)" accent={accent} to="/Trends">
+      {data?.site_only
+        ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
+        : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
+            empty="No sales recorded yet this month." fmtValue={(v) => `${Number(v || 0).toLocaleString("en-ZA")} u`} />}
+    </ReportCard>
+  );
+}
+
+function DeadStockItemsCard() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["dash-dead-stock-items"],
+    queryFn: () => apiGet("/api/reports/dashboard/dead-stock-items"),
+    staleTime: 60_000,
+  });
+  const accent = "hsl(0 72% 50%)";
+  const rows = (data?.rows || []).map((r) => ({
+    key: r.item_number,
+    label: r.item_description || r.item_number,
+    title: `${r.item_number}${r.last_period ? " · last sold " + r.last_period : " · never sold"}`,
+    value: r.inv_value,
+  }));
+  return (
+    <ReportCard icon={PackageX} title="Top Dead Stock" accent={accent} to="/Trends">
+      {data?.site_only
+        ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
+        : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
+            empty="No dead stock — every held SKU has sold recently." fmtValue={(v) => fmtCompactR(v)} />}
+    </ReportCard>
+  );
+}
+
+function TopCustomersCard() {
+  const { data, isLoading, error, refetch } = useQuery({
+    queryKey: ["dash-top-customers"],
+    queryFn: () => apiGet("/api/reports/dashboard/top-customers"),
+    staleTime: 60_000,
+  });
+  const accent = "hsl(200 80% 55%)";
+  const rows = (data?.rows || []).map((r) => ({
+    key: r.customer_code,
+    label: r.customer_name || r.customer_code,
+    title: `${r.customer_code}${r.customer_name ? " · " + r.customer_name : ""}`,
+    value: r.revenue,
+  }));
+  return (
+    <ReportCard icon={UserRound} title="Top Customers by Sales" accent={accent} to="/Trends">
+      {data?.site_only
+        ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
+        : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
+            empty="No customer sales recorded yet." fmtValue={(v) => fmtCompactR(v)} />}
+    </ReportCard>
+  );
+}
+
 export default function ReportingDashboard() {
   const { data: kpis } = useQuery({
     queryKey: ["dash-kpis"],
@@ -348,6 +445,13 @@ export default function ReportingDashboard() {
         <RepExposureCard />
         <InventoryValueCard />
         <BatCard />
+      </div>
+
+      {/* Sales & inventory highlights — compact versions of the Trends graphs */}
+      <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <TopItemsMtdCard />
+        <DeadStockItemsCard />
+        <TopCustomersCard />
       </div>
     </div>
   );
