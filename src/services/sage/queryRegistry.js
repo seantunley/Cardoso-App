@@ -486,7 +486,10 @@ export function validateSageQueryOverride(sqlText, key) {
   if (sqlText === null || sqlText === undefined) return null;
   const s = String(sqlText).trim();
   if (s.length === 0) return null; // empty = clear back to default
-  if (!/^(\s*--[^\n]*\n)*\s*(SELECT|WITH)\b/i.test(s)) return 'must start with SELECT or WITH (read-only)';
+  // Must start with SELECT or WITH (read-only). Allow optional leading
+  // whitespace, line comments, and statement-terminator semicolons — the
+  // BAT corrections default is a T-SQL CTE that legitimately starts with ";WITH".
+  if (!/^(\s|;|--[^\n]*\n)*(SELECT|WITH)\b/i.test(s)) return 'must start with SELECT or WITH (read-only)';
   if (BANNED_SQL.test(s)) return 'contains a forbidden write/DDL keyword';
   for (const p of d.params || []) {
     if (!new RegExp(`@${p}\\b`, 'i').test(s)) return `must reference the @${p} parameter`;
@@ -501,17 +504,30 @@ export function validateSageQueryOverride(sqlText, key) {
 // Unified override store (migration v095). This is the primary source for every
 // query; the descriptor's legacy getOverride() (the old per-module column / KV
 // row) is kept only as a read-only fallback for a value not yet migrated.
-function readUnifiedOverride(key) {
+// Returns the unified-store row's sql_text, or undefined when there is NO row.
+// Distinguishing "no row" from "row with an empty value" matters: an empty row
+// is the explicit "use the shipped default" marker (see setSageQueryOverride).
+function readUnifiedRow(key) {
   try {
-    return db.prepare('SELECT sql_text FROM sage_query_override WHERE query_key = ?').get(key)?.sql_text ?? null;
+    const row = db.prepare('SELECT sql_text FROM sage_query_override WHERE query_key = ?').get(key);
+    return row ? (row.sql_text ?? '') : undefined;
   } catch {
-    return null; // table not present yet (pre-migration)
+    return undefined; // table not present yet (pre-migration)
   }
 }
 
 function effectiveOverride(d) {
-  const unified = (readUnifiedOverride(d.key) || '').trim();
-  if (unified) return unified;
+  const unified = readUnifiedRow(d.key);
+  if (unified !== undefined) {
+    // A unified row is authoritative — an empty value is the explicit "use the
+    // shipped default" marker, which SUPPRESSES the legacy fallback (v095 copies
+    // legacy overrides into the unified store but leaves the old store
+    // populated, so without this a "Reset to default" would reactivate it).
+    const s = String(unified).trim();
+    return s || null;
+  }
+  // No unified state at all → fall back to the legacy per-module store, for any
+  // override the migration didn't carry across.
   const legacy = d.getOverride ? (d.getOverride() || '').trim() : '';
   return legacy || null;
 }
@@ -525,7 +541,15 @@ export function setSageQueryOverride(key, sqlText, userId = null) {
   if (!d) throw new Error(`Unknown Sage query: ${key}`);
   const s = (sqlText || '').trim();
   if (s.length === 0) {
-    db.prepare('DELETE FROM sage_query_override WHERE query_key = ?').run(key);
+    // Clear back to the shipped default. Persist an explicit empty "use default"
+    // marker (NOT a delete) so a pre-v095 legacy override left in the old store
+    // can't reactivate via effectiveOverride()'s fallback once the row is gone.
+    db.prepare(`
+      INSERT INTO sage_query_override (query_key, sql_text, updated_by, updated_at)
+      VALUES (?, '', ?, now_local())
+      ON CONFLICT(query_key) DO UPDATE SET
+        sql_text = '', updated_by = excluded.updated_by, updated_at = now_local()
+    `).run(key, userId);
     return { key, cleared: true };
   }
   const issue = validateSageQueryOverride(s, key);
