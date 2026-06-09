@@ -514,37 +514,72 @@ export default function MaintenanceTab() {
                 <span className="text-amber-400 ml-1">, {integrity.summary.needs_reupload} need re-upload</span>
               )}.
             </div>
-            {integrity.recons.filter((r) => !r.passed).length === 0 ? (
-              <div className="text-xs text-emerald-400">No integrity drift — every reconciliation ties out.</div>
-            ) : (
-              <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
-                {integrity.recons.filter((r) => !r.passed).map((r) => (
-                  <div key={r.id} className="rounded border border-rose-500/30 bg-rose-500/5 p-2">
-                    <div className="font-mono text-[11px] font-semibold text-foreground">
-                      W{String(r.week_number).padStart(2, '0')}/{r.year} — {r.failed_check_ids.join(', ')}
+            {(() => {
+              const failed = integrity.recons.filter((r) => !r.passed);
+              // A week with no stored Overview (pre-v72 / never re-uploaded) is
+              // reported as passed only because the Overview-dependent checks are
+              // SKIPPED — it is not actually verified. Surface it as its own amber
+              // state (matching the Reconciliation dashboard) rather than letting
+              // it count toward "every recon ties out".
+              const needsReupload = integrity.recons.filter((r) => !r.marked_zero && r.overview_orders_stored === 0);
+              return (
+                <>
+                  {failed.length === 0 && needsReupload.length === 0 && (
+                    <div className="text-xs text-emerald-400">No integrity drift — every reconciliation ties out.</div>
+                  )}
+                  {failed.length > 0 && (
+                    <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+                      {failed.map((r) => (
+                        <div key={r.id} className="rounded border border-rose-500/30 bg-rose-500/5 p-2">
+                          <div className="font-mono text-[11px] font-semibold text-foreground">
+                            W{String(r.week_number).padStart(2, '0')}/{r.year} — {r.failed_check_ids.join(', ')}
+                          </div>
+                          {r.checks.filter((c) => !c.passed && !c.skipped).map((c) => (
+                            <div key={c.id} className="mt-1 text-[10px] text-muted-foreground leading-relaxed pl-2" style={{ borderLeft: '2px solid hsl(var(--destructive))' }}>
+                              <span className="text-foreground/90">{c.name}.</span>{' '}
+                              {c.expected != null && c.actual != null && (
+                                <span>Expected {c.expected} → <span className="text-rose-400">{c.actual}</span>. </span>
+                              )}
+                              {c.detail}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
                     </div>
-                    {r.checks.filter((c) => !c.passed && !c.skipped).map((c) => (
-                      <div key={c.id} className="mt-1 text-[10px] text-muted-foreground leading-relaxed pl-2" style={{ borderLeft: '2px solid hsl(var(--destructive))' }}>
-                        <span className="text-foreground/90">{c.name}.</span>{' '}
-                        {c.expected != null && c.actual != null && (
-                          <span>Expected {c.expected} → <span className="text-rose-400">{c.actual}</span>. </span>
-                        )}
-                        {c.detail}
+                  )}
+                  {needsReupload.length > 0 && (
+                    <div className="rounded border border-amber-500/30 bg-amber-500/5 p-2">
+                      <div className="text-[11px] font-medium text-amber-300">
+                        {needsReupload.length} week{needsReupload.length === 1 ? '' : 's'} could not be verified — no stored Overview pivot (pre-update or never re-uploaded), so the Overview-dependent checks were skipped:
                       </div>
-                    ))}
-                  </div>
-                ))}
-              </div>
-            )}
+                      <div className="mt-1 font-mono text-[10px] text-muted-foreground">
+                        {needsReupload.map((r) => `W${String(r.week_number).padStart(2, '0')}/${r.year}`).join('  ·  ')}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         )}
-        <p className="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
-          To resolve a week that fails on orphan extractions or a totals mismatch,{' '}
-          <strong className="text-foreground">re-upload that week&apos;s spreadsheet</strong> — the upload rebuilds
-          the Overview pivot and clears stale rows safely. A headline-total drift can also be healed with the{' '}
-          <em>Recompute BAT recon totals</em> tool above. (Bulk auto-deletion of &quot;orphan&quot; rows is
-          intentionally not offered: on multi-branch or pre-Overview weeks, legitimate rows can look like orphans.)
-        </p>
+        <div className="mt-3 rounded-md border border-border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground space-y-1.5">
+          <div className="font-medium text-foreground">How to resolve each failure:</div>
+          <div>
+            <strong className="text-foreground">Needs re-upload</strong> (no stored Overview) — re-upload that
+            week&apos;s spreadsheet; the upload stores the Overview pivot so the skipped checks can run.
+          </div>
+          <div>
+            <strong className="text-foreground">Totals mismatch</strong> — heal with the{' '}
+            <em>Recompute BAT recon totals</em> tool above.
+          </div>
+          <div>
+            <strong className="text-foreground">Orphan extractions</strong> — review the order numbers listed above.
+            Re-uploading does <strong className="text-foreground">not</strong> clear these: the upload rebuilds the
+            Overview but keeps existing extraction rows. They also can&apos;t be safely bulk-deleted (on multi-branch
+            or pre-Overview weeks, legitimate rows look like orphans), so flag the listed rows to support for a
+            targeted fix.
+          </div>
+        </div>
       </div>
 
       <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>
