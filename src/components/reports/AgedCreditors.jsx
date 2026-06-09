@@ -27,6 +27,7 @@ function fetchAgedCreditors(params) {
   const qs = new URLSearchParams();
   if (params.site && params.site !== 'all') qs.set('site', params.site);
   if (params.minBalance) qs.set('min_balance', String(params.minBalance));
+  if (params.paidOnly) qs.set('paid_only', 'true');
   return fetch(`/api/reports/aged-creditors?${qs.toString()}`, { credentials: 'include' })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
@@ -36,6 +37,9 @@ export default function AgedCreditors() {
   const [searchParams, setSearchParams] = useSearchParams();
   const site = searchParams.get('site') || 'all';
   const minBalance = Number(searchParams.get('min_balance') ?? 0);
+  // Defaults ON (hide never-paid vendors), matching the Creditor Balances page.
+  // Absent param = on; only an explicit ?paid_only=false turns it off.
+  const paidOnly = searchParams.get('paid_only') !== 'false';
   const setParam = (key, value, dflt) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -45,13 +49,14 @@ export default function AgedCreditors() {
     }, { replace: true });
   const setSite = (v) => setParam('site', v, 'all');
   const setMinBalance = (v) => setParam('min_balance', v, 0);
+  const setPaidOnly = (v) => setParam('paid_only', v ? '' : 'false', '');
 
   const [sortBy, setSortBy] = useState('balance');
   const [sortDir, setSortDir] = useState('desc');
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['aged-creditors', site, minBalance],
-    queryFn: () => fetchAgedCreditors({ site, minBalance }),
+    queryKey: ['aged-creditors', site, minBalance, paidOnly],
+    queryFn: () => fetchAgedCreditors({ site, minBalance, paidOnly }),
     staleTime: 60_000,
   });
 
@@ -110,6 +115,7 @@ export default function AgedCreditors() {
     const qs = new URLSearchParams();
     if (site !== 'all') qs.set('site', site);
     if (minBalance) qs.set('min_balance', String(minBalance));
+    if (paidOnly) qs.set('paid_only', 'true');
     return qs.toString();
   };
   const stamp = () => new Date().toISOString().slice(0, 10);
@@ -127,6 +133,7 @@ export default function AgedCreditors() {
   const filterDescriptors = [];
   if (data?.hub_mode && site !== 'all') filterDescriptors.push(`Site: ${site}`);
   if (minBalance) filterDescriptors.push(`Min balance R ${minBalance}`);
+  filterDescriptors.push(paidOnly ? 'With payment history' : 'All vendors');
 
   return (
     <ReportFrame
@@ -165,9 +172,15 @@ export default function AgedCreditors() {
             style={{ borderRadius: '12px' }}
           />
         </div>
+        <FilterField
+          label="Payments"
+          value={paidOnly ? 'paid' : 'all'}
+          onChange={(v) => setPaidOnly(v === 'paid')}
+          options={[{ value: 'paid', label: 'With payment history' }, { value: 'all', label: 'All vendors' }]}
+        />
         <div className="flex items-end">
           <button
-            onClick={() => { setSite('all'); setMinBalance(0); }}
+            onClick={() => { setSite('all'); setMinBalance(0); setPaidOnly(true); }}
             className="w-full border border-border px-2 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors"
             style={{ borderRadius: '12px' }}
           >
