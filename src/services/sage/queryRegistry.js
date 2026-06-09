@@ -99,6 +99,127 @@ define({
 `,
 });
 
+define({
+  key: 'creditor.vendor',
+  label: 'Creditors — vendor master',
+  purpose: 'Vendor name, terms, contact and active flag for the Creditors module.',
+  pool: 'bat_sage',
+  tables: ['APVEN'],
+  params: [],
+  requiredColumns: ['vendor_code', 'vendor_name'],
+  getOverride: readerSql('SELECT vendor_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(VENDORID))  AS vendor_code,
+    LTRIM(RTRIM(VENDNAME))  AS vendor_name,
+    LTRIM(RTRIM(TERMSCODE)) AS terms,
+    LTRIM(RTRIM(NAMECTAC))  AS contact,
+    LTRIM(RTRIM(TEXTPHON1)) AS phone,
+    LTRIM(RTRIM(EMAIL1))    AS email,
+    CASE WHEN SWACTV = 1 THEN 1 ELSE 0 END AS is_active
+  FROM APVEN
+`,
+});
+
+define({
+  key: 'creditor.ap_invoice',
+  label: 'Aged Creditors — AP open items',
+  purpose: 'Open AP documents per vendor, aged by due date for the Aged Creditors report.',
+  pool: 'bat_sage',
+  tables: ['APOBL'],
+  params: [],
+  requiredColumns: ['vendor_code', 'document_number', 'document_date_int', 'due_date_int', 'outstanding_amount'],
+  getOverride: readerSql('SELECT ap_invoice_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(IDVEND))    AS vendor_code,
+    LTRIM(RTRIM(IDINVC))    AS document_number,
+    CAST(IDTRXTYPE AS varchar(10)) AS document_type,
+    DATEINVC                AS document_date_int,
+    DATEINVCDU              AS due_date_int,
+    AMTINVCHC               AS original_amount,
+    AMTDUEHC                AS outstanding_amount,
+    LTRIM(RTRIM(IDPONBR))   AS reference
+  FROM APOBL
+  WHERE AMTDUEHC <> 0
+`,
+});
+
+define({
+  key: 'creditor.ap_payment',
+  label: 'Creditors — AP payments',
+  purpose: 'Vendor payment (cheque) history within the sync window.',
+  pool: 'bat_sage',
+  tables: ['APTCR'],
+  params: ['from', 'to'],
+  requiredColumns: ['vendor_code', 'payment_number', 'payment_date_int', 'amount'],
+  getOverride: readerSql('SELECT ap_payment_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(IDVEND))     AS vendor_code,
+    LTRIM(RTRIM(IDRMIT))     AS payment_number,
+    DATERMIT                 AS payment_date_int,
+    LTRIM(RTRIM(PAYMCODE))   AS payment_method,
+    AMTRMITHC                AS amount,
+    LTRIM(RTRIM(TXTRMITREF)) AS reference,
+    LTRIM(RTRIM(IDBANK))     AS bank_code
+  FROM APTCR
+  WHERE DATERMIT BETWEEN @from AND @to AND AMTRMITHC > 0
+`,
+});
+
+define({
+  key: 'creditor.po_header',
+  label: 'Creditors — purchase order headers',
+  purpose: 'Purchase order headers within the sync window.',
+  pool: 'bat_sage',
+  tables: ['POPORH1'],
+  params: ['from', 'to'],
+  requiredColumns: ['po_number', 'vendor_code', 'po_date_int'],
+  getOverride: readerSql('SELECT po_header_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(PONUMBER))  AS po_number,
+    LTRIM(RTRIM(VDCODE))    AS vendor_code,
+    LTRIM(RTRIM(VDNAME))    AS vendor_name,
+    DATE                    AS po_date_int,
+    EXPARRIVAL              AS expected_date_int,
+    CASE
+      WHEN ISCOMPLETE = 1 THEN 'COMPLETE'
+      WHEN ONHOLD     = 1 THEN 'ON HOLD'
+      ELSE 'OPEN'
+    END                     AS status,
+    DOCTOTAL                AS total_amount
+  FROM POPORH1
+  WHERE DATE BETWEEN @from AND @to
+`,
+});
+
+define({
+  key: 'creditor.po_line',
+  label: 'Creditors — purchase order lines',
+  purpose: 'Purchase order line detail within the sync window.',
+  pool: 'bat_sage',
+  tables: ['POPORH1', 'POPORL'],
+  params: ['from', 'to'],
+  requiredColumns: ['po_number', 'line_no', 'item_number'],
+  getOverride: readerSql('SELECT po_line_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(h.PONUMBER))  AS po_number,
+    l.PORLSEQ                 AS line_no,
+    LTRIM(RTRIM(l.ITEMNO))    AS item_number,
+    LTRIM(RTRIM(l.ITEMDESC))  AS item_description,
+    l.OQORDERED               AS qty_ordered,
+    l.OQRECEIVED              AS qty_received,
+    l.UNITCOST                AS unit_cost,
+    l.EXTENDED                AS extended_cost
+  FROM POPORH1 h
+  INNER JOIN POPORL l ON l.PORHSEQ = h.PORHSEQ
+  WHERE h.DATE BETWEEN @from AND @to
+`,
+});
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 const BANNED_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
