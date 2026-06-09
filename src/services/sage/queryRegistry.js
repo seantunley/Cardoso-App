@@ -324,6 +324,152 @@ define({
   defaultSql: DEFAULT_JTI_SQL,
 });
 
+define({
+  key: 'inventory.sales_agg',
+  label: 'Inventory — monthly sales aggregates',
+  purpose: 'Per-item monthly sales totals (qty + revenue) for inventory movement / Trends.',
+  pool: 'bat_sage',
+  tables: ['OESHDT', 'ICITEM'],
+  params: ['from', 'to'],
+  requiredColumns: ['item_number', 'period', 'qty_sold', 'revenue', 'last_sale_int'],
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(OESHDT.ITEM))         AS item_number,
+    FORMAT(CAST(CAST(OESHDT.TRANDATE AS VARCHAR(8)) AS DATE), 'yyyy-MM') AS period,
+    SUM(OESHDT.QTYSOLD)               AS qty_sold,
+    SUM(OESHDT.FAMTSALES)             AS revenue,
+    COUNT(*)                          AS order_count,
+    MAX(OESHDT.TRANDATE)              AS last_sale_int
+  FROM OESHDT
+  INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
+  WHERE OESHDT.TRANDATE BETWEEN @from AND @to
+    AND OESHDT.QTYSOLD > 0
+  GROUP BY LTRIM(RTRIM(OESHDT.ITEM)),
+           FORMAT(CAST(CAST(OESHDT.TRANDATE AS VARCHAR(8)) AS DATE), 'yyyy-MM')
+  ORDER BY item_number, period
+`,
+});
+
+define({
+  key: 'inventory.sales_txn',
+  label: 'Inventory — per-transaction sales',
+  purpose: 'Per-transaction sales rows for forecasting drill-through.',
+  pool: 'bat_sage',
+  tables: ['OESHDT', 'ICITEM', 'ARCUS'],
+  params: ['from', 'to'],
+  requiredColumns: ['item_number', 'transaction_date_int', 'order_number', 'qty_sold', 'line_amount'],
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(OESHDT.ITEM))         AS item_number,
+    OESHDT.TRANDATE                   AS transaction_date_int,
+    LTRIM(RTRIM(OESHDT.TRANNUM))      AS order_number,
+    LTRIM(RTRIM(OESHDT.CUSTOMER))     AS customer_code,
+    LTRIM(RTRIM(ARCUS.NAMECUST))      AS customer_name,
+    OESHDT.QTYSOLD                    AS qty_sold,
+    CASE WHEN OESHDT.QTYSOLD > 0 THEN OESHDT.FAMTSALES / OESHDT.QTYSOLD ELSE NULL END AS unit_price,
+    OESHDT.FAMTSALES                  AS line_amount
+  FROM OESHDT
+  INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
+  LEFT JOIN ARCUS ON OESHDT.CUSTOMER = ARCUS.IDCUST
+  WHERE OESHDT.TRANDATE BETWEEN @from AND @to
+    AND OESHDT.QTYSOLD > 0
+  ORDER BY OESHDT.TRANDATE DESC, OESHDT.ITEM
+`,
+});
+
+define({
+  key: 'pricing.price_lists',
+  label: 'Pricing — price list enumeration',
+  purpose: 'Available Sage price lists and their item counts.',
+  pool: 'bat_sage',
+  tables: ['ICPRICP'],
+  params: [],
+  requiredColumns: ['code', 'item_count'],
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(PRICELIST)) AS code,
+    COUNT(DISTINCT ITEMNO)  AS item_count
+  FROM ICPRICP
+  WHERE LTRIM(RTRIM(PRICELIST)) <> ''
+    AND UNITPRICE > 0
+  GROUP BY LTRIM(RTRIM(PRICELIST))
+  ORDER BY 1
+`,
+});
+
+define({
+  key: 'bat.sage_corrections',
+  label: 'BAT — problematic fee lines',
+  purpose: 'Scans BAT vendor AP lines for week-number typos / missing prefixes to correct.',
+  pool: 'bat_sage',
+  tables: ['APIBH', 'APIBD', 'APIBC'],
+  params: ['year'],
+  requiredColumns: ['batch_number', 'item_number', 'line_number', 'document_number', 'line_description', 'week_number', 'fee_type', 'problem_type'],
+  defaultSql: `
+  ;WITH all_bat_lines AS (
+    SELECT
+      d.CNTBTCH,
+      d.CNTITEM,
+      d.CNTLINE,
+      h.IDVEND,
+      h.IDINVC,
+      h.DATEINVC,
+      CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE) AS doc_date,
+      bc.BTCHDESC,
+      bc.BTCHSTTS,
+      LTRIM(RTRIM(d.TEXTDESC)) AS textdesc,
+      d.AMTDISTHC,
+      CASE
+        WHEN d.TEXTDESC LIKE '%WEEK [0-9]%'
+          THEN CAST(LTRIM(RTRIM(SUBSTRING(d.TEXTDESC,
+               PATINDEX('%WEEK [0-9]%', d.TEXTDESC) + 5, 2))) AS INT)
+        ELSE NULL
+      END AS desc_week,
+      CASE
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DELIVERY%' THEN 'DELIVERY FEE'
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'DISCOUNT%' THEN 'DISCOUNT FEE'
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICING%'  THEN 'PRICING ADJ'
+        WHEN LTRIM(RTRIM(d.TEXTDESC)) LIKE 'PRICE%'    THEN 'PRICING ADJ'
+        ELSE 'OTHER'
+      END AS fee_type
+    FROM APIBH h
+    INNER JOIN APIBD d ON d.CNTBTCH = h.CNTBTCH AND d.CNTITEM = h.CNTITEM
+    LEFT JOIN APIBC bc ON bc.CNTBTCH = h.CNTBTCH
+    WHERE LTRIM(RTRIM(h.IDVEND)) LIKE '%BAT%'
+      AND YEAR(CAST(CAST(h.DATEINVC AS VARCHAR(8)) AS DATE)) = @year
+      AND LTRIM(RTRIM(d.TEXTDESC)) NOT LIKE '%Purchases Clearing Account%'
+  )
+  SELECT
+    CNTBTCH   AS batch_number,
+    CNTITEM   AS item_number,
+    CNTLINE   AS line_number,
+    LTRIM(RTRIM(IDVEND)) AS vendor_number,
+    LTRIM(RTRIM(IDINVC)) AS document_number,
+    DATEINVC  AS document_date,
+    doc_date,
+    LTRIM(RTRIM(COALESCE(BTCHDESC, ''))) AS batch_description,
+    CASE BTCHSTTS
+      WHEN 1 THEN 'Open'
+      WHEN 3 THEN 'Posted'
+      WHEN 4 THEN 'Deleted'
+      WHEN 7 THEN 'Posted'
+      WHEN NULL THEN 'Archived'
+      ELSE 'Unknown'
+    END AS batch_status,
+    textdesc  AS line_description,
+    desc_week AS week_number,
+    fee_type,
+    AMTDISTHC AS line_amount,
+    CASE
+      WHEN desc_week IS NULL THEN 'NO_WEEK'
+      ELSE 'OK'
+    END AS problem_type
+  FROM all_bat_lines
+  WHERE fee_type <> 'OTHER'
+  ORDER BY CNTBTCH, CNTITEM, CNTLINE
+`,
+});
+
 // ── Public API ──────────────────────────────────────────────────────────────
 
 const BANNED_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;

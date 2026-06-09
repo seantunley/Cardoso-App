@@ -2,6 +2,7 @@ import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { logError } from '../lib/errorLog.js';
+import { resolveSageQuery } from './sage/queryRegistry.js';
 
 // Sage 300 stores per-unit prices in ICPRICP keyed by (item, price list,
 // unit of measure). Each (item, price list) combination typically has
@@ -121,16 +122,7 @@ function itemsForSupplier(supplier) {
 export async function getPriceLists() {
   try {
     const pool = await getSagePool();
-    const r = await pool.request().query(`
-      SELECT
-        LTRIM(RTRIM(PRICELIST)) AS code,
-        COUNT(DISTINCT ITEMNO)  AS item_count
-      FROM ICPRICP
-      WHERE LTRIM(RTRIM(PRICELIST)) <> ''
-        AND UNITPRICE > 0
-      GROUP BY LTRIM(RTRIM(PRICELIST))
-      ORDER BY 1
-    `);
+    const r = await pool.request().query(resolveSageQuery('pricing.price_lists'));
     return r.recordset;
   } catch (err) {
     logError('pricing.lists', err);
