@@ -208,7 +208,104 @@ function EmptyState({ children }) {
   );
 }
 
+// Customer-area sub-tabs (mirrors the Inventory tab): record-volume/flag trends,
+// and customers ranked by sales value over a selectable timeline.
 function CustomerTrends() {
+  const [innerTab, setInnerTab] = useState("trends");
+  return (
+    <Tabs value={innerTab} onValueChange={setInnerTab} className="space-y-4">
+      <TabsList className="inline-flex h-10 rounded-2xl border border-border bg-muted p-1 gap-1">
+        <TabsTrigger value="trends" title="Customer record volume + flag rate over time" className="rounded-xl px-4 py-1.5 text-sm">
+          Record trends
+        </TabsTrigger>
+        <TabsTrigger value="sales" title="Customers ranked by sales value, by timeline" className="rounded-xl px-4 py-1.5 text-sm">
+          By sales
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="trends" className="space-y-6"><CustomerRecordTrends /></TabsContent>
+      <TabsContent value="sales" className="space-y-6"><CustomersBySales /></TabsContent>
+    </Tabs>
+  );
+}
+
+const SALES_TIMELINES = [
+  { value: 3, label: "Last 3 months" },
+  { value: 6, label: "Last 6 months" },
+  { value: 12, label: "Last 12 months" },
+  { value: 24, label: "Last 24 months" },
+  { value: 0, label: "All time" },
+];
+
+// Full customers-by-sales table, filterable by timeline. Inter-branch transfers
+// are excluded server-side. Reuses the dashboard top-customers endpoint.
+function CustomersBySales() {
+  const [months, setMonths] = useState(12);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["site-trends-customers-by-sales", months],
+    queryFn: async () => {
+      const r = await fetch(`/api/reports/dashboard/top-customers?months=${months}&limit=100`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || "Failed to load customers by sales");
+      return d;
+    },
+    staleTime: 60_000,
+  });
+  const rows = data?.rows || [];
+  const max = Math.max(1, ...rows.map((r) => Math.abs(r.revenue) || 0));
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-xs text-muted-foreground">Customers ranked by sales value. Inter-branch transfers are excluded.</div>
+        <select
+          value={months}
+          onChange={(e) => setMonths(Number(e.target.value))}
+          className="rounded-xl border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
+        >
+          {SALES_TIMELINES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
+      </div>
+      {isLoading && <LoadingSkeleton />}
+      {!isLoading && error && <ErrorBanner message={error.message} />}
+      {!isLoading && !error && data?.site_only && (
+        <EmptyState>Customer sales figures are available on branch (site) installs.</EmptyState>
+      )}
+      {!isLoading && !error && !data?.site_only && rows.length === 0 && (
+        <EmptyState>No customer sales recorded in this period.</EmptyState>
+      )}
+      {!isLoading && !error && rows.length > 0 && (
+        <div className="overflow-x-auto rounded-2xl border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                <th className="px-3 py-2 w-8 text-right">#</th>
+                <th className="px-3 py-2">Customer</th>
+                <th className="px-3 py-2 text-right">Units</th>
+                <th className="px-3 py-2 text-right">Sales (R)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, i) => (
+                <tr key={r.customer_code} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground/60">{i + 1}</td>
+                  <td className="px-3 py-2">
+                    <div className="font-medium text-foreground">{r.customer_name || r.customer_code}</div>
+                    <div className="mt-1 h-1 max-w-[260px] overflow-hidden rounded-full bg-muted/40">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(2, (Math.abs(r.revenue) / max) * 100)}%`, background: "hsl(200 80% 55%)" }} />
+                    </div>
+                  </td>
+                  <td className="px-3 py-2 text-right tabular-nums text-foreground/90">{formatQty(r.qty)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold text-foreground">{formatRand(r.revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerRecordTrends() {
   const [period, setPeriod] = useState("weekly");
   const { data, isLoading, error } = useQuery({
     queryKey: ["site-trends-customer", period],
