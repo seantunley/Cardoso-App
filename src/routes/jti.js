@@ -32,7 +32,7 @@ import {
 import { buildJtiWorkbook } from '../services/jti/jtiSpreadsheet.js';
 import { buildJtiFilename } from '../services/jti/jtiFilename.js';
 import { getJtiSettings, setJtiSettings } from '../services/jti/jtiSettings.js';
-import { resolveSageQuery } from '../services/sage/queryRegistry.js';
+import { resolveSageQuery, getSageQuery } from '../services/sage/queryRegistry.js';
 import {
   archiveJtiExport,
   listJtiArchives,
@@ -262,7 +262,7 @@ export async function handleExport({ db, getSagePool, audit, archiveRoot, pushTo
       + (archivedId ? `; archived as #${archivedId}` : '')
       + (archiveError ? `; ARCHIVE FAILED: ${archiveError}` : ''),
     changes: {
-      from, to, rowCount: rows.length, manual, usedOverride: Boolean(sqlOverride),
+      from, to, rowCount: rows.length, manual, usedOverride: sqlOverride !== getSageQuery('jti.export').defaultSql,
       archivedId, archiveError,
     },
     status: archiveError ? 'partial' : 'success',

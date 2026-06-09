@@ -234,8 +234,13 @@ export default function MaintenanceTab() {
       if (!r.ok) throw new Error(d.error || 'Integrity report failed');
       setIntegrity(d);
       const failing = d.summary?.failing || 0;
-      if (failing === 0) toast.success(`All ${d.summary?.total || 0} reconciliation(s) pass integrity.`);
-      else toast.warning(`${failing} of ${d.summary?.total || 0} reconciliation(s) have integrity drift.`);
+      const needsReupload = d.summary?.needs_reupload || 0;
+      const total = d.summary?.total || 0;
+      // Don't claim "all pass" when some weeks couldn't be verified (no stored
+      // Overview → checks skipped, not passed) — that contradicts the amber panel.
+      if (failing > 0) toast.warning(`${failing} of ${total} reconciliation(s) have integrity drift.`);
+      else if (needsReupload > 0) toast.warning(`${total - needsReupload} of ${total} pass; ${needsReupload} need re-upload before they can be verified.`);
+      else toast.success(`All ${total} reconciliation(s) pass integrity.`);
     } catch (e) {
       toast.error(e.message || 'Integrity report failed');
     } finally {
