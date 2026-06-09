@@ -1145,8 +1145,15 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const from = `${month}-01`;
       const to = `${month}-${String(now.getDate()).padStart(2, '0')}`;
       const rows = db.prepare(`
-        SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS revenue, ir.item_description
+        SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS revenue,
+               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
         FROM inventory_sales_transactions t
+        LEFT JOIN (
+          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+          FROM inventory_sales_cache
+          WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+          GROUP BY TRIM(item_number)
+        ) ic ON ic.item_number = TRIM(t.item_number)
         LEFT JOIN (
           SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
           FROM inventoryrecord

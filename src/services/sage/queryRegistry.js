@@ -339,7 +339,8 @@ define({
     SUM(OESHDT.QTYSOLD)               AS qty_sold,
     SUM(OESHDT.FAMTSALES)             AS revenue,
     COUNT(*)                          AS order_count,
-    MAX(OESHDT.TRANDATE)              AS last_sale_int
+    MAX(OESHDT.TRANDATE)              AS last_sale_int,
+    MAX(LTRIM(RTRIM(ICITEM.[DESC])))  AS item_description
   FROM OESHDT
   INNER JOIN ICITEM ON OESHDT.ITEM = ICITEM.ITEMNO
   WHERE OESHDT.TRANDATE BETWEEN @from AND @to

@@ -64,12 +64,13 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
 
   // Monthly aggregates → inventory_sales_cache (upsert)
   const upsertAgg = db.prepare(`
-    INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(item_number, period) DO UPDATE SET
       qty_sold = excluded.qty_sold,
       revenue = excluded.revenue,
       order_count = excluded.order_count,
+      item_description = excluded.item_description,
       last_sale_date = CASE
         WHEN excluded.last_sale_date > inventory_sales_cache.last_sale_date
           THEN excluded.last_sale_date
@@ -102,6 +103,7 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
         Math.round((r.revenue || 0) * 100) / 100,
         r.order_count || 0,
         intToDate(r.last_sale_int),
+        r.item_description || null,
       );
     }
     // Replace transaction rows for the synced window to avoid duplicates.

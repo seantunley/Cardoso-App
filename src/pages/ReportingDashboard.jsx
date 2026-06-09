@@ -348,7 +348,7 @@ function TopItemsMtdCard() {
   const accent = "hsl(145 55% 45%)";
   const rows = (data?.rows || []).map((r) => ({
     key: r.item_number,
-    label: r.item_description || r.item_number,
+    label: r.item_description ? `${r.item_number} · ${r.item_description}` : r.item_number,
     title: `${r.item_number}${r.item_description ? " · " + r.item_description : ""}`,
     value: r.qty,
   }));
