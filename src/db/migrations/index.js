@@ -97,6 +97,7 @@ import m91 from './v091_debtor_ar_module.js';
 import m92 from './v092_debtor_reporting_account.js';
 import m93 from './v093_hub_ar_document_summary.js';
 import m94 from './v094_monthly_reports_permission.js';
+import m95 from './v095_sage_query_override.js';
 
 const migrations = [
   m1,
@@ -193,6 +194,7 @@ const migrations = [
   m92,
   m93,
   m94,
+  m95,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

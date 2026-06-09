@@ -352,6 +352,47 @@ export function validateSageQueryOverride(sqlText, key) {
   return null;
 }
 
+// Unified override store (migration v095). This is the primary source for every
+// query; the descriptor's legacy getOverride() (the old per-module column / KV
+// row) is kept only as a read-only fallback for a value not yet migrated.
+function readUnifiedOverride(key) {
+  try {
+    return db.prepare('SELECT sql_text FROM sage_query_override WHERE query_key = ?').get(key)?.sql_text ?? null;
+  } catch {
+    return null; // table not present yet (pre-migration)
+  }
+}
+
+function effectiveOverride(d) {
+  const unified = (readUnifiedOverride(d.key) || '').trim();
+  if (unified) return unified;
+  const legacy = d.getOverride ? (d.getOverride() || '').trim() : '';
+  return legacy || null;
+}
+
+/**
+ * Set (or clear, when sqlText is empty) the override for a query in the unified
+ * store. Validates first and throws on a bad override. Returns {key, cleared}.
+ */
+export function setSageQueryOverride(key, sqlText, userId = null) {
+  const d = REGISTRY[key];
+  if (!d) throw new Error(`Unknown Sage query: ${key}`);
+  const s = (sqlText || '').trim();
+  if (s.length === 0) {
+    db.prepare('DELETE FROM sage_query_override WHERE query_key = ?').run(key);
+    return { key, cleared: true };
+  }
+  const issue = validateSageQueryOverride(s, key);
+  if (issue) throw new Error(issue);
+  db.prepare(`
+    INSERT INTO sage_query_override (query_key, sql_text, updated_by, updated_at)
+    VALUES (?, ?, ?, now_local())
+    ON CONFLICT(query_key) DO UPDATE SET
+      sql_text = excluded.sql_text, updated_by = excluded.updated_by, updated_at = now_local()
+  `).run(key, s, userId);
+  return { key, cleared: false };
+}
+
 /**
  * Effective SQL for a query: the operator override when present, else the
  * shipped default. Non-validating (overrides are validated on save) so this
@@ -360,8 +401,7 @@ export function validateSageQueryOverride(sqlText, key) {
 export function resolveSageQuery(key) {
   const d = REGISTRY[key];
   if (!d) throw new Error(`Unknown Sage query: ${key}`);
-  const override = d.getOverride ? (d.getOverride() || '').trim() : '';
-  return override || d.defaultSql;
+  return effectiveOverride(d) || d.defaultSql;
 }
 
 /** Descriptor for a single query (null if unknown). */
@@ -372,7 +412,7 @@ export function getSageQuery(key) {
 /** Every registered query + its current override state, for the admin screen. */
 export function listSageQueries() {
   return Object.values(REGISTRY).map((d) => {
-    const override = d.getOverride ? (d.getOverride() || '') : '';
+    const override = effectiveOverride(d);
     return {
       key: d.key,
       label: d.label,
@@ -382,8 +422,8 @@ export function listSageQueries() {
       params: d.params || [],
       requiredColumns: d.requiredColumns || [],
       defaultSql: d.defaultSql,
-      override: override.trim() ? override : null,
-      overridable: Boolean(d.getOverride),
+      override: override || null,
+      overridable: true,
     };
   });
 }
