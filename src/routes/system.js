@@ -1394,6 +1394,16 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         FROM bat_invoice_extractions e
         JOIN bat_reconciliations r ON r.id = e.reconciliation_id
         WHERE e.order_number IS NOT NULL
+          -- Only weeks whose Overview pivot was actually stored. A recon created
+          -- before bat_overview_orders existed (v72 "needs re-upload") has ZERO
+          -- overview rows, so the NOT EXISTS below would match EVERY extraction
+          -- and the prune would wipe all its history. Requiring at least one
+          -- overview row scopes the prune to genuine orphans on populated weeks;
+          -- needs-reupload weeks are left for re-upload, never pruned.
+          AND EXISTS (
+            SELECT 1 FROM bat_overview_orders ov
+            WHERE ov.reconciliation_id = e.reconciliation_id
+          )
           AND NOT EXISTS (
             SELECT 1 FROM bat_overview_orders o
             WHERE o.reconciliation_id = e.reconciliation_id AND o.order_number = e.order_number
