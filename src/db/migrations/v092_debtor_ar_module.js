@@ -16,7 +16,7 @@
 // datarecord — this table only carries the open documents and joins back to it
 // on customer_number. No new permission: AR aging stays under can_access_reports.
 export default {
-  version: 91,
+  version: 92,
   name: 'debtor_ar_module',
   up(db) {
     db.exec(`

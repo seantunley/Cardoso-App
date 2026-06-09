@@ -6,7 +6,7 @@
 // ICITEM, so we capture ICITEM.[DESC] alongside the totals into this new column.
 // Existing rows stay NULL until the next inventory sales sync refills the cache.
 export default {
-  version: 96,
+  version: 97,
   name: 'inventory_sales_cache_description',
   up(db) {
     const cols = db.prepare('PRAGMA table_info(inventory_sales_cache)').all().map((c) => c.name);

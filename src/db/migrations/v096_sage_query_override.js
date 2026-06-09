@@ -8,7 +8,7 @@
 // across so nothing is lost. The registry reads/writes this table from here on;
 // the old columns/rows are left untouched (dead) for rollback safety.
 export default {
-  version: 95,
+  version: 96,
   name: 'sage_query_override',
   up(db) {
     db.exec(`

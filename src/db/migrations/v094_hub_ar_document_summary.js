@@ -4,7 +4,7 @@
 // a consolidated view. One row per (site, month); the hub upserts the rolling
 // current+prior financial-year window each ETL cycle.
 export default {
-  version: 93,
+  version: 94,
   name: 'hub_ar_document_summary',
   up(db) {
     db.exec(`

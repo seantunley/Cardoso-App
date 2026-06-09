@@ -9,7 +9,7 @@
 // ages + joins on it, matching Customer Balances. Populated by debtorSync.js;
 // existing rows default to customer_code until the next sync.
 export default {
-  version: 92,
+  version: 93,
   name: 'debtor_reporting_account',
   up(db) {
     const hasCol = (table, col) =>

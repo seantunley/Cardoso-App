@@ -11,7 +11,7 @@
 //     for Top Customers over a selectable timeline.
 // Both are keyed by site_id so the hub can consolidate or filter by branch.
 export default {
-  version: 97,
+  version: 98,
   name: 'hub_inventory_sales_aggregates',
   up(db) {
     db.exec(`

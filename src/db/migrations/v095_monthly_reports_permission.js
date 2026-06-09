@@ -6,7 +6,7 @@ import { ensureColumn } from './_helpers.js';
 // backfilled so they don't lose access when commission moves under this group's
 // permission.
 export default {
-  version: 94,
+  version: 95,
   name: 'monthly_reports_permission',
   up(db) {
     ensureColumn(db, 'user', 'can_access_monthly_reports', 'INTEGER NOT NULL DEFAULT 0');
