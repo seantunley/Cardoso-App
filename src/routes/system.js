@@ -534,7 +534,20 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
   router.get('/api/system/scheduled-jobs', requireAuth, requireAdmin, async (req, res) => {
     try {
       const { listScheduledJobs } = await import('../lib/scheduledJobs.js');
-      res.json({ jobs: listScheduledJobs(), serverTime: new Date().toISOString() });
+      const jobs = listScheduledJobs();
+      // Attach each job's most recent run (from job_runs) so the Schedule tab
+      // can show last-run + status beside next-run. This reads the same source
+      // the alert engine uses, so the operator sees the exact data behind a
+      // "stale sync" alert (e.g. last run 3d ago against a daily schedule) —
+      // no parallel staleness calculation, just the latest run fact.
+      const lastRunStmt = db.prepare(
+        `SELECT status, started_at, ended_at, duration_ms, error_message
+         FROM job_runs WHERE name = ? ORDER BY started_at DESC LIMIT 1`,
+      );
+      for (const j of jobs) {
+        j.lastRun = lastRunStmt.get(j.name) || null;
+      }
+      res.json({ jobs, serverTime: new Date().toISOString() });
     } catch (err) {
       console.error('[system.scheduled-jobs] failed:', err.message);
       res.status(500).json({ error: 'Failed to load scheduled jobs' });
