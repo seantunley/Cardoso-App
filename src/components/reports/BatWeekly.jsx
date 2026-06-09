@@ -91,6 +91,11 @@ export default function BatWeekly() {
         </div>
       </div>
 
+      {data?.hub_unavailable && (
+        <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">
+          BAT reconciliation runs per branch — open this report on a branch (site) install. The hub doesn&apos;t consolidate per-branch BAT recon data.
+        </div>
+      )}
       {data && summary && (
         <>
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">

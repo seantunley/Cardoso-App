@@ -1852,6 +1852,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reports/bat-weekly', requireAuth, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
+      // BAT reconciliation is a per-branch operational process — there is no hub
+      // BAT data to consolidate. Flag it so the hub shows a "site only" note.
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, weeks: [], summary: null, year, available_years: [], generated_at: new Date().toISOString() });
+      }
       const yearWhere = year ? 'WHERE r.year = ?' : '';
       const params = year ? [year] : [];
       const rows = prep(
@@ -1937,6 +1942,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // ISO year that bat_reconciliations is keyed on.
     const year = req.query.year ? parseInt(req.query.year, 10) : isoYear(new Date());
     try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, year, fees: [], summary: null, available_years: [], generated_at: new Date().toISOString() });
+      }
       const supplierAgg = prep(
         `SELECT
            COALESCE(SUM(supplier_discount), 0) AS discount,
@@ -1989,6 +1997,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reports/bat-exceptions', requireAuth, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_unavailable: true, year, summary: null, by_reason: [], by_store: [], available_years: [], generated_at: new Date().toISOString() });
+      }
       const yearJoin = year ? 'AND r.year = ?' : '';
       const params = year ? [year] : [];
       const rows = prep(
