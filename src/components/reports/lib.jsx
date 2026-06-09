@@ -512,11 +512,11 @@ export function ReportFrame({
 }
 
 // Small chart-card wrapper with a title.
-export function ChartCard({ title, sub, children, height = 260 }) {
+export function ChartCard({ title, sub, children, height = 260, hint }) {
   return (
     <div className="bg-card p-4" style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}>
-      <div className="flex items-baseline justify-between mb-3">
-        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{title}</div>
+      <div className="flex items-baseline justify-between mb-3" title={hint}>
+        <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground" style={hint ? { cursor: 'help' } : undefined}>{title}</div>
         {sub && <div className="font-mono text-[10px] text-muted-foreground/60">{sub}</div>}
       </div>
       <ResponsiveContainer width="100%" height={height}>

@@ -228,6 +228,7 @@ function CustomerTrends() {
           <select
             value={months}
             onChange={(e) => setMonths(Number(e.target.value))}
+            title="Limit the customers-by-sales ranking to this time window — sales value is summed over the selected period (inter-branch transfers excluded)."
             className="rounded-xl border border-border bg-card px-3 py-1.5 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"
           >
             {SALES_TIMELINES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -303,10 +304,10 @@ function CustomersBySales({ months }) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
-                <th className="px-3 py-2 w-8 text-right">#</th>
-                <th className="px-3 py-2">Customer</th>
-                <th className="px-3 py-2 text-right">Units</th>
-                <th className="px-3 py-2 text-right">Sales (R)</th>
+                <th className="px-3 py-2 w-8 text-right" title="Rank by sales value over the selected period">#</th>
+                <th className="px-3 py-2" title="Customer name (code shown if no name). The bar length is relative to the top customer.">Customer</th>
+                <th className="px-3 py-2 text-right" title="Total units sold to this customer over the selected period">Units</th>
+                <th className="px-3 py-2 text-right" title="Total sales value in Rand (R) over the selected period — the column the list is ranked by">Sales (R)</th>
               </tr>
             </thead>
             <tbody>

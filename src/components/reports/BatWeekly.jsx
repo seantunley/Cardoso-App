@@ -128,7 +128,9 @@ export default function BatWeekly() {
                 <Bar dataKey="sage" name="Credit Notes" fill={REPORT_COLORS.secondary} radius={[2, 2, 0, 0]} />
               </BarChart>
             </ChartCard>
-            <ChartCard title="Total value per week" sub="BAT vs Credit Notes (R)">
+            <ChartCard title="Total value per week" sub="BAT vs Credit Notes (R)"
+              hint="Each week's BAT supplier total and Sage credit-notes total, in Rand. The two lines should track closely on a clean reconciliation — a visible gap between them is that week's variance.">
+
               <LineChart data={chartData} margin={{ top: 10, right: 16, left: 6, bottom: 32 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
                 <XAxis dataKey="label" tick={AXIS_TICK} tickLine={AXIS_LINE} axisLine={AXIS_LINE}

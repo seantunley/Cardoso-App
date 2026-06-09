@@ -33,14 +33,14 @@ const AP_BUCKET_META = [
 ];
 
 // A card that wraps a report summary with a header + deep-link.
-function ReportCard({ icon: Icon, title, accent, to, children, query }) {
+function ReportCard({ icon: Icon, title, accent, to, children, query, hint }) {
   const navigate = useNavigate();
   return (
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" title={hint}>
           <Icon className="h-4 w-4" style={{ color: accent }} />
-          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground">{title}</h2>
+          <h2 className="text-sm font-semibold uppercase tracking-wide text-foreground" style={hint ? { cursor: 'help' } : undefined}>{title}</h2>
         </div>
         {to && (
           <button
@@ -353,7 +353,9 @@ function TopItemsMtdCard() {
     value: r.qty,
   }));
   return (
-    <ReportCard icon={TrendingUp} title="Top Items Sold (MTD)" accent={accent} to="/Trends">
+    <ReportCard icon={TrendingUp} title="Top Items Sold (MTD)" accent={accent} to="/Trends"
+      hint="The 10 best-selling items this month by units sold (inter-branch transfers excluded). Each row shows item code · description — hover a row for the full text. Bar length is relative to the top item.">
+
       {data?.site_only
         ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
         : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
@@ -376,7 +378,9 @@ function DeadStockItemsCard() {
     value: r.inv_value,
   }));
   return (
-    <ReportCard icon={PackageX} title="Top Dead Stock" accent={accent} to="/Trends">
+    <ReportCard icon={PackageX} title="Top Dead Stock" accent={accent} to="/Trends"
+      hint="The 10 highest-value items still in stock with no sale in the last 3+ months, ranked by held stock value (R). Inter-branch transfers don't count as a sale. Bar length is relative to the top item.">
+
       {data?.site_only
         ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
         : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}
@@ -399,7 +403,9 @@ function TopCustomersCard() {
     value: r.revenue,
   }));
   return (
-    <ReportCard icon={UserRound} title="Top Customers · 12 mo" accent={accent} to="/Trends">
+    <ReportCard icon={UserRound} title="Top Customers · 12 mo" accent={accent} to="/Trends"
+      hint="Your 10 biggest customers by sales value (R) over the last 12 months. Inter-branch transfers are excluded. Open the full, timeline-filterable list in Trends → Customers → By sales.">
+
       {data?.site_only
         ? <p className="py-2 text-xs text-muted-foreground">{SITE_ONLY_NOTE}</p>
         : <MiniRankList rows={rows} accent={accent} isLoading={isLoading} error={error} refetch={refetch}

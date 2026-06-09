@@ -174,6 +174,7 @@ export default function AgedCreditors() {
         </div>
         <FilterField
           label="Payments"
+          title="With payment history (default) shows only vendors that have a recorded payment, hiding never-paid accounts — matching the Creditor Balances page and the dashboard tile. Switch to All vendors to include them."
           value={paidOnly ? 'paid' : 'all'}
           onChange={(v) => setPaidOnly(v === 'paid')}
           options={[{ value: 'paid', label: 'With payment history' }, { value: 'all', label: 'All vendors' }]}
@@ -291,10 +292,10 @@ export default function AgedCreditors() {
   );
 }
 
-function FilterField({ label, value, onChange, options }) {
+function FilterField({ label, value, onChange, options, title }) {
   return (
-    <div>
-      <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1">{label}</label>
+    <div title={title}>
+      <label className="block font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-1" style={title ? { cursor: 'help' } : undefined}>{label}</label>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
