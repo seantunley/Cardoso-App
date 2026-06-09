@@ -1,6 +1,9 @@
-import { lazy, Suspense, Fragment } from 'react';
+import { lazy, Suspense, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays } from 'lucide-react';
+import { api } from '@/api/apiClient';
+import { hasPermission } from '@/lib/permissions';
 import SavedViews from '@/components/reports/SavedViews';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
@@ -50,21 +53,32 @@ const REPORTS = [
   },
 ];
 
-const ALL_ITEMS = REPORTS.flatMap(g => g.items);
-
 export default function Reports() {
+  const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me(), staleTime: Infinity });
+  // Daily Sales Figures exposes the same posted-document figures as Monthly Sales
+  // Figures, so it sits behind can_access_monthly_reports. Hide it (and block a
+  // direct ?report=daily-sales) for Reports-only users, matching the API guard.
+  const canMonthly = hasPermission(currentUser, 'can_access_monthly_reports');
+  const groups = useMemo(
+    () => REPORTS
+      .map((g) => ({ ...g, items: g.items.filter((it) => it.id !== 'daily-sales' || canMonthly) }))
+      .filter((g) => g.items.length > 0),
+    [canMonthly],
+  );
+  const allItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+
   // The active report lives in the URL (?report=<id>) so dashboard deep-links,
   // saved views, and browser back/forward all work and the view is shareable.
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get('report');
-  const activeId = ALL_ITEMS.some(i => i.id === requested) ? requested : 'aged-debtors';
+  const activeId = allItems.some(i => i.id === requested) ? requested : 'aged-debtors';
   const setActiveId = (id) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set('report', id);
       return next;
     }, { replace: true });
-  const active = ALL_ITEMS.find(i => i.id === activeId);
+  const active = allItems.find(i => i.id === activeId);
 
   return (
     <div
@@ -89,7 +103,7 @@ export default function Reports() {
             itself gets the full width of the page instead of a second sidebar
             competing with the app nav. Wraps on narrow screens. */}
         <div className="report-print-hide mb-5 flex flex-wrap items-center gap-x-1.5 gap-y-2 border-b border-border pb-4">
-          {REPORTS.map((group, gi) => (
+          {groups.map((group, gi) => (
             <Fragment key={group.group}>
               {gi > 0 && <span className="mx-1.5 hidden h-5 w-px self-center bg-border sm:block" aria-hidden />}
               <span className="mr-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/50">{group.group}</span>

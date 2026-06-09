@@ -140,6 +140,20 @@ export async function syncDebtorsFromSage() {
     }
   }
 
+  // The AR open-item source is required: it's the authoritative open set the
+  // ledger is rebuilt from. If it errored (bad override, missing AROBL grant,
+  // Sage down) the per-source catch above swallowed it — but we must NOT stamp a
+  // fresh last_synced_at, or the stale ledger would look freshly synced and both
+  // the manual route (ok:true) and the scheduled job would report success.
+  // Throw so the failure surfaces (route → error, scheduler → failed job) and
+  // the success timestamp is skipped.
+  const arResult = summary.sources.ar_invoices;
+  if (!arResult || arResult.error) {
+    const msg = arResult?.error || 'AR open-item sync did not run';
+    logError('debtorSync.run', new Error(`debtor sync failed: ${msg}`), summary, 'warn');
+    throw new Error(`Debtor AR open-item sync failed: ${msg}`);
+  }
+
   try {
     const totalRows = Object.values(summary.sources).reduce((acc, s) => acc + (Number(s.rows) || 0), 0);
     db.prepare(`

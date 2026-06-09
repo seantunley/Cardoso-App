@@ -484,7 +484,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // broken down by day (same VAT split + Net as the monthly Sales Figures).
   // Site-only: the hub stores monthly totals, not daily, so HUB_MODE returns an
   // explicit "unavailable" flag the UI surfaces as a note.
-  router.get('/api/reports/daily-sales-figures', ...reportsGuard, async (req, res) => {
+  // Gated by monthlyReportsGuard (same as ar-document-summary above): it exposes
+  // the same posted-document figures, so Reports-only users must not reach it.
+  router.get('/api/reports/daily-sales-figures', ...monthlyReportsGuard, async (req, res) => {
     try {
       const now = new Date();
       const y = now.getFullYear();
