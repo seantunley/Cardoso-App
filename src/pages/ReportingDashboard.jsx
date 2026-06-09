@@ -116,17 +116,23 @@ function AgedDebtorsCard() {
             </div>
             <div className="text-xs text-muted-foreground">{s?.total_customers ?? 0} customers outstanding</div>
           </div>
-          <div className="space-y-1">
-            {BUCKET_META.map((b) => (
-              <div key={b.key} className="flex items-center justify-between text-xs">
-                <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="h-2 w-2 rounded-full" style={{ background: b.color }} />
-                  {b.label}
-                </span>
-                <span className="tabular-nums text-foreground">R {fmtR(s?.buckets?.[b.key])}</span>
-              </div>
-            ))}
-          </div>
+          {/* Hub mode's debtor-balance-summary has no per-bucket breakdown
+              (buckets: null). Render the aging list only when bucket data is
+              present, so the hub card shows the headline total alone rather
+              than a misleading column of R 0.00 rows. */}
+          {s?.buckets && (
+            <div className="space-y-1">
+              {BUCKET_META.map((b) => (
+                <div key={b.key} className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <span className="h-2 w-2 rounded-full" style={{ background: b.color }} />
+                    {b.label}
+                  </span>
+                  <span className="tabular-nums text-foreground">R {fmtR(s?.buckets?.[b.key])}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </>
       )}
     </ReportCard>
