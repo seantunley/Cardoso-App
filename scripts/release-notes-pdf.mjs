@@ -13,6 +13,81 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-02': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '02 Jun 2026',
+    intro:
+      'A performance-focused update: the app is noticeably faster across ' +
+      'data-heavy screens, search inputs, and report loading. This release also ' +
+      'ships a set of accuracy and reliability fixes to commission reporting, ' +
+      'sales forecasting, and stock-receipt sync.',
+    sections: [
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Faster, more responsive screens',
+            body:
+              'A dedicated performance pass has eliminated unnecessary ' +
+              're-renders throughout the app. Typing in search boxes, sorting ' +
+              'tables, and scrolling large lists is now smooth and immediate, ' +
+              'with no perceptible lag.',
+          },
+          {
+            title: 'Reports load on demand',
+            body:
+              'Individual reports are now fetched only when you open them, ' +
+              'rather than all at once on page load. The first screen you see ' +
+              'after logging in loads significantly faster as a result.',
+          },
+          {
+            title: 'Insights feed loads instantly',
+            body:
+              'The Insights cache is pre-warmed automatically after each ' +
+              'nightly sync, so your proactive alerts and baselines are ready ' +
+              'the moment you open the feed.',
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Commission totals now accurate',
+            body:
+              'A row-multiplication issue that could cause commission figures ' +
+              'to appear higher than correct has been resolved. All commission ' +
+              'reports now show accurate amounts.',
+          },
+          {
+            title: 'Reliable commission archiving for closed periods',
+            body:
+              'Archiving commission for a closed period can now be triggered ' +
+              'on demand and retries automatically if interrupted, preventing ' +
+              'gaps in historical commission records.',
+          },
+          {
+            title: 'Forecast calendar gaps corrected',
+            body:
+              'Sales forecasts now account for all calendar periods correctly, ' +
+              'giving you complete and consistent projections without missing ' +
+              'intervals.',
+          },
+          {
+            title: 'Stock-receipt sync handles reversed lines',
+            body:
+              'The stock-receipt sync now correctly reconciles reversed or ' +
+              'cancelled purchase lines, keeping your inventory records in step ' +
+              'with Sage.',
+          },
+        ],
+      },
+    ],
+  },
+
   '2026-05-29': {
   product: 'Cardoso App',
   title: 'Product Update',
