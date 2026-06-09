@@ -554,6 +554,54 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
     }
   });
 
+  // GET /api/sage-queries
+  //
+  // Lists every Sage 300 query the app runs (the central registry), with each
+  // query's shipped default, whether an operator override is active, its params,
+  // required output columns, pool and tables. Backs Settings → Sage Queries.
+  router.get('/api/sage-queries', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { listSageQueries } = await import('../services/sage/queryRegistry.js');
+      res.json({ queries: listSageQueries() });
+    } catch (err) {
+      console.error('[sage-queries] list failed:', err.message);
+      res.status(500).json({ error: 'Failed to load Sage queries' });
+    }
+  });
+
+  // PUT /api/sage-queries/:key  { sql }
+  //
+  // Set the operator override for one query (validated against the registry's
+  // declared params + required columns), or clear it back to the shipped default
+  // when sql is empty. Writes the unified sage_query_override table.
+  router.put('/api/sage-queries/:key', requireAuth, requireAdmin, async (req, res) => {
+    try {
+      const { setSageQueryOverride, getSageQuery } = await import('../services/sage/queryRegistry.js');
+      const key = req.params.key;
+      if (!getSageQuery(key)) return res.status(404).json({ error: `Unknown Sage query: ${key}` });
+      let result;
+      try {
+        result = setSageQueryOverride(key, req.body?.sql ?? '', req.currentUser?.id ?? null);
+      } catch (validationErr) {
+        // setSageQueryOverride throws the validator's message for a bad override.
+        return res.status(400).json({ error: validationErr.message || 'Invalid override SQL' });
+      }
+      logAudit({
+        req,
+        action: result.cleared ? 'sage_query_override_clear' : 'sage_query_override_set',
+        resourceType: 'sage_query',
+        resourceName: key,
+        details: result.cleared
+          ? `Cleared override for ${key} — reverted to the shipped default`
+          : `Set operator override for ${key}`,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error('[sage-queries] save failed:', err.message);
+      res.status(500).json({ error: 'Failed to save Sage query override' });
+    }
+  });
+
   // GET /api/system/alerts?status=active|all
   //
   // Active alerts (resolved_at IS NULL) drive the admin banner; the
