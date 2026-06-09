@@ -10,10 +10,12 @@ import {
   TOOLTIP_CONTENT, TOOLTIP_LABEL, TOOLTIP_ITEM, TOOLTIP_CURSOR,
   REPORT_COLORS,
 } from './lib';
+import BranchFilter from './BranchFilter';
 
-function fetchRepExposure(minBalance) {
+function fetchRepExposure(minBalance, site) {
   const qs = new URLSearchParams();
   if (minBalance) qs.set('min_balance', String(minBalance));
+  if (site && site !== 'all') qs.set('site', site);
   return fetch(`/api/reports/rep-exposure?${qs.toString()}`, { credentials: 'include' })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
@@ -22,6 +24,7 @@ export default function SalesRepExposure() {
   // Min-balance filter persisted in the URL (shareable + reload-safe).
   const [searchParams, setSearchParams] = useSearchParams();
   const minBalance = Number(searchParams.get('min_balance') ?? 3);
+  const site = searchParams.get('site') || 'all';
   const setMinBalance = (v) =>
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
@@ -32,8 +35,8 @@ export default function SalesRepExposure() {
   const [expandedRep, setExpandedRep] = useState(null);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['rep-exposure', minBalance],
-    queryFn: () => fetchRepExposure(minBalance),
+    queryKey: ['rep-exposure', minBalance, site],
+    queryFn: () => fetchRepExposure(minBalance, site),
     staleTime: 60_000,
   });
 
@@ -63,6 +66,7 @@ export default function SalesRepExposure() {
   const exportQs = () => {
     const qs = new URLSearchParams();
     if (minBalance) qs.set('min_balance', String(minBalance));
+    if (site && site !== 'all') qs.set('site', site);
     return qs.toString();
   };
   const stamp = () => new Date().toISOString().slice(0, 10);
@@ -109,6 +113,7 @@ export default function SalesRepExposure() {
             style={{ borderRadius: '12px' }}
           />
         </div>
+        <BranchFilter hubMode={data?.hub_mode} sites={data?.filters?.sites} />
       </div>
 
       {data && summary && (

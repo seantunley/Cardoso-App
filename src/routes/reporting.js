@@ -1727,9 +1727,22 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // healthy rows + one JSON.parse pair for the laggards".
   // Build the rep-exposure report object. Shared by the JSON endpoint and
   // the PDF/Excel export so screen and download never diverge.
+  // Hub branch filter: from rows that each carry a `site_name`, return the
+  // distinct branch list (dropdown options) and the rows narrowed to the chosen
+  // branch. siteFilter 'all' (or site mode) = consolidated across all branches.
+  function applyBranchFilter(rows, isHub, siteFilter) {
+    if (!isHub) return { sites: [], filtered: rows };
+    const sites = Array.from(new Set(rows.map((r) => String(r.site_name || '').trim()).filter(Boolean))).sort();
+    const filtered = siteFilter && siteFilter !== 'all'
+      ? rows.filter((r) => String(r.site_name || '').trim() === siteFilter)
+      : rows;
+    return { sites, filtered };
+  }
+
   function buildRepExposureReport(query) {
     const isHub = process.env.HUB_MODE === 'true';
     const minBalance = Math.max(0, parseFloat(query.min_balance) || CUSTOMER_BALANCES_MIN_AMOUNT);
+    const siteFilter = String(query.site || 'all').trim();
     {
       let records;
       if (isHub) {
@@ -1754,6 +1767,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
              AND outstanding_balance_num > ?`
         ).all(SITE_NAME, minBalance).map(hydrateSalesRepAndAccountType);
       }
+      const branch = applyBranchFilter(records, isHub, siteFilter);
+      records = branch.filtered;
       const repMap = new Map();
       for (const r of records) {
         const rep = String(r.sales_rep || '').trim() || '— Unassigned';
@@ -1790,7 +1805,13 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         total_orange: reps.reduce((s, r) => s + r.flag_counts.orange, 0),
       };
 
-      return { reps, summary, generated_at: new Date().toISOString(), site_name: SITE_NAME, min_balance: minBalance };
+      return {
+        reps, summary, generated_at: new Date().toISOString(),
+        site_name: isHub ? (siteFilter !== 'all' ? siteFilter : 'All branches') : SITE_NAME,
+        min_balance: minBalance,
+        hub_mode: isHub,
+        filters: { sites: branch.sites },
+      };
     }
   }
 
