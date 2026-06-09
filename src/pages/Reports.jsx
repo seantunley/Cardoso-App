@@ -1,6 +1,6 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, Fragment } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, ChevronRight, CalendarDays } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays } from 'lucide-react';
 import SavedViews from '@/components/reports/SavedViews';
 
 // Each report pulls in recharts and bespoke logic; lazy-load so the
@@ -85,72 +85,54 @@ export default function Reports() {
           <SavedViews />
         </div>
 
-        <div className="grid gap-5 lg:grid-cols-[260px_1fr]">
-          <aside className="report-print-hide space-y-5">
-            {REPORTS.map(group => (
-              <div key={group.group}>
-                <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-2 px-1">
-                  {group.group}
-                </div>
-                <ul className="space-y-px">
-                  {group.items.map(item => {
-                    const Icon = item.icon;
-                    const isActive = activeId === item.id;
-                    return (
-                      <li key={item.id}>
-                        <button
-                          onClick={() => item.ready && setActiveId(item.id)}
-                          disabled={!item.ready}
-                          className={`group w-full flex items-center justify-between gap-2 px-3 py-2.5 text-left transition-all ${
-                            isActive ? 'bg-card' : 'hover:bg-card/50'
-                          } ${!item.ready ? 'opacity-40 cursor-not-allowed' : ''}`}
-                          style={{
-                            border: isActive ? `1px solid ${item.accent}` : '1px solid transparent',
-                            borderLeftWidth: isActive ? '2px' : '1px',
-                            borderRadius: '12px',
-                            boxShadow: isActive ? `0 0 12px ${item.accent}25` : 'none',
-                          }}
-                        >
-                          <span className="flex items-center gap-2.5">
-                            <Icon className="h-4 w-4" style={{ color: item.accent }} strokeWidth={isActive ? 2 : 1.5} />
-                            <span
-                              className="font-mono text-[11px] uppercase tracking-[0.15em]"
-                              style={{ color: isActive ? item.accent : 'hsl(var(--foreground))' }}
-                            >
-                              {item.name}
-                            </span>
-                          </span>
-                          {!item.ready && (
-                            <span className="font-mono text-[9px] uppercase tracking-[0.15em] text-muted-foreground/60">soon</span>
-                          )}
-                          {item.ready && isActive && (
-                            <ChevronRight className="h-3 w-3" style={{ color: item.accent }} />
-                          )}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </div>
-            ))}
-          </aside>
-
-          <main>
-            {active?.component ? (
-              <Suspense fallback={
-                <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Loading report…</p>
-                </div>
-              }>
-                <active.component />
-              </Suspense>
-            ) : (
-              <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
-                <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Select a report from the left.</p>
-              </div>
-            )}
-          </main>
+        {/* Report selector — a horizontal toolbar across the top, so the report
+            itself gets the full width of the page instead of a second sidebar
+            competing with the app nav. Wraps on narrow screens. */}
+        <div className="report-print-hide mb-5 flex flex-wrap items-center gap-x-1.5 gap-y-2 border-b border-border pb-4">
+          {REPORTS.map((group, gi) => (
+            <Fragment key={group.group}>
+              {gi > 0 && <span className="mx-1.5 hidden h-5 w-px self-center bg-border sm:block" aria-hidden />}
+              <span className="mr-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/50">{group.group}</span>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const isActive = activeId === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => item.ready && setActiveId(item.id)}
+                    disabled={!item.ready}
+                    title={item.name}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.12em] transition-colors ${
+                      isActive ? 'bg-card' : 'border-border text-foreground/80 hover:bg-card/60'
+                    } ${!item.ready ? 'cursor-not-allowed opacity-40' : ''}`}
+                    style={isActive ? { borderColor: item.accent, color: item.accent } : undefined}
+                  >
+                    <Icon className="h-3.5 w-3.5" style={{ color: item.accent }} strokeWidth={isActive ? 2 : 1.5} />
+                    {item.name}
+                    {!item.ready && <span className="ml-0.5 text-[8px] text-muted-foreground/60">soon</span>}
+                  </button>
+                );
+              })}
+            </Fragment>
+          ))}
         </div>
+
+        <main>
+          {active?.component ? (
+            <Suspense fallback={
+              <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
+                <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Loading report…</p>
+              </div>
+            }>
+              <active.component />
+            </Suspense>
+          ) : (
+            <div className="bg-card border border-border p-12 text-center text-muted-foreground" style={{ borderRadius: '12px' }}>
+              <p className="font-mono text-[11px] uppercase tracking-[0.2em]">Select a report above.</p>
+            </div>
+          )}
+        </main>
       </div>
     </div>
   );
