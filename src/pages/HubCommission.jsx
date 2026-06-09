@@ -30,6 +30,7 @@ export default function HubCommission() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [downloadingId, setDownloadingId] = useState(null);
+  const [bundleKey, setBundleKey] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +75,34 @@ export default function HubCommission() {
       toast.error(`Archive download failed: ${err.message}`);
     } finally {
       setDownloadingId(null);
+    }
+  };
+
+  // Download every received site's PDF for a period as one ZIP.
+  const handleBundleDownload = async (period) => {
+    setBundleKey(period.key);
+    try {
+      const r = await fetch(
+        `/api/hub/commission/archive-groups/${period.period_year}/${period.period_month}/download`,
+        { credentials: "include" },
+      );
+      if (!r.ok) {
+        let message = `HTTP ${r.status}`;
+        try { message = (await r.json()).error || message; }
+        catch (e) { console.error("[hubCommission.bundle_parse]", { key: period.key }, e.message); }
+        throw new Error(message);
+      }
+      const blob = await r.blob();
+      const fname = `Commission_Bundle_${period.period_year}-${String(period.period_month).padStart(2, "0")}.zip`;
+      triggerDownload(blob, fname);
+      toast.success(
+        `Downloaded ${period.received_count} site PDF${period.received_count === 1 ? "" : "s"}` +
+        (period.missing_site_ids.length ? ` (${period.missing_site_ids.length} still missing)` : ""),
+      );
+    } catch (err) {
+      toast.error(`Bundle download failed: ${err.message}`);
+    } finally {
+      setBundleKey(null);
     }
   };
 
@@ -203,6 +232,8 @@ export default function HubCommission() {
                       expectedSites={expectedSites}
                       onDownload={handleDownload}
                       downloadingId={downloadingId}
+                      onBundleDownload={handleBundleDownload}
+                      bundleKey={bundleKey}
                     />
                   ))}
                 </tbody>
@@ -215,8 +246,9 @@ export default function HubCommission() {
   );
 }
 
-function PeriodRow({ period, expectedSites, onDownload, downloadingId }) {
+function PeriodRow({ period, expectedSites, onDownload, downloadingId, onBundleDownload, bundleKey }) {
   const label = `${MONTH_NAMES[period.period_month - 1] || period.period_month} ${period.period_year}`;
+  const bundling = bundleKey === period.key;
   return (
     <tr
       className={`border-b border-border/40 last:border-b-0 ${
@@ -227,7 +259,26 @@ function PeriodRow({ period, expectedSites, onDownload, downloadingId }) {
         {label}
       </td>
       <td className="py-2.5 pr-4">
-        <CompletenessPill complete={period.complete} received={period.received_count} expected={period.expected_count} />
+        <div className="flex items-center gap-2">
+          <CompletenessPill complete={period.complete} received={period.received_count} expected={period.expected_count} />
+          <button
+            onClick={() => onBundleDownload(period)}
+            disabled={period.received_count === 0 || bundling}
+            className="inline-flex items-center gap-1 px-2 py-1 border border-border font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground hover:text-foreground hover:border-foreground transition-colors disabled:opacity-40 disabled:hover:text-muted-foreground disabled:hover:border-border"
+            style={{ borderRadius: "6px" }}
+            title={
+              period.received_count === 0
+                ? "No archives received for this period yet"
+                : `Download all ${period.received_count} site PDF${period.received_count === 1 ? "" : "s"} for this month as one ZIP` +
+                  (period.missing_site_ids.length ? ` — ${period.missing_site_ids.length} site(s) still missing` : "")
+            }
+          >
+            {bundling
+              ? <Loader2 className="h-3 w-3 animate-spin" />
+              : <Download className="h-3 w-3" strokeWidth={1.75} />}
+            All (ZIP)
+          </button>
+        </div>
       </td>
       {expectedSites.map((s) => {
         const archive = period.received_by_site.get(s.id);
@@ -301,7 +352,11 @@ function CompletenessPill({ complete, received, expected }) {
 
 function formatTs(s) {
   if (!s) return "—";
-  const d = new Date(s.replace(" ", "T") + "Z");
+  // generated_at is written on the SITE with now_local() — i.e. already
+  // local (SAST) wall-clock, no timezone marker. Parse it as LOCAL (no
+  // trailing "Z"); appending "Z" treated it as UTC and shifted every time
+  // +2h on display.
+  const d = new Date(s.replace(" ", "T"));
   if (Number.isNaN(d.getTime())) return s;
   return d.toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
 }

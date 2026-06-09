@@ -30,6 +30,7 @@ import {
   listArchiveGroups,
   streamArchiveBundle,
 } from '../services/hub/jtiHubBundle.js';
+import { streamCommissionArchiveBundle } from '../services/hub/commissionHubBundle.js';
 import {
   receiveCommissionArchive,
   listHubCommissionArchives,
@@ -1578,7 +1579,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     try {
       const deleteStmt = db.prepare(`DELETE FROM hub_user_allowed_sites WHERE email = ?`);
-      const insertStmt = db.prepare(`INSERT INTO hub_user_allowed_sites (email, site_slug, assigned_at) VALUES (?, ?, datetime('now'))`);
+      const insertStmt = db.prepare(`INSERT INTO hub_user_allowed_sites (email, site_slug, assigned_at) VALUES (?, ?, now_local())`);
       const txn = db.transaction(() => {
         deleteStmt.run(user.email);
         for (const slug of site_slugs) {
@@ -1662,7 +1663,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     // Record which users were successfully pushed to which sites
     const upsertSite = db.prepare(`
       INSERT INTO hub_user_sites (email, site_slug, pushed_at)
-      VALUES (?, ?, datetime('now'))
+      VALUES (?, ?, now_local())
       ON CONFLICT(email, site_slug) DO UPDATE SET pushed_at = excluded.pushed_at
     `);
     for (const res_row of summary.filter(s => s.ok)) {
@@ -2371,6 +2372,69 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     res.setHeader('X-Hub-Commission-Archive-Id', String(id));
     res.setHeader('X-Commission-Archive-Sha256', row.sha256);
     res.end(buffer);
+  });
+
+  // GET /api/hub/commission/archive-groups/:year/:month/download
+  // Stream a single ZIP of every site's commission PDF for the period —
+  // the "download all sites for the month" bundle (cf. the JTI bundle).
+  // Scoped to the user's allowed sites; lenient on completeness (bundles
+  // whatever has been received, with the missing set reported for audit).
+  router.get('/api/hub/commission/archive-groups/:year/:month/download', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+    const year = Number(req.params?.year);
+    const month = Number(req.params?.month);
+    if (!Number.isInteger(year) || !Number.isInteger(month)) {
+      return res.status(400).json({ error: 'Invalid year/month — must be integers' });
+    }
+    // Restrict the bundle to the sites this user is allowed to see.
+    const allowedIds = getAllowedSiteIds(req, res);
+    const siteAllowed = (sid) => allowedIds === null || allowedIds.has(sid) || allowedIds.has(Number(sid)) || allowedIds.has(String(sid));
+    const sites = (HUB_SITES || []).filter((s) => siteAllowed(s.id));
+
+    const outcome = streamCommissionArchiveBundle({
+      db, sites, periodYear: year, periodMonth: month, res,
+      onError: (err) => {
+        try { logError('hub.commission_bundle', err, { period_year: year, period_month: month }); } catch (e) { console.error('[hub.commission_bundle]', { year, month }, e.message); }
+        try {
+          logAudit({
+            req, action: 'hub_commission_bundle_download', resourceType: 'system',
+            resourceName: `Commission bundle ${year}-${String(month).padStart(2, '0')}`,
+            details: `Bundle stream failed: ${err.message}`, status: 'failure',
+          });
+        } catch (auditErr) { console.warn('[hub.commission_bundle.audit_failure]', { year, month }, auditErr.message); }
+      },
+    });
+
+    if (outcome.ok) {
+      try {
+        logAudit({
+          req, action: 'hub_commission_bundle_download', resourceType: 'system',
+          resourceName: outcome.filename,
+          details: `Downloaded commission bundle for ${year}-${String(month).padStart(2, '0')} — ${outcome.archives.length} site(s): ${outcome.archives.map((a) => a.site_id).join(', ')}${outcome.missing_site_ids?.length ? ` (missing: ${outcome.missing_site_ids.join(', ')})` : ''}`,
+        });
+      } catch (e) { console.warn('[hub.commission_bundle.audit_success]', { year, month }, e.message); }
+      return; // response is streaming
+    }
+
+    const statusCode =
+      outcome.code === 'BAD_PERIOD'   ? 400 :
+      outcome.code === 'FILE_MISSING' ? 410 :
+      outcome.code === 'PERIOD_EMPTY' ? 404 :
+      500;
+    try {
+      logAudit({
+        req, action: 'hub_commission_bundle_download', resourceType: 'system',
+        resourceName: `Commission bundle ${year}-${String(month).padStart(2, '0')}`,
+        details: `Bundle refused (${outcome.code}): ${outcome.message}`, status: 'failure',
+      });
+    } catch (e) { console.warn('[hub.commission_bundle.audit_refused]', { year, month, code: outcome.code }, e.message); }
+    res.status(statusCode).json({
+      ok: false,
+      code: outcome.code,
+      error: outcome.message,
+      ...(outcome.missing_site_ids != null ? { missing_site_ids: outcome.missing_site_ids } : {}),
+      ...(outcome.received_count   != null ? { received_count:   outcome.received_count   } : {}),
+      ...(outcome.expected_count   != null ? { expected_count:   outcome.expected_count   } : {}),
+    });
   });
 
   // ========================================================================
