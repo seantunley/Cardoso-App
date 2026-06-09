@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   parseAmount, formatAmount,
   getVisibleAccountType, getAccountTypePillClasses,
@@ -13,11 +14,26 @@ export default function PrintableTable({
   siteFilter, ageBucket, activeAgeBucketLabel,
   filteredGrandTotal, printRows, printData, sites,
 }) {
+  // Depot name from Settings → Depot Details, shown as the print letterhead so
+  // the Customer Balances printout carries the same branding as the reports.
+  const { data: depot } = useQuery({
+    queryKey: ["depot-profile-name"],
+    queryFn: () => fetch("/api/depot-profile", { credentials: "include" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+    staleTime: 5 * 60_000,
+  });
+  const depotName = (depot?.profile?.name || "").trim();
   return (
     <div id="customer-balances-printable" style={{ visibility: "hidden", position: "absolute" }}>
       <div className="cb-print-header">
-        <h1>{printTitle}</h1>
-        <p>Printed: {printDate} · {totalRecords} customer{totalRecords !== 1 ? "s" : ""}</p>
+        <div className="cb-print-headmain">
+          {depotName && <div className="cb-print-depot">{depotName}</div>}
+          <h1>{printTitle}</h1>
+          <p>Printed: {printDate} · {totalRecords} customer{totalRecords !== 1 ? "s" : ""}</p>
+        </div>
+        <div className="cb-print-brand">
+          <img src="/cardoso-logo-orange.png" alt="Cardoso" className="cb-print-logo" />
+          Confidential business report
+        </div>
       </div>
       <div className="cb-print-summary">
         <div>
