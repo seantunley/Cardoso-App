@@ -449,6 +449,64 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // Same ARIBH/ARIBC query as the monthly summary, but grouped by full day
+  // (YYYYMMDD) instead of month — used by the Daily Sales Figures report for the
+  // current month. Filters/joins identical so the daily rows reconcile to the
+  // month total.
+  async function queryArDailySummary(from, to) {
+    const pool = await getSagePool();
+    const rs = await pool.request().input('from', from).input('to', to).query(`
+      SELECT CAST(h.DATEINVC AS varchar(8)) AS ymd,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.BASETAX1  ELSE 0 END) AS inv_excl,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTTAX1   ELSE 0 END) AS inv_vat,
+        SUM(CASE WHEN h.TEXTTRX = 1 THEN h.AMTNETTOT ELSE 0 END) AS inv_incl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.BASETAX1  ELSE 0 END) AS dn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTTAX1   ELSE 0 END) AS dn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 2 THEN h.AMTNETTOT ELSE 0 END) AS dn_incl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.BASETAX1  ELSE 0 END) AS cn_excl,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTTAX1   ELSE 0 END) AS cn_vat,
+        SUM(CASE WHEN h.TEXTTRX = 3 THEN h.AMTNETTOT ELSE 0 END) AS cn_incl
+      FROM ARIBC c INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+      WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC BETWEEN @from AND @to
+      GROUP BY CAST(h.DATEINVC AS varchar(8))
+      ORDER BY ymd`);
+    const days = rs.recordset.map((r) => {
+      const invoices = arMkAmt(r.inv_excl, r.inv_vat, r.inv_incl);
+      const debit_notes = arMkAmt(r.dn_excl, r.dn_vat, r.dn_incl);
+      const credit_notes = arMkAmt(r.cn_excl, r.cn_vat, r.cn_incl);
+      const ymd = String(r.ymd);
+      return { day: `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`, invoices, credit_notes, debit_notes, net_incl: invoices.incl + debit_notes.incl - credit_notes.incl };
+    });
+    return { days, totals: arSumTotals(days) };
+  }
+
+  // GET /api/reports/daily-sales-figures — current month's posted A/R documents
+  // broken down by day (same VAT split + Net as the monthly Sales Figures).
+  // Site-only: the hub stores monthly totals, not daily, so HUB_MODE returns an
+  // explicit "unavailable" flag the UI surfaces as a note.
+  router.get('/api/reports/daily-sales-figures', ...reportsGuard, async (req, res) => {
+    try {
+      const now = new Date();
+      const y = now.getFullYear();
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const from = Number(`${y}${mo}01`);
+      const to = Number(`${y}${mo}${String(now.getDate()).padStart(2, '0')}`);
+      const month = `${y}-${mo}`;
+
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_mode: true, unavailable: true, month, from, to, days: [], totals: null });
+      }
+
+      const { days, totals } = await queryArDailySummary(from, to);
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+      res.json({ month, from, to, days, totals, site_name: depotName });
+    } catch (err) {
+      console.error('[daily-sales-figures] failed', err.message);
+      res.status(503).json({ error: 'Could not load the daily sales figures. Check the Sage connection and try again.' });
+    }
+  });
+
   // GET /api/reports/debtor-balance-summary — headline debtor exposure for the
   // dashboard tile. Positive open balances only (excludes net-credit customers),
   // so it matches the Customer Balances page total to the cent, plus the AR

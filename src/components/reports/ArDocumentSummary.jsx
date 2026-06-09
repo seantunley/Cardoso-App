@@ -1,11 +1,12 @@
-import { Fragment, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ReportFrame, PrintHeader, PrintFooter, fmtR, downloadCsv } from './lib';
+import { ReportFrame, PrintHeader, PrintFooter, downloadCsv } from './lib';
+import SalesFiguresTable from './SalesFiguresTable';
 
 // Posted A/R documents (Invoices / Credit Notes / Debit Notes) by month with
 // VAT split out. Net = Invoices + Debit notes − Credit notes. Site mode queries
 // Sage live (ARIBH); hub mode shows a consolidated table plus one section per
-// branch (synced down into hub_ar_document_summary).
+// branch (synced down into hub_ar_document_summary). Amounts in Rand (R).
 
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 const yearStartStr = () => `${new Date().getFullYear()}-01-01`;
@@ -14,82 +15,6 @@ function fetchSummary({ from, to }) {
   const qs = new URLSearchParams({ from, to });
   return fetch(`/api/reports/ar-document-summary?${qs.toString()}`, { credentials: 'include' })
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
-}
-
-const TYPES = [
-  { key: 'invoices', label: 'Invoices', accent: 'hsl(145 55% 45%)' },
-  { key: 'credit_notes', label: 'Credit Notes', accent: 'hsl(0 72% 50%)' },
-  { key: 'debit_notes', label: 'Debit Notes', accent: 'hsl(33 95% 55%)' },
-];
-
-const Td = ({ v, strong }) => (
-  <td className={`px-2 py-1 text-right tabular-nums ${strong ? 'font-semibold text-foreground' : 'text-foreground/90'}`}>{fmtR(v)}</td>
-);
-
-function DocTable({ months, totals, currentMonth }) {
-  if (!months?.length) {
-    return <div className="rounded-xl border border-border bg-card px-6 py-8 text-center text-sm text-muted-foreground">No posted documents in this range.</div>;
-  }
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
-      <table className="w-full text-sm report-doc-table" style={{ minWidth: 980 }}>
-        <thead>
-          <tr className="border-b border-border">
-            <th rowSpan={2} className="px-2 py-1.5 text-left text-xs font-medium text-muted-foreground align-bottom">Month</th>
-            {TYPES.map((t) => (
-              <th key={t.key} colSpan={3} className="px-2 py-1.5 text-center text-xs font-semibold uppercase tracking-wide border-l border-border" style={{ color: t.accent }}>{t.label}</th>
-            ))}
-            <th rowSpan={2} className="px-2 py-1.5 text-right text-xs font-semibold text-foreground align-bottom border-l border-border">Net (Incl)</th>
-          </tr>
-          <tr className="border-b border-border">
-            {TYPES.map((t) => (
-              <Fragment key={t.key}>
-                <th className="px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground border-l border-border">Ex-VAT</th>
-                <th className="px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground">VAT</th>
-                <th className="px-2 py-1.5 text-right text-[10px] font-medium text-muted-foreground">Incl</th>
-              </Fragment>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {months.map((m) => {
-            const isCurrent = m.month === currentMonth;
-            return (
-              <tr key={m.month} className={`border-b border-border/50 ${isCurrent ? 'bg-[hsla(33,95%,55%,0.10)]' : 'hover:bg-muted/30'}`}>
-                <td className="px-2 py-1 text-left font-mono text-foreground">
-                  {m.month}
-                  {isCurrent && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--phosphor)' }}>current</span>}
-                </td>
-                {TYPES.map((t) => (
-                  <Fragment key={`${m.month}-${t.key}`}>
-                    <td className="px-2 py-1 text-right tabular-nums text-foreground/90 border-l border-border/40">{fmtR(m[t.key].excl)}</td>
-                    <Td v={m[t.key].vat} />
-                    <Td v={m[t.key].incl} />
-                  </Fragment>
-                ))}
-                <td className="px-2 py-1 text-right tabular-nums font-semibold text-foreground border-l border-border/40">{fmtR(m.net_incl)}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-        {totals && (
-          <tfoot>
-            <tr className="border-t-2 border-border bg-muted/40">
-              <td className="px-2 py-1.5 text-left font-semibold text-foreground">TOTAL</td>
-              {TYPES.map((t) => (
-                <Fragment key={`tot-${t.key}`}>
-                  <td className="px-2 py-1.5 text-right tabular-nums font-semibold text-foreground border-l border-border/40">{fmtR(totals[t.key].excl)}</td>
-                  <Td v={totals[t.key].vat} strong />
-                  <Td v={totals[t.key].incl} strong />
-                </Fragment>
-              ))}
-              <td className="px-2 py-1.5 text-right tabular-nums font-bold text-foreground border-l border-border/40">{fmtR(totals.net_incl)}</td>
-            </tr>
-          </tfoot>
-        )}
-      </table>
-    </div>
-  );
 }
 
 export default function ArDocumentSummary() {
@@ -128,7 +53,7 @@ export default function ArDocumentSummary() {
   return (
     <ReportFrame
       title={<>Monthly Sales <em className="text-phosphor">Figures</em>.</>}
-      subtitle="Posted invoices, credit notes and debit notes by month with VAT shown separately. Net = Invoices + Debit notes − Credit notes. Matches the Sage 'Sales Figures' report (ARIBH, VAT-bearing documents)."
+      subtitle="Posted invoices, credit notes and debit notes by month with VAT shown separately. Net = Invoices + Debit notes − Credit notes. Amounts in Rand (R). Matches the Sage 'Sales Figures' report (ARIBH, VAT-bearing documents)."
       printId="ar-doc-summary"
       orientation="landscape"
       onExportCsv={csvMonths.length ? exportCsv : undefined}
@@ -164,7 +89,7 @@ export default function ArDocumentSummary() {
       )}
 
       {!isHub && months.length > 0 && (
-        <DocTable months={months} totals={totals} currentMonth={currentMonth} />
+        <SalesFiguresTable rows={months} totals={totals} labelKey="month" labelHeader="Month" currentLabel={currentMonth} />
       )}
 
       {isHub && hasData && (
@@ -172,13 +97,13 @@ export default function ArDocumentSummary() {
           {(consolidated?.months?.length || 0) > 0 && (
             <div>
               <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-foreground">All branches · consolidated</div>
-              <DocTable months={consolidated.months} totals={consolidated.totals} currentMonth={currentMonth} />
+              <SalesFiguresTable rows={consolidated.months} totals={consolidated.totals} labelKey="month" labelHeader="Month" currentLabel={currentMonth} />
             </div>
           )}
           {branches.map((b) => (
             <div key={b.site_id}>
               <div className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em]" style={{ color: 'var(--phosphor)' }}>{b.site_name}</div>
-              <DocTable months={b.months} totals={b.totals} currentMonth={currentMonth} />
+              <SalesFiguresTable rows={b.months} totals={b.totals} labelKey="month" labelHeader="Month" currentLabel={currentMonth} />
             </div>
           ))}
         </div>
