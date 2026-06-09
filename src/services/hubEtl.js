@@ -771,7 +771,11 @@ async function syncSite(site) {
     // helper just returns err.message verbatim, so this is safe to use as
     // a single funnel.
     syncError = describeFetchError(err, site.url);
-    db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
+    // A failed/slow data pull is a freshness problem, NOT a reachability one.
+    // Record it on the Accpac freshness fields (shown in the tile footer) and
+    // leave hub_sites.status to the health-ping — otherwise a single slow sync
+    // flips a reachable, pingable site to Offline (the online/offline flip-flop).
+    db.prepare(`UPDATE hub_sites SET last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
 
     // Verbose, plain-English log so an operator can triage from the System
     // Log alone without source-diving. Default fetch errors ("fetch failed",

@@ -2724,29 +2724,15 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
-      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
-      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      // Served from the precomputed rollup cache (rebuilt once per inventory-sales
+      // sync) — a cheap indexed SELECT, never an on-demand 24-month aggregation,
+      // so this can't freeze the site's event loop / time out the hub's sync.
       const rows = prep(`
-        SELECT TRIM(t.item_number) AS item_number,
-               SUBSTR(t.transaction_date, 1, 7) AS period,
-               SUM(t.qty_sold) AS qty_sold,
-               SUM(t.line_amount) AS revenue,
-               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
-        FROM inventory_sales_transactions t
-        LEFT JOIN (
-          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
-          FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
-          GROUP BY TRIM(item_number)
-        ) ic ON ic.item_number = TRIM(t.item_number)
-        LEFT JOIN (
-          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
-          FROM inventoryrecord
-        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
-        WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
-        GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
+        SELECT item_number, period, qty_sold, revenue, item_description
+        FROM inventory_item_sales_rollup
         ORDER BY period, item_number
         LIMIT ? OFFSET ?
-      `).all(from, limit, offset);
+      `).all(limit, offset);
       res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -2758,19 +2744,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
-      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
-      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      // Served from the precomputed rollup cache (rebuilt once per inventory-sales
+      // sync) — a cheap indexed SELECT, never an on-demand aggregation.
       const rows = prep(`
-        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
-               SUBSTR(transaction_date, 1, 7) AS period,
-               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
-        FROM inventory_sales_transactions
-        WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
-          AND NOT ${EXCL_INTER_BRANCH}
-        GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
+        SELECT customer_code, customer_name, period, revenue, qty
+        FROM inventory_customer_sales_rollup
         ORDER BY period, customer_code
         LIMIT ? OFFSET ?
-      `).all(from, limit, offset);
+      `).all(limit, offset);
       res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });

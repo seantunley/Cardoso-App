@@ -123,7 +123,62 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   })();
 
   updateMeta(aggRows.length);
+  // Precompute the monthly item/customer sales rollups the hub pulls, so the
+  // /api/reporting/inventory-*-sales endpoints serve a cheap indexed SELECT
+  // instead of re-aggregating 24 months on every hub request — that on-demand
+  // aggregation froze the site's (synchronous) event loop and timed out the
+  // hub's health/KPIs fetches, flip-flopping the site tile Offline.
+  try { rebuildInventorySalesRollups(); }
+  catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
   return { synced: aggRows.length, transactions: txnRows.length };
+}
+
+// EXCL_INTER_BRANCH mirrors the fragment in routes/reporting.js — exclude
+// inter-branch transfer "customers" (matched by name) from sales figures.
+const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
+
+// Rebuild the precomputed monthly sales rollups (trailing 24 months) the hub
+// pulls. Runs once per inventory-sales sync — NOT per hub request — so the
+// reporting endpoints stay cheap indexed SELECTs and never freeze the site's
+// event loop. Single source of the aggregation; see migration v099.
+export function rebuildInventorySalesRollups() {
+  const d = new Date();
+  const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+  const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+  const rebuild = db.transaction(() => {
+    db.prepare('DELETE FROM inventory_item_sales_rollup').run();
+    db.prepare(`
+      INSERT INTO inventory_item_sales_rollup (item_number, period, qty_sold, revenue, item_description)
+      SELECT TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7),
+             SUM(t.qty_sold), SUM(t.line_amount),
+             COALESCE(MAX(ic.item_description), MAX(ir.item_description))
+      FROM inventory_sales_transactions t
+      LEFT JOIN (
+        SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+        FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+        GROUP BY TRIM(item_number)
+      ) ic ON ic.item_number = TRIM(t.item_number)
+      LEFT JOIN (
+        SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+        FROM inventoryrecord WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+        GROUP BY TRIM(item_number)
+      ) ir ON ir.item_number = TRIM(t.item_number)
+      WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
+      GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
+    `).run(from);
+
+    db.prepare('DELETE FROM inventory_customer_sales_rollup').run();
+    db.prepare(`
+      INSERT INTO inventory_customer_sales_rollup (customer_code, period, revenue, qty, customer_name)
+      SELECT TRIM(customer_code), SUBSTR(transaction_date, 1, 7),
+             SUM(line_amount), SUM(qty_sold), MAX(customer_name)
+      FROM inventory_sales_transactions
+      WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+        AND NOT ${EXCL_INTER_BRANCH}
+      GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
+    `).run(from);
+  });
+  rebuild();
 }
 
 export function getSyncMeta() {
