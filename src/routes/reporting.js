@@ -1161,11 +1161,30 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
 
   // Top 10 items sold this month (by units), from the monthly sales cache.
-  router.get('/api/reports/dashboard/top-items-mtd', ...reportsGuard, (_req, res) => {
+  router.get('/api/reports/dashboard/top-items-mtd', ...reportsGuard, (req, res) => {
     try {
       const now = new Date();
       const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, month, rows: [] });
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, t.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, t.site_id) AS site_name FROM hub_inventory_item_sales t LEFT JOIN hub_sites hs ON hs.id = t.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          SELECT TRIM(t.item_number) AS item_number, SUM(t.qty_sold) AS qty, SUM(t.revenue) AS revenue, MAX(t.item_description) AS item_description
+          FROM hub_inventory_item_sales t LEFT JOIN hub_sites hs ON hs.id = t.site_id
+          WHERE t.period = ? ${where}
+          GROUP BY TRIM(t.item_number)
+          ORDER BY qty DESC
+          LIMIT 10
+        `).all(month, ...params).map((r) => ({
+          item_number: r.item_number,
+          item_description: r.item_description || null,
+          qty: Number(r.qty) || 0,
+          revenue: Number(r.revenue) || 0,
+        }));
+        return res.json({ month, rows, hub_mode: true, filters: { sites } });
+      }
       const from = `${month}-01`;
       const to = `${month}-${String(now.getDate()).padStart(2, '0')}`;
       const rows = db.prepare(`
@@ -1201,10 +1220,39 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   });
 
   // Top 10 dead-stock items (held value, no sale in 3+ months) by held value.
-  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (_req, res) => {
+  router.get('/api/reports/dashboard/dead-stock-items', ...reportsGuard, (req, res) => {
     try {
-      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, rows: [] });
       const threshold = dashMonth(3);
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const where = siteFilter !== 'all' ? 'AND COALESCE(hs.name, i.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, i.site_id) AS site_name FROM hub_inventory i LEFT JOIN hub_sites hs ON hs.id = i.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          WITH last_sale AS (
+            SELECT site_id, TRIM(item_number) AS item_number, MAX(period) AS last_period
+            FROM hub_inventory_item_sales GROUP BY site_id, TRIM(item_number)
+          )
+          SELECT TRIM(i.item_number) AS item_number, i.item_description,
+                 COALESCE(CAST(REPLACE(REPLACE(i.inventory_value, ',', ''), ' ', '') AS REAL), 0) AS inv_value,
+                 ls.last_period,
+                 COALESCE(hs.name, i.site_id) AS site_name
+          FROM hub_inventory i
+          LEFT JOIN hub_sites hs ON hs.id = i.site_id
+          LEFT JOIN last_sale ls ON ls.site_id = i.site_id AND ls.item_number = TRIM(i.item_number)
+          WHERE COALESCE(CAST(REPLACE(REPLACE(i.inventory_value, ',', ''), ' ', '') AS REAL), 0) > 0
+            AND (ls.last_period IS NULL OR ls.last_period < ?) ${where}
+          ORDER BY inv_value DESC
+          LIMIT 10
+        `).all(threshold, ...params).map((r) => ({
+          item_number: r.item_number,
+          item_description: r.item_description || null,
+          inv_value: Number(r.inv_value) || 0,
+          last_period: r.last_period || null,
+          site_name: r.site_name || null,
+        }));
+        return res.json({ threshold_months: 3, rows, hub_mode: true, filters: { sites } });
+      }
       const rows = db.prepare(`
         WITH last_sale AS (
           SELECT TRIM(item_number) AS item_number, MAX(SUBSTR(transaction_date, 1, 7)) AS last_period
@@ -1237,9 +1285,34 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // Top 10 customers by sales value, from the per-transaction sales table.
   router.get('/api/reports/dashboard/top-customers', ...reportsGuard, (req, res) => {
     try {
-      if (process.env.HUB_MODE === 'true') return res.json({ site_only: true, months: 12, rows: [] });
       const months = Math.max(0, parseInt(req.query.months, 10) || 12); // default last 12 months; 0 = all time
       const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 10));
+      if (process.env.HUB_MODE === 'true') {
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, c.site_id) = ?' : '';
+        const hubConds = ["c.customer_code IS NOT NULL AND TRIM(c.customer_code) <> ''"];
+        const hubParams = [];
+        if (months > 0) {
+          const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - (months - 1), 1);
+          hubConds.push('c.period >= ?'); hubParams.push(`${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}`);
+        }
+        const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, c.site_id) AS site_name FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        const rows = db.prepare(`
+          SELECT TRIM(c.customer_code) AS customer_code, MAX(c.customer_name) AS customer_name,
+                 SUM(c.revenue) AS revenue, SUM(c.qty) AS qty
+          FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id
+          WHERE ${hubConds.join(' AND ')} ${siteWhere}
+          GROUP BY TRIM(c.customer_code)
+          ORDER BY revenue DESC
+          LIMIT ?
+        `).all(...hubParams, ...(siteFilter !== 'all' ? [siteFilter] : []), limit).map((r) => ({
+          customer_code: r.customer_code,
+          customer_name: r.customer_name || null,
+          revenue: Number(r.revenue) || 0,
+          qty: Number(r.qty) || 0,
+        }));
+        return res.json({ months, rows, hub_mode: true, filters: { sites } });
+      }
       const where = ["customer_code IS NOT NULL AND TRIM(customer_code) <> ''", `NOT ${EXCL_INTER_BRANCH}`];
       const params = [];
       if (months > 0) {
@@ -2640,6 +2713,65 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         records: rows,
         sync_meta: meta || {},
       });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
+  // this for the Top Items + Dead Stock tiles. Description comes from the sales
+  // cache (v096) falling back to the item master. Trailing 24 months.
+  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      const rows = prep(`
+        SELECT TRIM(t.item_number) AS item_number,
+               SUBSTR(t.transaction_date, 1, 7) AS period,
+               SUM(t.qty_sold) AS qty_sold,
+               SUM(t.line_amount) AS revenue,
+               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
+        FROM inventory_sales_transactions t
+        LEFT JOIN (
+          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
+          FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+          GROUP BY TRIM(item_number)
+        ) ic ON ic.item_number = TRIM(t.item_number)
+        LEFT JOIN (
+          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
+          FROM inventoryrecord
+        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
+        WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
+        ORDER BY period, item_number
+        LIMIT ? OFFSET ?
+      `).all(from, limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-customer monthly sales with inter-branch transfers EXCLUDED — the hub
+  // pulls this for the Top Customers tile (summed over the selected timeline).
+  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      const rows = prep(`
+        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
+               SUBSTR(transaction_date, 1, 7) AS period,
+               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
+        FROM inventory_sales_transactions
+        WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+          AND NOT ${EXCL_INTER_BRANCH}
+        GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
+        ORDER BY period, customer_code
+        LIMIT ? OFFSET ?
+      `).all(from, limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

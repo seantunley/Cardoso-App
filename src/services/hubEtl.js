@@ -460,6 +460,98 @@ async function syncSite(site) {
       console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
     }
 
+    // Inventory item sales (inter-branch transfers excluded) → for the dashboard
+    // Top Items + Dead Stock tiles. Same paginate → stage → atomic-swap pattern.
+    try {
+      const fetchItemPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-item-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory item-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allItemRecords = [];
+      let itemOffset = 0;
+      let nextItemPromise = guardOrphan(fetchItemPage(0));
+      while (true) {
+        const itemData = await nextItemPromise;
+        const recs = itemData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = itemData?.has_more === true && consumed > 0;
+        nextItemPromise = willHaveMore ? guardOrphan(fetchItemPage(itemOffset + consumed)) : null;
+        for (const r of recs) allItemRecords.push(r);
+        itemOffset += consumed;
+        if (!nextItemPromise) break;
+      }
+      const upsertItem = db.prepare(`
+        INSERT INTO hub_inventory_item_sales (site_id, item_number, item_description, period, qty_sold, revenue, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, item_number, period) DO UPDATE SET
+          item_description=excluded.item_description, qty_sold=excluded.qty_sold,
+          revenue=excluded.revenue, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_item_sales WHERE site_id = ?').run(site.id);
+        for (const r of allItemRecords) {
+          upsertItem.run(site.id, r.item_number, r.item_description || null, r.period, r.qty_sold || 0, r.revenue || 0);
+        }
+      })();
+    } catch (itemErr) {
+      console.log(`[hub-etl] Inventory item-sales sync skipped for ${site.id}: ${itemErr.message}`);
+    }
+
+    // Inventory customer sales (inter-branch transfers excluded) → for the
+    // dashboard Top Customers tile (summed over the selected timeline).
+    try {
+      const fetchCustPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-customer-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory customer-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allCustRecords = [];
+      let custOffset = 0;
+      let nextCustPromise = guardOrphan(fetchCustPage(0));
+      while (true) {
+        const custData = await nextCustPromise;
+        const recs = custData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = custData?.has_more === true && consumed > 0;
+        nextCustPromise = willHaveMore ? guardOrphan(fetchCustPage(custOffset + consumed)) : null;
+        for (const r of recs) allCustRecords.push(r);
+        custOffset += consumed;
+        if (!nextCustPromise) break;
+      }
+      const upsertCust = db.prepare(`
+        INSERT INTO hub_inventory_customer_sales (site_id, customer_code, customer_name, period, revenue, qty, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, customer_code, period) DO UPDATE SET
+          customer_name=excluded.customer_name, revenue=excluded.revenue,
+          qty=excluded.qty, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_customer_sales WHERE site_id = ?').run(site.id);
+        for (const r of allCustRecords) {
+          upsertCust.run(site.id, r.customer_code, r.customer_name || null, r.period, r.revenue || 0, r.qty || 0);
+        }
+      })();
+    } catch (custErr) {
+      console.log(`[hub-etl] Inventory customer-sales sync skipped for ${site.id}: ${custErr.message}`);
+    }
+
     // Stock receipt expiry — read-only hub copy for cross-site visibility.
     // Paginated fetch (1000 rows / 10s per page), stage all pages in
     // memory, then atomic delete+insert so a mid-page failure leaves

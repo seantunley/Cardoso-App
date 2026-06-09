@@ -345,10 +345,10 @@ function MiniRankList({ rows, accent, isLoading, error, refetch, empty, fmtValue
 
 const SITE_ONLY_NOTE = "Inventory & sales figures are available on branch (site) installs.";
 
-function TopItemsMtdCard() {
+function TopItemsMtdCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-top-items-mtd"],
-    queryFn: () => apiGet("/api/reports/dashboard/top-items-mtd"),
+    queryKey: ["dash-top-items-mtd", site],
+    queryFn: () => apiGet(withSite("/api/reports/dashboard/top-items-mtd", site)),
     staleTime: 60_000,
   });
   const accent = "hsl(145 55% 45%)";
@@ -370,17 +370,17 @@ function TopItemsMtdCard() {
   );
 }
 
-function DeadStockItemsCard() {
+function DeadStockItemsCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-dead-stock-items"],
-    queryFn: () => apiGet("/api/reports/dashboard/dead-stock-items"),
+    queryKey: ["dash-dead-stock-items", site],
+    queryFn: () => apiGet(withSite("/api/reports/dashboard/dead-stock-items", site)),
     staleTime: 60_000,
   });
   const accent = "hsl(0 72% 50%)";
-  const rows = (data?.rows || []).map((r) => ({
-    key: r.item_number,
-    label: r.item_description || r.item_number,
-    title: `${r.item_number}${r.last_period ? " · last sold " + r.last_period : " · never sold"}`,
+  const rows = (data?.rows || []).map((r, i) => ({
+    key: `${r.site_name || ""}-${r.item_number}-${i}`,
+    label: `${r.site_name && site === "all" ? r.site_name + " · " : ""}${r.item_description || r.item_number}`,
+    title: `${r.site_name ? r.site_name + " · " : ""}${r.item_number}${r.last_period ? " · last sold " + r.last_period : " · never sold"}`,
     value: r.inv_value,
   }));
   return (
@@ -395,10 +395,10 @@ function DeadStockItemsCard() {
   );
 }
 
-function TopCustomersCard() {
+function TopCustomersCard({ site }) {
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ["dash-top-customers"],
-    queryFn: () => apiGet("/api/reports/dashboard/top-customers?months=12"),
+    queryKey: ["dash-top-customers", site],
+    queryFn: () => apiGet(withSite("/api/reports/dashboard/top-customers?months=12", site)),
     staleTime: 60_000,
   });
   const accent = "hsl(200 80% 55%)";
@@ -469,9 +469,9 @@ export default function ReportingDashboard() {
 
       {/* Sales & inventory highlights — compact versions of the Trends graphs */}
       <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <TopItemsMtdCard />
-        <DeadStockItemsCard />
-        <TopCustomersCard />
+        <TopItemsMtdCard site={site} />
+        <DeadStockItemsCard site={site} />
+        <TopCustomersCard site={site} />
       </div>
     </div>
   );
