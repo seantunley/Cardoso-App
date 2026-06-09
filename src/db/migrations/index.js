@@ -101,6 +101,7 @@ import m95 from './v095_monthly_reports_permission.js';
 import m96 from './v096_sage_query_override.js';
 import m97 from './v097_inventory_sales_cache_description.js';
 import m98 from './v098_hub_inventory_sales_aggregates.js';
+import m99 from './v099_inventory_sales_rollup_cache.js';
 
 const migrations = [
   m1,
@@ -201,6 +202,7 @@ const migrations = [
   m96,
   m97,
   m98,
+  m99,
 ];
 
 migrations.sort((a, b) => a.version - b.version);
