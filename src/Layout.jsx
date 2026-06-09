@@ -421,10 +421,18 @@ const NAV_GROUP_ORDER = ["Customers", "Creditors", "Inventory", "BAT and JTI", "
 // v2: reset all operators to fully-expanded sidebar groups (user request
 // 2026-05-28). Existing v1 keys are abandoned, not migrated.
 const NAV_COLLAPSED_GROUPS_KEY = "cardoso.sidebar.collapsedGroups.v2";
+// localStorage key for the rail's expanded/collapsed state, so it survives
+// reloads instead of resetting to collapsed on every load.
+const NAV_SIDEBAR_COLLAPSED_KEY = "cardoso.sidebar.collapsed";
 
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
-  const [isCollapsed, setIsCollapsed]       = useState(true);
+  const [isCollapsed, setIsCollapsed]       = useState(() => {
+    try {
+      const stored = localStorage.getItem(NAV_SIDEBAR_COLLAPSED_KEY);
+      return stored === null ? false : stored === "true"; // default expanded on first visit
+    } catch { return false; }
+  });
   const [theme, setTheme]                   = useState(() => localStorage.getItem('cardoso-theme') || 'dark');
   const hubMode = useHubMode();
   const [cmdOpen, setCmdOpen]               = useState(false);
@@ -453,6 +461,11 @@ export default function Layout({ children, currentPageName }) {
       return next;
     });
   };
+  // Persist the rail's collapsed/expanded state so it doesn't reset on reload.
+  useEffect(() => {
+    try { localStorage.setItem(NAV_SIDEBAR_COLLAPSED_KEY, String(isCollapsed)); }
+    catch (e) { console.warn('[sidebar.collapsed.write] localStorage write failed', e.message); }
+  }, [isCollapsed]);
   const [isSavingPassword, setIsSavingPassword] = useState(false);
   const [versionStatus, setVersionStatus]   = useState({
     currentVersion: APP_VERSION,
