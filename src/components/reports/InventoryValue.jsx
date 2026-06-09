@@ -1,4 +1,5 @@
 import { useState, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   ReportFrame, ChartCard, SummaryTile, PrintHeader, PrintFooter,
@@ -9,19 +10,23 @@ import {
   LEGEND_WRAPPER,
   PALETTE, REPORT_COLORS, fmtCompactR,
 } from './lib';
+import BranchFilter from './BranchFilter';
 
-function fetchInventoryValue(topN) {
+function fetchInventoryValue(topN, site) {
   const qs = new URLSearchParams({ top: String(topN) });
+  if (site && site !== 'all') qs.set('site', site);
   return fetch(`/api/reports/inventory-value?${qs.toString()}`, { credentials: 'include' })
     .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
 
 export default function InventoryValue() {
   const [topN, setTopN] = useState(25);
+  const [searchParams] = useSearchParams();
+  const site = searchParams.get('site') || 'all';
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ['inventory-value', topN],
-    queryFn: () => fetchInventoryValue(topN),
+    queryKey: ['inventory-value', topN, site],
+    queryFn: () => fetchInventoryValue(topN, site),
     staleTime: 60_000,
   });
 
@@ -87,6 +92,7 @@ export default function InventoryValue() {
             {[10, 25, 50, 100, 200].map(n => <option key={n} value={n}>Top {n}</option>)}
           </select>
         </div>
+        <BranchFilter hubMode={data?.hub_mode} sites={data?.filters?.sites} />
       </div>
 
       {data && summary && (

@@ -2062,14 +2062,23 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
                                   CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)
                                   * CAST(REPLACE(REPLACE(COALESCE(last_cost, '0'), ',', ''), ' ', '') AS REAL))`;
       const qtyExpr = `CAST(REPLACE(REPLACE(COALESCE(qty_on_hand, '0'), ',', ''), ' ', '') AS REAL)`;
+      // Hub branch filter (matched on the branch's display name): narrow to one
+      // branch, or consolidate across all when 'all'. valueExprI/qtyExprI are the
+      // same value/qty expressions qualified for the joined hub_inventory (alias i).
+      const siteFilter = String(req.query.site || 'all').trim();
+      const valueExprI = valueExpr.replace(/\binventory_value\b/g, 'i.inventory_value').replace(/\bqty_on_hand\b/g, 'i.qty_on_hand').replace(/\blast_cost\b/g, 'i.last_cost');
+      const qtyExprI = qtyExpr.replace(/\bqty_on_hand\b/g, 'i.qty_on_hand');
+      const hubSiteWhere = siteFilter !== 'all' ? 'WHERE COALESCE(s.name, i.site_id) = ?' : '';
+      const hubSiteParams = siteFilter !== 'all' ? [siteFilter] : [];
       const commoditySql = isHub
         ? `SELECT
-             COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
+             COALESCE(NULLIF(TRIM(i.commodity), ''), '— Uncategorised') AS commodity,
              COUNT(*)         AS item_count,
-             SUM(${valueExpr}) AS total_value,
-             SUM(${qtyExpr})   AS total_qty
-           FROM hub_inventory
-           GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
+             SUM(${valueExprI}) AS total_value,
+             SUM(${qtyExprI})   AS total_qty
+           FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+           ${hubSiteWhere}
+           GROUP BY COALESCE(NULLIF(TRIM(i.commodity), ''), '— Uncategorised')
            ORDER BY total_value DESC`
         : `SELECT
              COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised') AS commodity,
@@ -2079,7 +2088,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            FROM inventoryrecord
            GROUP BY COALESCE(NULLIF(TRIM(commodity), ''), '— Uncategorised')
            ORDER BY total_value DESC`;
-      const byCommodity = prep(commoditySql).all().map(r => ({
+      const byCommodity = prep(commoditySql).all(...(isHub ? hubSiteParams : [])).map(r => ({
         commodity: r.commodity,
         item_count: r.item_count,
         total_value: num(r.total_value),
@@ -2092,6 +2101,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
                   ${valueExpr.replace(/\binventory_value\b/g, 'i.inventory_value').replace(/\bqty_on_hand\b/g, 'i.qty_on_hand').replace(/\blast_cost\b/g, 'i.last_cost')} AS inventory_value,
                   COALESCE(s.name, i.site_id) AS site_name
            FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+           ${hubSiteWhere}
            ORDER BY inventory_value DESC
            LIMIT ?`
         : `SELECT item_number, item_description, qty_on_hand, last_cost, price,
@@ -2101,7 +2111,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            FROM inventoryrecord
            ORDER BY inventory_value DESC
            LIMIT ?`;
-      const topItems = (isHub ? prep(topItemsSql).all(topN) : prep(topItemsSql).all(SITE_NAME, topN)).map(r => ({
+      const topItems = (isHub ? prep(topItemsSql).all(...hubSiteParams, topN) : prep(topItemsSql).all(SITE_NAME, topN)).map(r => ({
         item_number: r.item_number,
         item_description: r.item_description,
         qty_on_hand: num(r.qty_on_hand),
@@ -2115,6 +2125,12 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const totalValue = byCommodity.reduce((s, c) => s + c.total_value, 0);
       const totalItems = byCommodity.reduce((s, c) => s + c.item_count, 0);
 
+      const sites = isHub
+        ? prep(`SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+                FROM hub_inventory i LEFT JOIN hub_sites s ON s.id = i.site_id
+                ORDER BY site_name`).all().map(r => r.site_name).filter(Boolean)
+        : [];
+
       res.json({
         summary: {
           total_items: totalItems,
@@ -2125,7 +2141,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         top_items: topItems,
         top_n: topN,
         generated_at: new Date().toISOString(),
-        site_name: SITE_NAME,
+        site_name: isHub ? (siteFilter !== 'all' ? siteFilter : 'All branches') : SITE_NAME,
+        hub_mode: isHub,
+        filters: { sites },
       });
     } catch (err) {
       console.error('[reporting] inventory-value error:', err);
