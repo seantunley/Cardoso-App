@@ -149,6 +149,28 @@ function initHubSiteRegistry() {
   hubRepository.upsertSites(HUB_SITES);
 }
 
+// Prune hub_inventory rows a site no longer returns (upsert-then-prune keeps the
+// hub copy live). Stages the synced item numbers into a TEMP TABLE and anti-joins,
+// rather than a `NOT IN (?, ?, …)` list: a site above SQLite's ~32,766 variable
+// cap would otherwise throw on every cycle, failing the whole sync so `since`
+// never advances (SYNC-4). Mirrors the site-side prune in syncEngine.js. Takes the
+// db handle so it's unit-testable against an in-memory DB.
+export function pruneHubInventory(database, siteId, itemNumbers) {
+  if (!itemNumbers || itemNumbers.length === 0) return;
+  const prune = database.transaction((items) => {
+    database.exec('CREATE TEMP TABLE IF NOT EXISTS _hub_prune_inventory(item_number TEXT PRIMARY KEY)');
+    database.exec('DELETE FROM _hub_prune_inventory');
+    const insertTemp = database.prepare('INSERT OR IGNORE INTO _hub_prune_inventory(item_number) VALUES (?)');
+    for (const item of items) insertTemp.run(item);
+    database.prepare(`
+      DELETE FROM hub_inventory
+      WHERE site_id = ?
+        AND item_number NOT IN (SELECT item_number FROM _hub_prune_inventory)
+    `).run(siteId);
+  });
+  prune(itemNumbers);
+}
+
 // --- ETL function ---
 async function syncSite(site) {
   const startedAt = new Date().toISOString();
@@ -406,12 +428,7 @@ async function syncSite(site) {
       if (!nextInvPromise) break;
     }
     // Prune hub_inventory rows no longer in the site's query (upsert-then-prune)
-    if (syncedItemNumbers.length > 0) {
-      const placeholders = syncedItemNumbers.map(() => '?').join(',');
-      db.prepare(
-        `DELETE FROM hub_inventory WHERE site_id = ? AND item_number NOT IN (${placeholders})`
-      ).run(site.id, ...syncedItemNumbers);
-    }
+    pruneHubInventory(db, site.id, syncedItemNumbers);
 
     // AR document summary (per-branch "Sales Figures") — tiny payload (one row
     // per month over the current+prior FY), single fetch. Clear-and-reload the
