@@ -7,6 +7,7 @@ import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
+import { rebuildInventorySalesRollups } from '../services/inventoryMovement.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek, weeksInIsoYear } from '../lib/isoWeek.js';
@@ -2718,11 +2719,33 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // After a v099 upgrade the rollup cache is empty until the next inventory-sales
+  // sync. The hub pull does delete-and-replace, so an empty pull would WIPE valid
+  // Top Items/Dead Stock data on the hub. Rebuild once on first read if the cache
+  // is empty but transactions exist — the in-process flag stops repeat rebuilds
+  // (even when the rollup is legitimately empty), and the rebuild fits inside the
+  // hub's fetch timeout so the pull still succeeds with real data.
+  let salesRollupWarmAttempted = false;
+  const ensureSalesRollupWarm = () => {
+    if (salesRollupWarmAttempted) return;
+    salesRollupWarmAttempted = true;
+    try {
+      const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
+      const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
+      if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {
+        rebuildInventorySalesRollups();
+      }
+    } catch (e) {
+      console.warn('[inventory.sales_rollup.warm] first-read rebuild failed; next sales sync will populate it:', e.message);
+    }
+  };
+
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
   // this for the Top Items + Dead Stock tiles. Description comes from the sales
   // cache (v096) falling back to the item master. Trailing 24 months.
   router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
+      ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand 24-month aggregation,
@@ -2743,6 +2766,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // pulls this for the Top Customers tile (summed over the selected timeline).
   router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
+      ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand aggregation.
