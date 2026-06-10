@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { activateCoffeeMode, launchLedgerConfetti, pulseSecretGlow } from "@/lib/fun";
+import { activateCoffeeMode, launchLedgerConfetti, pulseSecretGlow, getLedgerFortune } from "@/lib/fun";
 
 const KONAMI_SEQUENCE = [
   "ArrowUp",
@@ -22,6 +22,7 @@ export default function CardosoEasterEgg() {
   const [lineCount, setLineCount] = useState(0);
   const [commandOpen, setCommandOpen] = useState(false);
   const [commandValue, setCommandValue] = useState("");
+  const [commandFeedback, setCommandFeedback] = useState("");
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -39,10 +40,14 @@ export default function CardosoEasterEgg() {
         target?.isContentEditable;
       if (isEditable) return;
 
-      if ((event.ctrlKey || event.metaKey) && event.code === "KeyK") {
+      // Ctrl+SHIFT+K — plain Ctrl+K belongs to the navigation command palette
+      // (src/components/CommandPalette.jsx); both used to bind Ctrl+K and
+      // opened stacked on top of each other.
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "KeyK") {
         event.preventDefault();
         setCommandOpen(true);
         setCommandValue("");
+        setCommandFeedback("");
         return;
       }
 
@@ -97,13 +102,43 @@ export default function CardosoEasterEgg() {
     };
   }, [visible]);
 
+  // Quiet words the console understands. Anything else gets a playful reply
+  // (with a nudge toward a real word) instead of silently doing nothing —
+  // before this, only "coffee" worked and every other word gave zero feedback,
+  // which made the whole console look broken.
   const handleCommandSubmit = (event) => {
     event.preventDefault();
-    if (commandValue.trim().toLowerCase() === "coffee") {
+    const word = commandValue.trim().toLowerCase();
+    if (!word) return;
+    if (word === "coffee") {
       activateCoffeeMode();
       setCommandOpen(false);
       setCommandValue("");
+      setCommandFeedback("");
+      return;
     }
+    if (word === "ledger") {
+      setCommandOpen(false);
+      setCommandValue("");
+      setCommandFeedback("");
+      setVisible(true);
+      setLineCount(0);
+      launchLedgerConfetti();
+      pulseSecretGlow();
+      return;
+    }
+    if (word === "phosphor") {
+      pulseSecretGlow();
+      setCommandFeedback("The glow remembers you.");
+      setCommandValue("");
+      return;
+    }
+    if (word === "fortune") {
+      setCommandFeedback(getLedgerFortune());
+      setCommandValue("");
+      return;
+    }
+    setCommandFeedback("The ledger keeps its secrets. (Coffee helps. So do fortunes.)");
   };
 
   return (
@@ -120,10 +155,15 @@ export default function CardosoEasterEgg() {
             <input
               autoFocus
               value={commandValue}
-              onChange={(event) => setCommandValue(event.target.value)}
+              onChange={(event) => { setCommandValue(event.target.value); setCommandFeedback(""); }}
               placeholder="Type a quiet word"
               className="w-full border-0 border-b border-border bg-transparent py-2 font-mono text-sm uppercase tracking-[0.16em] text-foreground outline-none placeholder:text-muted-subtle focus:border-accent"
             />
+            {commandFeedback && (
+              <div className="mt-3 font-mono text-[11px] uppercase tracking-[0.18em] text-accent">
+                {commandFeedback}
+              </div>
+            )}
           </form>
         </div>
       )}
