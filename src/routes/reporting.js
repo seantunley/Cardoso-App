@@ -91,25 +91,34 @@ function isInvoiceBalanceMatch(record) {
   return Math.abs(balance - invoice) <= 0.1;
 }
 
-function parseBalanceDate(value) {
+// Exported for testing. Returns the invoice date at LOCAL midnight so the
+// day-diff against `today` (also local midnight, below) is consistent.
+// `new Date('YYYY-MM-DD')` parses as UTC midnight — on a UTC+2 host that makes a
+// same-day invoice compute as -1 days, drop out of getBalanceInvoiceAges, and
+// shifts every bucket boundary a day late (UI-2). new Date(y, m-1, d) builds at
+// local midnight directly.
+export function parseBalanceDate(value) {
   if (!value) return null;
   const input = String(value).trim();
   if (!input) return null;
 
   if (/^\d{8}$/.test(input)) {
-    return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+    return new Date(Number(input.slice(0, 4)), Number(input.slice(4, 6)) - 1, Number(input.slice(6, 8)));
   }
 
   const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) {
-    return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+    return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
   }
 
   const parsed = new Date(input);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())) return null;
+  // Normalise an arbitrary parsed value to local midnight of its local day.
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
 }
 
-function getBalanceInvoiceAges(record) {
+export function getBalanceInvoiceAges(record) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return [1, 2, 3, 4, 5]
