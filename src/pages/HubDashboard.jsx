@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
 import { toast } from "sonner";
 import { humanizeApiError } from "@/lib/humanizeApiError";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -839,6 +840,7 @@ const HubCustomerSearch = memo(function HubCustomerSearch({ sites }) {
 
 export default function HubDashboard() {
   const colorScheme = useColorScheme();
+  const confirm = useConfirm();
   const [kpis, setKpis] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
@@ -974,7 +976,12 @@ export default function HubDashboard() {
   };
 
   const forceResync = async () => {
-    if (!window.confirm('This will clear all synced data and do a full re-pull from all sites. Continue?')) return;
+    if (!(await confirm({
+      title: "Force full re-sync?",
+      description: "This will clear all synced data and do a full re-pull from all sites.",
+      confirmLabel: "Re-sync everything",
+      destructive: true,
+    }))) return;
     setSyncing(true);
     try {
       await fetch("/api/hub/force-resync", { method: "POST", credentials: "include" });

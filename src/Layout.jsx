@@ -368,6 +368,7 @@ import { useAppInfo, useHubMode } from "@/lib/useAppInfo";
 import { hasPermission } from "@/lib/permissions";
 import { toast } from "sonner";
 import { reportClientError } from "@/lib/clientLog";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 const ChangePasswordModal = lazy(() => import("@/components/users/ChangePasswordModal"));
 const SettingsPanel = lazy(() => import("@/components/settings/SettingsPanel"));
@@ -431,6 +432,7 @@ const navCollapsedGroupsKey = (userId) =>
 
 export default function Layout({ children, currentPageName }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   // Sidebar expanded by default (user request 2026-06-03). Operator
   // can still collapse via the header chevron; that state is local-
   // session only and intentionally not persisted, since the previous
@@ -957,7 +959,7 @@ export default function Layout({ children, currentPageName }) {
                   </DropdownMenuItem>
                   {versionStatus.updateAvailable && isAdmin && (
                     <DropdownMenuItem
-                      onClick={() => { if (!updateInstalling && window.confirm(`Install update v${versionStatus.latestVersion} now? The app will update and restart.`)) confirmUpdate(); }}
+                      onClick={async () => { if (!updateInstalling && (await confirm({ title: `Install update v${versionStatus.latestVersion} now?`, description: "The app will update and restart.", confirmLabel: "Install update" }))) confirmUpdate(); }}
                     >
                       <span className="text-[var(--phosphor)]">{updateInstalling ? "Installing update…" : `Install update v${versionStatus.latestVersion}`}</span>
                     </DropdownMenuItem>

@@ -16,6 +16,7 @@ import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import ProtectedRoute from "@/components/auth/ProtectedAuth";
 import CardosoEasterEgg from "@/components/easter/CardosoEasterEgg";
+import { ConfirmProvider } from "@/components/shared/ConfirmProvider";
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
 const MainPage = mainPageKey ? Pages[mainPageKey] : () => <></>;
@@ -184,12 +185,14 @@ function App() {
   return (
     <div className="min-h-screen bg-background text-foreground">
       <QueryClientProvider client={queryClientInstance}>
-        <Router>
-          <NavigationTracker />
-          <SessionExpiryWatcher />
-          <AuthenticatedApp />
-          <CardosoEasterEgg />
-        </Router>
+        <ConfirmProvider>
+          <Router>
+            <NavigationTracker />
+            <SessionExpiryWatcher />
+            <AuthenticatedApp />
+            <CardosoEasterEgg />
+          </Router>
+        </ConfirmProvider>
         <Toaster />
         <SonnerToaster richColors position="top-right" duration={5000} closeButton />
       </QueryClientProvider>
