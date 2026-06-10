@@ -9,7 +9,7 @@
 //
 // To track progress, edit the .md (check the boxes, add owner/notes). Re-run
 // this script only when you want a refreshed PDF from the encoded findings.
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { jsPDF } from 'jspdf';
 
@@ -228,9 +228,29 @@ const SECTIONS = [
 ];
 
 // ---------------------------------------------------------------------------
+// Preserve human-edited state (checkbox + the Status/Owner/Notes line) from an
+// existing .md, so re-running to refresh the PDF never discards progress.
+// ---------------------------------------------------------------------------
+function parseExistingStatus(md) {
+  const map = {};
+  if (!md) return map;
+  let ref = null;
+  for (const line of md.split(/\r?\n/)) {
+    const head = line.match(/^- \[([ xX])\]\s+\*\*([A-Z]+-\d+)\*\*/);
+    if (head) { ref = head[2]; map[ref] = { checked: head[1].toLowerCase() === 'x', status: null }; continue; }
+    if (ref) {
+      const st = line.match(/^\s*- \*\*Status:\*\*\s+(.+)$/);
+      if (st) { map[ref].status = st[1].trim(); ref = null; }
+    }
+  }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
 // Markdown (the actionable backlog)
 // ---------------------------------------------------------------------------
-function toMarkdown() {
+const DEFAULT_STATUS = 'Open · Owner: _—_ · Notes: _—_';
+function toMarkdown(preserved = {}) {
   const L = [];
   L.push(`# ${META.title}`);
   L.push('');
@@ -250,11 +270,12 @@ function toMarkdown() {
     L.push(`## ${s.id}`);
     L.push('');
     for (const it of s.items) {
-      L.push(`- [ ] **${it.ref}** \`${it.sev}\` — **${it.title}**`);
+      const p = preserved[it.ref];
+      L.push(`- [${p?.checked ? 'x' : ' '}] **${it.ref}** \`${it.sev}\` — **${it.title}**`);
       L.push(`  - **Where:** \`${it.loc}\``);
       L.push(`  - **What:** ${it.detail}`);
       L.push(`  - **Fix:** ${it.fix}`);
-      L.push(`  - **Status:** Open · Owner: _—_ · Notes: _—_`);
+      L.push(`  - **Status:** ${p?.status || DEFAULT_STATUS}`);
       L.push('');
     }
   }
@@ -266,7 +287,7 @@ function toMarkdown() {
 // ---------------------------------------------------------------------------
 const sevColor = { P0: [185, 28, 28], P1: [194, 65, 12], P2: [161, 98, 7], P3: [55, 65, 81] };
 
-function toPdf() {
+function toPdf(preserved = {}) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
@@ -309,11 +330,14 @@ function toPdf() {
     for (const it of s.items) {
       ensure(60);
       // ref + severity chip + title
-      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(...(sevColor[it.sev] || [0, 0, 0]));
-      doc.text(`${it.ref}  [${it.sev}]`, M, y);
-      doc.setTextColor(17, 24, 39);
-      const titleLines = doc.splitTextToSize(it.title, CW - 96);
-      doc.text(titleLines, M + 96, y);
+      const done = preserved[it.ref]?.checked;
+      doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+      doc.setTextColor(...(done ? [22, 101, 52] : (sevColor[it.sev] || [0, 0, 0])));
+      doc.text(`${done ? 'DONE ' : ''}${it.ref}  [${it.sev}]`, M, y);
+      const tIndent = done ? 132 : 96;
+      doc.setTextColor(...(done ? [156, 163, 175] : [17, 24, 39]));
+      const titleLines = doc.splitTextToSize(it.title, CW - tIndent);
+      doc.text(titleLines, M + tIndent, y);
       y += titleLines.length * 13 + 2;
       text(`Where: ${it.loc}`, { size: 8.5, style: 'italic', color: [107, 114, 128], indent: 10, gap: 2 });
       text(`What: ${it.detail}`, { size: 9.2, color: [31, 41, 55], indent: 10, gap: 2 });
@@ -337,7 +361,26 @@ const outDir = path.join(process.cwd(), 'docs', 'review');
 mkdirSync(outDir, { recursive: true });
 const mdPath = path.join(outDir, `${META.slug}.md`);
 const pdfPath = path.join(outDir, `${META.slug}.pdf`);
-writeFileSync(mdPath, toMarkdown(), 'utf8');
-writeFileSync(pdfPath, Buffer.from(toPdf().output('arraybuffer')));
-console.log('Wrote:', path.relative(process.cwd(), mdPath));
+
+// Read any existing tracker first so re-running preserves checked boxes + the
+// Status/Owner/Notes line. Without this, refreshing the PDF would silently
+// reset every item to Open and discard progress notes.
+let existingMd = null;
+try { existingMd = readFileSync(mdPath, 'utf8'); } catch { /* first run */ }
+const preserved = parseExistingStatus(existingMd);
+
+// Don't drop progress silently: warn if the tracker has work recorded against a
+// ref that's no longer in this report (it won't be re-emitted).
+const known = new Set(SECTIONS.flatMap((s) => s.items.map((i) => i.ref)));
+for (const [ref, p] of Object.entries(preserved)) {
+  const hasProgress = p.checked || (p.status && p.status !== DEFAULT_STATUS);
+  if (hasProgress && !known.has(ref)) {
+    console.warn(`WARNING: ${ref} had progress in the tracker but is no longer in this report — its note is being dropped.`);
+  }
+}
+
+writeFileSync(mdPath, toMarkdown(preserved), 'utf8');
+writeFileSync(pdfPath, Buffer.from(toPdf(preserved).output('arraybuffer')));
+const doneCount = Object.values(preserved).filter((p) => p.checked).length;
+console.log('Wrote:', path.relative(process.cwd(), mdPath), doneCount ? `(preserved ${doneCount} checked item(s))` : '');
 console.log('Wrote:', path.relative(process.cwd(), pdfPath));
