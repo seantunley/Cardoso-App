@@ -219,14 +219,17 @@ export default function Login() {
         />
         {/* Live phosphor telemetry — drifting glowing traces (pure decoration;
             static under prefers-reduced-motion, paused when the tab is hidden) */}
+        {/* Full-height ambient layer. The quote card and footer sit IN FRONT
+            of it on their own solid blurred backdrops (z-10 + bg-card/85),
+            so the visualisation can live at the bottom without swallowing
+            the content. */}
         <PhosphorTraces />
-        {/* Hairline grid */}
+        {/* Soft dot matrix — replaces the old square hairline grid */}
         <div
-          className="absolute inset-0 pointer-events-none opacity-[0.04]"
+          className="absolute inset-0 pointer-events-none opacity-[0.06]"
           style={{
-            backgroundImage:
-              "linear-gradient(to right, hsl(var(--foreground)) 1px, transparent 1px), linear-gradient(to bottom, hsl(var(--foreground)) 1px, transparent 1px)",
-            backgroundSize: "48px 48px",
+            backgroundImage: "radial-gradient(hsl(var(--foreground)) 1px, transparent 1.5px)",
+            backgroundSize: "26px 26px",
           }}
         />
 
@@ -259,7 +262,7 @@ export default function Login() {
 
         {/* Bottom meta */}
         <div className="relative z-10 space-y-8">
-          <div className="max-w-md border-l border-accent/60 pl-4">
+          <div className="max-w-md rounded-2xl border border-accent/25 bg-card/85 backdrop-blur-md p-5">
             <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent mb-3">
               Quote of the day
             </div>
@@ -299,7 +302,10 @@ export default function Login() {
           />
         </div>
 
-        <div className="max-w-sm w-full">
+        <div
+          className="max-w-sm w-full rounded-3xl border border-border/70 bg-card/60 backdrop-blur-sm p-8 lg:p-9"
+          style={{ boxShadow: "0 0 60px hsla(33, 95%, 55%, 0.07), 0 18px 40px rgba(0,0,0,0.25)" }}
+        >
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
             Sign in
           </div>
@@ -310,7 +316,7 @@ export default function Login() {
             Identify yourself.
           </h2>
 
-          <div className="lg:hidden mb-8 border-l border-accent/60 pl-4">
+          <div className="lg:hidden mb-8 rounded-2xl border border-accent/25 bg-card/40 p-5">
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent mb-2">
               Quote of the day
             </div>
@@ -330,7 +336,7 @@ export default function Login() {
                 autoComplete="username"
                 value={formData.email}
                 onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-                className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-subtle"
+                className="w-full rounded-2xl border border-border bg-background/60 focus:border-accent focus:ring-2 focus:ring-accent/25 text-foreground px-4 py-3 text-base font-mono tracking-wide outline-none transition-all placeholder:text-muted-subtle"
                 placeholder={`e.g. ${usernameExample}`}
                 required
               />
@@ -346,14 +352,14 @@ export default function Login() {
                   autoComplete="current-password"
                   value={formData.password}
                   onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                  className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 pr-10 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-subtle"
+                  className="w-full rounded-2xl border border-border bg-background/60 focus:border-accent focus:ring-2 focus:ring-accent/25 text-foreground px-4 py-3 pr-12 text-base font-mono tracking-wide outline-none transition-all placeholder:text-muted-subtle"
                   placeholder="••••••••"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(v => !v)}
-                  className="absolute right-0 top-1/2 -translate-y-1/2 p-2 text-muted-foreground hover:text-accent transition-colors"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 rounded-full text-muted-foreground hover:text-accent hover:bg-accent/10 transition-colors"
                   aria-label="Toggle password visibility"
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -362,7 +368,7 @@ export default function Login() {
             </div>
 
             {displayError && (
-              <div className="flex items-start gap-3 border-l-2 border-destructive pl-3 py-2">
+              <div className="flex items-start gap-3 rounded-2xl border border-destructive/40 bg-destructive/10 px-4 py-3">
                 <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-destructive mt-0.5">Err</span>
                 <span className="text-sm text-foreground">{displayError}</span>
               </div>
@@ -371,7 +377,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={isSubmitting}
-              className="group w-full flex items-center justify-between border border-foreground bg-transparent hover:bg-[hsla(33,95%,55%,0.18)] hover:border-[var(--phosphor)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)] disabled:opacity-50 disabled:cursor-not-allowed px-5 py-4 transition-all duration-200 mt-4"
+              className="group w-full flex items-center justify-between rounded-full border border-accent/60 bg-accent/10 hover:bg-[hsla(33,95%,55%,0.22)] hover:border-[var(--phosphor)] hover:shadow-[0_0_18px_hsla(33,95%,55%,0.4)] disabled:opacity-50 disabled:cursor-not-allowed px-7 py-4 transition-all duration-200 mt-4"
             >
               <span className="font-mono text-xs uppercase tracking-[0.25em] font-medium">
                 {isSubmitting ? "Authenticating" : "Authenticate"}
