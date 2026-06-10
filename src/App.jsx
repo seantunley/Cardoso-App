@@ -87,7 +87,21 @@ const ProtectedLayoutRoute = ({ hubMode }) => {
   return (
     <ProtectedPage>
       <LayoutWrapper currentPageName={currentPageName}>
-        <Outlet />
+        {/* Suspense INSIDE the layout: navigating to a lazy page whose chunk
+            isn't loaded yet swaps only the content pane for a spinner. With
+            the boundary only outside the route tree (the previous setup), the
+            ENTIRE shell — sidebar included — unmounted to a full-screen
+            fallback on every first visit to a page, which read as the app
+            blanking out between clicks. */}
+        <Suspense
+          fallback={
+            <div className="flex min-h-[60vh] items-center justify-center">
+              <div className="h-7 w-7 animate-spin rounded-full border-[3px] border-border border-t-[var(--phosphor)]" />
+            </div>
+          }
+        >
+          <Outlet />
+        </Suspense>
       </LayoutWrapper>
     </ProtectedPage>
   );
