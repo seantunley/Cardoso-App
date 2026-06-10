@@ -63,13 +63,21 @@ export default function CollapsibleFilterBar({
             <span
               key={chip.key}
               role="button"
+              tabIndex={0}
               title="Remove this filter"
               onClick={(e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 chip.onClear?.();
               }}
-              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-400 text-[11px] font-medium px-2 py-0.5 hover:bg-amber-500/25 cursor-pointer"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  chip.onClear?.();
+                }
+              }}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 text-amber-400 text-[11px] font-medium px-2 py-0.5 hover:bg-amber-500/25 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-amber-400"
             >
               {chip.label}
               <span aria-hidden="true" className="opacity-60">×</span>

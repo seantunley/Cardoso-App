@@ -82,6 +82,7 @@ export default function AutoFlagRuleForm({ rule, onSave, onDelete, isSaving, isA
               )}
             </button>
             {isAdmin && (
+              // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- stopPropagation only (keeps the toggle from triggering the parent expand button); the checkbox inside is the real control
               <label
                 className="flex items-center gap-1.5 cursor-pointer shrink-0 select-none"
                 onClick={e => e.stopPropagation()}

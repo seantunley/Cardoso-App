@@ -426,10 +426,8 @@ function LabelWithTip({ tooltip, className, children }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className={`${className} cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-[3px]`}
-          tabIndex={0}
-        >
+        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- tooltip trigger must be keyboard-focusable so the tooltip opens on focus (Radix shows on focus); that IS the accessible behavior */}
+        <span className={`${className} cursor-help underline decoration-dotted decoration-muted-foreground/40 underline-offset-[3px]`} tabIndex={0}>
           {children}
         </span>
       </TooltipTrigger>
