@@ -7,12 +7,7 @@ import { toast } from "sonner";
 import { humanizeApiError } from "@/lib/humanizeApiError";
 import CustomerLookup from "../components/customer/CustomerLookup";
 import FlaggedCustomersModal from "../components/customer/FlaggedCustomersModal";
-
-function parseAmount(val) {
-  if (val == null || val === "") return 0;
-  const n = parseFloat(String(val).replace(/[^0-9.\-]/g, ""));
-  return isNaN(n) ? 0 : n;
-}
+import { parseAmount } from "@/lib/format";
 
 function fmtR(v) {
   return Math.abs(parseAmount(v)).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -37,7 +32,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
   }, [open]);
 
   const search = async () => {
-    const v = parseFloat(String(amount).replace(/[^0-9.\-]/g, ""));
+    const v = parseAmount(amount);
     if (!Number.isFinite(v) || v <= 0) { setError("Enter a valid rand amount"); return; }
     setSearching(true); setError(null); setResults(null);
     setSageResults(null); setSageError(null); // reset sage when local re-searches
@@ -54,7 +49,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
   };
 
   const searchSage = async () => {
-    const v = parseFloat(String(amount).replace(/[^0-9.\-]/g, ""));
+    const v = parseAmount(amount);
     if (!Number.isFinite(v) || v <= 0) return;
     setSageSearching(true); setSageError(null); setSageResults(null);
     try {
