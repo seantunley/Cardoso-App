@@ -109,9 +109,9 @@ export default function PhosphorTraces({ className = "", style }) {
 
     // ── Mode: traces ────────────────────────────────────────────────────────
     const TRACES = [
-      { y: 0.55, amp: 0.055, k: 1, alpha: 0.5, width: 1.6 },
-      { y: 0.38, amp: 0.085, k: 2, alpha: 0.22, width: 1.2 },
-      { y: 0.22, amp: 0.060, k: 3, alpha: 0.12, width: 1.0 },
+      { y: 0.78, amp: 0.055, k: 1, alpha: 0.5, width: 1.6 },
+      { y: 0.52, amp: 0.085, k: 2, alpha: 0.22, width: 1.2 },
+      { y: 0.30, amp: 0.060, k: 3, alpha: 0.12, width: 1.0 },
     ];
     const STEP = 6;
     const drawTraces = (t) => {
@@ -202,7 +202,7 @@ export default function PhosphorTraces({ className = "", style }) {
     const drawBars = (t) => {
       const gap = w / BAR_COUNT;
       const bw = Math.max(3, gap * 0.42);
-      const baseline = h * 0.58; // upper-mid zone — the panel mask fades the lower third
+      const baseline = h * 0.86; // bottom of the panel — the quote card sits solidly in front
       for (let i = 0; i < BAR_COUNT; i += 1) {
         const x = gap * (i + 0.5);
         const n = (noise(i * 0.37, t * 0.55, 5) + 1) / 2; // 0..1

@@ -219,15 +219,11 @@ export default function Login() {
         />
         {/* Live phosphor telemetry — drifting glowing traces (pure decoration;
             static under prefers-reduced-motion, paused when the tab is hidden) */}
-        {/* Confined to the upper two-thirds: the mask fades the canvas out
-            before the quote card / footer zone so content never competes
-            with the visualisation. */}
-        <PhosphorTraces
-          style={{
-            maskImage: "linear-gradient(to bottom, black 0%, black 52%, rgba(0,0,0,0.25) 72%, transparent 88%)",
-            WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 52%, rgba(0,0,0,0.25) 72%, transparent 88%)",
-          }}
-        />
+        {/* Full-height ambient layer. The quote card and footer sit IN FRONT
+            of it on their own solid blurred backdrops (z-10 + bg-card/85),
+            so the visualisation can live at the bottom without swallowing
+            the content. */}
+        <PhosphorTraces />
         {/* Soft dot matrix — replaces the old square hairline grid */}
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.06]"
