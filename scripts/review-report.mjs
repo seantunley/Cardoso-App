@@ -10,6 +10,7 @@
 // To track progress, edit the .md (check the boxes, add owner/notes). Re-run
 // this script only when you want a refreshed PDF from the encoded findings.
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { jsPDF } from 'jspdf';
 
@@ -289,6 +290,11 @@ const sevColor = { P0: [185, 28, 28], P1: [194, 65, 12], P2: [161, 98, 7], P3: [
 
 function toPdf(preserved = {}) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+  // Deterministic PDF metadata so a content-unchanged regenerate produces NO
+  // binary diff. jsPDF otherwise stamps a fresh /CreationDate and /ID on every
+  // output(), which would make routine tracker refreshes churn the committed PDF.
+  doc.setCreationDate(new Date(`${META.slug.slice(0, 10)}T00:00:00Z`));
+  doc.setFileId(createHash('md5').update(META.slug).digest('hex').toUpperCase());
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
   const M = 48;
