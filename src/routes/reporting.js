@@ -3,6 +3,7 @@ import os from 'os';
 import fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { safeTokenEqual } from '../lib/safeEqual.js';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
@@ -182,7 +183,7 @@ function requireReportingToken(req, res, next) {
   if (!token) {
     return res.status(503).json({ error: 'Reporting API not configured' });
   }
-  if (req.headers['x-reporting-token'] !== token) {
+  if (!safeTokenEqual(req.headers['x-reporting-token'], token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
