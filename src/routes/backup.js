@@ -20,6 +20,7 @@ import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
+import { getBackupConfigExportMode } from '../lib/backupConfig.js';
 import { reportingRateLimiter, backupHeavyRateLimiter } from '../middleware/rateLimit.js';
 
 const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBackupAndFTP\\Db\\routines.db';
@@ -114,17 +115,6 @@ function createSqlBackupUnavailableResponse(message) {
     lastJob: null,
     databases: [],
   };
-}
-
-export function getBackupConfigExportMode() {
-  const raw = String(process.env.BACKUP_CONFIG_EXPORT_MODE || '').trim().toLowerCase();
-  if (['disabled', 'redacted', 'full'].includes(raw)) return raw;
-  // Default to REDACTED everywhere. Returning the full unredacted .env
-  // (SESSION_SECRET, ENCRYPTION_KEY) whenever NODE_ENV !== 'production' was a
-  // footgun — a service started without NODE_ENV set would expose secrets over
-  // the reporting-token-gated endpoint. Full/disabled now require an explicit
-  // BACKUP_CONFIG_EXPORT_MODE opt-in (SEC-3).
-  return 'redacted';
 }
 
 // Redact sensitive content from a .env file before exposing it. The original

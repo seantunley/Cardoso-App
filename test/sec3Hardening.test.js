@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { safeTokenEqual } from '../src/lib/safeEqual.js';
-import { getBackupConfigExportMode } from '../src/routes/backup.js';
+import { getBackupConfigExportMode } from '../src/lib/backupConfig.js';
 
 describe('safeTokenEqual (SEC-3 — constant-time token compare)', () => {
   it('true for identical tokens', () => {
