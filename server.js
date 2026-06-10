@@ -271,6 +271,16 @@ app.use(createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requirePermi
 // next(err), errors thrown from upstream middleware. Explicit per-route
 // logError() calls still take precedence — those get richer context. This
 // just ensures *nothing* falls into the void.
+// Any /api request that no route matched is a 404 — answer with JSON and never
+// let it fall through to the SPA catch-all below, which only responds for
+// non-/api paths and would otherwise leave the socket hanging until the client
+// times out (CRIT-3). app.use (not app.get) so unmatched POST/PUT/DELETE under
+// /api also get a clean 404 instead of Express's default HTML page. Mounted
+// after all /api routers, before the error handler.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: `No such endpoint: ${req.method} ${req.path}` });
+});
+
 app.use((err, req, res, next) => {
   try {
     logError('http.unhandled', err, {
@@ -286,11 +296,13 @@ app.use((err, req, res, next) => {
 
 if (IS_PRODUCTION) {
   // Express 5 (path-to-regexp v8) no longer accepts bare '*' wildcards;
-  // catch-all routes must use the named-splat syntax. This serves the SPA's
-  // index.html for any client-side route while letting unmatched /api/*
-  // requests fall through to the JSON 404 handler.
+  // catch-all routes must use the named-splat syntax. Serves the SPA's
+  // index.html for any client-side route. /api paths are already handled by the
+  // JSON 404 above and can't reach here — but guard anyway so a stray /api GET
+  // is never answered with index.html and a 200.
   app.get('/{*splat}', (req, res) => {
-    if (!req.path.startsWith('/api')) res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
+    if (req.path.startsWith('/api')) return res.status(404).json({ error: 'Not found' });
+    res.sendFile(path.join(process.cwd(), 'dist', 'index.html'));
   });
 }
 
