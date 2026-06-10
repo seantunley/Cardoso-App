@@ -643,6 +643,80 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     }
   });
 
+  // Orphan extractions = bat_invoice_extractions rows whose order_number is NOT in
+  // this recon's CURRENT bat_overview_orders (the integrity I5 failure). The
+  // Overview re-upload clean-slates bat_overview_orders but never the extractions,
+  // so re-uploading can't clear stale rows. CAUTION: on a multi-branch recon
+  // (e.g. Welkom + JHB in the same week) the latest upload replaces
+  // bat_overview_orders while the OTHER branch's extraction rows are intentionally
+  // retained — and those legitimately show as orphans here, in ANY OCR status
+  // (a freshly-uploaded second-branch POD may still be pending/not_found/failed,
+  // awaiting retry). No field on the row distinguishes "stale" from "valid other
+  // branch", so we DON'T guess: the admin reviews the list and ticks exactly which
+  // rows to delete. This GET feeds that picker.
+  const orphanExtractionsSql = `
+    SELECT e.id, e.order_number, e.order_amount, e.pdf_url, e.extraction_status
+    FROM bat_invoice_extractions e
+    WHERE e.reconciliation_id = ?
+      AND e.order_number IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM bat_overview_orders o
+        WHERE o.reconciliation_id = e.reconciliation_id AND o.order_number = e.order_number
+      )`;
+
+  router.get('/api/bat/reconciliation/:id/orphan-extractions', ...gate, requireAdmin, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    try {
+      const orphans = db.prepare(`${orphanExtractionsSql} ORDER BY e.order_number`).all(id);
+      res.json({ orphans });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete ONLY the operator-selected ids, after re-validating each is a genuine
+  // orphan for THIS recon — so a stale/hand-crafted request can never delete a
+  // matched row or a row from another recon. Admin-only + audited.
+  router.post('/api/bat/reconciliation/:id/prune-orphan-extractions', ...gate, requireAdmin, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    const requestedIds = Array.isArray(req.body?.ids)
+      ? [...new Set(req.body.ids.map((x) => parseInt(x, 10)).filter((n) => Number.isInteger(n) && n > 0))]
+      : null;
+    if (!requestedIds || requestedIds.length === 0) {
+      return res.status(400).json({ error: 'No extraction ids supplied to prune.' });
+    }
+    try {
+      const orphanIds = new Set(db.prepare(orphanExtractionsSql).all(id).map((r) => r.id));
+      const toDelete = requestedIds.filter((x) => orphanIds.has(x));
+      const refused = requestedIds.filter((x) => !orphanIds.has(x));
+
+      if (toDelete.length === 0) {
+        return res.status(400).json({
+          error: 'None of the selected rows are orphan extractions for this reconciliation (they may have been re-matched or already removed).',
+          refused,
+        });
+      }
+
+      const placeholders = toDelete.map(() => '?').join(',');
+      const rows = db.prepare(
+        `SELECT id, order_number, order_amount, extraction_status FROM bat_invoice_extractions WHERE id IN (${placeholders})`
+      ).all(...toDelete);
+      const info = db.prepare(`DELETE FROM bat_invoice_extractions WHERE id IN (${placeholders})`).run(...toDelete);
+
+      logAudit({
+        req, action: 'bat_prune_orphan_extractions', resourceType: 'system',
+        resourceId: id, resourceName: `Reconciliation ${id}`,
+        details: `Operator-selected prune of ${info.changes} orphan extraction(s): ${rows.map((o) => `${o.order_number}#${o.id} [${o.extraction_status || 'no-status'}]`).join('; ')}.${refused.length ? ` Refused ${refused.length} non-orphan id(s): ${refused.join(', ')}.` : ''}`,
+      });
+
+      res.json({ ok: true, pruned: info.changes, deleted: rows, refused });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/bat/reconciliations', ...gate, (req, res) => {
     const t0 = Date.now();
     const reconciliations = listReconciliations();
