@@ -675,7 +675,16 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     try {
       const positiveWhere = "outstanding_balance IS NOT NULL AND outstanding_balance != '' AND outstanding_balance != '0' AND outstanding_balance_num > 0";
       if (process.env.HUB_MODE === 'true') {
-        const r = prep(`SELECT COUNT(*) n, COALESCE(SUM(outstanding_balance_num), 0) total FROM hub_records WHERE ${positiveWhere}`).get();
+        // Honour the dashboard's ?site= branch filter, same as every other hub
+        // tile (and /api/kpis). Without this the Aged Debtors tile was the one
+        // card that ignored the branch selector and always showed all-branch
+        // totals. COALESCE(hs.name, r.site_id) matches the selector's values.
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, r.site_id) = ?' : '';
+        const params = siteFilter !== 'all' ? [siteFilter] : [];
+        const r = prep(`SELECT COUNT(*) n, COALESCE(SUM(r.outstanding_balance_num), 0) total
+          FROM hub_records r LEFT JOIN hub_sites hs ON hs.id = r.site_id
+          WHERE ${positiveWhere} ${siteWhere}`).get(...params);
         return res.json({ total_outstanding: r.total, total_customers: r.n, buckets: null });
       }
       const r = prep(`
