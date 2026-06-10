@@ -582,18 +582,21 @@ async function syncSite(site) {
         if (!nextArPromise) break;
       }
       const upsertAr = db.prepare(`
-        INSERT INTO hub_debtor_ar_invoice (site_id, customer_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        INSERT INTO hub_debtor_ar_invoice (site_id, customer_code, reporting_account, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
         ON CONFLICT(site_id, customer_code, document_number) DO UPDATE SET
-          document_type=excluded.document_type, document_date=excluded.document_date,
-          due_date=excluded.due_date, original_amount=excluded.original_amount,
-          outstanding_amount=excluded.outstanding_amount, reference=excluded.reference,
-          synced_at=excluded.synced_at
+          reporting_account=excluded.reporting_account, document_type=excluded.document_type,
+          document_date=excluded.document_date, due_date=excluded.due_date,
+          original_amount=excluded.original_amount, outstanding_amount=excluded.outstanding_amount,
+          reference=excluded.reference, synced_at=excluded.synced_at
       `);
       db.transaction(() => {
         db.prepare('DELETE FROM hub_debtor_ar_invoice WHERE site_id = ?').run(site.id);
         for (const r of allArRecords) {
-          upsertAr.run(site.id, r.customer_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
+          // reporting_account rolls national-account children up to the parent on
+          // the hub (buildAgedDebtorsReport joins/aggregates by it); falls back to
+          // the child code, matching debtorSync + the v093 backfill.
+          upsertAr.run(site.id, r.customer_code, r.reporting_account || r.customer_code || null, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
         }
       })();
     } catch (arErr) {
