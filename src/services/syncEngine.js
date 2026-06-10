@@ -107,6 +107,10 @@ const _SYNC_SQL = {
       updated_date=excluded.updated_date
   `,
   syncUpdateRecordFlag: `UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`,
+  // Bumps only updated_date — used when an auto-flag change lands on a row whose
+  // main data UPDATE was skipped as a no-op, so the hub's incremental pull
+  // (updated_date > since) still sees the flag change (SYNC-2 follow-up).
+  syncTouchUpdatedDate: `UPDATE datarecord SET updated_date = ? WHERE id = ?`,
   findFlagSnapshot: `
     SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
     FROM flag_snapshots WHERE customer_number = ? LIMIT 1
@@ -128,6 +132,39 @@ function acquireSyncLock(connectionId) {
 
 function releaseSyncLock(connectionId) {
   activeSyncs.delete(String(connectionId));
+}
+
+/**
+ * True when re-running the per-record UPDATE for an existing datarecord would
+ * change none of the columns it controls — i.e. the only effect of the write
+ * would be to bump synced_at / updated_date. `upd` is the object of new column
+ * values the sync loop computed; compared against the stored row as strings
+ * (null/undefined → '') because datarecord columns are TEXT and `upd` is already
+ * coerced. Skipping these no-op writes is SYNC-2: it stops every tick from
+ * bumping updated_date on every row, which made the hub re-pull the whole set.
+ * Exported for unit testing.
+ */
+export function isNoOpDataUpdate(existing, upd) {
+  for (const k of Object.keys(upd)) {
+    if (String(existing[k] ?? '') !== String(upd[k] ?? '')) return false;
+  }
+  return true;
+}
+
+/**
+ * True when applying `autoFlag` to `existing` would actually change the row's
+ * flag (colour, reason, or the auto_flagged bit) — `autoFlag` null means "no
+ * rule matches", which is a change only if the row was previously auto-flagged.
+ * Used to decide whether a flag write on a no-op-skipped row needs an
+ * updated_date bump so the hub picks it up. Exported for unit testing.
+ */
+export function autoFlagWouldChange(existing, autoFlag) {
+  if (autoFlag) {
+    return String(existing.flag_color ?? '') !== String(autoFlag.flag_color ?? '')
+      || String(existing.flag_reason ?? '') !== String(autoFlag.flag_reason ?? '')
+      || !existing.auto_flagged;
+  }
+  return !!existing.auto_flagged;
 }
 
 async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
@@ -266,7 +303,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         const uniqueIds = [...new Set(incomingIds)];
         const placeholders = uniqueIds.map(() => '?').join(',');
         const keyedRows = db.prepare(`
-          SELECT id, source_id, source_table, customer_number, customer_name,
+          SELECT id, created_by, source_id, source_table, customer_number, customer_name,
                  age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                  note, local_fields, flag_color, flag_reason, flag_created_by, data,
                  outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
@@ -294,6 +331,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       // because syncEngine.js is imported before initSchema runs in
       // server.js, so eager prepares boot-fail on pre-v41 upgrades.
       const updateRecordFlag = getSyncStmt('syncUpdateRecordFlag');
+      const touchUpdatedDate = getSyncStmt('syncTouchUpdatedDate');
       const findFlagSnapshot = getSyncStmt('findFlagSnapshot');
       const restoreFlag = getSyncStmt('restoreFlagSnapshot');
       const deleteFlagSnapshot = getSyncStmt('deleteFlagSnapshot');
@@ -301,6 +339,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       let diagLogged = false;
       let syncUpdated = 0;
       let syncInserted = 0;
+      let syncSkipped = 0; // existing rows whose data was unchanged (SYNC-2 no-op skip)
       const seenSourceIds = new Set();
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
@@ -356,7 +395,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
 
           if (existing) {
-            syncUpdated++;
             const keepExistingIfIncomingBlank = (incomingValue, existingValue) => {
               if (incomingValue !== undefined && incomingValue !== null && String(incomingValue).trim() !== '') {
                 return String(incomingValue);
@@ -364,36 +402,53 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               return String(existingValue ?? '');
             };
 
-            updateExistingRecord.run(
-              baseRecordData.created_by,
-              String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
-              String(baseRecordData.customer_name ?? existing.customer_name ?? ''),
-              String(baseRecordData.age_analysis ?? existing.age_analysis ?? ''),
-              String(baseRecordData.age_current ?? existing.age_current ?? ''),
-              String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
-              String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
-              String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
-              String(baseRecordData.outstanding_balance ?? existing.outstanding_balance ?? ''),
-              baseRecordData.source_id,
-              baseRecordData.source_table,
-              baseRecordData.data,
-              String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
-              baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
-              baseRecordData.receipts ?? existing.receipts ?? '[]',
-              String(baseRecordData.terms ?? existing.terms ?? ''),
-              keepExistingIfIncomingBlank(baseRecordData.sales_rep, existing.sales_rep),
-              keepExistingIfIncomingBlank(baseRecordData.account_type, existing.account_type),
-              existing.flag_color,
-              existing.flag_reason,
-              existing.flag_created_by,
-              String(baseRecordData.note ?? existing.note ?? ''),
-              baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? null,
-              baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? null,
-              baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? null,
-              baseRecordData.synced_at,
-              syncTimestamp,
-              existing.id
-            );
+            // Every column the UPDATE controls (flag_* are re-written as the
+            // existing values, so they never differ and aren't compared).
+            const upd = {
+              created_by:          baseRecordData.created_by,
+              customer_number:     String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
+              customer_name:       String(baseRecordData.customer_name ?? existing.customer_name ?? ''),
+              age_analysis:        String(baseRecordData.age_analysis ?? existing.age_analysis ?? ''),
+              age_current:         String(baseRecordData.age_current ?? existing.age_current ?? ''),
+              age_7_days:          String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
+              age_14_days:         String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
+              age_21_days:         String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
+              outstanding_balance: String(baseRecordData.outstanding_balance ?? existing.outstanding_balance ?? ''),
+              source_id:           baseRecordData.source_id,
+              source_table:        baseRecordData.source_table,
+              data:                baseRecordData.data,
+              local_fields:        String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
+              unpaid_invoices:     baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
+              receipts:            baseRecordData.receipts ?? existing.receipts ?? '[]',
+              terms:               String(baseRecordData.terms ?? existing.terms ?? ''),
+              sales_rep:           keepExistingIfIncomingBlank(baseRecordData.sales_rep, existing.sales_rep),
+              account_type:        keepExistingIfIncomingBlank(baseRecordData.account_type, existing.account_type),
+              note:                String(baseRecordData.note ?? existing.note ?? ''),
+              custom_field_1:      baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? null,
+              custom_field_2:      baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? null,
+              custom_field_3:      baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? null,
+            };
+
+            // SYNC-2: when nothing the UPDATE controls actually changed, skip the
+            // write. Otherwise every 30-min tick re-UPDATEs every unchanged row,
+            // bumping updated_date — which makes the hub re-download the ENTIRE
+            // record set on its next incremental pull (it filters on updated_date).
+            const noOp = isNoOpDataUpdate(existing, upd);
+            if (noOp) {
+              syncSkipped++;
+            } else {
+              syncUpdated++;
+              updateExistingRecord.run(
+                upd.created_by, upd.customer_number, upd.customer_name, upd.age_analysis,
+                upd.age_current, upd.age_7_days, upd.age_14_days, upd.age_21_days,
+                upd.outstanding_balance, upd.source_id, upd.source_table, upd.data,
+                upd.local_fields, upd.unpaid_invoices, upd.receipts, upd.terms,
+                upd.sales_rep, upd.account_type,
+                existing.flag_color, existing.flag_reason, existing.flag_created_by,
+                upd.note, upd.custom_field_1, upd.custom_field_2, upd.custom_field_3,
+                baseRecordData.synced_at, syncTimestamp, existing.id
+              );
+            }
              // Apply auto-flag rules only if the record was NOT manually flagged by a user
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
@@ -406,6 +461,14 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                } else if (existing.auto_flagged) {
                  // Rule no longer matches — clear the auto-flag
                  updateRecordFlag.run(null, null, 0, existing.id);
+               }
+               // updateRecordFlag writes only flag_*/auto_flagged, NOT updated_date.
+               // When the main data UPDATE above was skipped as a no-op but the
+               // auto-flag just CHANGED the flag (e.g. a rule was added/edited on
+               // an otherwise-unchanged row), bump updated_date so the hub's
+               // incremental pull (updated_date > since) still picks up the change.
+               if (noOp && autoFlagWouldChange(existing, autoFlag)) {
+                 touchUpdatedDate.run(syncTimestamp, existing.id);
                }
              }
           } else {
@@ -490,7 +553,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       });
 
       writeRowsTransaction(rows);
-      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${rows.length - seenSourceIds.size} duplicate rows skipped`);
+      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${syncSkipped} unchanged (no-op), ${rows.length - seenSourceIds.size} duplicate rows skipped`);
     };
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
