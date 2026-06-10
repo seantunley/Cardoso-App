@@ -202,7 +202,11 @@ export function createAuthRouter({ db, stmts, getUserById, requireAuth, requireA
 
     try {
       const hash = await bcrypt.hash(password, 12);
-      stmts.updateUserPassword.run(hash, userId);
+      // Set the password AND clear the force-reset flag atomically. Without
+      // clearing must_change_password, login (the must_change_password check
+      // above) re-triggers this first-time-password screen on every sign-in and
+      // silently rotates the user's password each time (CRIT-2).
+      db.prepare('UPDATE "user" SET password_hash = ?, must_change_password = 0 WHERE id = ?').run(hash, userId);
 
       // Upgrade session to full login
       const user = db.prepare(`SELECT * FROM "user" WHERE id = ?`).get(userId);

@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
 // Icons
-import { RefreshCw, AlertCircle, CheckCircle2, Clock } from "lucide-react";
+import { RefreshCw, AlertCircle, AlertTriangle, CheckCircle2, Clock } from "lucide-react";
 
 // ─── Sync Log Tab ────────────────────────────────────────────────────────────
 
@@ -53,7 +53,7 @@ export default function SyncLogTab() {
               {rows.map((row, i) => (
                 <tr key={i} className="border-b border-border last:border-0 hover:bg-muted/20">
                   <td className="px-4 py-2.5 font-medium">{row.site_slug}</td>
-                  <td className="px-4 py-2.5">{row.status==="success"?<CheckCircle2 className="h-4 w-4 text-green-500"/>:row.status==="error"?<AlertCircle className="h-4 w-4 text-red-500"/>:<Clock className="h-4 w-4 text-muted-foreground"/>}</td>
+                  <td className="px-4 py-2.5" title={row.status || ""}>{row.status==="error"?<AlertCircle className="h-4 w-4 text-red-500"/>:row.status==="partial"?<AlertTriangle className="h-4 w-4 text-amber-500"/>:(row.status==="ok"||row.status==="success")?<CheckCircle2 className="h-4 w-4 text-green-500"/>:<Clock className="h-4 w-4 text-muted-foreground"/>}</td>
                   <td className="px-4 py-2.5 text-muted-foreground">{row.records_fetched ?? "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap text-xs">{row.started_at ? new Date(row.started_at).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", year: "numeric", month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }) : "—"}</td>
                   <td className="px-4 py-2.5 text-muted-foreground text-xs max-w-[200px] truncate">{row.error_message || "—"}</td>

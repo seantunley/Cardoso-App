@@ -3,9 +3,37 @@
 // per-page formatNum/formatRand) — new code should import from here so the
 // formatting stays consistent. Existing modules can migrate incrementally.
 
-// Parse a possibly-formatted amount ("1,234.50", "R 1 234") to a number.
+// Parse a possibly-formatted amount to a number. Handles the formats this app
+// actually produces and accepts: SA "1 234,56" (space thousands, comma decimal —
+// what formatAmount/en-ZA emits), "1,234.56" (comma thousands, dot decimal), EU
+// "1.234,56", a bare "11710,66", and currency-prefixed "R 1 234,56".
+//
+// When both comma and dot appear, the right-most is the decimal separator and
+// the other is thousands grouping. With a single separator type it's a decimal
+// point only when it appears once with <=2 trailing digits ("11710,66", "1.5");
+// otherwise it's thousands grouping ("1,234", "1.234.567"). SA users type
+// grouping as spaces, so a lone comma is almost always the decimal.
 export function parseAmount(value) {
-  const n = parseFloat(String(value ?? "").replace(/[,\s]/g, "").replace(/[^0-9.\-]/g, ""));
+  // A number is already a number — never run it through the separator-guessing
+  // below, or a value with >2 decimal places (a computed amount, or a float
+  // artifact like 0.1 + 0.2 = 0.30000000000000004) would have its fractional
+  // part read as thousands grouping and balloon by orders of magnitude.
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  let s = String(value ?? "").trim();
+  if (!s) return 0;
+  s = s.replace(/[^\d.,-]/g, ""); // drop currency symbol, spaces, stray letters
+  const hasComma = s.includes(",");
+  const hasDot = s.includes(".");
+  if (hasComma && hasDot) {
+    const decimalSep = s.lastIndexOf(",") > s.lastIndexOf(".") ? "," : ".";
+    const thousandsSep = decimalSep === "," ? "." : ",";
+    s = s.split(thousandsSep).join("").replace(decimalSep, ".");
+  } else if (hasComma || hasDot) {
+    const sep = hasComma ? "," : ".";
+    const parts = s.split(sep);
+    s = (parts.length === 2 && parts[1].length <= 2) ? parts.join(".") : parts.join("");
+  }
+  const n = parseFloat(s);
   return Number.isFinite(n) ? n : 0;
 }
 

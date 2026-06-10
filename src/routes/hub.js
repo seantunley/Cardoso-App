@@ -2379,7 +2379,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   // the "download all sites for the month" bundle (cf. the JTI bundle).
   // Scoped to the user's allowed sites; lenient on completeness (bundles
   // whatever has been received, with the missing set reported for audit).
-  router.get('/api/hub/commission/archive-groups/:year/:month/download', requireAuth, requirePermission('can_access_commission'), (req, res) => {
+  router.get('/api/hub/commission/archive-groups/:year/:month/download', requireAuth, requirePermission('can_access_monthly_reports'), (req, res) => {
     const year = Number(req.params?.year);
     const month = Number(req.params?.month);
     if (!Number.isInteger(year) || !Number.isInteger(month)) {

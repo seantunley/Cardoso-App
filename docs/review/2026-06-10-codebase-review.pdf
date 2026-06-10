@@ -1,0 +1,2408 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 8417
+>>
+stream
+0.200025 w
+0 G
+0.07 0.09 0.15 rg
+0. 841.8899999999999864 595.2799999999999727 -96. re
+f
+BT
+/F2 20 Tf
+23. TL
+1. g
+48. 791.8899999999999864 Td
+(Cardoso App — Codebase Review) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.796 0.835 0.882 rg
+48. 771.8899999999999864 Td
+(Full-codebase bug / security / performance / architecture review) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.796 0.835 0.882 rg
+48. 755.8899999999999864 Td
+(10 June 2026) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.216 0.255 0.318 rg
+48. 721.8899999999999864 Td
+(Findings from a five-area review \(backend routes, services/sync, frontend, security, architecture\) across ~94K) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.216 0.255 0.318 rg
+48. 708.3899999999999864 Td
+(LOC. Each item has a stable reference \(e.g. CRIT-1\) for use in commits/PRs. Severity: P0 critical, P1 high, P2) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.216 0.255 0.318 rg
+48. 694.8899999999999864 Td
+(medium, P3 low. Status starts Open; tick the checkbox in the .md as items are actioned.) Tj
+ET
+BT
+/F2 10 Tf
+11.5 TL
+0.067 0.094 0.153 rg
+48. 673.3899999999999864 Td
+(41 items:  3 P0 critical    10 P1 high    18 P2 medium    10 P3 low) Tj
+ET
+0.95 0.96 0.96 rg
+42. 659.8899999999999864 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 644.8899999999999864 Td
+(Critical Bugs  \(3\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.725 0.11 0.11 rg
+48. 625.8899999999999864 Td
+(CRIT-1  [P0]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 625.8899999999999864 Td
+(Every MSSQL pool is secretly the same global pool) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 610.8899999999999864 Td
+(Where: syncEngine.js:183, batReconciliation.js:160, jtiPool.js:88, customerSqlPool.js:79, connections.js:57) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 597.4149999999999636 Td
+(What: All six call sql.connect\(config\) — mssql's GLOBAL API, which ignores config if a pool already exists. Whoever) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 584.9950000000000045 Td
+(connects first wins; a site with a separate BAT-only connection can import customers from the WRONG Sage DB;) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 572.5750000000000455 Td
+(pool.close\(\)/resetSagePool\(\) in one module aborts in-flight queries in another. Likely source of 'Connection is closed') Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 560.1549999999999727 Td
+(sync failures.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 545.7349999999999 Td
+(Fix: Use new sql.ConnectionPool\(config\).connect\(\) per module; never sql.connect\(\).) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.725 0.11 0.11 rg
+48. 524.3149999999999409 Td
+(CRIT-2  [P0]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 524.3149999999999409 Td
+(set-initial-password never clears must_change_password) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 509.3149999999999409 Td
+(Where: auth.js:205; statements.js:11) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 495.8399999999999181 Td
+(What: updateUserPassword is only UPDATE "user" SET password_hash=?. The audit log claims the flag is cleared but) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 483.4199999999999022 Td
+(nothing clears it — affected users are forced through the set-password screen on EVERY login, silently rotating their) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 470.9999999999998863 Td
+(password each time.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 456.5799999999998704 Td
+(Fix: Add must_change_password=0 to the password-set update \(and verify hub-pushed/seeded users\).) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.725 0.11 0.11 rg
+48. 435.1599999999998545 Td
+(CRIT-3  [P0]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 435.1599999999998545 Td
+(Unmatched /api GETs hang forever in production \(no JSON 404\)) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 420.1599999999998545 Td
+(Where: server.js:292) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 406.6849999999998317 Td
+(What: The SPA catch-all does `if \(!req.path.startsWith\('/api'\)\) res.sendFile\(\)` — for /api/* it neither responds nor calls) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 394.2649999999998158 Td
+(next\(\), and the referenced JSON 404 handler does not exist. Stale frontends hitting renamed endpoints tie up sockets) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 381.8449999999997999 Td
+(until client timeout. Related: hub-redirect login GETs a POST-only endpoint \(auth.js:100\) so that flow cannot complete) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 369.424999999999784 Td
+(and logs the user out of the site.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 355.0049999999997681 Td
+(Fix: Add a JSON 404 for unmatched /api/* after the catch-all; add a GET handler \(or fix the redirect\) for hub-token-login.) Tj
+ET
+0.95 0.96 0.96 rg
+42. 341.5849999999996953 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 326.5849999999996953 Td
+(Permission Gaps  \(3\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 307.5849999999996953 Td
+(PERM-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 307.5849999999996953 Td
+(Report JSON endpoints skip the guard their exports enforce) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 292.5849999999996953 Td
+(Where: reporting.js:1617 \(aged-debtors\), :1914 \(rep-exposure\), :1948/:2036/:2093 \(BAT\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 279.1099999999996726 Td
+(What: These are requireAuth only while their /export twins require can_access_reports. Any logged-in account can read) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 266.6899999999997135 Td
+(the full debt ledger / rep exposure / BAT data as JSON.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 252.2699999999997544 Td
+(Fix: Apply reportsGuard \(can_access_reports\) to the JSON endpoints to match the exports.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 230.8499999999997954 Td
+(PERM-2  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 230.8499999999997954 Td
+(Auto-flag mutation/test endpoints are requireAuth-only) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 215.8499999999997954 Td
+(Where: records.js:634 \(test-rule\), :746 \(apply-auto-flags\), :791 \(clear-auto-flags\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 202.3749999999997726 Td
+(What: Any user can wipe every record's flags; test-rule also returns real customer balances/invoices. The hub twin) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 189.9549999999998136 Td
+(correctly requires admin.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 175.5349999999998545 Td
+(Fix: Add requireAdmin \(or can_manage_rules\) to match the hub equivalents.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 154.1149999999998954 Td
+(PERM-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 154.1149999999998954 Td
+(Hub commission archive list/download vs bundle use different permissions) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 139.1149999999998954 Td
+(Where: hub.js:2315/2342 \(can_access_monthly_reports\) vs :2382 \(can_access_commission\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 125.6399999999998727 Td
+(What: Same data, two different permission keys — one is wrong. Site-side equivalents both use) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 113.2199999999999136 Td
+(can_access_monthly_reports.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 98.7999999999999545 Td
+(Fix: Standardise all three on can_access_monthly_reports.) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(1 / 6) Tj
+ET
+endstream
+endobj
+5 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 6 0 R
+>>
+endobj
+6 0 obj
+<<
+/Length 8954
+>>
+stream
+0.200025 w
+0 G
+0.95 0.96 0.96 rg
+42. 805.8899999999999864 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 790.8899999999999864 Td
+(Sync Correctness  \(8\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 771.8899999999999864 Td
+(SYNC-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 771.8899999999999864 Td
+(Incremental sync misses updates made during the sync window) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 756.8899999999999864 Td
+(Where: hubEtl.js:181; reporting.js:2429) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 743.4149999999999636 Td
+(What: `since` is the hub-clock timestamp from AFTER the whole 30-60s sync finished, but sites filter on site-clock) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 730.9950000000000045 Td
+(updated_date. Anything updated mid-sync \(or under clock skew\) is never re-pulled until the next Sage import rewrites it.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 718.5750000000000455 Td
+(A plausible source of the stale-data complaints.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 704.1549999999999727 Td
+(Fix: Stamp `since` from records-fetch START minus a safety margin \(or track max\(updated_date\) received\). Upserts) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 691.7350000000000136 Td
+(make re-pulls harmless.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 670.3150000000000546 Td
+(SYNC-2  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 670.3150000000000546 Td
+(Site imports rewrite every row every 30 min, defeating incremental pull) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 655.3150000000000546 Td
+(Where: syncEngine.js:301-489) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 641.8400000000000318 Td
+(What: No change detection — unchanged rows still get a full UPDATE bumping updated_date/synced_at inside one) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 629.4200000000000728 Td
+(synchronous transaction. Side effect: the hub then re-downloads the ENTIRE record set on every tick after each import.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 615. Td
+(Fix: Hash-compare `data` and skip no-op updates. Cuts site write churn and hub traffic ~95%.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 593.5800000000000409 Td
+(SYNC-3  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 593.5800000000000409 Td
+(Hub ETL stages fail silently while the run is logged status=ok) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 578.5800000000000409 Td
+(Where: hubEtl.js \(the 9 isolated pull stanzas\) + 1015) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 565.1050000000000182 Td
+(What: Isolated stanzas log-and-skip to console only; a permanently-404ing endpoint \(old site version\) means stale hub) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 552.6849999999999454 Td
+(tiles forever with zero operator signal. Violates the no-silent-failures rule.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 538.2649999999999864 Td
+(Fix: logError per stanza failure + persist a partial-error status in hub_sync_log.error.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 516.8450000000000273 Td
+(SYNC-4  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 516.8450000000000273 Td
+(hub_inventory prune uses one SQL placeholder per item \(>32,766 SKUs fails\)) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 501.8449999999999704 Td
+(Where: hubEtl.js:367-371) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 488.3699999999999477 Td
+(What: DELETE ... NOT IN \(one ? per item\). A site above SQLite's variable cap fails its whole sync every cycle; `since`) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 475.9499999999999318 Td
+(never advances. The site side already fixed this with a temp-table anti-join \(syncEngine.js:550\); the hub side wasn't) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 463.5299999999999159 Td
+(updated. Also: hub_records is never pruned, so cleared/renumbered records linger as ghosts.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 449.1099999999999 Td
+(Fix: Use a temp-table anti-join for the prune; add hub_records pruning.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 427.689999999999884 Td
+(SYNC-5  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 427.689999999999884 Td
+(Hub Aged Debtors ledgerReady gate is global, not per-site) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 412.689999999999884 Td
+(Where: reporting.js:1441-1458) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 399.2149999999998613 Td
+(What: Once ANY site's AR open-items land, sites whose ETL hasn't landed vanish from the report instead of falling back) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 386.7949999999998454 Td
+(to the snapshot. Relevant to PR #389's staged rollout — it will transiently hide branches.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 372.3749999999998295 Td
+(Fix: Make the ledger-vs-snapshot decision per site_id, not a global LIMIT 1.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 350.9549999999998136 Td
+(SYNC-6  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 350.9549999999998136 Td
+(auto-sync-cycle fires all due imports concurrently, unawaited, errors swallowed) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 335.9549999999998136 Td
+(Where: scheduler.js:762-770) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 322.4799999999997908 Td
+(What: Two different connections run concurrently \(triggers CRIT-1's pool clash\); job_runs records 'succeeded' before) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 310.0599999999998317 Td
+(imports finish; errors land only in console.error.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 295.6399999999998727 Td
+(Fix: Await sequentially \(like runScheduledSyncCycle\) or Promise.allSettled + logError.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 274.2199999999999136 Td
+(SYNC-7  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 274.2199999999999136 Td
+(probeSageHealth closes the shared pool on every probe failure) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 259.2199999999999136 Td
+(Where: batReconciliation.js:253) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 245.7449999999998909 Td
+( W h a t :   O n e   6 0 s   p r o b e   b l i p   c a l l s   r e s e t S a g e P o o l \( \)  !’   p o o l . c l o s e \( \) ,   a b o r t i n g   w h a t e v e r   i s   m i d - q u e r y   \( c o m p o u n d e d   b y   C R I T - 1 ' s) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 233.3249999999999318 Td
+(global pool\).) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 218.9049999999999727 Td
+(Fix: Mark the pool stale and let the next getSagePool\(\) recreate; don't close under in-flight work.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 197.4850000000000136 Td
+(SYNC-8  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 197.4850000000000136 Td
+(Cancel of Cardoso invoice generation reads the wrong \(global\) state) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 182.4850000000000136 Td
+(Where: batReconciliation.js:3958-4128) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 169.0099999999999909 Td
+(What: Cancellation checks read the global _activeGenerate \(now nulled/replaced\), so a cancelled run can complete and) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 156.5900000000000318 Td
+(then wipe a newer run's lock, allowing two generations to interleave writes.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 142.1700000000000728 Td
+(Fix: Capture a local run object and check me.cancelled; only clear the global if it still === me.) Tj
+ET
+0.95 0.96 0.96 rg
+42. 128.7500000000001137 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 113.7500000000001137 Td
+(Money / UI Bugs  \(6\)) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(2 / 6) Tj
+ET
+endstream
+endobj
+7 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 8 0 R
+>>
+endobj
+8 0 obj
+<<
+/Length 9278
+>>
+stream
+0.200025 w
+0 G
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 793.8899999999999864 Td
+(UI-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 793.8899999999999864 Td
+(SA comma-decimal amount input parsed 100x too large) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 778.8899999999999864 Td
+(Where: CustomerSearch.jsx:40/57/90; lib/format.js:8) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 765.4149999999999636 Td
+(What: The amount-search input accepts commas but the parser strips them, so 11710,66 searches for R 1 171 066.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 752.9950000000000045 Td
+(parseAmount can't round-trip its own formatAmount output either.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 738.5750000000000455 Td
+( F i x :   N o r m a l i s e   S A   f o r m a t   \( s t r i p   s p a c e s ,   c o m m a!’ d o t \)   b e f o r e   p a r s e F l o a t ;   f i x   f o r m a t . j s   r o u n d - t r i p   +   i t s   w r o n g   d o c   c o m m e n t .) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 717.1549999999999727 Td
+(UI-2  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 717.1549999999999727 Td
+(Snapshot aging off by one day on UTC+2 host) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 702.1549999999999727 Td
+(Where: reporting.js:94-123) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 688.67999999999995 Td
+( W h a t :   U T C - m i d n i g h t   p a r s e   v s   l o c a l - m i d n i g h t   ' t o d a y '  !’   s a m e - d a y   i n v o i c e s   c o m p u t e   a s   - 1   d a y s   a n d   a r e   d r o p p e d ;   e v e r y) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 676.2599999999999909 Td
+(bucket boundary shifts a day late.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 661.8400000000000318 Td
+(Fix: Parse invoice dates at local midnight \(or compute both in UTC\) so day-diff is consistent.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 640.4200000000000728 Td
+(UI-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 640.4200000000000728 Td
+(Destructive/admin actions silently no-op on failure) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 625.4200000000000728 Td
+(Where: HubDashboard.jsx:896 \(force-resync\), Layout.jsx:589 \(app-update\), Reconciliation.jsx:782 \(refresh-sage\), :383 \(BAT) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 613.94500000000005 Td
+(settings load\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 600.4700000000000273 Td
+(What: These do fetch with no res.ok check + bare catch. The BAT-settings one silently falls back to hard-coded TG/VAT) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 588.0500000000000682 Td
+(rates and posts them into ledger generation \(money-affecting\). Violates no-silent-failures.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 573.6300000000001091 Td
+(Fix: Check res.ok, surface a toast/error on failure, and fail loudly when saved rates can't load.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 552.2100000000000364 Td
+(UI-4  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 552.2100000000000364 Td
+(keepPreviousData is dead API under react-query v5 + undebounced search) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 537.2100000000000364 Td
+(Where: CreditorSummary.jsx:192/310, CreditorSearch.jsx:48) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 523.7350000000000136 Td
+(What: v5 removed keepPreviousData \(now placeholderData: keepPreviousData\), so the vendor table + AP tiles) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 511.3149999999999977 Td
+(blank/flash to R 0.00 on every keystroke, one request per character.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 496.8949999999999818 Td
+(Fix: placeholderData: \(prev\)=>prev + a 250ms debounced value in the queryKey \(CustomerBalances already does this\).) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 475.4749999999999659 Td
+(UI-5  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 475.4749999999999659 Td
+(Hub renders genuine R 0.00 as "—" \(hub-mirrors-site violation\)) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 460.4749999999999659 Td
+(Where: HubDashboard.jsx:38-43) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 446.9999999999999432 Td
+(What: formatAmount returns '—' for 0, so a real zero balance is indistinguishable from no-data; the site UI distinguishes) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 434.5799999999999272 Td
+(them, so hub and site disagree for the same customer.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 420.1599999999999113 Td
+(Fix: Distinguish empty \(—\) from zero \(R 0.00\), matching CustomerLookup.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 398.7399999999998954 Td
+(UI-6  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 398.7399999999998954 Td
+(Flag-count tiles show 0 when the KPI endpoints fail) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 383.7399999999998954 Td
+(Where: CustomerSearch.jsx:555-570; HubTrends.jsx:21) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 370.2649999999998727 Td
+( W h a t :   q u e r y F n s   c a t c h!’ r e t u r n   n u l l   a n d   t i l e s   r e n d e r   ? ?   0 ,   s o   a   D B - l o c k e d   e r r o r   d i s p l a y s   ' C r i t i c a l :   0   r e d   f l a g g e d '   —   a n) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 357.8449999999998568 Td
+(affirmative wrong statement instead of an error state.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 343.4249999999998408 Td
+(Fix: Surface an error/skeleton state instead of coercing failures to 0/[]) Tj
+ET
+0.95 0.96 0.96 rg
+42. 330.0049999999997681 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 315.0049999999997681 Td
+(Security  \(5\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 296.0049999999997681 Td
+(SEC-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 296.0049999999997681 Td
+(Sage override validator is bypassable) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 281.0049999999997681 Td
+(Where: queryRegistry.js:476; commission.js:40) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 267.5299999999997453 Td
+(What: Keyword denylist that requires a leading SELECT/WITH does NOT block SELECT…INTO,) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 255.1099999999997863 Td
+(OPENROWSET/OPENQUERY/BULK, WAITFOR DELAY, or \(it allows leading ;\) multi-statement. Admin-only, but the) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 242.6899999999998272 Td
+(guardrail's job is to keep overrides read-only even for admins; if the Sage login has write rights this mutates the ERP DB.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 228.2699999999998681 Td
+(Fix: Run overrides through a least-privilege READ-ONLY Sage login \(DB enforces it\); strip comments + block) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 215.8499999999999091 Td
+(INTO/OPENROWSET/WAITFOR/xp_/sp_/second-statement as defense in depth.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 194.42999999999995 Td
+(SEC-2  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 194.42999999999995 Td
+(Auto-update trusts GitHub release contents end-to-end \(no signature check\)) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 179.42999999999995 Td
+(Where: system.js:80-91, 1218, 1297, 1629) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 165.9549999999999272 Td
+(What: Installer + checksum come from the same release; the .exe is run via Task Scheduler as SYSTEM, auto-hourly. A) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 153.5349999999999682 Td
+(compromised repo/account propagates fleet-wide within an hour. \(Repo pinned + host allowlist + HTTPS are good) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 141.1150000000000091 Td
+(controls already.\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 126.69500000000005 Td
+(Fix: Verify Authenticode signature + publisher thumbprint before launch; sign the manifest with an off-repo key; prefer) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 114.2750000000000909 Td
+(operator-approved tag over auto-latest.) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(3 / 6) Tj
+ET
+endstream
+endobj
+9 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 10 0 R
+>>
+endobj
+10 0 obj
+<<
+/Length 8391
+>>
+stream
+0.200025 w
+0 G
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 793.8899999999999864 Td
+(SEC-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 793.8899999999999864 Td
+(Token compares non-constant-time; /api/backup/config defaults to FULL .env) Tj
+T* (off-production) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 765.8899999999999864 Td
+(Where: reporting.js:156, backup.js:51/118) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 752.4149999999999636 Td
+(What: Token gates the full-DB download and the unredacted .env \(SESSION_SECRET, ENCRYPTION_KEY\). !== is) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 739.9950000000000045 Td
+(timing-leaky \(low risk over Tailscale\). getBackupConfigExportMode\(\) returns 'full' whenever NODE_ENV !== 'production') Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 727.5750000000000455 Td
+(— a footgun if the service starts without that env.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 713.1549999999999727 Td
+(Fix: crypto.timingSafeEqual \(length-guard first\); default config export to redacted/disabled, explicit opt-in for full.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 691.7350000000000136 Td
+(SEC-4  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 691.7350000000000136 Td
+(Production CORS reflects any Origin with credentials) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 676.7350000000000136 Td
+(Where: server.js:119-125) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 663.2599999999999909 Td
+(What: origin callback always allows; currently blunted by sameSite:'strict' so it's latent, but any future cookie relaxation) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 650.8400000000000318 Td
+(makes it cross-origin readable.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 636.4200000000000728 Td
+(Fix: Reflect an explicit allowlist \(own origin + hub origin\) instead of cb\(null,true\).) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 615. Td
+(SEC-5  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 615. Td
+(Session cookie secure=off on default LAN-HTTP install; raw errors returned to) Tj
+T* (clients) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 587. Td
+(Where: server.js:189; records.js:1363, reporting.js:951/992, server.js:284) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 573.5250000000000909 Td
+(What: Default HTTP install sends the session cookie cleartext on the local LAN segment. Several handlers return raw) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 561.1050000000000182 Td
+(err.message \(SQL/table fragments\).) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 546.6849999999999454 Td
+(Fix: secure:true once TLS lands; return a generic message + keep detail in logError.) Tj
+ET
+0.95 0.96 0.96 rg
+42. 533.2649999999999864 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 518.2649999999999864 Td
+(Performance  \(4\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 499.2649999999999864 Td
+(PERF-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 499.2649999999999864 Td
+(Make precomputed rollup tables THE pattern for heavy reads) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 484.2649999999999864 Td
+(Where: reporting.js top-balances/top-items-mtd/dead-stock/aged-debtors; hub.js \(28 GROUP BY endpoints\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 470.7899999999999636 Td
+(What: Synchronous better-sqlite3 aggregation on the request path is the class that caused this week's production hangs.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 458.3699999999999477 Td
+(v099 point-fixed two endpoints; ~30 more aggregate per request \(some load every row + JSON.parse, some run window) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 445.9499999999999318 Td
+(functions over the whole item master\).) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 431.5299999999999159 Td
+(Fix: Generalise the v099 rollup approach: rebuild at sync-end, both UIs read the same table; add rollup_meta staleness) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 419.1099999999999 Td
+(to /api/system/health.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 397.689999999999884 Td
+(PERF-2  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 397.689999999999884 Td
+(Hub full-refreshes 7 datasets every 5 min when data changes nightly) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 382.689999999999884 Td
+(Where: hubEtl.js:417-767) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 369.2149999999998613 Td
+(What: movement/item-sales/customer-sales/AR/AP/creditor/stock-receipt staged fully in memory + delete-all+reinsert,) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 356.7949999999998454 Td
+(per site, ~288x/day, blocking the hub event loop — but the source changes once nightly.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 342.3749999999998295 Td
+(Fix: Move these to hourly/nightly cadence or gate on a site-reported freshness stamp; keep only records/KPIs/BAT on) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 329.9549999999998136 Td
+(the 5-min loop.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 308.5349999999998545 Td
+(PERF-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 308.5349999999998545 Td
+(Heavy per-search / per-request scans) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 293.5349999999998545 Td
+(Where: records.js:332 \(customer-by-amount, 20K rows x2 JSON.parse\), batReconciliation.js:557 \(integrity report N+1\),) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 282.0599999999998317 Td
+(inventoryMovement.js:13 \(3yr window staged in one txn\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 268.584999999999809 Td
+(What: Operator-triggered or polled endpoints doing full scans / per-row JSON.parse / N+1 invariant checks) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 256.1649999999998499 Td
+(synchronously on the main thread.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 241.7449999999998909 Td
+(Fix: Trigger-maintained side tables for amount search; cache integrity results keyed on recon last-modified; trailing 1-2) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 229.3249999999999318 Td
+(month window for nightly inventory after backfill.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 207.9049999999999727 Td
+(PERF-4  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 207.9049999999999727 Td
+(Frontend: undebounced search, idle 2s polling, unvirtualized vendor table) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 192.9049999999999727 Td
+(Where: CreditorSummary.jsx:310/439, OcrPanel.jsx:102) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 179.42999999999995 Td
+(What: One request per keystroke; OCR snapshot polls every 2s while idle \(~45 req/min from one tab\); CreditorSummary) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 167.0099999999999909 Td
+(renders the full vendor table without @tanstack/react-virtual \(which other tables use\).) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 152.5900000000000318 Td
+(Fix: Debounce keys; make refetchInterval a function of running state; virtualize the table.) Tj
+ET
+0.95 0.96 0.96 rg
+42. 139.1700000000000728 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 124.1700000000000728 Td
+(Architecture  \(7\)) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(4 / 6) Tj
+ET
+endstream
+endobj
+11 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 12 0 R
+>>
+endobj
+12 0 obj
+<<
+/Length 9615
+>>
+stream
+0.200025 w
+0 G
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 793.8899999999999864 Td
+(ARCH-1  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 793.8899999999999864 Td
+( D e f i n e   t h e   s i t e!’ h u b   d a t a s e t   c o n t r a c t   o n c e) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 778.8899999999999864 Td
+(Where: hubEtl.js syncSite \(9 copy-pasted pull stanzas\) + reporting.js \(8 copy-pasted serve endpoints\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 765.4149999999999636 Td
+(What: One logical thing written ~20 times; field drift is invisible until a hub tile goes blank \(the last three incidents\). New) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 752.9950000000000045 Td
+(dataset costs ~300 copy-pasted lines.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 738.5750000000000455 Td
+(Fix: A HUB_DATASETS config table + one pullDataset\(\) engine + a generated site router. Add a CONTRACT TEST per) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 726.1549999999999727 Td
+( d a t a s e t   \( s i t e   f i x t u r e  !’   p u l l  !’   a s s e r t   h u b   t a b l e \)   —   t h e   s i n g l e   h i g h e s t - v a l u e   m i s s i n g   t e s t .) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.761 0.255 0.047 rg
+48. 704.7350000000000136 Td
+(ARCH-2  [P1]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 704.7350000000000136 Td
+(Commit to rollup tables as the pattern \(retire per-request aggregation\)) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 689.7350000000000136 Td
+(Where: see PERF-1) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 676.2599999999999909 Td
+(What: Structural fix for the event-loop hang class; both hub+site reading one rollup enforces hub-mirrors-site by) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 663.8400000000000318 Td
+(construction.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 649.4200000000000728 Td
+(Fix: reporting_rollups.js with rebuildX\(\) called at sync-end; migrate dashboard + aged-debtors/creditors + hub trends in) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 637. Td
+(small PRs.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 615.5800000000000409 Td
+(ARCH-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 615.5800000000000409 Td
+(One isHubMode\(\) instead of 40 scattered env checks) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 600.5800000000000409 Td
+(Where: ~40 process.env.HUB_MODE==='true'; 4 private isHub\(\) copies \(debtors/creditors/stockReceipts/inventoryMovement\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 587.1050000000000182 Td
+(What: config/env.js validates HUB_MODE then everyone re-reads process.env raw. 18 reporting endpoints carry full dual) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 574.6850000000000591 Td
+(implementations inline.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 560.2650000000001 Td
+(Fix: Export isHubMode\(\) + split report builders' data acquisition per mode behind a small source interface; keep compute) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 547.8450000000000273 Td
+(single-pathed.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 526.4249999999999545 Td
+(ARCH-4  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 526.4249999999999545 Td
+(Split the giants along their natural seams; extract builders to services) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 511.4250000000000114 Td
+(Where: reporting.js \(2995\), hub.js \(3722\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 497.9499999999999886 Td
+(What: reporting.js is 3 modules \(user reports / pure builders / the token-auth machine contract\); builders being inline is) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 485.5299999999999727 Td
+(why none are tested.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 471.1099999999999568 Td
+( F i x :   M o v e - o n l y   P R s :   b u i l d e r s!’ s e r v i c e   \( +   f i r s t   u n i t   t e s t \) ,   / a p i / r e p o r t i n g / *!’ o w n   r o u t e r ,   h u b   a r c h i v e s   +   t r e n d s   r o u t e r s .) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 449.6899999999999409 Td
+(ARCH-5  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 449.6899999999999409 Td
+(Highest-value test gap: hubEtl + dataset contract, then builders) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 434.6899999999999409 Td
+(Where: hubEtl.js \(0 tests\), report builders \(0 tests\), React \(1 test / 186 files\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 421.2149999999999181 Td
+(What: Coverage is inverted relative to risk — every incident this week was in untested code.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 406.7949999999999022 Td
+(Fix: Contract test \(ARCH-1\), syncSite orchestration tests with stubbed fetch, builder unit tests as extracted.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 385.3749999999998863 Td
+(ARCH-6  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 385.3749999999998863 Td
+(Write the migration index generator the header already claims exists) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 370.3749999999998863 Td
+(Where: db/migrations/index.js \(refs missing scripts/_extract-migrations.mjs\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 356.8999999999998636 Td
+(What: 99 hand-maintained imports; a file present on disk but absent from index silently never runs \(the failure shape the) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 344.4799999999998477 Td
+(v62 gate was written for\).) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 330.0599999999998317 Td
+(Fix: Write _extract-migrations.mjs \(readdir+emit\); extend the CI gate to diff and fail on a missing index entry.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 308.6399999999998727 Td
+(ARCH-7  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 308.6399999999998727 Td
+(Standardise the route error funnel on logError + verbose messages) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 293.6399999999998727 Td
+(Where: reporting.js \(12 logError vs ~24 raw console.error\); some return raw err.message) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 280.1649999999998499 Td
+(What: Error handling is bimodal — hubEtl is the house-rule exemplar; many route catches discard the message and log) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 267.7449999999998909 Td
+(nothing to the System Log.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 253.3249999999999318 Td
+(Fix: routeErrorHandler\(scope\) helper that always logErrors with context + returns a stable message + error id; sweep) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 240.9049999999999727 Td
+(one file per PR.) Tj
+ET
+0.95 0.96 0.96 rg
+42. 227.4850000000000136 511.2799999999999727 -22. re
+f
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.067 0.094 0.153 rg
+48. 212.4850000000000136 Td
+(Feature Recommendations  \(5\)) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 193.4850000000000136 Td
+(FEAT-1  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 193.4850000000000136 Td
+(Ops alerting on sync failures / staleness) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 178.4850000000000136 Td
+(Where: new) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 165.0099999999999909 Td
+(What: Sync failures land in the System Log only; nobody reads logs until a tile looks wrong.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 150.5900000000000318 Td
+(Fix: Daily digest + immediate email/webhook on 'site unreachable >30 min' or 'dataset stale >24h'. Would have caught) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 138.1700000000000728 Td
+(this week's issues early.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 116.7500000000001137 Td
+(FEAT-2  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 116.7500000000001137 Td
+(Fleet version / freshness dashboard) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 101.7500000000001137 Td
+(Where: new \(hub\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 88.2750000000000909 Td
+(What: The hub knows each site's version + last-seen + data freshness.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 73.8550000000001319 Td
+(Fix: One Operations panel: version / last-seen / freshness / pending update per site — replaces the 'did 5.9.1 land) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 61.4350000000001728 Td
+(everywhere?' guesswork.) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(5 / 6) Tj
+ET
+endstream
+endobj
+13 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 14 0 R
+>>
+endobj
+14 0 obj
+<<
+/Length 2614
+>>
+stream
+0.200025 w
+0 G
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.631 0.384 0.027 rg
+48. 793.8899999999999864 Td
+(FEAT-3  [P2]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 793.8899999999999864 Td
+( A u t o m a t e d   h u b!” s i t e   r e c o n c i l i a t i o n   c h e c k) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 778.8899999999999864 Td
+(Where: new \(nightly job\)) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 765.4149999999999636 Td
+(What: Mechanically enforce the hub-mirrors-site rule instead of relying on review discipline.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 750.9950000000000045 Td
+(Fix: Nightly compare per-site totals \(debtor balance, AP outstanding, inventory value\) hub-vs-site; flag drift.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 729.5750000000000455 Td
+(FEAT-4  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 729.5750000000000455 Td
+(Staged / canary auto-update rollout) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 714.5750000000000455 Td
+(Where: system.js auto-update) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 701.1000000000000227 Td
+(What: A bad build currently fans out fleet-wide within the hour.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 686.6800000000000637 Td
+(Fix: Update one canary site, verify health + version report, then fan out. Would have contained the 5.9 hang to one) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 674.2599999999999909 Td
+(branch.) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.216 0.255 0.318 rg
+48. 652.8400000000000318 Td
+(FEAT-5  [P3]) Tj
+ET
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.067 0.094 0.153 rg
+144. 652.8400000000000318 Td
+( A g e d - d e b t o r s  !’   c o l l e c t i o n s   w o r k l i s t   b r i d g e) Tj
+ET
+BT
+/F3 8.5 Tf
+9.7749999999999986 TL
+0.42 0.447 0.502 rg
+58. 637.8400000000000318 Td
+(Where: new) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.122 0.161 0.216 rg
+58. 624.3650000000000091 Td
+(What: You already have collections worklists + per-document aging.) Tj
+ET
+BT
+/F1 9.2 Tf
+10.5799999999999983 TL
+0.082 0.369 0.459 rg
+58. 609.94500000000005 Td
+(Fix: Auto-feed 'new 21+ bucket entries' into a collections worklist — a small join with real business value.) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+48. 24. Td
+(Cardoso App — Codebase Review · 10 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.612 0.639 0.686 rg
+531.7599999999999909 24. Td
+(6 / 6) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R 5 0 R 7 0 R 9 0 R 11 0 R 13 0 R ]
+/Count 6
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+19 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+20 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+21 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+22 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+23 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+24 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+25 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+26 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+27 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+28 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 15 0 R
+/F2 16 0 R
+/F3 17 0 R
+/F4 18 0 R
+/F5 19 0 R
+/F6 20 0 R
+/F7 21 0 R
+/F8 22 0 R
+/F9 23 0 R
+/F10 24 0 R
+/F11 25 0 R
+/F12 26 0 R
+/F13 27 0 R
+/F14 28 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+29 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260610000000+00'00')
+>>
+endobj
+30 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 31
+0000000000 65535 f 
+0000048426 00000 n 
+0000050280 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000008621 00000 n 
+0000008758 00000 n 
+0000017764 00000 n 
+0000017901 00000 n 
+0000027231 00000 n 
+0000027369 00000 n 
+0000035813 00000 n 
+0000035952 00000 n 
+0000045620 00000 n 
+0000045759 00000 n 
+0000048515 00000 n 
+0000048641 00000 n 
+0000048772 00000 n 
+0000048906 00000 n 
+0000049044 00000 n 
+0000049168 00000 n 
+0000049297 00000 n 
+0000049429 00000 n 
+0000049565 00000 n 
+0000049693 00000 n 
+0000049820 00000 n 
+0000049949 00000 n 
+0000050082 00000 n 
+0000050184 00000 n 
+0000050533 00000 n 
+0000050619 00000 n 
+trailer
+<<
+/Size 31
+/Root 30 0 R
+/Info 29 0 R
+/ID [ <0CE625A09FBE591736FE6AA71AE57887> <0CE625A09FBE591736FE6AA71AE57887> ]
+>>
+startxref
+50723
+%%EOF

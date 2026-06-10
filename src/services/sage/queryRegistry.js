@@ -473,7 +473,94 @@ define({
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-const BANNED_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
+// Read/write keyword denylist for operator overrides. The REAL guarantee that an
+// override stays read-only is a least-privilege, READ-ONLY Sage login (the DB
+// rejects writes) — see docs/notes. This denylist is defense in depth so an
+// override can't issue a write, DDL, an out-of-band read (OPENROWSET/OPENQUERY/
+// BULK), SELECT…INTO (table creation), a time-based stall (WAITFOR), or a
+// server-config command even if the connecting login is over-privileged.
+const BANNED_KEYWORDS = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE|INTO|OPENROWSET|OPENQUERY|OPENDATASOURCE|BULK|WAITFOR|RECONFIGURE|SHUTDOWN)\b/i;
+// Extended / system stored procedures (xp_cmdshell, sp_executesql, …).
+const BANNED_PROCS = /\b(?:xp|sp)_\w/i;
+
+// Comment- AND string-literal-aware scrub for the read-only validator. Returns
+// the SQL with /* */ and -- comments removed AND the CONTENTS of string /
+// quoted-identifier literals blanked. This is required for the denylist + single-
+// statement checks to be sound: a naive comment strip can be fooled by a literal
+// like SELECT '--'; DROP TABLE x (the -- inside the string is NOT a comment to
+// SQL Server, so the regex would wrongly eat the real ;DROP), and would also
+// false-positive on a legitimate literal that contains ';' or '--'. Tracks
+// '...', "..." and [...] with their ''/""/]] escapes; -- and /* */ are treated
+// as comments only OUTSIDE a literal.
+//
+// `keepDelimitedIds`: the read-only keyword/statement scan wants delimited
+// identifiers blanked too (a column named [DELETE] or [a;b] must not trip the
+// keyword/`;` checks). But the required-column smoke check must still SEE
+// delimited aliases — JTI writes its reserved-word alias as `AS [DESC]` — so it
+// passes this true to keep [...] and "..." (still blanking '...' string literals,
+// which can never be an alias).
+export function scrubSqlForValidation(sqlText, { keepDelimitedIds = false } = {}) {
+  const src = String(sqlText ?? '');
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  // Consume a quoted span. When `keep`, copy it verbatim (so a delimited alias
+  // like [DESC] survives for the column check); otherwise emit a single space in
+  // its place. `close` doubled (''/""/]]) is an escaped delimiter, not the end.
+  const consume = (close, keep) => {
+    if (keep) out += src[i];
+    i += 1; // past the opening delimiter
+    while (i < n) {
+      if (src[i] === close && src[i + 1] === close) { if (keep) out += close + close; i += 2; continue; }
+      if (src[i] === close) { if (keep) out += close; i += 1; break; }
+      if (keep) out += src[i];
+      i += 1;
+    }
+    if (!keep) out += ' ';
+  };
+  while (i < n) {
+    const c = src[i];
+    const c2 = i + 1 < n ? src[i + 1] : '';
+    if (c === "'") { consume("'", false); continue; }                 // string literal — always blanked
+    if (c === '"') { consume('"', keepDelimitedIds); continue; }       // quoted identifier (or string)
+    if (c === '[') { consume(']', keepDelimitedIds); continue; }       // bracketed identifier
+    if (c === '-' && c2 === '-') { while (i < n && src[i] !== '\n') i += 1; out += ' '; continue; }
+    if (c === '/' && c2 === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i += 1;
+      i = Math.min(i + 2, n);
+      out += ' ';
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * Security core shared by every Sage override validator: must be a single,
+ * read-only SELECT/WITH statement with no write/DDL/out-of-band/proc escapes.
+ * Returns an error string, or null when acceptable (empty is caller-handled).
+ * Checks the comment-stripped form.
+ */
+export function readOnlyOverrideViolation(sqlText) {
+  const s = String(sqlText ?? '').trim();
+  if (s.length === 0) return null;
+  if (s.length > 20_000) return 'too long (max 20,000 characters)';
+  const clean = scrubSqlForValidation(s).trim();
+  // Must start with SELECT or WITH. A leading ';' is allowed — the BAT
+  // corrections default is a T-SQL CTE that legitimately starts ";WITH".
+  if (!/^(\s|;)*(SELECT|WITH)\b/i.test(clean)) return 'must start with SELECT or WITH (read-only)';
+  if (BANNED_KEYWORDS.test(clean)) return 'contains a forbidden write / DDL / out-of-band keyword (e.g. INTO, OPENROWSET, WAITFOR)';
+  if (BANNED_PROCS.test(clean)) return 'contains a forbidden stored-procedure reference (xp_/sp_)';
+  // Single statement only — a leading ';' (CTE batch separator) and a trailing
+  // ';' are fine; a ';' with another statement after it is not.
+  if (clean.split(';').map((x) => x.trim()).filter(Boolean).length > 1) {
+    return 'must be a single statement (no second ";"-separated statement)';
+  }
+  return null;
+}
 
 /**
  * The single guardrail for an operator-supplied override. Returns an error
@@ -487,18 +574,17 @@ export function validateSageQueryOverride(sqlText, key) {
   if (sqlText === null || sqlText === undefined) return null;
   const s = String(sqlText).trim();
   if (s.length === 0) return null; // empty = clear back to default
-  // Must start with SELECT or WITH (read-only). Allow optional leading
-  // whitespace, line comments, and statement-terminator semicolons — the
-  // BAT corrections default is a T-SQL CTE that legitimately starts with ";WITH".
-  if (!/^(\s|;|--[^\n]*\n)*(SELECT|WITH)\b/i.test(s)) return 'must start with SELECT or WITH (read-only)';
-  if (BANNED_SQL.test(s)) return 'contains a forbidden write/DDL keyword';
+  const sec = readOnlyOverrideViolation(s);
+  if (sec) return sec;
+  // Keep delimited identifiers here so a reserved-word alias like `AS [DESC]`
+  // (jti.export) is still visible to the required-column smoke check.
+  const clean = scrubSqlForValidation(s, { keepDelimitedIds: true });
   for (const p of d.params || []) {
-    if (!new RegExp(`@${p}\\b`, 'i').test(s)) return `must reference the @${p} parameter`;
+    if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference the @${p} parameter`;
   }
   for (const c of d.requiredColumns || []) {
-    if (!new RegExp(`\\b${c}\\b`, 'i').test(s)) return `must output a "${c}" column (the sync maps results by this alias)`;
+    if (!new RegExp(`\\b${c}\\b`, 'i').test(clean)) return `must output a "${c}" column (the sync maps results by this alias)`;
   }
-  if (s.length > 20_000) return 'too long (max 20,000 characters)';
   return null;
 }
 

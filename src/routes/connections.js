@@ -54,7 +54,11 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
           useEncryption: useEncryptionBool,
         });
 
-        pool = await sql.connect(config);
+        // Own pool — NOT sql.connect()/the global pool. A connection test must
+        // open the config it was given, not piggyback an existing global pool
+        // (which would test the wrong server and could close it on the app's
+        // other Sage users; CRIT-1).
+        pool = await new sql.ConnectionPool(config).connect();
 
         const tablesResult = await pool.request().query(`
           SELECT TABLE_NAME
@@ -136,14 +140,16 @@ export function createConnectionsRouter({ db, requireAuth, requirePermission, is
 
       try {
         const useEncBool = use_encryption != null ? Boolean(Number(use_encryption)) : null;
-        pool = await sql.connect(buildSqlServerConfig({
+        // Own pool — NOT sql.connect()/the global pool (CRIT-1); this ad-hoc test
+        // query must hit exactly the supplied config.
+        pool = await new sql.ConnectionPool(buildSqlServerConfig({
           user: username,
           password,
           server: host,
           database: database_name,
           port,
           useEncryption: useEncBool,
-        }));
+        })).connect();
 
         // Run the full query and slice — avoids any SQL modification that breaks
         // CTEs, comments, HAVING, ORDER BY, UNION, etc.

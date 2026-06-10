@@ -337,6 +337,123 @@ $result | ConvertTo-Json -Depth 6 -Compress
   return parsed;
 }
 
+/**
+ * Build the hub Aged Debtors source rows with a PER-SITE ledger/snapshot
+ * decision (SYNC-5). Each site whose AR open-item sync has COMPLETED (tracked in
+ * hub_debtor_ar_sync) is aged from its open-item ledger — even if that ledger is
+ * empty because the site is fully paid up; a site whose AR ETL hasn't run yet
+ * falls back to its hub_records snapshot (one pseudo-document per customer aged
+ * by the oldest dated unpaid invoice). The earlier GLOBAL ledger-ready check used
+ * the ledger for ALL sites the moment ONE site synced, dropping every
+ * not-yet-synced site's debtors; using row presence as the per-site marker would
+ * conversely show stale snapshot balances for a synced-but-fully-paid site.
+ *
+ * Exported for unit testing. `prep` is the caching db.prepare wrapper from the
+ * router; `siteFilter` is the resolved site name or 'all'.
+ *
+ * @returns {{ rows: object[], sites: string[], ledgerReady: boolean }}
+ */
+export function acquireHubAgedDebtorRows(prep, siteFilter) {
+  // Sites whose AR open-item sync has COMPLETED, tracked in hub_debtor_ar_sync —
+  // NOT inferred from the presence of ledger rows. A synced site that is fully
+  // paid up has zero hub_debtor_ar_invoice rows but must still be aged from the
+  // (empty) ledger, not fall back to its possibly-stale hub_records snapshot
+  // (SYNC-5). The snapshot query EXCLUDES these sites to avoid double-counting.
+  const ledgerSiteIds = prep(
+    'SELECT site_id FROM hub_debtor_ar_sync'
+  ).all().map((r) => r.site_id);
+
+  // Readiness for the requested scope, from the sync markers — NOT row count, so
+  // a synced-but-fully-paid site reads as "ready, nothing outstanding" rather
+  // than "no data yet". all-sites: any site has synced; a specific site: that
+  // site has synced. The caller uses this for the ledger_empty / "no data" flag.
+  const ledgerReady = siteFilter === 'all'
+    ? ledgerSiteIds.length > 0
+    : !!prep(
+        `SELECT 1 FROM hub_debtor_ar_sync ds LEFT JOIN hub_sites s ON s.id = ds.site_id
+         WHERE COALESCE(s.name, ds.site_id) = ? LIMIT 1`
+      ).get(siteFilter);
+
+  // Placeholder list of synced site ids, reused by the ledger queries below.
+  const inLedger = ledgerSiteIds.map(() => '?').join(',');
+
+  // --- Ledger rows: ONLY synced sites. A synced site that is fully paid up has
+  //     no rows here and correctly contributes nothing — it is NOT snapshotted. ---
+  let ledgerRows = [];
+  if (ledgerSiteIds.length) {
+    const ledgerParams = [...ledgerSiteIds];
+    let ledgerWhereSite = '';
+    if (siteFilter !== 'all') { ledgerWhereSite = 'AND COALESCE(s.name, i.site_id) = ?'; ledgerParams.push(siteFilter); }
+    ledgerRows = prep(
+      `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+              i.outstanding_amount, i.reference,
+              d.customer_name, d.sales_rep, d.account_type, d.terms,
+              COALESCE(s.name, i.site_id) AS site_name
+       FROM hub_debtor_ar_invoice i
+       LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
+       LEFT JOIN hub_sites s ON s.id = i.site_id
+       WHERE i.outstanding_amount <> 0 AND i.site_id IN (${inLedger}) ${ledgerWhereSite}`
+    ).all(...ledgerParams);
+  }
+
+  // --- Snapshot rows: ONLY sites that have NOT synced AR open-items (no double
+  //     count — synced sites are sourced from the ledger above, even when empty). ---
+  const notLedger = ledgerSiteIds.length ? `AND r.site_id NOT IN (${inLedger})` : '';
+  const snapParams = [];
+  let snapWhereSite = '';
+  if (siteFilter !== 'all') { snapWhereSite = 'AND COALESCE(s.name, r.site_id) = ?'; snapParams.push(siteFilter); }
+  const snapshotRows = prep(
+    `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
+            r.customer_name, r.sales_rep, r.account_type, r.terms,
+            r.outstanding_balance_num, r.unpaid_invoices,
+            COALESCE(s.name, r.site_id) AS site_name
+     FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+     WHERE r.outstanding_balance_num <> 0 ${snapWhereSite} ${notLedger}`
+  ).all(...snapParams, ...ledgerSiteIds).map((r) => {
+    const inv = parseJsonSafely(r.unpaid_invoices, []);
+    // Oldest dated unpaid line — the snapshot array isn't guaranteed oldest-first;
+    // null when absent → the aging engine's "unknown" bucket (balance still counted).
+    let oldestDate = null, oldestT = Infinity;
+    if (Array.isArray(inv)) {
+      for (const it of inv) {
+        const raw = it?.date;
+        if (!raw) continue;
+        const t = Date.parse(raw);
+        if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+      }
+    }
+    return {
+      ...r,
+      document_number: r.customer_code,
+      document_type: '',
+      document_date: oldestDate,
+      due_date: oldestDate,
+      outstanding_amount: r.outstanding_balance_num,
+      reference: '',
+    };
+  });
+
+  // Site dropdown = synced sites that have ledger rows + not-yet-synced sites
+  // with a snapshot balance, so the filter lists every site that has data to
+  // show. (A synced-but-fully-paid site has no rows under either source and so
+  // correctly does not appear — there is nothing to filter to.)
+  const siteSet = new Set();
+  if (ledgerSiteIds.length) {
+    prep(
+      `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+       FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+       WHERE i.outstanding_amount <> 0 AND i.site_id IN (${inLedger})`
+    ).all(...ledgerSiteIds).forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+  }
+  prep(
+    `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
+     FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+     WHERE r.outstanding_balance_num > 0 ${notLedger}`
+  ).all(...ledgerSiteIds).forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+
+  return { rows: [...ledgerRows, ...snapshotRows], sites: [...siteSet].sort(), ledgerReady };
+}
+
 export function createReportingRouter({ requireAuth, requirePermission }) {
   // Report data (trends, exports, insights) is gated by can_access_reports so
   // a bare authenticated account can't read revenue / dead-stock / debtor data
@@ -1435,77 +1552,20 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // real due date and outstanding amount, so we can age it the Sage way.
     let rows;
     let sites = [];
+    // Whether the AR open-item ledger has been synced for this scope — read from
+    // the sync markers, NOT row count, so a synced-but-fully-paid site reads as
+    // "ready, nothing outstanding" instead of triggering the "no data yet"
+    // warning (which is for sites that have never run the AR sync).
+    let ledgerReady = false;
     if (isHub) {
-      const params = [];
-      let whereSite = '';
-      const ledgerReady = prep('SELECT 1 FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0 LIMIT 1').get();
-      if (ledgerReady) {
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
-        sites = prep(
-          `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
-           FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
-           WHERE i.outstanding_amount <> 0 ORDER BY site_name`
-        ).all().map(r => r.site_name).filter(Boolean);
-        rows = prep(
-          `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
-                  i.outstanding_amount, i.reference,
-                  d.customer_name, d.sales_rep, d.account_type, d.terms,
-                  COALESCE(s.name, i.site_id) AS site_name
-           FROM hub_debtor_ar_invoice i
-           LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
-           LEFT JOIN hub_sites s ON s.id = i.site_id
-           WHERE i.outstanding_amount <> 0 ${whereSite}`
-        ).all(...params);
-      } else {
-        // Fallback: the hub open-item ledger isn't populated yet (no ETL into
-        // hub_debtor_ar_invoice). Use the per-customer snapshot in hub_records —
-        // the same source the hub Customer Balances already reads — so the
-        // report still returns balances + site filters instead of an empty
-        // page. Each customer becomes one pseudo-document aged by the OLDEST
-        // dated unpaid invoice in its snapshot until the open-item ETL lands.
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; params.push(siteFilter); }
-        sites = prep(
-          `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance_num > 0 ORDER BY site_name`
-        ).all().map(r => r.site_name).filter(Boolean);
-        rows = prep(
-          `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
-                  r.customer_name, r.sales_rep, r.account_type, r.terms,
-                  r.outstanding_balance_num, r.unpaid_invoices,
-                  COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance_num <> 0 ${whereSite}`
-        ).all(...params).map((r) => {
-          const inv = parseJsonSafely(r.unpaid_invoices, []);
-          // Scan every unpaid line for the OLDEST date — the snapshot array is
-          // not guaranteed oldest-first, and using inv[0] alone places a
-          // customer whose older invoice sits later in the array into a younger
-          // bucket, understating the aged-debtors summary. hub_records carries no
-          // flat date column, so the JSON snapshot is the only source; null when
-          // absent → the engine's "unknown" bucket (balance still counted).
-          let oldestDate = null, oldestT = Infinity;
-          if (Array.isArray(inv)) {
-            for (const it of inv) {
-              const raw = it?.date;
-              if (!raw) continue;
-              const t = Date.parse(raw);
-              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
-            }
-          }
-          return {
-            ...r,
-            document_number: r.customer_code,
-            document_type: '',
-            document_date: oldestDate,
-            due_date: oldestDate,
-            outstanding_amount: r.outstanding_balance_num,
-            reference: '',
-          };
-        });
-      }
+      // Per-site ledger/snapshot decision (SYNC-5) is extracted so it can be
+      // unit-tested against a seeded mixed-site DB. Each site is sourced from its
+      // own best data: open-item ledger if its AR ETL has landed, hub_records
+      // snapshot otherwise — a not-yet-synced site no longer vanishes.
+      ({ rows, sites, ledgerReady } = acquireHubAgedDebtorRows(prep, siteFilter));
     } else {
       sites = [SITE_NAME];
+      ledgerReady = !!prep('SELECT last_synced_at FROM debtor_sync_meta WHERE id = 1').get()?.last_synced_at;
       rows = prep(
         `SELECT i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
                 i.outstanding_amount, i.reference,
@@ -1516,14 +1576,15 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
          WHERE i.source_table = 'AROBL' AND i.outstanding_amount <> 0`
       ).all(SITE_NAME).map(hydrateSalesRepAndAccountType);
 
-      // Fallback: the AR open-item ledger (debtor_ar_invoice) hasn't been
-      // populated yet — the nightly debtors sync hasn't run since the upgrade, or
-      // the AR query isn't configured. Rather than show all-zero aging tiles while
-      // Customer Balances still shows a real outstanding total, age the
-      // per-customer snapshot (datarecord) by its OLDEST unpaid invoice — one
-      // pseudo-document per customer. This mirrors the hub's snapshot fallback and
+      // Fallback: the AR sync has NEVER run for this site (no debtor_sync_meta
+      // marker → ledgerReady false), so debtor_ar_invoice is empty. Rather than
+      // show all-zero aging tiles while Customer Balances still shows a real
+      // outstanding total, age the per-customer snapshot (datarecord) by its
+      // OLDEST unpaid invoice — one pseudo-document per customer. A synced-but-
+      // paid site (ledgerReady) shows nothing, correctly. ledger_empty still flags
+      // !ledgerReady below, so the UI nudges the operator to run the sync; this
       // self-heals to per-document AR aging on the first debtors sync.
-      if (rows.length === 0) {
+      if (!ledgerReady) {
         rows = prep(
           `SELECT TRIM(customer_number) AS customer_code, TRIM(customer_number) AS reporting_account,
                   customer_name, sales_rep, account_type, terms, outstanding_balance_num, unpaid_invoices,
@@ -1555,6 +1616,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         });
       }
     }
+
 
     // Age + join on the REPORTING account (national account for a member, else
     // the customer's own code) so national-account child invoices roll up under
@@ -1643,9 +1705,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         bucket_counts: bucketCounts,
       },
       filters: { sites, sales_reps: salesReps, account_types: accountTypes },
-      // True when the AR open-item ledger is empty (sync not yet run/configured)
-      // — lets the UI tell "nothing outstanding" apart from "no data yet".
-      ledger_empty: docs.length === 0,
+      // True when the AR open-item sync has NOT run for this scope (no markers) —
+      // lets the UI tell "nothing outstanding" (synced + paid up) apart from "no
+      // data yet" (never synced). Keyed on the sync markers, not row count, so a
+      // fully-paid synced branch no longer shows the "no AR data yet" warning.
+      ledger_empty: !ledgerReady,
       generated_at: new Date().toISOString(),
       site_name: SITE_NAME,
       hub_mode: isHub,
@@ -1653,7 +1717,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     };
   }
 
-  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+  router.get('/api/reports/aged-debtors', ...reportsGuard, (req, res) => {
     try {
       res.json(buildAgedDebtorsReport(req.query));
     } catch (err) {
@@ -1950,7 +2014,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   }
 
-  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+  router.get('/api/reports/rep-exposure', ...reportsGuard, (req, res) => {
     try {
       res.json(buildRepExposureReport(req.query));
     } catch (err) {
@@ -1984,7 +2048,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-weekly?year=YYYY — per-week BAT vs Sage credit-note
   // totals + variance + extraction stats, suitable for printing as a one-pager.
-  router.get('/api/reports/bat-weekly', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-weekly', ...reportsGuard, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
       // BAT reconciliation is a per-branch operational process — there is no hub
@@ -2072,7 +2136,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-ytd?year=YYYY — YTD fee-type breakdown comparing
   // BAT's claimed totals to Sage's posted credit-note totals.
-  router.get('/api/reports/bat-ytd', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-ytd', ...reportsGuard, (req, res) => {
     // ISO year fallback so a late-Dec call without ?year= matches the
     // ISO year that bat_reconciliations is keyed on.
     const year = req.query.year ? parseInt(req.query.year, 10) : isoYear(new Date());
@@ -2129,7 +2193,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-exceptions?year=YYYY — total exception value, count,
   // breakdown by reason (normalized) and by store.
-  router.get('/api/reports/bat-exceptions', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-exceptions', ...reportsGuard, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
       if (process.env.HUB_MODE === 'true') {

@@ -3,3 +3,7 @@
 
 # Binary assets — never apply line-ending conversion
 *.pdf binary
+
+# Generated review tracker — pin to LF so `node scripts/review-report.mjs`
+# (which writes LF) never churns the committed file on a CRLF checkout.
+docs/review/*.md text eol=lf

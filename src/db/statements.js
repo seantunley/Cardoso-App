@@ -8,7 +8,6 @@ function buildStatements(db) {
 
   stmts.getUserById        = db.prepare('SELECT * FROM "user" WHERE id = ?');
   stmts.getUserByEmail     = db.prepare('SELECT * FROM "user" WHERE email = ?');
-  stmts.updateUserPassword = db.prepare('UPDATE "user" SET password_hash = ? WHERE id = ?');
 
   stmts.kpiTotalRecords  = db.prepare('SELECT COUNT(*) as count FROM datarecord');
   stmts.kpiFlagCounts    = db.prepare('SELECT flag_color, COUNT(*) as count FROM datarecord GROUP BY flag_color');
