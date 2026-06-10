@@ -591,12 +591,14 @@ export default function Layout({ children, currentPageName }) {
     setUpdateInstalling(true);
     try {
       const res = await fetch('/api/app-update-trigger', { method: 'POST', credentials: 'include' });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         setUpdateInstalling(false);
+        toast.error(data.error || `Update failed to start (HTTP ${res.status})`);
       }
     } catch (e) {
       setUpdateInstalling(false);
+      toast.error(`Update failed to start: ${e.message}`);
     }
   };
 

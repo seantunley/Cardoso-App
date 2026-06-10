@@ -382,7 +382,10 @@ export default function Reconciliation() {
   // last-used per-site values instead of the macro defaults.
   useEffect(() => {
     fetch('/api/bat/settings', { credentials: 'include' })
-      .then(r => r.ok ? r.json() : null)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then(s => {
         if (s?.tg1_rate) setTg1Rate(String(s.tg1_rate));
         if (s?.tg2_rate) setTg2Rate(String(s.tg2_rate));
@@ -391,7 +394,12 @@ export default function Reconciliation() {
           if (Number.isFinite(v)) setVatPercent(v);
         }
       })
-      .catch(() => {});
+      // Fail loudly: these rates feed Cardoso invoice generation. If the saved
+      // values can't load, the inputs silently keep their defaults — the operator
+      // must know so they verify before generating (no-silent-failures).
+      .catch((err) => {
+        toast.error(`Could not load saved BAT TG/VAT rates — the inputs show defaults. Verify them before generating invoices. (${err.message})`);
+      });
   }, []);
   const cardosoFileRef = useRef();
   // Active EventSource + polling timer for the in-flight extraction stream.
@@ -781,12 +789,15 @@ export default function Reconciliation() {
 
   const handleRefreshSage = async () => {
     if (!selected) return;
-    const r = await fetch(`/api/bat/reconciliation/${selected.id}/refresh-sage`, {
-      method: 'POST', credentials: 'include',
-    });
-    if (r.ok) {
-      const data = await r.json();
+    try {
+      const r = await fetch(`/api/bat/reconciliation/${selected.id}/refresh-sage`, {
+        method: 'POST', credentials: 'include',
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
       setSelected(data.reconciliation);
+    } catch (e) {
+      toast.error(`Failed to refresh from Sage: ${e.message}`);
     }
   };
 
