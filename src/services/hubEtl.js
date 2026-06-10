@@ -651,6 +651,56 @@ async function syncSite(site) {
       console.log(`[hub-etl] Creditor AP open-items sync skipped for ${site.id}: ${apErr.message}`);
     }
 
+    // Creditor master → hub_creditor, so Aged Creditors can join vendor name /
+    // terms / last_payment_date. The report's default paid_only=true filter needs
+    // last_payment_date, so without this the default hub view stays empty even
+    // though the AP open items are present.
+    try {
+      const fetchCredPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/creditors?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Creditor master fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allCredRecords = [];
+      let credOffset = 0;
+      let nextCredPromise = guardOrphan(fetchCredPage(0));
+      while (true) {
+        const credData = await nextCredPromise;
+        const recs = credData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = credData?.has_more === true && consumed > 0;
+        nextCredPromise = willHaveMore ? guardOrphan(fetchCredPage(credOffset + consumed)) : null;
+        for (const r of recs) allCredRecords.push(r);
+        credOffset += consumed;
+        if (!nextCredPromise) break;
+      }
+      const upsertCred = db.prepare(`
+        INSERT INTO hub_creditor (site_id, vendor_code, vendor_name, terms, contact, phone, email, is_active, last_receipt_date, last_payment_date, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, vendor_code) DO UPDATE SET
+          vendor_name=excluded.vendor_name, terms=excluded.terms, contact=excluded.contact,
+          phone=excluded.phone, email=excluded.email, is_active=excluded.is_active,
+          last_receipt_date=excluded.last_receipt_date, last_payment_date=excluded.last_payment_date,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_creditor WHERE site_id = ?').run(site.id);
+        for (const r of allCredRecords) {
+          upsertCred.run(site.id, r.vendor_code, r.vendor_name || null, r.terms || null, r.contact || null, r.phone || null, r.email || null, r.is_active ?? 1, r.last_receipt_date || null, r.last_payment_date || null);
+        }
+      })();
+    } catch (credErr) {
+      console.log(`[hub-etl] Creditor master sync skipped for ${site.id}: ${credErr.message}`);
+    }
+
     // Stock receipt expiry — read-only hub copy for cross-site visibility.
     // Paginated fetch (1000 rows / 10s per page), stage all pages in
     // memory, then atomic delete+insert so a mid-page failure leaves
