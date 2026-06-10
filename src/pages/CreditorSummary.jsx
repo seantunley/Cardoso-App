@@ -11,6 +11,7 @@ import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
+import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
 
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
 const AP_TILES = [
@@ -127,13 +128,6 @@ function fmtR(v) {
 function fmtDate(s) {
   if (!s) return "—";
   return s;
-}
-
-// SQLite now writes via now_local() (registered in src/db/index.js)
-// which returns SAST regardless of host TZ — so we can render the
-// stored string directly.
-function fmtLocalSyncTime(iso) {
-  return iso || null;
 }
 
 async function fetchCreditors({ search, activeOnly, includeZero }) {
@@ -298,14 +292,10 @@ export default function CreditorSummary() {
               <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
               {syncing ? "Syncing…" : "Sync from Sage"}
             </button>
-            <span
-              className="text-[10px] uppercase tracking-wider text-muted-foreground text-right"
-              title="Scheduled nightly at 04:30 (Operations page lists every job)"
-            >
-              {meta?.last_synced_at ? `Last sync: ${fmtLocalSyncTime(meta.last_synced_at)}` : "Never synced"}
-              <br />
-              <span className="opacity-70">Next: nightly 04:30</span>
-            </span>
+            <LastSyncedBadge
+              iso={meta?.last_synced_at}
+              detail="Scheduled nightly at 04:30 (Operations page lists every job)"
+            />
           </div>
         </div>
 
