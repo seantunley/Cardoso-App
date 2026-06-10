@@ -896,9 +896,16 @@ export default function HubDashboard() {
   const triggerSync = async () => {
     setSyncing(true);
     try {
-      await fetch("/api/hub/sync", { method: "POST", credentials: "include" });
+      const res = await fetch("/api/hub/sync", { method: "POST", credentials: "include" });
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        throw new Error(d.error || `Sync failed (HTTP ${res.status})`);
+      }
       setTimeout(() => { fetchAll(); setSyncing(false); }, 3000);
-    } catch { setSyncing(false); }
+    } catch (e) {
+      setSyncing(false);
+      toast.error(`Hub sync failed to start: ${e.message}`);
+    }
   };
 
   const resyncSite = async (site) => {
