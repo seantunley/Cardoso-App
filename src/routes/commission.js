@@ -8,6 +8,7 @@ import {
   DEFAULT_COMMISSION_RECEIPTS_SQL,
   DEFAULT_COMMISSION_UNPAID_SQL,
 } from '../services/commission.js';
+import { readOnlyOverrideViolation, scrubSqlForValidation } from '../services/sage/queryRegistry.js';
 import {
   listCommissionArchives,
   getCommissionArchive,
@@ -32,20 +33,17 @@ function validateOverrideSql(sql, { expectedParams }) {
   if (sql === null || sql === undefined) return null;
   const s = String(sql).trim();
   if (s.length === 0) return null; // empty = clear back to default
-  // Allowlist on starting verb — must be SELECT or WITH.
-  if (!/^(\s*--[^\n]*\n)*\s*(SELECT|WITH)\b/i.test(s)) {
-    return 'must start with SELECT or WITH (read-only)';
-  }
-  // Blocklist mutations + dangerous Sage extensions.
-  const banned = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
-  if (banned.test(s)) return 'contains a forbidden write/DDL keyword';
-  // Param-presence check: every declared @param must appear in the SQL.
+  // Shared read-only / single-statement / no-OOB security core (SEC-1) — the
+  // same guardrail the Sage query registry uses, so both override paths reject
+  // SELECT…INTO, OPENROWSET, WAITFOR, xp_/sp_, and a ";"-separated 2nd statement.
+  const sec = readOnlyOverrideViolation(s);
+  if (sec) return sec;
+  // Param-presence check (on the comment-stripped form): every declared @param
+  // must appear in real SQL, not only inside a comment.
+  const clean = scrubSqlForValidation(s, { keepDelimitedIds: true });
   for (const p of expectedParams) {
-    const re = new RegExp(`@${p}\\b`, 'i');
-    if (!re.test(s)) return `must reference @${p} for the date / vat parameter binding`;
+    if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference @${p} for the date / vat parameter binding`;
   }
-  // Length cap so a runaway override can't poison error_log on bind failure.
-  if (s.length > 20_000) return 'too long (max 20,000 chars)';
   return null;
 }
 
