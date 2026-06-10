@@ -4,13 +4,14 @@
 //
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
+import DataTable from "@/components/shared/DataTable";
 import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
 
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
@@ -71,55 +72,15 @@ function FilterPill({ active, onClick, children }) {
   );
 }
 
+// Column-width persistence, resize handles, sticky header, and row windowing
+// all live in the shared DataTable now. Same storage key as the old in-page
+// implementation so operators keep their saved column widths.
 const COL_WIDTHS_KEY = "creditorSummary.columnWidths.v1";
 const COL_DEFAULTS = {
   vendor_code: 110, vendor_name: 360, terms: 100,
   last_receipt_date: 120, last_payment_date: 120,
   ytd_receipt_count: 110, outstanding_amount: 150,
 };
-const MIN_COL = 60;
-
-function useColWidths() {
-  const [widths, setWidths] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(COL_WIDTHS_KEY) || "{}");
-      return { ...COL_DEFAULTS, ...saved };
-    } catch { return COL_DEFAULTS; }
-  });
-  const widthsRef = useRef(widths);
-  const writeRef = useRef(null);
-  useEffect(() => {
-    widthsRef.current = widths;
-    if (writeRef.current) clearTimeout(writeRef.current);
-    writeRef.current = setTimeout(() => {
-      try { localStorage.setItem(COL_WIDTHS_KEY, JSON.stringify(widths)); } catch {} // eslint-disable-line no-empty -- localStorage quota errors are non-fatal
-    }, 200);
-    return () => { if (writeRef.current) clearTimeout(writeRef.current); };
-  }, [widths]);
-  const startResize = useCallback((id) => (e) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startW = widthsRef.current[id] ?? COL_DEFAULTS[id] ?? 100;
-    const onMove = (ev) => {
-      const next = Math.max(MIN_COL, startW + (ev.clientX - startX));
-      setWidths((w) => ({ ...w, [id]: next }));
-    };
-    const onUp = () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }, []);
-  const resetCol = useCallback((id) => {
-    setWidths((w) => ({ ...w, [id]: COL_DEFAULTS[id] ?? 100 }));
-  }, []);
-  return { widths, startResize, resetCol };
-}
 
 function fmtR(v) {
   const n = Number(v) || 0;
@@ -157,7 +118,7 @@ async function triggerSync() {
 }
 
 const COLUMNS = [
-  { key: "vendor_code",        label: "Code",          align: "left",  format: (v) => v },
+  { key: "vendor_code",        label: "Code",          align: "left",  mono: true, format: (v) => v },
   { key: "vendor_name",        label: "Vendor",        align: "left",  format: (v) => v || "—" },
   { key: "terms",              label: "Terms",         align: "left",  format: (v) => v || "—" },
   { key: "last_receipt_date",  label: "Last receipt",  align: "left",  format: fmtDate },
@@ -182,7 +143,6 @@ export default function CreditorSummary() {
   const [sortKey, setSortKey] = useState("outstanding_amount");
   const [sortDir, setSortDir] = useState("desc");
   const [syncing, setSyncing] = useState(false);
-  const { widths, startResize, resetCol } = useColWidths();
 
   const { data, isLoading, error } = useQuery({
     queryKey: ["creditors", debouncedSearch, activeOnly, includeZero],
@@ -400,56 +360,17 @@ export default function CreditorSummary() {
           </div>
         )}
         {!isLoading && !error && rows.length > 0 && (
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="overflow-auto max-h-[70vh]">
-              <table className="text-sm" style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}>
-                <colgroup>
-                  {COLUMNS.map((c) => (
-                    <col key={c.key} style={{ width: `${widths[c.key]}px` }} />
-                  ))}
-                </colgroup>
-                <thead className="sticky top-0 bg-card z-10">
-                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {COLUMNS.map((c) => (
-                      <th
-                        key={c.key}
-                        className={`px-3 py-2 cursor-pointer hover:text-foreground select-none relative ${c.align === "right" ? "text-right" : "text-left"}`}
-                        onClick={() => toggleSort(c.key)}
-                        title={`Sort by ${c.label}`}
-                      >
-                        <span className="truncate inline-block max-w-full align-middle">
-                          {c.label}{sortKey === c.key ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-                        </span>
-                        <span
-                          onMouseDown={startResize(c.key)}
-                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); resetCol(c.key); }}
-                          onClick={(e) => e.stopPropagation()}
-                          className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-accent/50 active:bg-accent z-20"
-                          title="Drag to resize · double-click to reset"
-                          style={{ touchAction: "none" }}
-                        />
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => (
-                    <tr key={r.vendor_code} className="border-b border-border last:border-0 hover:bg-muted/30">
-                      {COLUMNS.map((c) => (
-                        <td
-                          key={c.key}
-                          className={`px-3 py-1.5 tabular-nums truncate ${c.align === "right" ? "text-right" : "text-left"} ${c.key === "vendor_code" ? "font-mono text-xs" : ""}`}
-                          title={String(r[c.key] ?? "")}
-                        >
-                          {c.format(r[c.key])}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <DataTable
+            columns={COLUMNS}
+            rows={rows}
+            rowKey={(r) => r.vendor_code}
+            sortKey={sortKey}
+            sortDir={sortDir}
+            onSortChange={toggleSort}
+            storageKey={COL_WIDTHS_KEY}
+            defaultWidths={COL_DEFAULTS}
+            maxHeight="70vh"
+          />
         )}
       </div>
     </div>
