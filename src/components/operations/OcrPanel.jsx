@@ -99,7 +99,12 @@ export default function OcrPanel() {
       if (!r.ok) throw new Error(d.error || 'Failed to load OCR snapshot');
       return d;
     },
-    refetchInterval: 2000,
+    // 2s only while OCR is actually doing something (worker running or a recon
+    // active); idle panels drop to 15s. The old flat 2s hit the snapshot
+    // endpoint ~1,800×/hour from an idle Operations tab (PERF-4). Background
+    // tabs already pause via react-query's refetchIntervalInBackground default.
+    refetchInterval: (query) =>
+      (query.state.data?.worker_running || query.state.data?.active_recon) ? 2000 : 15_000,
   });
 
   const counters = useQuery({

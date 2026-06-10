@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Search, X } from "lucide-react";
 import { apiGet, apiSend, formatCurrency } from "./utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 export default function AssignCustomersDialog({ open, onClose, worklistId, onAssigned }) {
   const [search, setSearch] = useState("");
@@ -16,6 +17,12 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
   const [salesRep, setSalesRep] = useState("all");
   const [daysOverdue, setDaysOverdue] = useState("");
   const [selected, setSelected] = useState(new Set());
+  // Free-typed fields key the query off debounced copies — one request per
+  // typing pause, not per keystroke (PERF-4). Inputs stay bound to the
+  // immediate state for responsiveness.
+  const debouncedSearch = useDebouncedValue(search, 250);
+  const debouncedMinValue = useDebouncedValue(minValue, 250);
+  const debouncedDaysOverdue = useDebouncedValue(daysOverdue, 250);
   useEffect(() => {
     if (!open) {
       setSearch(""); setMinValue(""); setSalesRep("all"); setDaysOverdue("");
@@ -24,13 +31,13 @@ export default function AssignCustomersDialog({ open, onClose, worklistId, onAss
   }, [open]);
 
   const candidates = useQuery({
-    queryKey: ["collection-candidates", worklistId, search, minValue, salesRep, daysOverdue],
+    queryKey: ["collection-candidates", worklistId, debouncedSearch, debouncedMinValue, salesRep, debouncedDaysOverdue],
     queryFn: () => {
       const params = new URLSearchParams({ worklist_id: String(worklistId) });
-      if (search) params.set("q", search);
-      if (minValue && parseFloat(minValue) > 0) params.set("min_value", minValue);
+      if (debouncedSearch) params.set("q", debouncedSearch);
+      if (debouncedMinValue && parseFloat(debouncedMinValue) > 0) params.set("min_value", debouncedMinValue);
       if (salesRep && salesRep !== "all") params.set("sales_rep", salesRep);
-      if (daysOverdue && parseInt(daysOverdue, 10) > 0) params.set("days_overdue", daysOverdue);
+      if (debouncedDaysOverdue && parseInt(debouncedDaysOverdue, 10) > 0) params.set("days_overdue", debouncedDaysOverdue);
       return apiGet(`/api/collections/candidates?${params.toString()}`).then(d => d.candidates || []);
     },
     enabled: open && !!worklistId,

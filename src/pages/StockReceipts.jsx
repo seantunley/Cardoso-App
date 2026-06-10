@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { Package, RefreshCw, Search, Calendar, Plus, AlertTriangle } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
@@ -44,6 +45,9 @@ function FilterPill({ active, onClick, children, title }) {
 export default function StockReceipts() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
+  // Query keys off a debounced copy — one request per typing pause, not per
+  // keystroke (PERF-4); the input stays bound to `search` for responsiveness.
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [missingOnly, setMissingOnly] = useState(true);
   const [siteFilter, setSiteFilter] = useState("all");
   const [selectedLineId, setSelectedLineId] = useState(null);
@@ -66,10 +70,10 @@ export default function StockReceipts() {
   });
 
   const receiptLines = useQuery({
-    queryKey: ["stock-receipt-lines", search, missingOnly, siteFilter],
+    queryKey: ["stock-receipt-lines", debouncedSearch, missingOnly, siteFilter],
     queryFn: () => {
       const params = new URLSearchParams({ limit: "300" });
-      if (search) params.set("search", search);
+      if (debouncedSearch) params.set("search", debouncedSearch);
       if (missingOnly) params.set("missing_expiry", "true");
       if (hubMode && siteFilter !== "all") params.set("site_id", siteFilter);
       return apiFetch(`/api/stock-receipts?${params}`);
