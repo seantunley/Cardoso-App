@@ -66,7 +66,7 @@ export default function PhosphorTraces({ className = "", style }) {
 
     // ── Shared: colour splashes ─────────────────────────────────────────────
     const SPLASH_HUES = [185, 320, 95, 260, 15];
-    const SPLASH_COUNT = 8;
+    const SPLASH_COUNT = 6;
     const splashes = [];
     const spawnSplash = (s, now) => {
       s.x = Math.random();              // fractions of w/h — survive resizes
@@ -75,7 +75,7 @@ export default function PhosphorTraces({ className = "", style }) {
       s.hue = SPLASH_HUES[Math.floor(Math.random() * SPLASH_HUES.length)];
       s.born = now;
       s.life = 6 + Math.random() * 8;   // seconds — slow blooms, not strobes
-      s.peak = 0.16 + Math.random() * 0.14; // clearly visible, still ambient
+      s.peak = 0.09 + Math.random() * 0.08; // visible but calm — tuned down from 0.16-0.30 ("a bit loud")
     };
     for (let i = 0; i < SPLASH_COUNT; i += 1) {
       const s = {};
@@ -98,9 +98,9 @@ export default function PhosphorTraces({ className = "", style }) {
         const cx = s.x * w;
         const cy = s.y * h;
         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, s.r);
-        g.addColorStop(0, `hsla(${s.hue}, 95%, 62%, ${alpha})`);
-        g.addColorStop(0.6, `hsla(${s.hue}, 95%, 58%, ${alpha * 0.45})`);
-        g.addColorStop(1, `hsla(${s.hue}, 95%, 58%, 0)`);
+        g.addColorStop(0, `hsla(${s.hue}, 80%, 60%, ${alpha})`);
+        g.addColorStop(0.6, `hsla(${s.hue}, 80%, 56%, ${alpha * 0.45})`);
+        g.addColorStop(1, `hsla(${s.hue}, 80%, 56%, 0)`);
         ctx.fillStyle = g;
         ctx.fillRect(cx - s.r, cy - s.r, s.r * 2, s.r * 2);
       }
