@@ -130,6 +130,23 @@ function releaseSyncLock(connectionId) {
   activeSyncs.delete(String(connectionId));
 }
 
+/**
+ * True when re-running the per-record UPDATE for an existing datarecord would
+ * change none of the columns it controls — i.e. the only effect of the write
+ * would be to bump synced_at / updated_date. `upd` is the object of new column
+ * values the sync loop computed; compared against the stored row as strings
+ * (null/undefined → '') because datarecord columns are TEXT and `upd` is already
+ * coerced. Skipping these no-op writes is SYNC-2: it stops every tick from
+ * bumping updated_date on every row, which made the hub re-pull the whole set.
+ * Exported for unit testing.
+ */
+export function isNoOpDataUpdate(existing, upd) {
+  for (const k of Object.keys(upd)) {
+    if (String(existing[k] ?? '') !== String(upd[k] ?? '')) return false;
+  }
+  return true;
+}
+
 async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
   let pool;
   let syncRunId = null;
@@ -301,6 +318,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       let diagLogged = false;
       let syncUpdated = 0;
       let syncInserted = 0;
+      let syncSkipped = 0; // existing rows whose data was unchanged (SYNC-2 no-op skip)
       const seenSourceIds = new Set();
       const writeRowsTransaction = db.transaction((rowsToWrite) => {
         for (const row of rowsToWrite) {
@@ -356,7 +374,6 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
           });
 
           if (existing) {
-            syncUpdated++;
             const keepExistingIfIncomingBlank = (incomingValue, existingValue) => {
               if (incomingValue !== undefined && incomingValue !== null && String(incomingValue).trim() !== '') {
                 return String(incomingValue);
@@ -364,36 +381,52 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
               return String(existingValue ?? '');
             };
 
-            updateExistingRecord.run(
-              baseRecordData.created_by,
-              String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
-              String(baseRecordData.customer_name ?? existing.customer_name ?? ''),
-              String(baseRecordData.age_analysis ?? existing.age_analysis ?? ''),
-              String(baseRecordData.age_current ?? existing.age_current ?? ''),
-              String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
-              String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
-              String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
-              String(baseRecordData.outstanding_balance ?? existing.outstanding_balance ?? ''),
-              baseRecordData.source_id,
-              baseRecordData.source_table,
-              baseRecordData.data,
-              String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
-              baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
-              baseRecordData.receipts ?? existing.receipts ?? '[]',
-              String(baseRecordData.terms ?? existing.terms ?? ''),
-              keepExistingIfIncomingBlank(baseRecordData.sales_rep, existing.sales_rep),
-              keepExistingIfIncomingBlank(baseRecordData.account_type, existing.account_type),
-              existing.flag_color,
-              existing.flag_reason,
-              existing.flag_created_by,
-              String(baseRecordData.note ?? existing.note ?? ''),
-              baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? null,
-              baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? null,
-              baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? null,
-              baseRecordData.synced_at,
-              syncTimestamp,
-              existing.id
-            );
+            // Every column the UPDATE controls (flag_* are re-written as the
+            // existing values, so they never differ and aren't compared).
+            const upd = {
+              created_by:          baseRecordData.created_by,
+              customer_number:     String(baseRecordData.customer_number ?? existing.customer_number ?? ''),
+              customer_name:       String(baseRecordData.customer_name ?? existing.customer_name ?? ''),
+              age_analysis:        String(baseRecordData.age_analysis ?? existing.age_analysis ?? ''),
+              age_current:         String(baseRecordData.age_current ?? existing.age_current ?? ''),
+              age_7_days:          String(baseRecordData.age_7_days ?? existing.age_7_days ?? ''),
+              age_14_days:         String(baseRecordData.age_14_days ?? existing.age_14_days ?? ''),
+              age_21_days:         String(baseRecordData.age_21_days ?? existing.age_21_days ?? ''),
+              outstanding_balance: String(baseRecordData.outstanding_balance ?? existing.outstanding_balance ?? ''),
+              source_id:           baseRecordData.source_id,
+              source_table:        baseRecordData.source_table,
+              data:                baseRecordData.data,
+              local_fields:        String(baseRecordData.local_fields ?? stringifyJsonSafely(existingLocalFields)),
+              unpaid_invoices:     baseRecordData.unpaid_invoices ?? existing.unpaid_invoices ?? '[]',
+              receipts:            baseRecordData.receipts ?? existing.receipts ?? '[]',
+              terms:               String(baseRecordData.terms ?? existing.terms ?? ''),
+              sales_rep:           keepExistingIfIncomingBlank(baseRecordData.sales_rep, existing.sales_rep),
+              account_type:        keepExistingIfIncomingBlank(baseRecordData.account_type, existing.account_type),
+              note:                String(baseRecordData.note ?? existing.note ?? ''),
+              custom_field_1:      baseRecordData.custom_field_1 ?? existing.custom_field_1 ?? null,
+              custom_field_2:      baseRecordData.custom_field_2 ?? existing.custom_field_2 ?? null,
+              custom_field_3:      baseRecordData.custom_field_3 ?? existing.custom_field_3 ?? null,
+            };
+
+            // SYNC-2: when nothing the UPDATE controls actually changed, skip the
+            // write. Otherwise every 30-min tick re-UPDATEs every unchanged row,
+            // bumping updated_date — which makes the hub re-download the ENTIRE
+            // record set on its next incremental pull (it filters on updated_date).
+            if (isNoOpDataUpdate(existing, upd)) {
+              syncSkipped++;
+            } else {
+              syncUpdated++;
+              updateExistingRecord.run(
+                upd.created_by, upd.customer_number, upd.customer_name, upd.age_analysis,
+                upd.age_current, upd.age_7_days, upd.age_14_days, upd.age_21_days,
+                upd.outstanding_balance, upd.source_id, upd.source_table, upd.data,
+                upd.local_fields, upd.unpaid_invoices, upd.receipts, upd.terms,
+                upd.sales_rep, upd.account_type,
+                existing.flag_color, existing.flag_reason, existing.flag_created_by,
+                upd.note, upd.custom_field_1, upd.custom_field_2, upd.custom_field_3,
+                baseRecordData.synced_at, syncTimestamp, existing.id
+              );
+            }
              // Apply auto-flag rules only if the record was NOT manually flagged by a user
              // (manually flagged = has a flag AND auto_flagged is 0 AND flag_created_by is set)
              const manuallyFlagged = existing.flag_color && !existing.auto_flagged && existing.flag_created_by;
@@ -490,7 +523,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       });
 
       writeRowsTransaction(rows);
-      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${rows.length - seenSourceIds.size} duplicate rows skipped`);
+      console.log(`[sync-stats] ${sourceName}: ${rows.length} incoming rows, ${seenSourceIds.size} unique, ${syncUpdated} updated, ${syncInserted} inserted, ${syncSkipped} unchanged (no-op), ${rows.length - seenSourceIds.size} duplicate rows skipped`);
     };
     if (syncQuery) {
       // ── QUERY MODE ─────────────────────────────────────────────────────────
