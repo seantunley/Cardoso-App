@@ -3,6 +3,7 @@ import pluginJs from "@eslint/js";
 import pluginReact from "eslint-plugin-react";
 import pluginReactHooks from "eslint-plugin-react-hooks";
 import pluginUnusedImports from "eslint-plugin-unused-imports";
+import pluginJsxA11y from "eslint-plugin-jsx-a11y";
 
 export default [
   {
@@ -33,8 +34,28 @@ export default [
       react: pluginReact,
       "react-hooks": pluginReactHooks,
       "unused-imports": pluginUnusedImports,
+      "jsx-a11y": pluginJsxA11y,
     },
     rules: {
+      // Accessibility — recommended ruleset, then targeted level changes below
+      // where the codebase has an established interaction pattern that needs
+      // a bigger refactor (tracked, not ignored).
+      ...pluginJsxA11y.configs.recommended.rules,
+      // ~48 existing inputs use a visual <label> without htmlFor/nesting.
+      // Real issue, mechanical fix, but too broad for the introduction PR —
+      // surfaced as warnings so new code is visible in review; ratchet to
+      // error once the backlog is cleared.
+      "jsx-a11y/label-has-associated-control": "warn",
+      // Clickable <div>/<tr> rows without keyboard handlers (~36 sites). The
+      // DataTable consolidation work gives rows real keyboard interaction;
+      // until then these stay visible as warnings rather than being ignored.
+      "jsx-a11y/no-static-element-interactions": "warn",
+      "jsx-a11y/click-events-have-key-events": "warn",
+      // Deliberate: operator-speed dialogs (search typeaheads, upload modals)
+      // autofocus their primary input by design on this keyboard-heavy LAN
+      // app; the rule's screen-reader-disorientation concern is mitigated by
+      // Radix moving focus into the dialog anyway.
+      "jsx-a11y/no-autofocus": "off",
       // no-undef catches references to identifiers that were never
       // declared OR imported in scope. Explicitly enabled because the
       // surrounding `rules: {}` object REPLACES (not merges with) the
