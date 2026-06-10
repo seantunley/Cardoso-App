@@ -115,10 +115,15 @@ function createSqlBackupUnavailableResponse(message) {
   };
 }
 
-function getBackupConfigExportMode() {
+export function getBackupConfigExportMode() {
   const raw = String(process.env.BACKUP_CONFIG_EXPORT_MODE || '').trim().toLowerCase();
   if (['disabled', 'redacted', 'full'].includes(raw)) return raw;
-  return process.env.NODE_ENV === 'production' ? 'redacted' : 'full';
+  // Default to REDACTED everywhere. Returning the full unredacted .env
+  // (SESSION_SECRET, ENCRYPTION_KEY) whenever NODE_ENV !== 'production' was a
+  // footgun — a service started without NODE_ENV set would expose secrets over
+  // the reporting-token-gated endpoint. Full/disabled now require an explicit
+  // BACKUP_CONFIG_EXPORT_MODE opt-in (SEC-3).
+  return 'redacted';
 }
 
 // Redact sensitive content from a .env file before exposing it. The original

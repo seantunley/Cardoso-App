@@ -3,6 +3,7 @@ import os from 'os';
 import fs from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import crypto from 'crypto';
 import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
@@ -177,12 +178,23 @@ function matchesAgeBucket(record, ageBucket) {
   return true;
 }
 
+// Constant-time token comparison. A plain !== leaks, via timing, how many leading
+// bytes matched — over a long-lived shared secret that lets an attacker recover it
+// byte-by-byte. timingSafeEqual needs equal-length buffers, so length-guard first
+// (the length itself isn't the secret). Exported for unit testing.
+export function safeTokenEqual(provided, expected) {
+  const a = Buffer.from(String(provided ?? ''), 'utf8');
+  const b = Buffer.from(String(expected ?? ''), 'utf8');
+  if (a.length === 0 || a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 function requireReportingToken(req, res, next) {
   const token = process.env.REPORTING_TOKEN;
   if (!token) {
     return res.status(503).json({ error: 'Reporting API not configured' });
   }
-  if (req.headers['x-reporting-token'] !== token) {
+  if (!safeTokenEqual(req.headers['x-reporting-token'], token)) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   next();
