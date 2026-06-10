@@ -20,7 +20,8 @@
     "hub:postgres:verify": "node scripts/hub-postgres-verify.mjs",
     "check:migrations": "node scripts/check-migration-versions.mjs",
     "schema:dump": "node scripts/dump-schema-snapshot.mjs",
-    "prepare": "node scripts/install-git-hooks.mjs"
+    "prepare": "node scripts/install-git-hooks.mjs",
+    "test:e2e": "playwright test"
   },
   "overrides": {
     "qs": "^6.15.2",
@@ -113,6 +114,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
+    "@playwright/test": "^1.60.0",
     "@testing-library/react": "^16.3.2",
     "@types/node": "^25.9.2",
     "@types/react": "^19.2.17",

@@ -5,13 +5,24 @@
 import db from '../db/index.js';
 import { logError } from './errorLog.js';
 
-const insertAudit = db.prepare(`
-  INSERT INTO auditlog (
-    action_type, user_email, user_name, resource_type,
-    resource_id, resource_name, action_details, changes,
-    ip_address, status
-  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
+// Prepared lazily on first use, NOT at module load: ESM hoists imports, so a
+// module-level db.prepare here runs before server.js reaches runMigrations().
+// On an existing DB that's invisible, but on a FRESH database (new site
+// install, e2e scratch DB) the auditlog table doesn't exist yet and the whole
+// server crashed at boot. Caught by the e2e smoke setup.
+let insertAuditStmt = null;
+function insertAudit() {
+  if (!insertAuditStmt) {
+    insertAuditStmt = db.prepare(`
+      INSERT INTO auditlog (
+        action_type, user_email, user_name, resource_type,
+        resource_id, resource_name, action_details, changes,
+        ip_address, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+  }
+  return insertAuditStmt;
+}
 
 function extractIp(req) {
   if (!req) return null;
@@ -97,7 +108,7 @@ export function logAudit({
     if (!resolvedDetails && changes && (changes.before || changes.after)) {
       resolvedDetails = summarizeDiff(changes);
     }
-    insertAudit.run(
+    insertAudit().run(
       String(action || 'unknown').slice(0, 64),
       user.email || 'system',
       user.full_name || user.email || '',
