@@ -2728,16 +2728,17 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   let salesRollupWarmAttempted = false;
   const ensureSalesRollupWarm = () => {
     if (salesRollupWarmAttempted) return;
-    salesRollupWarmAttempted = true;
-    try {
-      const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
-      const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
-      if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {
-        rebuildInventorySalesRollups();
-      }
-    } catch (e) {
-      console.warn('[inventory.sales_rollup.warm] first-read rebuild failed; next sales sync will populate it:', e.message);
+    const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
+    const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
+    if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {
+      // Let a rebuild failure PROPAGATE — do NOT swallow it. The endpoint then
+      // returns 500, the hub treats it as a failed pull and SKIPS its
+      // delete-and-replace, so it keeps the existing valid hub data instead of
+      // wiping it with an empty set. The once-flag is set only after success
+      // (below), so the next hub pull retries the rebuild.
+      rebuildInventorySalesRollups();
     }
+    salesRollupWarmAttempted = true;
   };
 
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
