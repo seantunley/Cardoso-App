@@ -351,7 +351,7 @@ $result | ConvertTo-Json -Depth 6 -Compress
  * Exported for unit testing. `prep` is the caching db.prepare wrapper from the
  * router; `siteFilter` is the resolved site name or 'all'.
  *
- * @returns {{ rows: object[], sites: string[] }}
+ * @returns {{ rows: object[], sites: string[], ledgerReady: boolean }}
  */
 export function acquireHubAgedDebtorRows(prep, siteFilter) {
   // Sites whose AR open-item sync has COMPLETED, tracked in hub_debtor_ar_sync —
@@ -362,6 +362,17 @@ export function acquireHubAgedDebtorRows(prep, siteFilter) {
   const ledgerSiteIds = prep(
     'SELECT site_id FROM hub_debtor_ar_sync'
   ).all().map((r) => r.site_id);
+
+  // Readiness for the requested scope, from the sync markers — NOT row count, so
+  // a synced-but-fully-paid site reads as "ready, nothing outstanding" rather
+  // than "no data yet". all-sites: any site has synced; a specific site: that
+  // site has synced. The caller uses this for the ledger_empty / "no data" flag.
+  const ledgerReady = siteFilter === 'all'
+    ? ledgerSiteIds.length > 0
+    : !!prep(
+        `SELECT 1 FROM hub_debtor_ar_sync ds LEFT JOIN hub_sites s ON s.id = ds.site_id
+         WHERE COALESCE(s.name, ds.site_id) = ? LIMIT 1`
+      ).get(siteFilter);
 
   // Placeholder list of synced site ids, reused by the ledger queries below.
   const inLedger = ledgerSiteIds.map(() => '?').join(',');
@@ -440,7 +451,7 @@ export function acquireHubAgedDebtorRows(prep, siteFilter) {
      WHERE r.outstanding_balance_num > 0 ${notLedger}`
   ).all(...ledgerSiteIds).forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
 
-  return { rows: [...ledgerRows, ...snapshotRows], sites: [...siteSet].sort() };
+  return { rows: [...ledgerRows, ...snapshotRows], sites: [...siteSet].sort(), ledgerReady };
 }
 
 export function createReportingRouter({ requireAuth, requirePermission }) {
@@ -1541,14 +1552,20 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // real due date and outstanding amount, so we can age it the Sage way.
     let rows;
     let sites = [];
+    // Whether the AR open-item ledger has been synced for this scope — read from
+    // the sync markers, NOT row count, so a synced-but-fully-paid site reads as
+    // "ready, nothing outstanding" instead of triggering the "no data yet"
+    // warning (which is for sites that have never run the AR sync).
+    let ledgerReady = false;
     if (isHub) {
       // Per-site ledger/snapshot decision (SYNC-5) is extracted so it can be
       // unit-tested against a seeded mixed-site DB. Each site is sourced from its
       // own best data: open-item ledger if its AR ETL has landed, hub_records
       // snapshot otherwise — a not-yet-synced site no longer vanishes.
-      ({ rows, sites } = acquireHubAgedDebtorRows(prep, siteFilter));
+      ({ rows, sites, ledgerReady } = acquireHubAgedDebtorRows(prep, siteFilter));
     } else {
       sites = [SITE_NAME];
+      ledgerReady = !!prep('SELECT last_synced_at FROM debtor_sync_meta WHERE id = 1').get()?.last_synced_at;
       rows = prep(
         `SELECT i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
                 i.outstanding_amount, i.reference,
@@ -1647,9 +1664,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         bucket_counts: bucketCounts,
       },
       filters: { sites, sales_reps: salesReps, account_types: accountTypes },
-      // True when the AR open-item ledger is empty (sync not yet run/configured)
-      // — lets the UI tell "nothing outstanding" apart from "no data yet".
-      ledger_empty: docs.length === 0,
+      // True when the AR open-item sync has NOT run for this scope (no markers) —
+      // lets the UI tell "nothing outstanding" (synced + paid up) apart from "no
+      // data yet" (never synced). Keyed on the sync markers, not row count, so a
+      // fully-paid synced branch no longer shows the "no AR data yet" warning.
+      ledger_empty: !ledgerReady,
       generated_at: new Date().toISOString(),
       site_name: SITE_NAME,
       hub_mode: isHub,

@@ -86,9 +86,20 @@ describe('acquireHubAgedDebtorRows — per-site ledger/snapshot (SYNC-5)', () =>
     expect(acquireHubAgedDebtorRows(prep, 'Charlie').rows).toEqual([]);
   });
 
+  it('reports ledgerReady from sync markers, not row count', () => {
+    // all-sites: at least one site has synced → ready.
+    expect(acquireHubAgedDebtorRows(prep, 'all').ledgerReady).toBe(true);
+    // Charlie synced but fully paid (zero rows) → STILL ready (the fix: no false
+    // "no AR data yet" warning for a fully-paid branch).
+    expect(acquireHubAgedDebtorRows(prep, 'Charlie').ledgerReady).toBe(true);
+    // Bravo never synced → not ready (snapshot fallback; warning is correct).
+    expect(acquireHubAgedDebtorRows(prep, 'Bravo').ledgerReady).toBe(false);
+  });
+
   it('falls back to snapshot for ALL sites when none have synced yet', () => {
     memDb.exec('DELETE FROM hub_debtor_ar_sync');
-    const { rows, sites } = acquireHubAgedDebtorRows(prep, 'all');
+    const { rows, sites, ledgerReady } = acquireHubAgedDebtorRows(prep, 'all');
+    expect(ledgerReady).toBe(false);
     expect(sites).toEqual(['Alpha', 'Bravo', 'Charlie']);
     expect(rows).toHaveLength(3);
     expect(rows.every((r) => r.document_type === '')).toBe(true);
