@@ -66,16 +66,16 @@ export default function PhosphorTraces({ className = "" }) {
 
     // ── Shared: colour splashes ─────────────────────────────────────────────
     const SPLASH_HUES = [185, 320, 95, 260, 15];
-    const SPLASH_COUNT = 5;
+    const SPLASH_COUNT = 8;
     const splashes = [];
     const spawnSplash = (s, now) => {
       s.x = Math.random();              // fractions of w/h — survive resizes
       s.y = Math.random();
-      s.r = 50 + Math.random() * 90;    // px radius
+      s.r = 90 + Math.random() * 160;   // px radius — big soft blooms
       s.hue = SPLASH_HUES[Math.floor(Math.random() * SPLASH_HUES.length)];
       s.born = now;
       s.life = 6 + Math.random() * 8;   // seconds — slow blooms, not strobes
-      s.peak = 0.05 + Math.random() * 0.07; // max alpha — always subtle
+      s.peak = 0.16 + Math.random() * 0.14; // clearly visible, still ambient
     };
     for (let i = 0; i < SPLASH_COUNT; i += 1) {
       const s = {};
@@ -84,6 +84,10 @@ export default function PhosphorTraces({ className = "" }) {
       splashes.push(s);
     }
     const drawSplashes = (t) => {
+      // Additive blending: on the dark panel, overlapping colour genuinely
+      // GLOWS instead of muddying — this is what makes the splashes read as
+      // colour rather than faint smudges (first pass was sub-perceptual).
+      ctx.globalCompositeOperation = "lighter";
       for (const s of splashes) {
         const age = t - s.born;
         if (age > s.life) spawnSplash(s, t);
@@ -94,11 +98,13 @@ export default function PhosphorTraces({ className = "" }) {
         const cx = s.x * w;
         const cy = s.y * h;
         const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, s.r);
-        g.addColorStop(0, `hsla(${s.hue}, 90%, 60%, ${alpha})`);
-        g.addColorStop(1, `hsla(${s.hue}, 90%, 60%, 0)`);
+        g.addColorStop(0, `hsla(${s.hue}, 95%, 62%, ${alpha})`);
+        g.addColorStop(0.6, `hsla(${s.hue}, 95%, 58%, ${alpha * 0.45})`);
+        g.addColorStop(1, `hsla(${s.hue}, 95%, 58%, 0)`);
         ctx.fillStyle = g;
         ctx.fillRect(cx - s.r, cy - s.r, s.r * 2, s.r * 2);
       }
+      ctx.globalCompositeOperation = "source-over";
     };
 
     // ── Mode: traces ────────────────────────────────────────────────────────
