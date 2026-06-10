@@ -91,27 +91,56 @@ function isInvoiceBalanceMatch(record) {
   return Math.abs(balance - invoice) <= 0.1;
 }
 
-function parseBalanceDate(value) {
+// Exported for testing. Returns the invoice date at LOCAL midnight so the
+// day-diff against `today` (also local midnight, below) is consistent.
+// `new Date('YYYY-MM-DD')` parses as UTC midnight — on a UTC+2 host that makes a
+// same-day invoice compute as -1 days, drop out of getBalanceInvoiceAges, and
+// shifts every bucket boundary a day late (UI-2). new Date(y, m-1, d) builds at
+// local midnight directly.
+export function parseBalanceDate(value) {
   if (!value) return null;
   const input = String(value).trim();
   if (!input) return null;
 
   if (/^\d{8}$/.test(input)) {
-    return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+    return new Date(Number(input.slice(0, 4)), Number(input.slice(4, 6)) - 1, Number(input.slice(6, 8)));
   }
 
   const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
   if (dmy) {
-    return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+    return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
+  }
+
+  // YYYY-MM-DD / YYYY/M/D — handle explicitly at LOCAL midnight. The fallback
+  // below (new Date(input)) parses a date-only ISO string as UTC midnight, which
+  // on a host WEST of UTC is the previous local evening; the setHours() there
+  // would then shift it to the previous local day, making same-day ISO invoices
+  // read as 1 day old (UI-2).
+  const ymd = input.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymd) {
+    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
   }
 
   const parsed = new Date(input);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())) return null;
+  // Normalise an arbitrary parsed value to local midnight of its local day.
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
 }
 
-function getBalanceInvoiceAges(record) {
+// Calendar-day difference (today - date) computed from UTC-normalised date
+// components, so it's exact across DST boundaries. Subtracting two local-midnight
+// instants and dividing by 86,400,000 is wrong on a spring-forward/fall-back day
+// (the interval is 23h/25h), which Math.floor would round to the previous day —
+// shifting the bucket / lastPurchaseDays filters (UI-2). Exported for testing.
+export function calendarDayAge(date, today = new Date()) {
+  const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const b = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((a - b) / 86400000);
+}
+
+export function getBalanceInvoiceAges(record) {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
   return [1, 2, 3, 4, 5]
     .filter((index) => {
       const amt = record?.[`last_unpaid_invoice_${index}_amount`];
@@ -119,7 +148,7 @@ function getBalanceInvoiceAges(record) {
     })
     .map((index) => parseBalanceDate(record?.[`last_unpaid_invoice_${index}_date`]))
     .filter(Boolean)
-    .map((date) => Math.floor((today - date) / 86400000))
+    .map((date) => calendarDayAge(date, today))
     .filter((days) => Number.isFinite(days) && days >= 0);
 }
 
@@ -929,7 +958,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           if (lastPurchaseDays > 0) {
             const dt = parseBalanceDate(row.LastInvoiceDate ?? row.last_invoice_date ?? row.last_unpaid_invoice_1_date);
             if (!dt) return false;
-            const days = Math.floor((today - dt) / 86400000);
+            const days = calendarDayAge(dt, today);
             if (days < lastPurchaseDays) return false;
           }
           // Dormant — derived from analyseInvoiceCredit using the active
