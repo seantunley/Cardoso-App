@@ -19,6 +19,7 @@ import BetterSqlite3 from 'better-sqlite3';
 import db, { dbPath } from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
+import { safeTokenEqual } from '../lib/safeEqual.js';
 import { reportingRateLimiter, backupHeavyRateLimiter } from '../middleware/rateLimit.js';
 
 const DEFAULT_SQLBACKUP_ROUTINES_DB_PATH = 'C:\\ProgramData\\Pranas.NET\\SQLBackupAndFTP\\Db\\routines.db';
@@ -48,7 +49,7 @@ function requireReportingToken(req, res, next) {
   const token = req.headers['x-reporting-token'];
   const expectedToken = process.env.REPORTING_TOKEN;
 
-  if (!expectedToken || token !== expectedToken) {
+  if (!expectedToken || !safeTokenEqual(token, expectedToken)) {
     // Log auth failures so probing / brute-force attempts against the
     // backup endpoints are visible in the System Log (and via the
     // securitySignals 401 counter). NEVER log the supplied token —
