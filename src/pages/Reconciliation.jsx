@@ -790,6 +790,29 @@ export default function Reconciliation() {
     }
   };
 
+  // Remove orphan extraction rows (order_number not in BAT's Overview pivot) for
+  // this recon — clears the integrity I5 drift. Admin-only on the server; a
+  // non-admin gets a clear 403 toast. Re-loads the recon so the banner updates.
+  const handlePruneOrphans = async () => {
+    if (!selected) return;
+    if (!window.confirm(
+      'Remove the orphan extraction rows from this reconciliation?\n\n'
+      + 'These reference orders that are NOT in BAT’s Overview pivot (stale rows from a prior upload). '
+      + 'The POD PDFs are not affected; the recon totals are recomputed.'
+    )) return;
+    try {
+      const r = await fetch(`/api/bat/reconciliation/${selected.id}/prune-orphan-extractions`, {
+        method: 'POST', credentials: 'include',
+      });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      toast.success(`Pruned ${d.pruned} orphan extraction row${d.pruned === 1 ? '' : 's'}.`);
+      loadReconciliation(selected.id);
+    } catch (e) {
+      toast.error(`Failed to prune orphan rows: ${e.message}`);
+    }
+  };
+
   const handleStartExtraction = async () => {
     if (!selected || extracting) return;
     setExtracting(true);
@@ -1857,6 +1880,16 @@ export default function Reconciliation() {
                       </li>
                     ))}
                   </ul>
+                  {failed.some((c) => c.id === 'no_orphan_extractions') && (
+                    <button
+                      onClick={handlePruneOrphans}
+                      className="mt-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] border transition-colors hover:bg-destructive/10"
+                      style={{ borderColor: 'hsl(var(--destructive))', color: 'hsl(var(--destructive))', borderRadius: '8px' }}
+                      title="Delete the stale extraction rows whose order_number isn't in BAT's Overview pivot (admin only)"
+                    >
+                      Prune orphan extraction rows
+                    </button>
+                  )}
                   <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-3">
                     Logged to System Log as <span className="text-foreground">bat.integrity.drift</span> for this recon.
                   </div>
