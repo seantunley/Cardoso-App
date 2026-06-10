@@ -136,6 +136,21 @@ async function syncSite(site) {
   // data-pull timeout, so only genuine unreachability flips the site Offline.
   let reachable = false;
 
+  // Each isolated pull stanza below catches its own failure so one bad dataset
+  // doesn't abort the whole site. But a stanza that fails every tick (e.g. an
+  // old site version permanently 404-ing an endpoint) used to log to the console
+  // and nothing else — the run still recorded status='ok', so the hub tile went
+  // stale forever with zero operator signal (SYNC-3, no-silent-failures). Each
+  // stanza now routes its failure here: System Log via logError + accumulated so
+  // the run is recorded status='partial' with the reasons in hub_sync_log.error.
+  const stageErrors = [];
+  const recordStageFailure = (stage, e) => {
+    const msg = e?.message || String(e);
+    console.log(`[hub-etl] ${stage} skipped for ${site.id}: ${msg}`);
+    try { logError('hub.etl.stage', e, { site: site.id, site_url: site.url, stage }); } catch { /* logger is best-effort; the stanza already degraded gracefully */ }
+    stageErrors.push(`${stage}: ${msg}`);
+  };
+
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
@@ -177,9 +192,11 @@ async function syncSite(site) {
       .finally(() => clearTimeout(tBatEarly))
       .catch((err) => ({ ok: false, _earlyError: err }));
 
-    // Last sync for incremental pull
+    // Last sync for incremental pull. 'partial' counts: those runs DID complete
+    // the records pull (a partial failure is in a downstream stanza, not the
+    // records pull, which fails to status='error'), so `since` should advance.
     const lastSync = db.prepare(
-      `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status='ok' ORDER BY completed_at DESC LIMIT 1`
+      `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status IN ('ok','partial') ORDER BY completed_at DESC LIMIT 1`
     ).get(site.id);
     const sinceParam = lastSync ? `?since=${encodeURIComponent(lastSync.completed_at)}` : '';
 
@@ -462,7 +479,253 @@ async function syncSite(site) {
         }
       })();
     } catch (movErr) {
-      console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
+      recordStageFailure('Inventory movement', movErr);
+    }
+
+    // Inventory item sales (inter-branch transfers excluded) → for the dashboard
+    // Top Items + Dead Stock tiles. Same paginate → stage → atomic-swap pattern.
+    try {
+      const fetchItemPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-item-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory item-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allItemRecords = [];
+      let itemOffset = 0;
+      let nextItemPromise = guardOrphan(fetchItemPage(0));
+      while (true) {
+        const itemData = await nextItemPromise;
+        const recs = itemData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = itemData?.has_more === true && consumed > 0;
+        nextItemPromise = willHaveMore ? guardOrphan(fetchItemPage(itemOffset + consumed)) : null;
+        for (const r of recs) allItemRecords.push(r);
+        itemOffset += consumed;
+        if (!nextItemPromise) break;
+      }
+      const upsertItem = db.prepare(`
+        INSERT INTO hub_inventory_item_sales (site_id, item_number, item_description, period, qty_sold, revenue, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, item_number, period) DO UPDATE SET
+          item_description=excluded.item_description, qty_sold=excluded.qty_sold,
+          revenue=excluded.revenue, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_item_sales WHERE site_id = ?').run(site.id);
+        for (const r of allItemRecords) {
+          upsertItem.run(site.id, r.item_number, r.item_description || null, r.period, r.qty_sold || 0, r.revenue || 0);
+        }
+      })();
+    } catch (itemErr) {
+      recordStageFailure('Inventory item-sales', itemErr);
+    }
+
+    // Inventory customer sales (inter-branch transfers excluded) → for the
+    // dashboard Top Customers tile (summed over the selected timeline).
+    try {
+      const fetchCustPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/inventory-customer-sales?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Inventory customer-sales fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allCustRecords = [];
+      let custOffset = 0;
+      let nextCustPromise = guardOrphan(fetchCustPage(0));
+      while (true) {
+        const custData = await nextCustPromise;
+        const recs = custData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = custData?.has_more === true && consumed > 0;
+        nextCustPromise = willHaveMore ? guardOrphan(fetchCustPage(custOffset + consumed)) : null;
+        for (const r of recs) allCustRecords.push(r);
+        custOffset += consumed;
+        if (!nextCustPromise) break;
+      }
+      const upsertCust = db.prepare(`
+        INSERT INTO hub_inventory_customer_sales (site_id, customer_code, customer_name, period, revenue, qty, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, customer_code, period) DO UPDATE SET
+          customer_name=excluded.customer_name, revenue=excluded.revenue,
+          qty=excluded.qty, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_inventory_customer_sales WHERE site_id = ?').run(site.id);
+        for (const r of allCustRecords) {
+          upsertCust.run(site.id, r.customer_code, r.customer_name || null, r.period, r.revenue || 0, r.qty || 0);
+        }
+      })();
+    } catch (custErr) {
+      recordStageFailure('Inventory customer-sales', custErr);
+    }
+
+    // Debtor AR open items → hub_debtor_ar_invoice, so Aged Debtors ages
+    // per-document at the hub. Paginate → stage → atomic full-refresh per site.
+    try {
+      const fetchArPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/ar-open-items?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`AR open-items fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allArRecords = [];
+      let arOffset = 0;
+      let nextArPromise = guardOrphan(fetchArPage(0));
+      while (true) {
+        const arData = await nextArPromise;
+        const recs = arData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = arData?.has_more === true && consumed > 0;
+        nextArPromise = willHaveMore ? guardOrphan(fetchArPage(arOffset + consumed)) : null;
+        for (const r of recs) allArRecords.push(r);
+        arOffset += consumed;
+        if (!nextArPromise) break;
+      }
+      const upsertAr = db.prepare(`
+        INSERT INTO hub_debtor_ar_invoice (site_id, customer_code, reporting_account, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, customer_code, document_number) DO UPDATE SET
+          reporting_account=excluded.reporting_account, document_type=excluded.document_type,
+          document_date=excluded.document_date, due_date=excluded.due_date,
+          original_amount=excluded.original_amount, outstanding_amount=excluded.outstanding_amount,
+          reference=excluded.reference, synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_debtor_ar_invoice WHERE site_id = ?').run(site.id);
+        for (const r of allArRecords) {
+          // reporting_account rolls national-account children up to the parent on
+          // the hub (buildAgedDebtorsReport joins/aggregates by it); falls back to
+          // the child code, matching debtorSync + the v093 backfill.
+          upsertAr.run(site.id, r.customer_code, r.reporting_account || r.customer_code || null, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
+        }
+      })();
+      // Mark this site's AR open-item sync as COMPLETED — even when it returned
+      // zero open items — so Aged Debtors ages it from the (now-empty) ledger
+      // instead of falling back to its possibly-stale hub_records snapshot (SYNC-5).
+      db.prepare(`INSERT INTO hub_debtor_ar_sync (site_id, synced_at) VALUES (?, now_local())
+        ON CONFLICT(site_id) DO UPDATE SET synced_at = excluded.synced_at`).run(site.id);
+    } catch (arErr) {
+      recordStageFailure('Debtor AR open-items', arErr);
+    }
+
+    // Creditor AP open items → hub_creditor_ap_invoice, so Aged Creditors works
+    // at the hub. Paginate → stage → atomic full-refresh per site.
+    try {
+      const fetchApPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/ap-open-items?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`AP open-items fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allApRecords = [];
+      let apOffset = 0;
+      let nextApPromise = guardOrphan(fetchApPage(0));
+      while (true) {
+        const apData = await nextApPromise;
+        const recs = apData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = apData?.has_more === true && consumed > 0;
+        nextApPromise = willHaveMore ? guardOrphan(fetchApPage(apOffset + consumed)) : null;
+        for (const r of recs) allApRecords.push(r);
+        apOffset += consumed;
+        if (!nextApPromise) break;
+      }
+      const upsertAp = db.prepare(`
+        INSERT INTO hub_creditor_ap_invoice (site_id, vendor_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, vendor_code, document_number) DO UPDATE SET
+          document_type=excluded.document_type, document_date=excluded.document_date,
+          due_date=excluded.due_date, original_amount=excluded.original_amount,
+          outstanding_amount=excluded.outstanding_amount, reference=excluded.reference,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_creditor_ap_invoice WHERE site_id = ?').run(site.id);
+        for (const r of allApRecords) {
+          upsertAp.run(site.id, r.vendor_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
+        }
+      })();
+    } catch (apErr) {
+      recordStageFailure('Creditor AP open-items', apErr);
+    }
+
+    // Creditor master → hub_creditor, so Aged Creditors can join vendor name /
+    // terms / last_payment_date. The report's default paid_only=true filter needs
+    // last_payment_date, so without this the default hub view stays empty even
+    // though the AP open items are present.
+    try {
+      const fetchCredPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/creditors?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`Creditor master fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allCredRecords = [];
+      let credOffset = 0;
+      let nextCredPromise = guardOrphan(fetchCredPage(0));
+      while (true) {
+        const credData = await nextCredPromise;
+        const recs = credData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = credData?.has_more === true && consumed > 0;
+        nextCredPromise = willHaveMore ? guardOrphan(fetchCredPage(credOffset + consumed)) : null;
+        for (const r of recs) allCredRecords.push(r);
+        credOffset += consumed;
+        if (!nextCredPromise) break;
+      }
+      const upsertCred = db.prepare(`
+        INSERT INTO hub_creditor (site_id, vendor_code, vendor_name, terms, contact, phone, email, is_active, last_receipt_date, last_payment_date, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, vendor_code) DO UPDATE SET
+          vendor_name=excluded.vendor_name, terms=excluded.terms, contact=excluded.contact,
+          phone=excluded.phone, email=excluded.email, is_active=excluded.is_active,
+          last_receipt_date=excluded.last_receipt_date, last_payment_date=excluded.last_payment_date,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_creditor WHERE site_id = ?').run(site.id);
+        for (const r of allCredRecords) {
+          upsertCred.run(site.id, r.vendor_code, r.vendor_name || null, r.terms || null, r.contact || null, r.phone || null, r.email || null, r.is_active ?? 1, r.last_receipt_date || null, r.last_payment_date || null);
+        }
+      })();
+    } catch (credErr) {
+      recordStageFailure('Creditor master', credErr);
     }
 
     // Inventory item sales (inter-branch transfers excluded) → for the dashboard
@@ -763,7 +1026,7 @@ async function syncSite(site) {
         }
       })();
     } catch (sreErr) {
-      console.log(`[hub-etl] Stock receipt expiry sync skipped for ${site.id}: ${sreErr.message}`);
+      recordStageFailure('Stock receipt expiry', sreErr);
     }
 
     // BAT Reconciliation summary — recorded into hub_bat_summary.
@@ -854,7 +1117,7 @@ async function syncSite(site) {
           VALUES (?, ?, ?)
           ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
         `).run(site.id, msg, new Date().toISOString());
-        console.warn(`[HUB] ${site.name}: ${msg}`);
+        recordStageFailure('BAT summary', new Error(msg));
       }
     } catch (batErr) {
       const msg = describeFetchError(batErr, `${site.url}/api/reporting/bat-summary`).slice(0, 500);
@@ -863,7 +1126,7 @@ async function syncSite(site) {
         VALUES (?, ?, ?)
         ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
       `).run(site.id, msg, new Date().toISOString());
-      console.warn(`[HUB] ${site.name}: BAT summary fetch failed — ${msg}`);
+      recordStageFailure('BAT summary', batErr);
     }
 
     // Update hub_sites
@@ -1009,10 +1272,15 @@ async function syncSite(site) {
     });
   }
 
+  // status: 'error' = the whole site sync failed (records pull / fatal); 'partial'
+  // = records synced but one or more downstream stanzas failed (recorded in
+  // error so the operator sees WHICH); 'ok' = clean. A fatal error dominates.
+  const finalStatus = syncError ? 'error' : (stageErrors.length ? 'partial' : 'ok');
+  const finalError = syncError || (stageErrors.length ? stageErrors.join(' | ') : null);
   db.prepare(`
     INSERT INTO hub_sync_log (site_id, started_at, completed_at, records_fetched, status, error)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, syncError ? 'error' : 'ok', syncError || null);
+  `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, finalStatus, finalError);
 
   return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
 }

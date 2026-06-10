@@ -631,7 +631,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   // POST /api/test-rule
   // Accepts { conditions, sample_size } and runs the rule logic against real records.
   // Returns up to sample_size records (default 5) that matched, plus up to sample_size that didn't.
-  router.post('/api/test-rule', requireAuth, (req, res) => {
+  router.post('/api/test-rule', requireAuth, requirePermission('can_manage_rules'), (req, res) => {
     try {
       const { conditions: rawConditions, sample_size = 5 } = req.body;
       let conditions = rawConditions;
@@ -743,7 +743,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
 
   // ==================== AUTO-FLAG ROUTES ====================
 
-  router.post('/api/apply-auto-flags', requireAuth, (req, res) => {
+  router.post('/api/apply-auto-flags', requireAuth, requirePermission('can_manage_rules'), (req, res) => {
     try {
       const rules = stmts.activeAutoFlagRules.all();
       const activeRules = rules.map(r => {
@@ -788,7 +788,7 @@ export function createRecordsRouter({ db, stmts, requireAuth, requireAdmin, requ
   });
 
 
-  router.post('/api/clear-auto-flags', requireAuth, (req, res) => {
+  router.post('/api/clear-auto-flags', requireAuth, requirePermission('can_manage_rules'), (req, res) => {
     try {
       const result = stmts.clearAllAutoFlags.run();
       logAudit({
