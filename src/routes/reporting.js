@@ -337,6 +337,98 @@ $result | ConvertTo-Json -Depth 6 -Compress
   return parsed;
 }
 
+/**
+ * Build the hub Aged Debtors source rows with a PER-SITE ledger/snapshot
+ * decision (SYNC-5). Each site that has open-item ledger rows in
+ * hub_debtor_ar_invoice is aged from that ledger; a site whose AR ETL hasn't
+ * landed yet falls back to its hub_records snapshot (one pseudo-document per
+ * customer aged by the oldest dated unpaid invoice). The earlier GLOBAL
+ * ledger-ready check used the ledger for ALL sites the moment ONE site synced,
+ * which silently dropped every not-yet-synced site's debtors from the report.
+ *
+ * Exported for unit testing. `prep` is the caching db.prepare wrapper from the
+ * router; `siteFilter` is the resolved site name or 'all'.
+ *
+ * @returns {{ rows: object[], sites: string[] }}
+ */
+export function acquireHubAgedDebtorRows(prep, siteFilter) {
+  // Sites whose open-item ETL has landed. The ledger query inherently returns
+  // only these sites' rows; the snapshot query must EXCLUDE them to avoid
+  // double-counting a site under both sources.
+  const ledgerSiteIds = prep(
+    'SELECT DISTINCT site_id FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0'
+  ).all().map((r) => r.site_id);
+
+  // --- Ledger rows (sites with open-item data) ---
+  const ledgerParams = [];
+  let ledgerWhereSite = '';
+  if (siteFilter !== 'all') { ledgerWhereSite = 'AND COALESCE(s.name, i.site_id) = ?'; ledgerParams.push(siteFilter); }
+  const ledgerRows = prep(
+    `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+            i.outstanding_amount, i.reference,
+            d.customer_name, d.sales_rep, d.account_type, d.terms,
+            COALESCE(s.name, i.site_id) AS site_name
+     FROM hub_debtor_ar_invoice i
+     LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
+     LEFT JOIN hub_sites s ON s.id = i.site_id
+     WHERE i.outstanding_amount <> 0 ${ledgerWhereSite}`
+  ).all(...ledgerParams);
+
+  // --- Snapshot rows, ONLY for sites without ledger data yet (no double count) ---
+  const notLedger = ledgerSiteIds.length
+    ? `AND r.site_id NOT IN (${ledgerSiteIds.map(() => '?').join(',')})`
+    : '';
+  const snapParams = [];
+  let snapWhereSite = '';
+  if (siteFilter !== 'all') { snapWhereSite = 'AND COALESCE(s.name, r.site_id) = ?'; snapParams.push(siteFilter); }
+  const snapshotRows = prep(
+    `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
+            r.customer_name, r.sales_rep, r.account_type, r.terms,
+            r.outstanding_balance_num, r.unpaid_invoices,
+            COALESCE(s.name, r.site_id) AS site_name
+     FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+     WHERE r.outstanding_balance_num <> 0 ${snapWhereSite} ${notLedger}`
+  ).all(...snapParams, ...ledgerSiteIds).map((r) => {
+    const inv = parseJsonSafely(r.unpaid_invoices, []);
+    // Oldest dated unpaid line — the snapshot array isn't guaranteed oldest-first;
+    // null when absent → the aging engine's "unknown" bucket (balance still counted).
+    let oldestDate = null, oldestT = Infinity;
+    if (Array.isArray(inv)) {
+      for (const it of inv) {
+        const raw = it?.date;
+        if (!raw) continue;
+        const t = Date.parse(raw);
+        if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+      }
+    }
+    return {
+      ...r,
+      document_number: r.customer_code,
+      document_type: '',
+      document_date: oldestDate,
+      due_date: oldestDate,
+      outstanding_amount: r.outstanding_balance_num,
+      reference: '',
+    };
+  });
+
+  // Site dropdown = union of ledger sites + snapshot-only sites (so the filter
+  // lists every site that has data under either source).
+  const siteSet = new Set();
+  prep(
+    `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+     FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+     WHERE i.outstanding_amount <> 0`
+  ).all().forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+  prep(
+    `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
+     FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
+     WHERE r.outstanding_balance_num > 0 ${notLedger}`
+  ).all(...ledgerSiteIds).forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+
+  return { rows: [...ledgerRows, ...snapshotRows], sites: [...siteSet].sort() };
+}
+
 export function createReportingRouter({ requireAuth, requirePermission }) {
   // Report data (trends, exports, insights) is gated by can_access_reports so
   // a bare authenticated account can't read revenue / dead-stock / debtor data
@@ -1436,74 +1528,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     let rows;
     let sites = [];
     if (isHub) {
-      const params = [];
-      let whereSite = '';
-      const ledgerReady = prep('SELECT 1 FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0 LIMIT 1').get();
-      if (ledgerReady) {
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, i.site_id) = ?'; params.push(siteFilter); }
-        sites = prep(
-          `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
-           FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
-           WHERE i.outstanding_amount <> 0 ORDER BY site_name`
-        ).all().map(r => r.site_name).filter(Boolean);
-        rows = prep(
-          `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
-                  i.outstanding_amount, i.reference,
-                  d.customer_name, d.sales_rep, d.account_type, d.terms,
-                  COALESCE(s.name, i.site_id) AS site_name
-           FROM hub_debtor_ar_invoice i
-           LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
-           LEFT JOIN hub_sites s ON s.id = i.site_id
-           WHERE i.outstanding_amount <> 0 ${whereSite}`
-        ).all(...params);
-      } else {
-        // Fallback: the hub open-item ledger isn't populated yet (no ETL into
-        // hub_debtor_ar_invoice). Use the per-customer snapshot in hub_records —
-        // the same source the hub Customer Balances already reads — so the
-        // report still returns balances + site filters instead of an empty
-        // page. Each customer becomes one pseudo-document aged by the OLDEST
-        // dated unpaid invoice in its snapshot until the open-item ETL lands.
-        if (siteFilter !== 'all') { whereSite = 'AND COALESCE(s.name, r.site_id) = ?'; params.push(siteFilter); }
-        sites = prep(
-          `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance_num > 0 ORDER BY site_name`
-        ).all().map(r => r.site_name).filter(Boolean);
-        rows = prep(
-          `SELECT r.site_id, TRIM(r.customer_number) AS customer_code,
-                  r.customer_name, r.sales_rep, r.account_type, r.terms,
-                  r.outstanding_balance_num, r.unpaid_invoices,
-                  COALESCE(s.name, r.site_id) AS site_name
-           FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
-           WHERE r.outstanding_balance_num <> 0 ${whereSite}`
-        ).all(...params).map((r) => {
-          const inv = parseJsonSafely(r.unpaid_invoices, []);
-          // Scan every unpaid line for the OLDEST date — the snapshot array is
-          // not guaranteed oldest-first, and using inv[0] alone places a
-          // customer whose older invoice sits later in the array into a younger
-          // bucket, understating the aged-debtors summary. hub_records carries no
-          // flat date column, so the JSON snapshot is the only source; null when
-          // absent → the engine's "unknown" bucket (balance still counted).
-          let oldestDate = null, oldestT = Infinity;
-          if (Array.isArray(inv)) {
-            for (const it of inv) {
-              const raw = it?.date;
-              if (!raw) continue;
-              const t = Date.parse(raw);
-              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
-            }
-          }
-          return {
-            ...r,
-            document_number: r.customer_code,
-            document_type: '',
-            document_date: oldestDate,
-            due_date: oldestDate,
-            outstanding_amount: r.outstanding_balance_num,
-            reference: '',
-          };
-        });
-      }
+      // Per-site ledger/snapshot decision (SYNC-5) is extracted so it can be
+      // unit-tested against a seeded mixed-site DB. Each site is sourced from its
+      // own best data: open-item ledger if its AR ETL has landed, hub_records
+      // snapshot otherwise — a not-yet-synced site no longer vanishes.
+      ({ rows, sites } = acquireHubAgedDebtorRows(prep, siteFilter));
     } else {
       sites = [SITE_NAME];
       rows = prep(
