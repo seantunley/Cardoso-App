@@ -473,7 +473,47 @@ define({
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-const BANNED_SQL = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE)\b/i;
+// Read/write keyword denylist for operator overrides. The REAL guarantee that an
+// override stays read-only is a least-privilege, READ-ONLY Sage login (the DB
+// rejects writes) — see docs/notes. This denylist is defense in depth so an
+// override can't issue a write, DDL, an out-of-band read (OPENROWSET/OPENQUERY/
+// BULK), SELECT…INTO (table creation), a time-based stall (WAITFOR), or a
+// server-config command even if the connecting login is over-privileged.
+const BANNED_KEYWORDS = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUTE|MERGE|GRANT|REVOKE|CREATE|INTO|OPENROWSET|OPENQUERY|OPENDATASOURCE|BULK|WAITFOR|RECONFIGURE|SHUTDOWN)\b/i;
+// Extended / system stored procedures (xp_cmdshell, sp_executesql, …).
+const BANNED_PROCS = /\b(?:xp|sp)_\w/i;
+
+// Strip /* block */ then -- line comments. Run BEFORE the denylist so a keyword
+// can't be smuggled past the regex by splitting it with a comment
+// ("WAIT/**/FOR", "SELECT * IN/**/TO x") and so a keyword that only appears
+// inside a comment doesn't false-positive.
+export function stripSqlComments(sqlText) {
+  return String(sqlText ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+}
+
+/**
+ * Security core shared by every Sage override validator: must be a single,
+ * read-only SELECT/WITH statement with no write/DDL/out-of-band/proc escapes.
+ * Returns an error string, or null when acceptable (empty is caller-handled).
+ * Checks the comment-stripped form.
+ */
+export function readOnlyOverrideViolation(sqlText) {
+  const s = String(sqlText ?? '').trim();
+  if (s.length === 0) return null;
+  if (s.length > 20_000) return 'too long (max 20,000 characters)';
+  const clean = stripSqlComments(s).trim();
+  // Must start with SELECT or WITH. A leading ';' is allowed — the BAT
+  // corrections default is a T-SQL CTE that legitimately starts ";WITH".
+  if (!/^(\s|;)*(SELECT|WITH)\b/i.test(clean)) return 'must start with SELECT or WITH (read-only)';
+  if (BANNED_KEYWORDS.test(clean)) return 'contains a forbidden write / DDL / out-of-band keyword (e.g. INTO, OPENROWSET, WAITFOR)';
+  if (BANNED_PROCS.test(clean)) return 'contains a forbidden stored-procedure reference (xp_/sp_)';
+  // Single statement only — a leading ';' (CTE batch separator) and a trailing
+  // ';' are fine; a ';' with another statement after it is not.
+  if (clean.split(';').map((x) => x.trim()).filter(Boolean).length > 1) {
+    return 'must be a single statement (no second ";"-separated statement)';
+  }
+  return null;
+}
 
 /**
  * The single guardrail for an operator-supplied override. Returns an error
@@ -487,18 +527,15 @@ export function validateSageQueryOverride(sqlText, key) {
   if (sqlText === null || sqlText === undefined) return null;
   const s = String(sqlText).trim();
   if (s.length === 0) return null; // empty = clear back to default
-  // Must start with SELECT or WITH (read-only). Allow optional leading
-  // whitespace, line comments, and statement-terminator semicolons — the
-  // BAT corrections default is a T-SQL CTE that legitimately starts with ";WITH".
-  if (!/^(\s|;|--[^\n]*\n)*(SELECT|WITH)\b/i.test(s)) return 'must start with SELECT or WITH (read-only)';
-  if (BANNED_SQL.test(s)) return 'contains a forbidden write/DDL keyword';
+  const sec = readOnlyOverrideViolation(s);
+  if (sec) return sec;
+  const clean = stripSqlComments(s);
   for (const p of d.params || []) {
-    if (!new RegExp(`@${p}\\b`, 'i').test(s)) return `must reference the @${p} parameter`;
+    if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference the @${p} parameter`;
   }
   for (const c of d.requiredColumns || []) {
-    if (!new RegExp(`\\b${c}\\b`, 'i').test(s)) return `must output a "${c}" column (the sync maps results by this alias)`;
+    if (!new RegExp(`\\b${c}\\b`, 'i').test(clean)) return `must output a "${c}" column (the sync maps results by this alias)`;
   }
-  if (s.length > 20_000) return 'too long (max 20,000 characters)';
   return null;
 }
 
