@@ -2783,6 +2783,43 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // Per-document AR open items (debtor open-item ledger) — the hub pulls this to
+  // populate hub_debtor_ar_invoice so Aged Debtors ages per-document at head
+  // office. Cheap indexed read of the open-item table; no aggregation.
+  router.get('/api/reporting/ar-open-items', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const rows = prep(`
+        SELECT customer_code, document_number, document_type, document_date, due_date,
+               original_amount, outstanding_amount, reference
+        FROM debtor_ar_invoice
+        ORDER BY customer_code, document_number
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Per-document AP open items (creditor open-item ledger) — the hub pulls this to
+  // populate hub_creditor_ap_invoice so Aged Creditors works at head office.
+  router.get('/api/reporting/ap-open-items', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const rows = prep(`
+        SELECT vendor_code, document_number, document_type, document_date, due_date,
+               original_amount, outstanding_amount, reference
+        FROM creditor_ap_invoice
+        ORDER BY vendor_code, document_number
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/reporting/stock-receipt-expiry', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
