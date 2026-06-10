@@ -53,11 +53,11 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
 
         {/* Compact single-row stats — db / port / tables / records / last sync */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-border pt-2.5 font-mono text-[11px] text-muted-foreground">
-          <span className="truncate max-w-[40%]"><span className="text-muted-foreground/50">db </span><span className="text-foreground">{connection.database_name}</span></span>
-          <span><span className="text-muted-foreground/50">port </span><span className="text-foreground tabular-nums">{connection.port || 1433}</span></span>
+          <span className="truncate max-w-[40%]"><span className="text-muted-subtle">db </span><span className="text-foreground">{connection.database_name}</span></span>
+          <span><span className="text-muted-subtle">port </span><span className="text-foreground tabular-nums">{connection.port || 1433}</span></span>
           <span><span className="text-foreground tabular-nums">{connection.table_configs?.length || 0}</span> tables</span>
           <span><span className="text-foreground tabular-nums">{connection.record_count?.toLocaleString("en-US") || "0"}</span> records</span>
-          <span><span className="text-muted-foreground/50">synced </span><span className="text-foreground">{lastSync}</span></span>
+          <span><span className="text-muted-subtle">synced </span><span className="text-foreground">{lastSync}</span></span>
         </div>
 
         {connection.status === "error" && connection.last_error && (

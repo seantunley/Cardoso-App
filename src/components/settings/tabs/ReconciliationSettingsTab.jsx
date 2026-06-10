@@ -466,7 +466,7 @@ export default function ReconciliationSettingsTab() {
                   value={settings.google_vision_key || ''}
                   onChange={e => setSettings(s => ({ ...s, google_vision_key: e.target.value }))}
                   placeholder="AIzaSy..."
-                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
                 />
                 <button
                   type="button"
@@ -492,7 +492,7 @@ export default function ReconciliationSettingsTab() {
                   value={settings.ocr_space_key || ''}
                   onChange={e => setSettings(s => ({ ...s, ocr_space_key: e.target.value }))}
                   placeholder="K890..."
-                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
                 />
                 <button
                   type="button"

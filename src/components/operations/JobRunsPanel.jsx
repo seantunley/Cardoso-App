@@ -214,14 +214,14 @@ export default function JobRunsPanel() {
                       {meta.schedule && (
                         <div className="text-[10px] text-muted-foreground font-mono mt-0.5 truncate">{meta.schedule}</div>
                       )}
-                      <div className="text-[10px] text-muted-foreground/60 font-mono mt-0.5 truncate">{j.name}</div>
+                      <div className="text-[10px] text-muted-subtle font-mono mt-0.5 truncate">{j.name}</div>
                     </td>
                     <td className="px-4 py-2.5 align-top">
                       <StatusBadge status={j.last_status} failuresInWindow={j.failures_in_window} />
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap align-top">
                       <div className="truncate">{fmtTime(j.last_started_at)}</div>
-                      {ago && <div className="text-[10px] text-muted-foreground/70">{ago}</div>}
+                      {ago && <div className="text-[10px] text-muted-subtle">{ago}</div>}
                     </td>
                     <td className="px-4 py-2.5 text-muted-foreground font-mono align-top">{fmtDuration(j.last_duration_ms)}</td>
                     <td className="px-4 py-2.5 text-foreground align-top">
@@ -237,7 +237,7 @@ export default function JobRunsPanel() {
                           </TooltipContent>
                         </Tooltip>
                       ) : (
-                        <span className="text-muted-foreground/50">—</span>
+                        <span className="text-muted-subtle">—</span>
                       )}
                     </td>
                   </tr>

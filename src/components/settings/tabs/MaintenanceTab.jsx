@@ -468,7 +468,7 @@ export default function MaintenanceTab() {
                 <div className="max-h-32 overflow-y-auto pr-1">
                   <table className="w-full text-[11px] tabular-nums">
                     <thead>
-                      <tr className="text-muted-foreground/80 border-b border-amber-500/20">
+                      <tr className="text-muted-subtle border-b border-amber-500/20">
                         <th className="text-left pr-2 pb-1 font-medium">Week</th>
                         <th className="text-right px-2 pb-1 font-medium">PODs</th>
                         <th className="text-right px-2 pb-1 font-medium">Missing amount</th>

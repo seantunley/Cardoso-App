@@ -183,7 +183,7 @@ const SiteCard = memo(function SiteCard({
           className={cn(
             "shrink-0 flex items-center justify-center rounded-md border h-8 w-8 transition-colors",
             isOrphan
-              ? "border-border/50 text-muted-foreground/30 cursor-not-allowed"
+              ? "border-border/50 text-muted-subtle cursor-not-allowed"
               : "border-border text-muted-foreground hover:text-foreground hover:bg-muted",
           )}
           title={
@@ -203,7 +203,7 @@ const SiteCard = memo(function SiteCard({
           <div className="group relative overflow-hidden rounded-xl border border-border bg-muted p-3">
             <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-1">Total</p>
             <p className="text-xl font-extrabold text-foreground leading-none">{total ?? "—"}</p>
-            <p className="text-[11px] text-muted-foreground/60 mt-1">Records</p>
+            <p className="text-[11px] text-muted-subtle mt-1">Records</p>
             <div className="mt-2 h-0.5 rounded-full bg-border">
               <div className="h-full rounded-full bg-muted-foreground/40 w-full" />
             </div>
@@ -278,14 +278,14 @@ const SiteCard = memo(function SiteCard({
               "text-[10px]",
               accpacStatus === 'error' ? "text-rose-400" :
               stale ? "text-amber-400" :
-              site.last_accpac_synced_at ? "text-muted-foreground/80" : "text-muted-foreground/50",
+              site.last_accpac_synced_at ? "text-muted-subtle" : "text-muted-subtle",
             )}>
               {site.last_accpac_synced_at
                 ? `Accpac sync: ${new Date(site.last_accpac_synced_at).toLocaleString()}${stale ? ` · ${stale}` : ''}`
                 : 'Accpac sync: — (not yet reported)'}
             </span>
             {site.last_seen && (
-              <span className="text-[10px] text-muted-foreground/50">
+              <span className="text-[10px] text-muted-subtle">
                 Hub pull: {new Date(site.last_seen).toLocaleString()}
               </span>
             )}
@@ -582,7 +582,7 @@ const HubCustomerModal = memo(function HubCustomerModal({ record, open, onClose 
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-accent">Hub snapshot</span>
               <span className="ml-2">Changes must be made at the site directly.</span>
               {(record._siteLastSeen || record.synced_at) && (
-                <span className="block mt-0.5 font-mono text-[10px] text-muted-foreground/70">
+                <span className="block mt-0.5 font-mono text-[10px] text-muted-subtle">
                   Last synced: {new Date(record._siteLastSeen || record.synced_at).toLocaleString()}
                 </span>
               )}
@@ -1066,7 +1066,7 @@ export default function HubDashboard() {
         </div>
       ) : (
         <div className="flex flex-col items-center justify-center py-20 border border-border bg-card" style={{ borderRadius: "12px" }}>
-          <Network className="w-10 h-10 text-muted-foreground/60 mb-5" strokeWidth={1} />
+          <Network className="w-10 h-10 text-muted-subtle mb-5" strokeWidth={1} />
           <h3 className="font-display text-2xl text-foreground">No sites configured</h3>
           <p className="text-sm text-muted-foreground mt-2">Add site connections to start aggregating data.</p>
         </div>

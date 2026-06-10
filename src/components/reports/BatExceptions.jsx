@@ -101,7 +101,7 @@ export default function BatExceptions() {
       {data && summary && (
         <>
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-4 gap-3">
-            <SummaryTile label="Total exception value" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_amount)}</>} accent={REPORT_COLORS.warning} big />
+            <SummaryTile label="Total exception value" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_amount)}</>} accent={REPORT_COLORS.warning} big />
             <SummaryTile label="Flagged invoices" value={fmtCount(summary.total_count)} accent={REPORT_COLORS.warning} />
             <SummaryTile label="Distinct reasons" value={fmtCount(summary.distinct_reasons)} accent={REPORT_COLORS.info} />
             <SummaryTile label="Distinct stores" value={fmtCount(summary.distinct_stores)} accent={REPORT_COLORS.purple} />
@@ -155,7 +155,7 @@ export default function BatExceptions() {
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{r.count}</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{pct.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.amount)}
+                        <span className="text-muted-subtle mr-1">R</span>{fmtR(r.amount)}
                       </td>
                     </tr>
                   );
@@ -167,7 +167,7 @@ export default function BatExceptions() {
                   <td className="px-2 py-2 text-right font-mono tabular-nums">{summary.total_count}</td>
                   <td className="px-2 py-2"></td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                    <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_amount)}
+                    <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_amount)}
                   </td>
                 </tr>
               </tfoot>
@@ -190,7 +190,7 @@ export default function BatExceptions() {
                     <td className="px-2 py-1.5 text-foreground">{s.store_name}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{s.count}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(s.amount)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(s.amount)}
                     </td>
                   </tr>
                 ))}

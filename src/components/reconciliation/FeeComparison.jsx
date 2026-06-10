@@ -64,11 +64,11 @@ export default function FeeComparison({ comparison, creditNotes }) {
                 >
                   <td className="px-4 py-3 text-foreground font-medium">{row.type}</td>
                   <td className="px-4 py-3 text-right font-mono text-foreground tabular-nums">
-                    <span className="text-muted-foreground/60 mr-1">R</span>
+                    <span className="text-muted-subtle mr-1">R</span>
                     {fmt(row.supplier)}
                   </td>
                   <td className="px-4 py-3 text-right font-mono text-foreground tabular-nums">
-                    <span className="text-muted-foreground/60 mr-1">R</span>
+                    <span className="text-muted-subtle mr-1">R</span>
                     {fmt(row.sage)}
                   </td>
                   <td
@@ -133,7 +133,7 @@ export default function FeeComparison({ comparison, creditNotes }) {
                     <td className="px-3 py-2 truncate max-w-48 text-muted-foreground">{cn.line_description}</td>
                     <td className="px-3 py-2 text-muted-foreground">{cn.fee_type}</td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums">
-                      <span className="text-muted-foreground/60 mr-1">R</span>
+                      <span className="text-muted-subtle mr-1">R</span>
                       {fmt(cn.line_amount)}
                     </td>
                   </tr>

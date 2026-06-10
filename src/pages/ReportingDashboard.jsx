@@ -127,7 +127,7 @@ function AgedDebtorsCard({ site }) {
         <>
           <div className="mb-3">
             <div className="text-2xl font-semibold tabular-nums text-foreground">
-              <span className="mr-1 text-muted-foreground/60">R</span>
+              <span className="mr-1 text-muted-subtle">R</span>
               {fmtR(s?.total_outstanding)}
             </div>
             <div className="text-xs text-muted-foreground">{s?.total_customers ?? 0} customers outstanding</div>
@@ -172,7 +172,7 @@ function AgedCreditorsCard({ site }) {
         <>
           <div className="mb-3">
             <div className="text-2xl font-semibold tabular-nums text-foreground">
-              <span className="mr-1 text-muted-foreground/60">R</span>
+              <span className="mr-1 text-muted-subtle">R</span>
               {fmtR(s?.total_outstanding)}
             </div>
             <div className="text-xs text-muted-foreground">{s?.total_vendors ?? 0} vendors outstanding</div>
@@ -211,7 +211,7 @@ function RepExposureCard({ site }) {
         <>
           <div className="mb-3">
             <div className="text-2xl font-semibold tabular-nums text-foreground">
-              <span className="mr-1 text-muted-foreground/60">R</span>
+              <span className="mr-1 text-muted-subtle">R</span>
               {fmtR(data?.summary?.total_outstanding)}
             </div>
             <div className="text-xs text-muted-foreground">across {data?.summary?.total_reps ?? 0} reps</div>
@@ -247,7 +247,7 @@ function InventoryValueCard({ site }) {
         <>
           <div className="mb-3">
             <div className="text-2xl font-semibold tabular-nums text-foreground">
-              <span className="mr-1 text-muted-foreground/60">R</span>
+              <span className="mr-1 text-muted-subtle">R</span>
               {fmtR(s?.total_value)}
             </div>
             <div className="text-xs text-muted-foreground">{s?.total_items ?? 0} items on hand</div>
@@ -337,7 +337,7 @@ function MiniRankList({ rows, accent, isLoading, error, refetch, empty, fmtValue
     <ol className="space-y-1.5">
       {rows.map((r, i) => (
         <li key={r.key ?? i} className="flex items-center gap-2">
-          <span className="w-3.5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-foreground/50">{i + 1}</span>
+          <span className="w-3.5 shrink-0 text-right font-mono text-[10px] tabular-nums text-muted-subtle">{i + 1}</span>
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="truncate text-foreground/90" title={r.title || r.label}>{r.label}</span>

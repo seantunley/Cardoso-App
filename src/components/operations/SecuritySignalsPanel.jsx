@@ -72,7 +72,7 @@ export default function SecuritySignalsPanel() {
                 <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{c.label}</div>
                 <div className="text-xl font-semibold mt-1">{c.value}</div>
                 {c.hint && (
-                  <div className="text-[10px] text-muted-foreground/80 mt-2 leading-snug">{c.hint}</div>
+                  <div className="text-[10px] text-muted-subtle mt-2 leading-snug">{c.hint}</div>
                 )}
               </div>
             ))}

@@ -302,7 +302,7 @@ export default function SystemLogPanel() {
                       <td className="px-4 py-2.5 text-muted-foreground whitespace-nowrap align-top">
                         <div>{fmt(newest.occurred_at)}</div>
                         {range && (
-                          <div className="text-[10px] text-muted-foreground/60 mt-0.5">range: {range}</div>
+                          <div className="text-[10px] text-muted-subtle mt-0.5">range: {range}</div>
                         )}
                       </td>
                       <td className="px-4 py-2.5 align-top">
@@ -322,7 +322,7 @@ export default function SystemLogPanel() {
                           <span className="break-words">{newest.message}</span>
                         </div>
                         {!isGroupOpen && oldest !== newest && (
-                          <div className="text-[10px] text-muted-foreground/60 mt-1 ml-6">
+                          <div className="text-[10px] text-muted-subtle mt-1 ml-6">
                             earliest: {newest.message === oldest.message ? "same" : oldest.message}
                           </div>
                         )}
@@ -345,7 +345,7 @@ export default function SystemLogPanel() {
                             className={`border-b border-border last:border-0 bg-muted/5 hover:bg-muted/15 ${hasDetail ? "cursor-pointer" : ""}`}
                           >
                             <td className="px-4 py-2 pl-10 text-muted-foreground whitespace-nowrap text-xs">{fmt(r.occurred_at)}</td>
-                            <td className="px-4 py-2 text-xs text-muted-foreground/70">↳</td>
+                            <td className="px-4 py-2 text-xs text-muted-subtle">↳</td>
                             <td className="px-4 py-2 text-foreground/90 break-words text-xs">{r.message}</td>
                           </tr>
                           {isRowOpen && hasDetail && (

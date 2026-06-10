@@ -173,7 +173,7 @@ export default function Records() {
   if (currentUser && !canAccessRecords) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen gap-4 text-muted-foreground">
-        <ShieldOff className="w-12 h-12 text-muted-foreground/50" />
+        <ShieldOff className="w-12 h-12 text-muted-subtle" />
         <p className="text-lg font-medium">Access Denied</p>
         <p className="text-sm">You don't have permission to view Records.</p>
       </div>
@@ -254,7 +254,7 @@ export default function Records() {
           </div>
         ) : records.length === 0 ? (
           <div className="text-center py-20 bg-card rounded-xl border border-border">
-            <FileText className="w-10 h-10 text-muted-foreground/30 mx-auto mb-3" />
+            <FileText className="w-10 h-10 text-muted-subtle mx-auto mb-3" />
             <h3 className="text-sm font-semibold text-foreground">No records found</h3>
             <p className="text-xs text-muted-foreground mt-1">
               {totalRecords === 0

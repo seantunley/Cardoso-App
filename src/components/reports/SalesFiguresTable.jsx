@@ -17,7 +17,7 @@ const TYPES = [
 // clearly as South African Rand.
 const RandCell = ({ v, strong, borderL }) => (
   <td className={`px-2 py-1 text-right tabular-nums ${borderL ? 'border-l border-border/40' : ''} ${strong ? 'font-semibold text-foreground' : 'text-foreground/90'}`}>
-    <span className="text-muted-foreground/45">R </span>{fmtR(v)}
+    <span className="text-muted-subtle">R </span>{fmtR(v)}
   </td>
 );
 

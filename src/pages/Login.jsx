@@ -326,7 +326,7 @@ export default function Login() {
                 autoComplete="username"
                 value={formData.email}
                 onChange={(e) => setFormData((prev) => ({ ...prev, email: e.target.value }))}
-                className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-foreground/40"
+                className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-subtle"
                 placeholder={`e.g. ${usernameExample}`}
                 required
               />
@@ -342,7 +342,7 @@ export default function Login() {
                   autoComplete="current-password"
                   value={formData.password}
                   onChange={(e) => setFormData((prev) => ({ ...prev, password: e.target.value }))}
-                  className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 pr-10 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-foreground/40"
+                  className="w-full bg-transparent border-0 border-b border-border focus:border-accent text-foreground py-2 pr-10 text-base font-mono tracking-wide outline-none transition-colors placeholder:text-muted-subtle"
                   placeholder="••••••••"
                   required
                 />

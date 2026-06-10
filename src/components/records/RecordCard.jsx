@@ -168,7 +168,7 @@ export default function RecordCard({ record, customFields, onFlagChange, onEdit,
                     className="h-9 w-9 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"
                     disabled
                   >
-                    <Lock className="w-3.5 h-3.5 text-muted-foreground/40" />
+                    <Lock className="w-3.5 h-3.5 text-muted-subtle" />
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>You don&apos;t have permission to edit records</TooltipContent>

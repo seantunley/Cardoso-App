@@ -104,7 +104,7 @@ export default function AccountingTab() {
                   step="0.01"
                   value={vatPercent}
                   onChange={e => setVatPercent(e.target.value)}
-                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+                  className="flex-1 rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
                 />
                 <span className="text-sm text-muted-foreground font-mono">%</span>
               </div>

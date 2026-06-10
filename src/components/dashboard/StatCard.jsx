@@ -63,7 +63,7 @@ export default function StatCard({ title, value, subtitle, icon: Icon, trend, co
 
         {Icon && (
           <Icon
-            className="w-4 h-4 shrink-0 text-muted-foreground/60 group-hover:text-[var(--phosphor)] transition-colors"
+            className="w-4 h-4 shrink-0 text-muted-subtle group-hover:text-[var(--phosphor)] transition-colors"
             strokeWidth={1.5}
           />
         )}

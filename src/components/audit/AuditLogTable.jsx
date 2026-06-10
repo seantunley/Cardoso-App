@@ -387,14 +387,14 @@ export default function AuditLogTable({ logs = [] }) {
                     >
                       <td className="px-4 py-3 text-muted-foreground align-top">
                         <div className="flex items-center gap-2">
-                          <Clock className="h-4 w-4 text-muted-foreground/50" />
+                          <Clock className="h-4 w-4 text-muted-subtle" />
                           {formatAppDate(log.created_date)}
                         </div>
                       </td>
 
                       <td className="px-4 py-3 align-top">
                         <div className="flex items-start gap-2">
-                          <User className="mt-0.5 h-4 w-4 text-muted-foreground/50" />
+                          <User className="mt-0.5 h-4 w-4 text-muted-subtle" />
                           <div>
                             <div className="font-medium text-foreground">
                               {log.user_name || "Unknown"}

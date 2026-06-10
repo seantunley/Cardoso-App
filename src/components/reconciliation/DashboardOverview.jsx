@@ -52,13 +52,13 @@ export default function DashboardOverview({ data }) {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 stagger-in">
         <Tile
           label="Total BAT"
-          value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(summary.totalSupplier)}</>}
+          value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(summary.totalSupplier)}</>}
           sub="across all reconciliations"
           tip="Sum of every BAT supplier spreadsheet you've uploaded — what BAT says they owe in credit notes."
         />
         <Tile
           label="Total Sage"
-          value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(summary.totalSage)}</>}
+          value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(summary.totalSage)}</>}
           sub="posted credit notes"
           accent="hsl(145 55% 45%)"
           glow="hsla(145, 55%, 45%, 0.25)"
@@ -66,7 +66,7 @@ export default function DashboardOverview({ data }) {
         />
         <Tile
           label="Total Variance"
-          value={<><span className="text-muted-foreground/60 text-3xl mr-1.5">R</span>{fmt(summary.totalVariance)}</>}
+          value={<><span className="text-muted-subtle text-3xl mr-1.5">R</span>{fmt(summary.totalVariance)}</>}
           sub={matched ? 'fully reconciled' : summary.totalVariance > 0 ? 'supplier higher' : 'sage higher'}
           accent={matched ? 'hsl(145 55% 45%)' : 'hsl(var(--destructive))'}
           glow={matched ? 'hsla(145, 55%, 45%, 0.25)' : 'hsla(0, 72%, 50%, 0.3)'}

@@ -106,7 +106,7 @@ export default function Reports() {
           {groups.map((group, gi) => (
             <Fragment key={group.group}>
               {gi > 0 && <span className="mx-1.5 hidden h-5 w-px self-center bg-border sm:block" aria-hidden />}
-              <span className="mr-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground/50">{group.group}</span>
+              <span className="mr-0.5 font-mono text-[9px] uppercase tracking-[0.2em] text-muted-subtle">{group.group}</span>
               {group.items.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeId === item.id;
@@ -124,7 +124,7 @@ export default function Reports() {
                   >
                     <Icon className="h-3.5 w-3.5" style={{ color: item.accent }} strokeWidth={isActive ? 2 : 1.5} />
                     {item.name}
-                    {!item.ready && <span className="ml-0.5 text-[8px] text-muted-foreground/60">soon</span>}
+                    {!item.ready && <span className="ml-0.5 text-[8px] text-muted-subtle">soon</span>}
                   </button>
                 );
               })}

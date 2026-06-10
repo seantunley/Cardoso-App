@@ -58,7 +58,7 @@ export default function Dashboard() {
         <div className="max-w-[1600px] mx-auto px-8 py-16">
           <Header greeting={johannesburgGreeting} operatorCodename={operatorCodename} />
           <div className="mt-16 border border-border py-24 text-center">
-            <Database className="w-10 h-10 mx-auto mb-6 text-muted-foreground/60" strokeWidth={1} />
+            <Database className="w-10 h-10 mx-auto mb-6 text-muted-subtle" strokeWidth={1} />
             <h3 className="font-display text-3xl text-foreground mb-2">No connections configured</h3>
             <p className="text-sm text-muted-foreground max-w-sm mx-auto">
               Set up your first database connection to begin ledgering customer records.
@@ -97,7 +97,7 @@ export default function Dashboard() {
                 </div>
                 <div>
                   <div className="font-display text-7xl lg:text-[7rem] leading-none text-foreground tracking-tight tabular-nums">
-                    {isLoading ? <span className="text-muted-foreground/40">0</span> : totalRecords}
+                    {isLoading ? <span className="text-muted-subtle">0</span> : totalRecords}
                   </div>
                   <div className="mt-3 h-px bg-border group-hover:bg-accent transition-colors" />
                   <p className="mt-3 text-xs text-muted-foreground">

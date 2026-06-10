@@ -121,7 +121,7 @@ export default function SalesRepExposure() {
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-4 gap-3">
             <SummaryTile label="Sales Reps" value={fmtCount(summary.total_reps)} accent={REPORT_COLORS.primary} />
             <SummaryTile label="Customers" value={fmtCount(summary.total_customers)} accent={REPORT_COLORS.info} />
-            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent={REPORT_COLORS.primary} big />
+            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_outstanding)}</>} accent={REPORT_COLORS.primary} big />
             <SummaryTile label="Red-flagged" value={fmtCount(summary.total_red)} sub={`+ ${summary.total_orange} orange`} accent={REPORT_COLORS.danger} />
           </div>
 
@@ -188,7 +188,7 @@ export default function SalesRepExposure() {
                         onClick={() => setExpandedRep(isOpen ? null : r.sales_rep)}
                       >
                         <td className="px-2 py-1.5 text-foreground">
-                          <span className="font-mono text-muted-foreground/60 mr-2">{isOpen ? '▾' : '▸'}</span>
+                          <span className="font-mono text-muted-subtle mr-2">{isOpen ? '▾' : '▸'}</span>
                           {r.sales_rep}
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground">{fmtCount(r.customer_count)}</td>
@@ -196,7 +196,7 @@ export default function SalesRepExposure() {
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.orange ? 'hsl(33 95% 55%)' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.orange || '—'}</td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.green ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.green || '—'}</td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                          <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.total_outstanding)}
+                          <span className="text-muted-subtle mr-1">R</span>{fmtR(r.total_outstanding)}
                         </td>
                       </tr>
                       {isOpen && (
@@ -210,7 +210,7 @@ export default function SalesRepExposure() {
                                     <td className="px-2 py-1 font-mono text-muted-foreground">{c.customer_number}</td>
                                     <td className="px-2 py-1 text-foreground">{c.customer_name}</td>
                                     <td className="px-2 py-1 text-right font-mono tabular-nums text-foreground">
-                                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(c.outstanding_balance)}
+                                      <span className="text-muted-subtle mr-1">R</span>{fmtR(c.outstanding_balance)}
                                     </td>
                                   </tr>
                                 ))}
@@ -232,7 +232,7 @@ export default function SalesRepExposure() {
                     <td className="px-2 py-2 text-right font-mono tabular-nums" style={{ color: 'hsl(33 95% 55%)' }}>{summary.total_orange}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums">—</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_outstanding)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_outstanding)}
                     </td>
                   </tr>
                 </tfoot>

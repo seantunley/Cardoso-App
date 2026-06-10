@@ -92,6 +92,7 @@
     --secondary-foreground: 24 10% 10%;
     --muted: 40 20% 90%;
     --muted-foreground: 24 8% 42%;
+    --muted-foreground-subtle: 24 8% 44%;  /* dimmest AA-passing text on BOTH --background (4.56:1) and --card (4.71:1) */
     --accent: 33 95% 52%;              /* phosphor amber */
     --accent-foreground: 24 10% 10%;
     --destructive: 0 70% 42%;          /* oxblood */
@@ -142,6 +143,7 @@
     --secondary-foreground: 40 50% 97%;
     --muted: 28 14% 22%;
     --muted-foreground: 35 20% 75%;
+    --muted-foreground-subtle: 35 15% 58%; /* AA on both --background (5.35:1) and --card (4.8:1) */
     --accent: 33 100% 62%;             /* phosphor amber — full saturation */
     --accent-foreground: 28 18% 14%;
     --destructive: 0 88% 62%;          /* hot oxblood — vivid */

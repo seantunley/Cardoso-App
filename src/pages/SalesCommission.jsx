@@ -464,7 +464,7 @@ export default function SalesCommission() {
 function MetricCell({ label, value, tone = "text-foreground", title, width = "w-28" }) {
   return (
     <div className={`${width} shrink-0 text-right`} title={title}>
-      <div className="text-[10px] uppercase tracking-wider text-muted-foreground/70 leading-tight">{label}</div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-subtle leading-tight">{label}</div>
       <div className={`tabular-nums ${tone}`}>{value}</div>
     </div>
   );

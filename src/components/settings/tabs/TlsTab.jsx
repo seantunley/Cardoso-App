@@ -142,7 +142,7 @@ function HubConnectionSection() {
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             placeholder="https://cardoso-headoffice.your-tailnet.ts.net:8443"
-            className="w-full rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
+            className="w-full rounded-[2px] border border-input bg-transparent px-3 py-2 text-sm font-mono placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:ring-1 focus:ring-[var(--phosphor)] outline-none"
           />
           <p className="text-[10px] text-muted-foreground">
             Include scheme and any non-default port (e.g. <code>:8443</code> if Caddy isn't on 443). Leave blank to clear the override.

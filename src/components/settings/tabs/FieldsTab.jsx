@@ -79,7 +79,7 @@ function FieldsTable({ fields }) {
               <tr key={f.key} className="border-b border-border last:border-0 hover:bg-muted/20">
                 <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground">{f.key}</td>
                 <td className="px-4 py-2.5 text-foreground text-sm">{f.label}</td>
-                <td className="px-4 py-2.5 font-mono text-xs text-muted-foreground/70 leading-relaxed">{f.fallbacks}</td>
+                <td className="px-4 py-2.5 font-mono text-xs text-muted-subtle leading-relaxed">{f.fallbacks}</td>
                 <td className="px-4 py-2.5">
                   <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border ${badge.cls}`}>
                     {badge.label}

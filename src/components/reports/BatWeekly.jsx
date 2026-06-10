@@ -100,18 +100,18 @@ export default function BatWeekly() {
         <>
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">
             <SummaryTile label="Weeks" value={fmtCount(summary.weeks_count)} accent={REPORT_COLORS.primary} />
-            <SummaryTile label="Total BAT" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
-            <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
+            <SummaryTile label="Total BAT" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
+            <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
             <SummaryTile
               label="Total Variance"
-              value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
+              value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
               sub={summary.total_variance > 0 ? 'BAT higher' : summary.total_variance < 0 ? 'Sage higher' : 'matched'}
               accent={Math.abs(summary.total_variance) < 1 ? REPORT_COLORS.secondary : REPORT_COLORS.danger}
               big
             />
             <SummaryTile
               label="Status mix"
-              value={<>{summary.matched_count}<span className="text-muted-foreground/60 text-base ml-1">/{summary.weeks_count}</span></>}
+              value={<>{summary.matched_count}<span className="text-muted-subtle text-base ml-1">/{summary.weeks_count}</span></>}
               sub={`${summary.mismatch_count} mismatch · ${summary.awaiting_count} awaiting`}
               accent={REPORT_COLORS.info}
             />
@@ -180,10 +180,10 @@ export default function BatWeekly() {
                       <td className="px-2 py-1.5 font-mono text-muted-foreground tabular-nums">{w.year}</td>
                       <td className="px-2 py-1.5 font-mono text-foreground tabular-nums">{w.week_number}</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(w.supplier_total)}
+                        <span className="text-muted-subtle mr-1">R</span>{fmtR(w.supplier_total)}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                        {w.sage_present ? <><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(w.sage_total)}</> : '—'}
+                        {w.sage_present ? <><span className="text-muted-subtle mr-1">R</span>{fmtR(w.sage_total)}</> : '—'}
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: w.matched ? 'hsl(145 55% 45%)' : (w.sage_present ? 'hsl(0 72% 50%)' : 'hsl(var(--muted-foreground))') }}>
                         {w.sage_present ? <><span className="opacity-60 mr-1">R</span>{fmtRSigned(w.variance)}</> : '—'}
@@ -196,7 +196,7 @@ export default function BatWeekly() {
                       </td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{w.exc_count || '—'}</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">
-                        {w.exc_amount > 0 ? <><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(w.exc_amount)}</> : '—'}
+                        {w.exc_amount > 0 ? <><span className="text-muted-subtle mr-1">R</span>{fmtR(w.exc_amount)}</> : '—'}
                       </td>
                     </tr>
                   );
@@ -207,10 +207,10 @@ export default function BatWeekly() {
                   <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                     <td className="px-2 py-2 text-foreground" colSpan={2}>Total ({summary.weeks_count} weeks)</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_supplier)}
                     </td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}
                     </td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
                       <span className="opacity-60 mr-1">R</span>{fmtRSigned(summary.total_variance)}
@@ -219,7 +219,7 @@ export default function BatWeekly() {
                     <td className="px-2 py-2"></td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">{summary.total_exceptions}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_exception_amount)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_exception_amount)}
                     </td>
                   </tr>
                 </tfoot>
