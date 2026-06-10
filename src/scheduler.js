@@ -783,7 +783,12 @@ export function startSchedulers() {
         }
       }
       return { triggered, considered: conns.length, failed, errors: errors.length ? errors : undefined };
-    }, (r) => r),
+    },
+    // contextFn passes the summary through; successCheck records the cycle as
+    // 'failed' when any due import failed, so Operations → Job Runs and the
+    // job-failure-spike alert (which counts only status='failed') surface it —
+    // not just a buried context blob an operator has to open by hand (SYNC-6).
+    (r) => r, { successCheck: (r) => !r?.failed }),
     5 * 60 * 1000,
   ));
   registerJob({ name: 'auto-sync-cycle', type: 'interval', intervalMs: 5 * 60 * 1000, mode: 'all', description: 'Auto-sync — fire any connection past its sync_interval_hours' });
