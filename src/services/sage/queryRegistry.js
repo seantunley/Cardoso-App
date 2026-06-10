@@ -483,12 +483,50 @@ const BANNED_KEYWORDS = /\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|EXEC|EXECUT
 // Extended / system stored procedures (xp_cmdshell, sp_executesql, …).
 const BANNED_PROCS = /\b(?:xp|sp)_\w/i;
 
-// Strip /* block */ then -- line comments. Run BEFORE the denylist so a keyword
-// can't be smuggled past the regex by splitting it with a comment
-// ("WAIT/**/FOR", "SELECT * IN/**/TO x") and so a keyword that only appears
-// inside a comment doesn't false-positive.
-export function stripSqlComments(sqlText) {
-  return String(sqlText ?? '').replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/--[^\n]*/g, ' ');
+// Comment- AND string-literal-aware scrub for the read-only validator. Returns
+// the SQL with /* */ and -- comments removed AND the CONTENTS of string /
+// quoted-identifier literals blanked. This is required for the denylist + single-
+// statement checks to be sound: a naive comment strip can be fooled by a literal
+// like SELECT '--'; DROP TABLE x (the -- inside the string is NOT a comment to
+// SQL Server, so the regex would wrongly eat the real ;DROP), and would also
+// false-positive on a legitimate literal that contains ';' or '--'. Tracks
+// '...', "..." and [...] with their ''/""/]] escapes; -- and /* */ are treated
+// as comments only OUTSIDE a literal.
+export function scrubSqlForValidation(sqlText) {
+  const src = String(sqlText ?? '');
+  let out = '';
+  let i = 0;
+  const n = src.length;
+  // Consume a quoted span and emit a single space in its place — its inner text
+  // is data, irrelevant to the read-only / single-statement checks. `close`
+  // doubled (''/""/]]) is an escaped delimiter, not the end of the span.
+  const skipQuoted = (close) => {
+    i += 1; // past the opening delimiter
+    while (i < n) {
+      if (src[i] === close && src[i + 1] === close) { i += 2; continue; }
+      if (src[i] === close) { i += 1; break; }
+      i += 1;
+    }
+    out += ' ';
+  };
+  while (i < n) {
+    const c = src[i];
+    const c2 = i + 1 < n ? src[i + 1] : '';
+    if (c === "'") { skipQuoted("'"); continue; }
+    if (c === '"') { skipQuoted('"'); continue; }
+    if (c === '[') { skipQuoted(']'); continue; }
+    if (c === '-' && c2 === '-') { while (i < n && src[i] !== '\n') i += 1; out += ' '; continue; }
+    if (c === '/' && c2 === '*') {
+      i += 2;
+      while (i < n && !(src[i] === '*' && src[i + 1] === '/')) i += 1;
+      i = Math.min(i + 2, n);
+      out += ' ';
+      continue;
+    }
+    out += c;
+    i += 1;
+  }
+  return out;
 }
 
 /**
@@ -501,7 +539,7 @@ export function readOnlyOverrideViolation(sqlText) {
   const s = String(sqlText ?? '').trim();
   if (s.length === 0) return null;
   if (s.length > 20_000) return 'too long (max 20,000 characters)';
-  const clean = stripSqlComments(s).trim();
+  const clean = scrubSqlForValidation(s).trim();
   // Must start with SELECT or WITH. A leading ';' is allowed — the BAT
   // corrections default is a T-SQL CTE that legitimately starts ";WITH".
   if (!/^(\s|;)*(SELECT|WITH)\b/i.test(clean)) return 'must start with SELECT or WITH (read-only)';
@@ -529,7 +567,7 @@ export function validateSageQueryOverride(sqlText, key) {
   if (s.length === 0) return null; // empty = clear back to default
   const sec = readOnlyOverrideViolation(s);
   if (sec) return sec;
-  const clean = stripSqlComments(s);
+  const clean = scrubSqlForValidation(s);
   for (const p of d.params || []) {
     if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference the @${p} parameter`;
   }

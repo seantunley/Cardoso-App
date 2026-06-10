@@ -8,7 +8,7 @@ import {
   DEFAULT_COMMISSION_RECEIPTS_SQL,
   DEFAULT_COMMISSION_UNPAID_SQL,
 } from '../services/commission.js';
-import { readOnlyOverrideViolation, stripSqlComments } from '../services/sage/queryRegistry.js';
+import { readOnlyOverrideViolation, scrubSqlForValidation } from '../services/sage/queryRegistry.js';
 import {
   listCommissionArchives,
   getCommissionArchive,
@@ -40,7 +40,7 @@ function validateOverrideSql(sql, { expectedParams }) {
   if (sec) return sec;
   // Param-presence check (on the comment-stripped form): every declared @param
   // must appear in real SQL, not only inside a comment.
-  const clean = stripSqlComments(s);
+  const clean = scrubSqlForValidation(s);
   for (const p of expectedParams) {
     if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference @${p} for the date / vat parameter binding`;
   }

@@ -23,6 +23,10 @@ describe('readOnlyOverrideViolation — SEC-1 bypass vectors are blocked', () =>
     'second ;-separated statement': 'SELECT 1 FROM AROBL WHERE x = @from; SELECT 2 FROM ARTBL',
     'not read-only (EXEC)': 'EXEC something @from',
     'leading ; then a write': '; DELETE FROM AROBL WHERE x = @from',
+    // The -- lives inside a string literal, so it is NOT a comment to SQL Server;
+    // a literal-unaware stripper would eat the real ;DROP and pass this.
+    'literal-hidden second statement': "SELECT @from, '--'; DROP TABLE x",
+    'literal-hidden block-comment write': "SELECT '/*' AS x, @from; DELETE FROM AROBL",
   };
   for (const [name, sql] of Object.entries(blocked)) {
     it(`blocks: ${name}`, () => {
@@ -42,6 +46,10 @@ describe('readOnlyOverrideViolation — legitimate queries pass', () => {
     'SELECT 1 /* DELETE FROM x */ FROM AROBL WHERE y = @from',
     // A "second statement" that is commented out is a single statement.
     'SELECT 1 FROM AROBL WHERE y = @from --; DROP TABLE x',
+    // A ';' or '--' INSIDE a string literal is data — must not false-positive as
+    // a second statement / comment now that the scrub is literal-aware.
+    "SELECT 'a;b' AS marker FROM AROBL WHERE x = @from",
+    "SELECT '-- not a comment' AS note FROM AROBL WHERE x = @from",
   ];
   for (const sql of allowed) {
     it(`allows: ${JSON.stringify(sql.slice(0, 30))}`, () => {
