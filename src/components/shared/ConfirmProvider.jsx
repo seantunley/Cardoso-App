@@ -22,11 +22,16 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog";
 
-const ConfirmContext = createContext(null);
+/**
+ * @typedef {{ title: string, description: string, confirmLabel: string, cancelLabel: string, destructive: boolean }} PendingConfirm
+ * @typedef {(opts?: { title?: string, description?: string, confirmLabel?: string, cancelLabel?: string, destructive?: boolean }) => Promise<boolean>} ConfirmFn
+ */
+
+const ConfirmContext = createContext(/** @type {ConfirmFn | null} */ (null));
 
 export function ConfirmProvider({ children }) {
-  const [pending, setPending] = useState(null); // { title, description, confirmLabel, cancelLabel, destructive }
-  const resolveRef = useRef(null);
+  const [pending, setPending] = useState(/** @type {PendingConfirm | null} */ (null));
+  const resolveRef = useRef(/** @type {((value: boolean) => void) | null} */ (null));
 
   const confirm = useCallback((opts) => {
     return new Promise((resolve) => {
@@ -57,13 +62,13 @@ export function ConfirmProvider({ children }) {
       {children}
       <AlertDialog open={!!pending} onOpenChange={(open) => { if (!open) settle(false); }}>
         <AlertDialogContent>
-          <AlertDialogHeader>
+          <AlertDialogHeader className="">
             <AlertDialogTitle>{pending?.title}</AlertDialogTitle>
             {pending?.description ? (
               <AlertDialogDescription className="whitespace-pre-line">{pending.description}</AlertDialogDescription>
             ) : null}
           </AlertDialogHeader>
-          <AlertDialogFooter>
+          <AlertDialogFooter className="">
             <AlertDialogCancel onClick={() => settle(false)}>{pending?.cancelLabel}</AlertDialogCancel>
             <AlertDialogAction
               onClick={() => settle(true)}

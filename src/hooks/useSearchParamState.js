@@ -16,9 +16,15 @@ import { useSearchParams } from "react-router-dom";
 let pendingParams = null;
 let flushScheduled = false;
 
+/**
+ * @param {string} key
+ * @param {string} [defaultValue]
+ * @returns {[string, (next: string | ((current: string) => string)) => void]}
+ */
 export function useSearchParamState(key, defaultValue = "") {
   const [searchParams, setSearchParams] = useSearchParams();
-  const value = searchParams.has(key) ? searchParams.get(key) : defaultValue;
+  // ?? instead of has()/get(): identical behavior, but TS can narrow it.
+  const value = searchParams.get(key) ?? defaultValue;
 
   const setValue = useCallback(
     (next) => {
