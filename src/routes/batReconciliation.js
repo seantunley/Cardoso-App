@@ -653,8 +653,14 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'invalid id' });
     try {
+      // Every extraction whose order_number isn't in the recon's CURRENT Overview
+      // pivot. CAUTION: on a multi-branch recon (e.g. Welkom + JHB in the same
+      // week) the latest upload REPLACES bat_overview_orders, but extraction rows
+      // from the other branch are intentionally retained with their OCR/manual
+      // corrections — so they legitimately show as orphans here and must NOT be
+      // deleted.
       const orphans = db.prepare(`
-        SELECT e.id, e.order_number, e.order_amount, e.pdf_url
+        SELECT e.id, e.order_number, e.order_amount, e.pdf_url, e.extraction_status
         FROM bat_invoice_extractions e
         WHERE e.reconciliation_id = ?
           AND e.order_number IS NOT NULL
@@ -664,21 +670,30 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
           )
       `).all(id);
 
-      if (orphans.length === 0) {
-        return res.json({ ok: true, pruned: 0, orphans: [] });
+      // Only prune TRULY STALE rows: no successful OCR extraction
+      // (extraction_status != 'found') AND no amount of any sign. A retained
+      // branch row carries a real OCR amount ('found') or a manually-set
+      // order_amount, so it is kept — never deleted by this tool.
+      const hasAmount = (o) => o.order_amount != null && Number(o.order_amount) !== 0;
+      const isStale = (o) => o.extraction_status !== 'found' && !hasAmount(o);
+      const stale = orphans.filter(isStale);
+      const retained = orphans.filter((o) => !isStale(o));
+
+      if (stale.length === 0) {
+        return res.json({ ok: true, pruned: 0, stale: [], retained });
       }
 
-      const ids = orphans.map((o) => o.id);
+      const ids = stale.map((o) => o.id);
       const placeholders = ids.map(() => '?').join(',');
       const info = db.prepare(`DELETE FROM bat_invoice_extractions WHERE id IN (${placeholders})`).run(...ids);
 
       logAudit({
         req, action: 'bat_prune_orphan_extractions', resourceType: 'system',
         resourceId: id, resourceName: `Reconciliation ${id}`,
-        details: `Pruned ${info.changes} orphan extraction(s) — order_number not in Overview pivot: ${orphans.map((o) => `${o.order_number}#${o.id} (R ${(Number(o.order_amount) || 0).toFixed(2)})`).join('; ')}`,
+        details: `Pruned ${info.changes} STALE orphan extraction(s) (no OCR/manual amount, not in Overview pivot): ${stale.map((o) => `${o.order_number}#${o.id}`).join('; ')}. Retained ${retained.length} orphan(s) with OCR/manual data (likely another branch's upload).`,
       });
 
-      res.json({ ok: true, pruned: info.changes, orphans });
+      res.json({ ok: true, pruned: info.changes, stale, retained });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

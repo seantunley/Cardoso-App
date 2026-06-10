@@ -796,9 +796,10 @@ export default function Reconciliation() {
   const handlePruneOrphans = async () => {
     if (!selected) return;
     if (!window.confirm(
-      'Remove the orphan extraction rows from this reconciliation?\n\n'
-      + 'These reference orders that are NOT in BAT’s Overview pivot (stale rows from a prior upload). '
-      + 'The POD PDFs are not affected; the recon totals are recomputed.'
+      'Remove the STALE orphan extraction rows from this reconciliation?\n\n'
+      + 'Only rows with NO OCR/manual amount (and not in BAT’s Overview pivot) are deleted. '
+      + 'Rows that have a real OCR/manual amount — e.g. retained rows from another branch’s '
+      + 'upload in the same week — are kept. The POD PDFs are not affected.'
     )) return;
     try {
       const r = await fetch(`/api/bat/reconciliation/${selected.id}/prune-orphan-extractions`, {
@@ -806,7 +807,16 @@ export default function Reconciliation() {
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      toast.success(`Pruned ${d.pruned} orphan extraction row${d.pruned === 1 ? '' : 's'}.`);
+      const pruned = d.pruned || 0;
+      const retained = (d.retained || []).length;
+      if (pruned === 0) {
+        toast.message(retained > 0
+          ? `No stale rows to prune. ${retained} orphan row${retained === 1 ? '' : 's'} kept — they have OCR/manual data (likely another branch’s upload).`
+          : 'No orphan rows to prune.');
+      } else {
+        toast.success(`Pruned ${pruned} stale orphan row${pruned === 1 ? '' : 's'}.`
+          + (retained > 0 ? ` Kept ${retained} with OCR/manual data (another branch).` : ''));
+      }
       loadReconciliation(selected.id);
     } catch (e) {
       toast.error(`Failed to prune orphan rows: ${e.message}`);
