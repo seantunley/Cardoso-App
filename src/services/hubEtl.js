@@ -552,6 +552,102 @@ async function syncSite(site) {
       console.log(`[hub-etl] Inventory customer-sales sync skipped for ${site.id}: ${custErr.message}`);
     }
 
+    // Debtor AR open items → hub_debtor_ar_invoice, so Aged Debtors ages
+    // per-document at the hub. Paginate → stage → atomic full-refresh per site.
+    try {
+      const fetchArPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/ar-open-items?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`AR open-items fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allArRecords = [];
+      let arOffset = 0;
+      let nextArPromise = guardOrphan(fetchArPage(0));
+      while (true) {
+        const arData = await nextArPromise;
+        const recs = arData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = arData?.has_more === true && consumed > 0;
+        nextArPromise = willHaveMore ? guardOrphan(fetchArPage(arOffset + consumed)) : null;
+        for (const r of recs) allArRecords.push(r);
+        arOffset += consumed;
+        if (!nextArPromise) break;
+      }
+      const upsertAr = db.prepare(`
+        INSERT INTO hub_debtor_ar_invoice (site_id, customer_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, customer_code, document_number) DO UPDATE SET
+          document_type=excluded.document_type, document_date=excluded.document_date,
+          due_date=excluded.due_date, original_amount=excluded.original_amount,
+          outstanding_amount=excluded.outstanding_amount, reference=excluded.reference,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_debtor_ar_invoice WHERE site_id = ?').run(site.id);
+        for (const r of allArRecords) {
+          upsertAr.run(site.id, r.customer_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
+        }
+      })();
+    } catch (arErr) {
+      console.log(`[hub-etl] Debtor AR open-items sync skipped for ${site.id}: ${arErr.message}`);
+    }
+
+    // Creditor AP open items → hub_creditor_ap_invoice, so Aged Creditors works
+    // at the hub. Paginate → stage → atomic full-refresh per site.
+    try {
+      const fetchApPage = async (pageOffset) => {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 10000);
+        const url = `${site.url}/api/reporting/ap-open-items?offset=${pageOffset}&limit=5000`;
+        try {
+          const res = await fetch(url, { headers, signal: ctrl.signal });
+          clearTimeout(t);
+          if (!res.ok) throw new Error(`AP open-items fetch failed at offset ${pageOffset}: HTTP ${res.status}`);
+          const data = await res.json();
+          if (data.error) throw new Error(data.error);
+          return data;
+        } finally { clearTimeout(t); }
+      };
+      const allApRecords = [];
+      let apOffset = 0;
+      let nextApPromise = guardOrphan(fetchApPage(0));
+      while (true) {
+        const apData = await nextApPromise;
+        const recs = apData?.records || [];
+        const consumed = recs.length;
+        const willHaveMore = apData?.has_more === true && consumed > 0;
+        nextApPromise = willHaveMore ? guardOrphan(fetchApPage(apOffset + consumed)) : null;
+        for (const r of recs) allApRecords.push(r);
+        apOffset += consumed;
+        if (!nextApPromise) break;
+      }
+      const upsertAp = db.prepare(`
+        INSERT INTO hub_creditor_ap_invoice (site_id, vendor_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
+        ON CONFLICT(site_id, vendor_code, document_number) DO UPDATE SET
+          document_type=excluded.document_type, document_date=excluded.document_date,
+          due_date=excluded.due_date, original_amount=excluded.original_amount,
+          outstanding_amount=excluded.outstanding_amount, reference=excluded.reference,
+          synced_at=excluded.synced_at
+      `);
+      db.transaction(() => {
+        db.prepare('DELETE FROM hub_creditor_ap_invoice WHERE site_id = ?').run(site.id);
+        for (const r of allApRecords) {
+          upsertAp.run(site.id, r.vendor_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
+        }
+      })();
+    } catch (apErr) {
+      console.log(`[hub-etl] Creditor AP open-items sync skipped for ${site.id}: ${apErr.message}`);
+    }
+
     // Stock receipt expiry — read-only hub copy for cross-site visibility.
     // Paginated fetch (1000 rows / 10s per page), stage all pages in
     // memory, then atomic delete+insert so a mid-page failure leaves
