@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest';
 // syncEngine imports the app DB + prepares statements at module load.
 vi.mock('../src/db/index.js', () => ({ default: { prepare: vi.fn(() => ({ run: vi.fn(), get: vi.fn(), all: vi.fn() })) } }));
 
-import { isNoOpDataUpdate } from '../src/services/syncEngine.js';
+import { isNoOpDataUpdate, autoFlagWouldChange } from '../src/services/syncEngine.js';
 
 const base = {
   created_by: 'import', customer_number: 'C1', customer_name: 'Acme',
@@ -62,5 +62,33 @@ describe('isNoOpDataUpdate (SYNC-2)', () => {
     expect(isNoOpDataUpdate(existingMissingCreatedBy, { ...base })).toBe(false);
     // With it loaded as the stored 'import', the unchanged row is a no-op.
     expect(isNoOpDataUpdate({ ...base, created_by: 'import' }, { ...base })).toBe(true);
+  });
+});
+
+describe('autoFlagWouldChange (SYNC-2 flag-only propagation)', () => {
+  const unflagged = { flag_color: null, flag_reason: null, auto_flagged: 0 };
+  const flagged = { flag_color: 'red', flag_reason: 'overdue', auto_flagged: 1 };
+
+  it('is true when a rule newly flags an unflagged row', () => {
+    expect(autoFlagWouldChange(unflagged, { flag_color: 'red', flag_reason: 'overdue' })).toBe(true);
+  });
+
+  it('is false when the rule re-applies the identical flag', () => {
+    expect(autoFlagWouldChange(flagged, { flag_color: 'red', flag_reason: 'overdue' })).toBe(false);
+  });
+
+  it('is true when the rule changes colour or reason', () => {
+    expect(autoFlagWouldChange(flagged, { flag_color: 'amber', flag_reason: 'overdue' })).toBe(true);
+    expect(autoFlagWouldChange(flagged, { flag_color: 'red', flag_reason: 'disputed' })).toBe(true);
+  });
+
+  it('is true when the same colour/reason but the row was not auto_flagged', () => {
+    const manual = { flag_color: 'red', flag_reason: 'overdue', auto_flagged: 0 };
+    expect(autoFlagWouldChange(manual, { flag_color: 'red', flag_reason: 'overdue' })).toBe(true);
+  });
+
+  it('clearing: true iff the row was auto_flagged', () => {
+    expect(autoFlagWouldChange(flagged, null)).toBe(true);
+    expect(autoFlagWouldChange(unflagged, null)).toBe(false);
   });
 });

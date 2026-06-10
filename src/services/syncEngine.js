@@ -107,6 +107,10 @@ const _SYNC_SQL = {
       updated_date=excluded.updated_date
   `,
   syncUpdateRecordFlag: `UPDATE datarecord SET flag_color = ?, flag_reason = ?, auto_flagged = ?, flag_source = 'auto' WHERE id = ?`,
+  // Bumps only updated_date — used when an auto-flag change lands on a row whose
+  // main data UPDATE was skipped as a no-op, so the hub's incremental pull
+  // (updated_date > since) still sees the flag change (SYNC-2 follow-up).
+  syncTouchUpdatedDate: `UPDATE datarecord SET updated_date = ? WHERE id = ?`,
   findFlagSnapshot: `
     SELECT flag_color, flag_reason, flag_created_by, flag_source, auto_flagged, note
     FROM flag_snapshots WHERE customer_number = ? LIMIT 1
@@ -145,6 +149,22 @@ export function isNoOpDataUpdate(existing, upd) {
     if (String(existing[k] ?? '') !== String(upd[k] ?? '')) return false;
   }
   return true;
+}
+
+/**
+ * True when applying `autoFlag` to `existing` would actually change the row's
+ * flag (colour, reason, or the auto_flagged bit) — `autoFlag` null means "no
+ * rule matches", which is a change only if the row was previously auto-flagged.
+ * Used to decide whether a flag write on a no-op-skipped row needs an
+ * updated_date bump so the hub picks it up. Exported for unit testing.
+ */
+export function autoFlagWouldChange(existing, autoFlag) {
+  if (autoFlag) {
+    return String(existing.flag_color ?? '') !== String(autoFlag.flag_color ?? '')
+      || String(existing.flag_reason ?? '') !== String(autoFlag.flag_reason ?? '')
+      || !existing.auto_flagged;
+  }
+  return !!existing.auto_flagged;
 }
 
 async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
@@ -311,6 +331,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       // because syncEngine.js is imported before initSchema runs in
       // server.js, so eager prepares boot-fail on pre-v41 upgrades.
       const updateRecordFlag = getSyncStmt('syncUpdateRecordFlag');
+      const touchUpdatedDate = getSyncStmt('syncTouchUpdatedDate');
       const findFlagSnapshot = getSyncStmt('findFlagSnapshot');
       const restoreFlag = getSyncStmt('restoreFlagSnapshot');
       const deleteFlagSnapshot = getSyncStmt('deleteFlagSnapshot');
@@ -412,7 +433,8 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
             // write. Otherwise every 30-min tick re-UPDATEs every unchanged row,
             // bumping updated_date — which makes the hub re-download the ENTIRE
             // record set on its next incremental pull (it filters on updated_date).
-            if (isNoOpDataUpdate(existing, upd)) {
+            const noOp = isNoOpDataUpdate(existing, upd);
+            if (noOp) {
               syncSkipped++;
             } else {
               syncUpdated++;
@@ -439,6 +461,14 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
                } else if (existing.auto_flagged) {
                  // Rule no longer matches — clear the auto-flag
                  updateRecordFlag.run(null, null, 0, existing.id);
+               }
+               // updateRecordFlag writes only flag_*/auto_flagged, NOT updated_date.
+               // When the main data UPDATE above was skipped as a no-op but the
+               // auto-flag just CHANGED the flag (e.g. a rule was added/edited on
+               // an otherwise-unchanged row), bump updated_date so the hub's
+               // incremental pull (updated_date > since) still picks up the change.
+               if (noOp && autoFlagWouldChange(existing, autoFlag)) {
+                 touchUpdatedDate.run(syncTimestamp, existing.id);
                }
              }
           } else {
