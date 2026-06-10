@@ -1614,7 +1614,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     };
   }
 
-  router.get('/api/reports/aged-debtors', requireAuth, (req, res) => {
+  router.get('/api/reports/aged-debtors', ...reportsGuard, (req, res) => {
     try {
       res.json(buildAgedDebtorsReport(req.query));
     } catch (err) {
@@ -1911,7 +1911,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   }
 
-  router.get('/api/reports/rep-exposure', requireAuth, (req, res) => {
+  router.get('/api/reports/rep-exposure', ...reportsGuard, (req, res) => {
     try {
       res.json(buildRepExposureReport(req.query));
     } catch (err) {
@@ -1945,7 +1945,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-weekly?year=YYYY — per-week BAT vs Sage credit-note
   // totals + variance + extraction stats, suitable for printing as a one-pager.
-  router.get('/api/reports/bat-weekly', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-weekly', ...reportsGuard, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
       // BAT reconciliation is a per-branch operational process — there is no hub
@@ -2033,7 +2033,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-ytd?year=YYYY — YTD fee-type breakdown comparing
   // BAT's claimed totals to Sage's posted credit-note totals.
-  router.get('/api/reports/bat-ytd', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-ytd', ...reportsGuard, (req, res) => {
     // ISO year fallback so a late-Dec call without ?year= matches the
     // ISO year that bat_reconciliations is keyed on.
     const year = req.query.year ? parseInt(req.query.year, 10) : isoYear(new Date());
@@ -2090,7 +2090,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // GET /api/reports/bat-exceptions?year=YYYY — total exception value, count,
   // breakdown by reason (normalized) and by store.
-  router.get('/api/reports/bat-exceptions', requireAuth, (req, res) => {
+  router.get('/api/reports/bat-exceptions', ...reportsGuard, (req, res) => {
     const year = req.query.year ? parseInt(req.query.year, 10) : null;
     try {
       if (process.env.HUB_MODE === 'true') {
