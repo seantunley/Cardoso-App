@@ -40,7 +40,7 @@ function validateOverrideSql(sql, { expectedParams }) {
   if (sec) return sec;
   // Param-presence check (on the comment-stripped form): every declared @param
   // must appear in real SQL, not only inside a comment.
-  const clean = scrubSqlForValidation(s);
+  const clean = scrubSqlForValidation(s, { keepDelimitedIds: true });
   for (const p of expectedParams) {
     if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference @${p} for the date / vat parameter binding`;
   }

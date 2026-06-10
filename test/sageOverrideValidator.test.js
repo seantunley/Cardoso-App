@@ -8,7 +8,7 @@ import { describe, it, expect, vi } from 'vitest';
 // queryRegistry imports db at module load; readOnlyOverrideViolation itself is pure.
 vi.mock('../src/db/index.js', () => ({ default: { prepare: vi.fn() } }));
 
-import { readOnlyOverrideViolation } from '../src/services/sage/queryRegistry.js';
+import { readOnlyOverrideViolation, validateSageQueryOverride, scrubSqlForValidation } from '../src/services/sage/queryRegistry.js';
 import { DEFAULT_JTI_SQL } from '../src/services/jti/jtiQuery.js';
 
 describe('readOnlyOverrideViolation — SEC-1 bypass vectors are blocked', () => {
@@ -64,5 +64,23 @@ describe('readOnlyOverrideViolation — legitimate queries pass', () => {
 
   it('the JTI default query stays valid under the hardened rules', () => {
     expect(readOnlyOverrideViolation(DEFAULT_JTI_SQL)).toBeNull();
+  });
+});
+
+describe('required-column check still sees delimited aliases', () => {
+  // The security scan blanks delimited identifiers, but the column smoke check
+  // must keep them so a reserved-word alias like `AS [DESC]` is visible.
+  it('keepDelimitedIds preserves [DESC] / "DESC"; default blanks them', () => {
+    expect(scrubSqlForValidation('SELECT x AS [DESC]', { keepDelimitedIds: true })).toContain('DESC');
+    expect(scrubSqlForValidation('SELECT x AS "DESC"', { keepDelimitedIds: true })).toContain('DESC');
+    expect(scrubSqlForValidation('SELECT x AS [DESC]')).not.toContain('DESC');
+    // A string literal is still blanked even when keeping identifiers.
+    expect(scrubSqlForValidation("SELECT 'DESC' AS y", { keepDelimitedIds: true })).not.toContain('DESC');
+  });
+
+  it('the full JTI default validates (its DESC column is aliased AS [DESC])', () => {
+    // Regression: blanking [DESC] in the column check rejected valid JTI overrides
+    // with `must output a "DESC" column`.
+    expect(validateSageQueryOverride(DEFAULT_JTI_SQL, 'jti.export')).toBeNull();
   });
 });

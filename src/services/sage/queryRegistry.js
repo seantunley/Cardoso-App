@@ -492,29 +492,38 @@ const BANNED_PROCS = /\b(?:xp|sp)_\w/i;
 // false-positive on a legitimate literal that contains ';' or '--'. Tracks
 // '...', "..." and [...] with their ''/""/]] escapes; -- and /* */ are treated
 // as comments only OUTSIDE a literal.
-export function scrubSqlForValidation(sqlText) {
+//
+// `keepDelimitedIds`: the read-only keyword/statement scan wants delimited
+// identifiers blanked too (a column named [DELETE] or [a;b] must not trip the
+// keyword/`;` checks). But the required-column smoke check must still SEE
+// delimited aliases — JTI writes its reserved-word alias as `AS [DESC]` — so it
+// passes this true to keep [...] and "..." (still blanking '...' string literals,
+// which can never be an alias).
+export function scrubSqlForValidation(sqlText, { keepDelimitedIds = false } = {}) {
   const src = String(sqlText ?? '');
   let out = '';
   let i = 0;
   const n = src.length;
-  // Consume a quoted span and emit a single space in its place — its inner text
-  // is data, irrelevant to the read-only / single-statement checks. `close`
-  // doubled (''/""/]]) is an escaped delimiter, not the end of the span.
-  const skipQuoted = (close) => {
+  // Consume a quoted span. When `keep`, copy it verbatim (so a delimited alias
+  // like [DESC] survives for the column check); otherwise emit a single space in
+  // its place. `close` doubled (''/""/]]) is an escaped delimiter, not the end.
+  const consume = (close, keep) => {
+    if (keep) out += src[i];
     i += 1; // past the opening delimiter
     while (i < n) {
-      if (src[i] === close && src[i + 1] === close) { i += 2; continue; }
-      if (src[i] === close) { i += 1; break; }
+      if (src[i] === close && src[i + 1] === close) { if (keep) out += close + close; i += 2; continue; }
+      if (src[i] === close) { if (keep) out += close; i += 1; break; }
+      if (keep) out += src[i];
       i += 1;
     }
-    out += ' ';
+    if (!keep) out += ' ';
   };
   while (i < n) {
     const c = src[i];
     const c2 = i + 1 < n ? src[i + 1] : '';
-    if (c === "'") { skipQuoted("'"); continue; }
-    if (c === '"') { skipQuoted('"'); continue; }
-    if (c === '[') { skipQuoted(']'); continue; }
+    if (c === "'") { consume("'", false); continue; }                 // string literal — always blanked
+    if (c === '"') { consume('"', keepDelimitedIds); continue; }       // quoted identifier (or string)
+    if (c === '[') { consume(']', keepDelimitedIds); continue; }       // bracketed identifier
     if (c === '-' && c2 === '-') { while (i < n && src[i] !== '\n') i += 1; out += ' '; continue; }
     if (c === '/' && c2 === '*') {
       i += 2;
@@ -567,7 +576,9 @@ export function validateSageQueryOverride(sqlText, key) {
   if (s.length === 0) return null; // empty = clear back to default
   const sec = readOnlyOverrideViolation(s);
   if (sec) return sec;
-  const clean = scrubSqlForValidation(s);
+  // Keep delimited identifiers here so a reserved-word alias like `AS [DESC]`
+  // (jti.export) is still visible to the required-column smoke check.
+  const clean = scrubSqlForValidation(s, { keepDelimitedIds: true });
   for (const p of d.params || []) {
     if (!new RegExp(`@${p}\\b`, 'i').test(clean)) return `must reference the @${p} parameter`;
   }
