@@ -15,7 +15,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('mssql', () => ({
   default: {
+    // Global pool API — must NOT be used anymore (CRIT-1); kept so tests can
+    // assert it is never called.
     connect: vi.fn(),
+    // Per-module pool: new sql.ConnectionPool(config).connect()
+    ConnectionPool: vi.fn(),
   },
 }));
 
@@ -59,6 +63,19 @@ function configureMocks({ roleId, connectionRow }) {
   db.prepare.mockImplementation(() => ({
     get: vi.fn(() => connectionRow),
   }));
+}
+
+// Mock a per-module pool open — new sql.ConnectionPool(config).connect(). Each
+// construction returns a pool whose .connect() resolves to the next queued fake
+// pool; the config given to the constructor is recorded for assertions.
+function queuePoolOpens(...pools) {
+  let i = 0;
+  // Regular function (not arrow) so it works under `new sql.ConnectionPool(...)`.
+  sql.ConnectionPool.mockImplementation(function (config) {
+    const p = pools[Math.min(i, pools.length - 1)];
+    i += 1;
+    return { config, connect: vi.fn().mockResolvedValue(p) };
+  });
 }
 
 beforeEach(async () => {
@@ -109,13 +126,13 @@ describe('getJtiSagePool — NO BAT FALLBACK', () => {
     await expect(getJtiSagePool()).rejects.toThrow(/does not fall back to the BAT/);
     // Critically — sql.connect was NEVER called. We do NOT silently
     // open a connection somewhere else.
-    expect(sql.connect).not.toHaveBeenCalled();
+    expect(sql.ConnectionPool).not.toHaveBeenCalled();
   });
 
   it('throws when role is assigned but the connection row is missing', async () => {
     configureMocks({ roleId: 99, connectionRow: null });
     await expect(getJtiSagePool()).rejects.toThrow(/Module routing/);
-    expect(sql.connect).not.toHaveBeenCalled();
+    expect(sql.ConnectionPool).not.toHaveBeenCalled();
   });
 });
 
@@ -133,11 +150,12 @@ describe('getJtiSagePool — happy path', () => {
 
   it('opens a pool with the resolved config', async () => {
     const fakePool = { connected: true, request: vi.fn(), close: vi.fn() };
-    sql.connect.mockResolvedValue(fakePool);
+    queuePoolOpens(fakePool);
     const pool = await getJtiSagePool();
     expect(pool).toBe(fakePool);
-    expect(sql.connect).toHaveBeenCalledTimes(1);
-    const cfg = sql.connect.mock.calls[0][0];
+    expect(sql.ConnectionPool).toHaveBeenCalledTimes(1);
+    expect(sql.connect).not.toHaveBeenCalled(); // own pool, never the global one (CRIT-1)
+    const cfg = sql.ConnectionPool.mock.calls[0][0];
     expect(cfg.server).toBe('10.0.0.5');
     expect(cfg.database).toBe('JTIDAT');
     expect(cfg.user).toBe('sa');
@@ -146,22 +164,22 @@ describe('getJtiSagePool — happy path', () => {
 
   it('returns the cached pool on subsequent calls (no re-connect)', async () => {
     const fakePool = { connected: true, request: vi.fn(), close: vi.fn() };
-    sql.connect.mockResolvedValue(fakePool);
+    queuePoolOpens(fakePool);
     await getJtiSagePool();
     await getJtiSagePool();
     await getJtiSagePool();
-    expect(sql.connect).toHaveBeenCalledTimes(1);
+    expect(sql.ConnectionPool).toHaveBeenCalledTimes(1);
   });
 
   it('re-opens when the cached pool is no longer connected', async () => {
     const dead = { connected: false, request: vi.fn(), close: vi.fn() };
     const fresh = { connected: true, request: vi.fn(), close: vi.fn() };
-    sql.connect.mockResolvedValueOnce(dead).mockResolvedValueOnce(fresh);
+    queuePoolOpens(dead, fresh);
     const first = await getJtiSagePool();
     expect(first).toBe(dead);
     const second = await getJtiSagePool();
     expect(second).toBe(fresh);
-    expect(sql.connect).toHaveBeenCalledTimes(2);
+    expect(sql.ConnectionPool).toHaveBeenCalledTimes(2);
     expect(dead.close).toHaveBeenCalled();
   });
 });
@@ -177,13 +195,13 @@ describe('resetJtiSagePool', () => {
     });
     const first = { connected: true, request: vi.fn(), close: vi.fn() };
     const second = { connected: true, request: vi.fn(), close: vi.fn() };
-    sql.connect.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    queuePoolOpens(first, second);
 
     await getJtiSagePool();
     await resetJtiSagePool();
     await getJtiSagePool();
 
     expect(first.close).toHaveBeenCalled();
-    expect(sql.connect).toHaveBeenCalledTimes(2);
+    expect(sql.ConnectionPool).toHaveBeenCalledTimes(2);
   });
 });

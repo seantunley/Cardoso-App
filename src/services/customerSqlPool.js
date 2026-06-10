@@ -76,7 +76,10 @@ async function getCustomerSqlPool() {
   if (pool) return pool;
   console.log(`[customer-sql] Opening pool from ${loaded.source}`);
   try {
-    pool = await sql.connect(loaded.config);
+    // Own pool — NOT sql.connect()/the global pool. The global API ignores this
+    // config when a pool already exists, so the customer import could run
+    // against the BAT-only Sage DB (CRIT-1).
+    pool = await new sql.ConnectionPool(loaded.config).connect();
   } catch (err) {
     try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;

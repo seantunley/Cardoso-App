@@ -85,7 +85,10 @@ export async function getJtiSagePool() {
 
   console.log(`[jti-sage] Opening JTI pool from ${loaded.source}`);
   try {
-    pool = await sql.connect(loaded.config);
+    // Own pool — NOT sql.connect()/the global pool (which would silently share
+    // whatever DB connected first; see CRIT-1). This module's header already
+    // warns that sharing the BAT pool by accident queries the wrong company.
+    pool = await new sql.ConnectionPool(loaded.config).connect();
   } catch (err) {
     try { logError('jti.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
     throw err;

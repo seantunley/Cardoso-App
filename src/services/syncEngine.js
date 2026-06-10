@@ -180,7 +180,11 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
       useEncryption,
     });
 
-    pool = await sql.connect(sqlConfig);
+    // Own pool — NOT sql.connect()/the global pool. Two connections importing
+    // concurrently would otherwise share one global pool keyed to whichever
+    // connected first, and this import's finally{ pool.close() } would tear down
+    // the other's in-flight queries (CRIT-1).
+    pool = await new sql.ConnectionPool(sqlConfig).connect();
 
     // ── Query mode (new) vs legacy table-config mode ──────────────────────────
     const syncQuery = connConfig.sync_query ? connConfig.sync_query.trim() : null;

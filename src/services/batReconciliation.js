@@ -157,7 +157,11 @@ export async function getSagePool() {
   if (pool) return pool;
   console.log(`[bat-sage] Opening Sage pool from ${loaded.source}`);
   try {
-    pool = await sql.connect(loaded.config);
+    // Own pool — NOT sql.connect()/the global pool. mssql's global connect()
+    // returns whatever pool connected first and ignores this config, so a
+    // BAT-only Sage connection could end up serving customer queries (and vice
+    // versa) and modules would close each other's pools (CRIT-1).
+    pool = await new sql.ConnectionPool(loaded.config).connect();
   } catch (err) {
     // A Sage pool failure stalls every BAT operation that needs Sage data
     // (week-status, credit notes, dashboards). Surface it in System Log so
