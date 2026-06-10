@@ -781,15 +781,19 @@ async function syncSite(site) {
     // Only flip the site Offline for genuine UNREACHABILITY: the health check
     // itself failed (we never confirmed the reporting endpoint is up), or a
     // connection-level error dropped the link mid-sync. A downstream data-pull
-    // TIMEOUT (or an HTTP/SQLite error) means the site is reachable but slow or
-    // erroring — a freshness problem, not offline — so leave hub_sites.status to
-    // the health-ping (that was the flip-flop). Distinguishing these also stops a
-    // site that drops just after a ping from rendering online for up to the
-    // 15-minute ping interval despite this sync having proven it unreachable.
+    // TIMEOUT / HTTP / SQLite error means the site is reachable but the hub pull
+    // failed — leave hub_sites.status to the health-ping (that was the flip-flop).
+    // Distinguishing these also stops a site that drops just after a ping from
+    // rendering online for up to the 15-minute ping interval.
+    //
+    // In NEITHER case touch last_accpac_status/last_accpac_error: those are the
+    // SITE's Accpac sync state, written only from the KPI response (success path).
+    // A hub-side pull failure here is unrelated to Accpac, so writing 'error'
+    // would show a false Accpac failure on the dashboard footer. The pull failure
+    // is recorded in hub_sync_log (status='error', below) and the verbose System
+    // Log, so it isn't silenced.
     if (!reachable || isConnError) {
-      db.prepare(`UPDATE hub_sites SET status='error', last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
-    } else {
-      db.prepare(`UPDATE hub_sites SET last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
+      db.prepare(`UPDATE hub_sites SET status='error' WHERE id=?`).run(site.id);
     }
 
     // Verbose, plain-English log so an operator can triage from the System
