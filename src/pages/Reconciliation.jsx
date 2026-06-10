@@ -797,9 +797,9 @@ export default function Reconciliation() {
     if (!selected) return;
     if (!window.confirm(
       'Remove the STALE orphan extraction rows from this reconciliation?\n\n'
-      + 'Only rows with NO OCR/manual amount (and not in BAT’s Overview pivot) are deleted. '
-      + 'Rows that have a real OCR/manual amount — e.g. retained rows from another branch’s '
-      + 'upload in the same week — are kept. The POD PDFs are not affected.'
+      + 'Only rows with NO successfully-extracted invoice (status not “found”, and not in '
+      + 'BAT’s Overview pivot) are deleted. Rows with a real OCR/manual invoice — e.g. retained '
+      + 'rows from another branch’s upload in the same week — are kept. The POD PDFs are not affected.'
     )) return;
     try {
       const r = await fetch(`/api/bat/reconciliation/${selected.id}/prune-orphan-extractions`, {

@@ -670,12 +670,14 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
           )
       `).all(id);
 
-      // Only prune TRULY STALE rows: no successful OCR extraction
-      // (extraction_status != 'found') AND no amount of any sign. A retained
-      // branch row carries a real OCR amount ('found') or a manually-set
-      // order_amount, so it is kept — never deleted by this tool.
-      const hasAmount = (o) => o.order_amount != null && Number(o.order_amount) !== 0;
-      const isStale = (o) => o.extraction_status !== 'found' && !hasAmount(o);
+      // Only prune TRULY STALE rows: those with NO successful OCR/manual invoice.
+      // extraction_status='found' is the single reliable signal of a real invoice
+      // — both OCR success and manualSetInvoice set it. order_amount is NOT
+      // reliable: it's copied from the supplier spreadsheet at insert time, before
+      // OCR, so a stale pending/not_found/failed row routinely carries a nonzero
+      // amount. So a 'found' orphan (a real invoice, e.g. retained from another
+      // branch's upload) is kept; everything else is the stale empty case.
+      const isStale = (o) => o.extraction_status !== 'found';
       const stale = orphans.filter(isStale);
       const retained = orphans.filter((o) => !isStale(o));
 
