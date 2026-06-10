@@ -397,6 +397,57 @@ function track(name, fn, contextFn, opts) {
   });
 }
 
+// ── Nightly sync retry ladder ────────────────────────────────────────────
+//
+// The nightly Sage syncs run once per day; a 4am failure used to wait a
+// whole day for the next attempt (operator report: data going 29h+ stale
+// and reports reading it becoming inconsistent). A failed nightly attempt
+// now retries up to NIGHTLY_RETRIES more times, NIGHTLY_RETRY_DELAY_MS
+// apart — a transient 4am hiccup (Sage maintenance window, network blip)
+// heals by ~05:30 instead of tomorrow. Every attempt gets its own
+// job_runs row, so Job Runs shows the whole ladder.
+//
+// "Failed" includes PARTIAL nights: syncCreditorsFromSage /
+// syncDebtorsFromSage deliberately swallow per-source errors into
+// summary.sources[*].error (one bad table must not kill the rest), so
+// without the successCheck a night where e.g. AP invoices failed would be
+// recorded as a clean success and never retried.
+const NIGHTLY_RETRIES = 2;
+const NIGHTLY_RETRY_DELAY_MS = 30 * 60 * 1000;
+
+function nightlySummaryOk(result) {
+  if (!result || typeof result !== 'object' || !result.sources) return true;
+  return !Object.values(result.sources).some((s) => s && s.error);
+}
+
+function nightlyWithRetry(name, fn) {
+  const attempt = (n) => {
+    const scheduleRetry = (why) => {
+      if (n >= NIGHTLY_RETRIES) {
+        console.error(`[${name}] still failing after ${n + 1} attempts (${why}) — giving up until the next scheduled night. The nightly-sync-stale alert will flag the data once it passes 26 hours old.`);
+        return;
+      }
+      console.warn(`[${name}] attempt ${n + 1} failed (${why}) — retrying in ${NIGHTLY_RETRY_DELAY_MS / 60_000} minutes (retry ${n + 1} of ${NIGHTLY_RETRIES}).`);
+      const t = setTimeout(() => attempt(n + 1), NIGHTLY_RETRY_DELAY_MS);
+      if (typeof t.unref === 'function') t.unref();
+    };
+    recordJob(name, fn, null, { successCheck: nightlySummaryOk })
+      .then((result) => {
+        if (nightlySummaryOk(result)) {
+          if (n > 0) console.log(`[${name}] retry ${n} of ${NIGHTLY_RETRIES} succeeded — data is current again.`);
+          return;
+        }
+        scheduleRetry('one or more Sage sources failed — see System Log for the per-source error');
+      })
+      .catch((err) => {
+        console.error(`[${name}] failed:`, err.message);
+        try { logError(`scheduler.${name}`, err); } catch {} // eslint-disable-line no-empty -- mirror failure already logged to console above
+        scheduleRetry(err.message);
+      });
+  };
+  return () => attempt(0);
+}
+
 export function startSchedulers() {
   {
     const t = cron.schedule('0,30 6-16 * * 1-5', track('scheduled-sync', runScheduledSyncCycle));
@@ -441,16 +492,24 @@ export function startSchedulers() {
     // Inventory movement — nightly sync of sales aggregates from Sage
     // OESHDT into the local inventory_sales_cache table. Runs at 04:00
     // so the data is fresh by the time operators check in the morning.
+    // The three nightly Sage pulls share the retry ladder (see
+    // nightlyWithRetry above) and the boot catch-up below. Runners are
+    // named so the catch-up can invoke the exact same code path.
+    const inventorySalesRunner = nightlyWithRetry('inventory-sales-sync', async () => {
+      const summary = await syncSalesFromSage();
+      computeAllForecasts();
+      // Warm the insights cache off the fresh data so the first morning load
+      // is instant. Guarded — a warm failure must not fail the sync job.
+      try { refreshInsights(); } catch (e) { console.warn('[insights.warm] failed:', e.message); }
+      return summary;
+    });
+    const creditorsRunner = nightlyWithRetry('creditors-sync', () => syncCreditorsFromSage());
+    const debtorsRunner = nightlyWithRetry('debtors-sync', () => syncDebtorsFromSage());
+
     {
-      const t = cron.schedule('0 4 * * *', track('inventory-sales-sync', async () => {
-        await syncSalesFromSage();
-        computeAllForecasts();
-        // Warm the insights cache off the fresh data so the first morning load
-        // is instant. Guarded — a warm failure must not fail the sync job.
-        try { refreshInsights(); } catch (e) { console.warn('[insights.warm] failed:', e.message); }
-      }));
+      const t = cron.schedule('0 4 * * *', inventorySalesRunner);
       cronTasks.push(t);
-      registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute' });
+      registerJob({ name: 'inventory-sales-sync', type: 'cron', cronExpression: '0 4 * * *', taskRef: t, mode: 'site', description: 'Nightly inventory sales cache sync from Sage OESHDT + forecast recompute (retries twice on failure)' });
     }
 
     // Creditors — nightly Sage pull of APVEN + APOBL + APTCR + POPORH1
@@ -458,22 +517,58 @@ export function startSchedulers() {
     // but before backup-verify (03:30) — wait, backup-verify is earlier
     // so we just need a free slot before the morning workday. 04:30 is it.
     {
-      const t = cron.schedule('30 4 * * *', track('creditors-sync', async () => {
-        await syncCreditorsFromSage();
-      }));
+      const t = cron.schedule('30 4 * * *', creditorsRunner);
       cronTasks.push(t);
-      registerJob({ name: 'creditors-sync', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'site', description: 'Nightly creditors sync from Sage APVEN/APOBL/APTCR/POPORH1' });
+      registerJob({ name: 'creditors-sync', type: 'cron', cronExpression: '30 4 * * *', taskRef: t, mode: 'site', description: 'Nightly creditors sync from Sage APVEN/APOBL/APTCR/POPORH1 (retries twice on failure)' });
     }
 
     // Debtors — nightly Sage pull of AROBL open AR documents into
     // debtor_ar_invoice, so the Aged Debtors report ages per-document by due
     // date. 04:45, 15 min after the creditors pull.
     {
-      const t = cron.schedule('45 4 * * *', track('debtors-sync', async () => {
-        await syncDebtorsFromSage();
-      }));
+      const t = cron.schedule('45 4 * * *', debtorsRunner);
       cronTasks.push(t);
-      registerJob({ name: 'debtors-sync', type: 'cron', cronExpression: '45 4 * * *', taskRef: t, mode: 'site', description: 'Nightly debtors AR open-item sync from Sage AROBL' });
+      registerJob({ name: 'debtors-sync', type: 'cron', cronExpression: '45 4 * * *', taskRef: t, mode: 'site', description: 'Nightly debtors AR open-item sync from Sage AROBL (retries twice on failure)' });
+    }
+
+    // Boot catch-up — the other half of the stale-data problem: if the
+    // machine is off or asleep at the 4am window, node-cron simply never
+    // fires. No failed run is recorded, nothing retries, and the data ages
+    // silently (operator report: 29h+ stale syncs). On boot, any nightly
+    // sync whose last SUCCESS is older than 24h runs immediately, through
+    // the same retry ladder. 90s delay so boot-time Sage pool init and the
+    // BAT cache refresh (15s one-shot) aren't competing for the connection.
+    {
+      const NIGHTLY_CATCH_UP = [
+        ['inventory-sales-sync', inventorySalesRunner],
+        ['creditors-sync', creditorsRunner],
+        ['debtors-sync', debtorsRunner],
+      ];
+      const t = setTimeout(() => {
+        for (const [name, runner] of NIGHTLY_CATCH_UP) {
+          try {
+            const last = db.prepare(`
+              SELECT started_at FROM job_runs
+              WHERE name = ? AND status = 'succeeded'
+              ORDER BY started_at DESC LIMIT 1
+            `).get(name);
+            if (!last) {
+              // Never succeeded. If it has never even been ATTEMPTED this is
+              // a fresh install waiting for its first scheduled night — skip.
+              const anyRun = db.prepare('SELECT 1 FROM job_runs WHERE name = ? LIMIT 1').get(name);
+              if (!anyRun) continue;
+            }
+            const ageHours = last ? (Date.now() - new Date(last.started_at).getTime()) / 3_600_000 : null;
+            if (last && ageHours <= 24) continue;
+            console.warn(`[nightly-catch-up] ${name} last succeeded ${last ? `${ageHours.toFixed(1)}h ago` : 'never'} — running it now instead of waiting for tonight's 4am window.`);
+            runner();
+          } catch (err) {
+            console.error(`[nightly-catch-up] ${name} staleness check failed: ${err.message} — leaving it to tonight's scheduled run.`);
+          }
+        }
+      }, 90_000);
+      if (typeof t.unref === 'function') t.unref();
+      registerJob({ name: 'nightly-catch-up', type: 'one-shot', delayMs: 90_000, mode: 'site', description: 'Boot catch-up — immediately run any nightly Sage sync whose last success is >24h old (covers the machine-off-at-4am case)' });
     }
   }
 
