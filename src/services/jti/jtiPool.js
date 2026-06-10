@@ -21,6 +21,10 @@ import { logError } from '../../lib/errorLog.js';
 
 let pool = null;
 let poolKey = null;
+// In-flight connect promise (+ its config key), shared by concurrent callers so
+// two simultaneous opens don't each create a pool and leak one (CRIT-1 race).
+let connecting = null;
+let connectingKey = null;
 
 /**
  * Resolve the databaseconnection row to use for JTI. Returns null if
@@ -82,16 +86,31 @@ export async function getJtiSagePool() {
     pool = null;
   }
   if (pool) return pool;
+  // Share an in-flight connect for the same config (CRIT-1 race): otherwise two
+  // concurrent callers both pass the `if (pool)` check, open separate pools, and
+  // the loser is overwritten — left open and never closed.
+  if (connecting && connectingKey === loaded.key) return connecting;
 
   console.log(`[jti-sage] Opening JTI pool from ${loaded.source}`);
-  try {
-    pool = await sql.connect(loaded.config);
-  } catch (err) {
-    try { logError('jti.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
-    throw err;
-  }
-  poolKey = loaded.key;
-  return pool;
+  connectingKey = loaded.key;
+  connecting = (async () => {
+    try {
+      // Own pool — NOT sql.connect()/the global pool (which would silently share
+      // whatever DB connected first; see CRIT-1). This module's header already
+      // warns that sharing the BAT pool by accident queries the wrong company.
+      const p = await new sql.ConnectionPool(loaded.config).connect();
+      pool = p;
+      poolKey = loaded.key;
+      return p;
+    } catch (err) {
+      try { logError('jti.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
+      throw err;
+    } finally {
+      connecting = null;
+      connectingKey = null;
+    }
+  })();
+  return connecting;
 }
 
 /**
