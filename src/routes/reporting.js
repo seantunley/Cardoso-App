@@ -7,6 +7,7 @@ import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
+import { rebuildInventorySalesRollups } from '../services/inventoryMovement.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek, weeksInIsoYear } from '../lib/isoWeek.js';
@@ -2718,35 +2719,44 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // After a v099 upgrade the rollup cache is empty until the next inventory-sales
+  // sync. The hub pull does delete-and-replace, so an empty pull would WIPE valid
+  // Top Items/Dead Stock data on the hub. Rebuild once on first read if the cache
+  // is empty but transactions exist — the in-process flag stops repeat rebuilds
+  // (even when the rollup is legitimately empty), and the rebuild fits inside the
+  // hub's fetch timeout so the pull still succeeds with real data.
+  let salesRollupWarmAttempted = false;
+  const ensureSalesRollupWarm = () => {
+    if (salesRollupWarmAttempted) return;
+    const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
+    const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
+    if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {
+      // Let a rebuild failure PROPAGATE — do NOT swallow it. The endpoint then
+      // returns 500, the hub treats it as a failed pull and SKIPS its
+      // delete-and-replace, so it keeps the existing valid hub data instead of
+      // wiping it with an empty set. The once-flag is set only after success
+      // (below), so the next hub pull retries the rebuild.
+      rebuildInventorySalesRollups();
+    }
+    salesRollupWarmAttempted = true;
+  };
+
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
   // this for the Top Items + Dead Stock tiles. Description comes from the sales
   // cache (v096) falling back to the item master. Trailing 24 months.
   router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
+      ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
-      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
-      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      // Served from the precomputed rollup cache (rebuilt once per inventory-sales
+      // sync) — a cheap indexed SELECT, never an on-demand 24-month aggregation,
+      // so this can't freeze the site's event loop / time out the hub's sync.
       const rows = prep(`
-        SELECT TRIM(t.item_number) AS item_number,
-               SUBSTR(t.transaction_date, 1, 7) AS period,
-               SUM(t.qty_sold) AS qty_sold,
-               SUM(t.line_amount) AS revenue,
-               COALESCE(MAX(ic.item_description), MAX(ir.item_description)) AS item_description
-        FROM inventory_sales_transactions t
-        LEFT JOIN (
-          SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
-          FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
-          GROUP BY TRIM(item_number)
-        ) ic ON ic.item_number = TRIM(t.item_number)
-        LEFT JOIN (
-          SELECT item_number, item_description, ROW_NUMBER() OVER (PARTITION BY item_number ORDER BY updated_date DESC) AS rn
-          FROM inventoryrecord
-        ) ir ON TRIM(ir.item_number) = TRIM(t.item_number) AND ir.rn = 1
-        WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
-        GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
+        SELECT item_number, period, qty_sold, revenue, item_description
+        FROM inventory_item_sales_rollup
         ORDER BY period, item_number
         LIMIT ? OFFSET ?
-      `).all(from, limit, offset);
+      `).all(limit, offset);
       res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -2757,20 +2767,16 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // pulls this for the Top Customers tile (summed over the selected timeline).
   router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
+      ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
-      const d = new Date(); const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
-      const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
+      // Served from the precomputed rollup cache (rebuilt once per inventory-sales
+      // sync) — a cheap indexed SELECT, never an on-demand aggregation.
       const rows = prep(`
-        SELECT TRIM(customer_code) AS customer_code, MAX(customer_name) AS customer_name,
-               SUBSTR(transaction_date, 1, 7) AS period,
-               SUM(line_amount) AS revenue, SUM(qty_sold) AS qty
-        FROM inventory_sales_transactions
-        WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
-          AND NOT ${EXCL_INTER_BRANCH}
-        GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
+        SELECT customer_code, customer_name, period, revenue, qty
+        FROM inventory_customer_sales_rollup
         ORDER BY period, customer_code
         LIMIT ? OFFSET ?
-      `).all(from, limit, offset);
+      `).all(limit, offset);
       res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
