@@ -2790,7 +2790,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     try {
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       const rows = prep(`
-        SELECT customer_code, document_number, document_type, document_date, due_date,
+        SELECT customer_code, reporting_account, document_number, document_type, document_date, due_date,
                original_amount, outstanding_amount, reference
         FROM debtor_ar_invoice
         ORDER BY customer_code, document_number
