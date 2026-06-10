@@ -217,6 +217,39 @@ export async function resetSagePool() {
   poolConfigKey = null;
 }
 
+// Extra margin added on top of the pool's request timeout before a stale-marked
+// pool is actually closed. The drain must be at least the request timeout so a
+// slow-but-still-valid in-flight query (allowed up to requestTimeout) finishes
+// or hits its own deadline before the pool is torn down — closing earlier would
+// abort it mid-flight. Fallback when the config is unreadable.
+const POOL_DRAIN_GRACE_MS = 5_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
+// Drop the cached pool so the next getSagePool() opens a FRESH one, but DON'T
+// close it synchronously — close it after a drain window so any BAT query
+// mid-flight on it can finish. Used by the health probe on failure:
+// resetSagePool()'s immediate pool.close() would abort whatever was mid-query
+// (SYNC-7). A genuinely-dead pool's in-flight queries are already failing, so the
+// deferred close is harmless there too.
+function markSagePoolStale(failedPool) {
+  // Only discard the cached pool if it's STILL the same one whose query just
+  // failed. A concurrent caller may already have replaced it with a freshly
+  // reconnected pool — tearing that down, or clearing its in-flight reconnect
+  // promise (`connecting`), would let a second ConnectionPool be created and
+  // revive the CRIT-1 race the connecting-guard prevents. An established cached
+  // pool always has connecting=null, so there is nothing to clear here.
+  if (!failedPool || pool !== failedPool) return;
+  const old = pool;
+  // Drain ≥ the configured request timeout (+ margin) so a slow valid query
+  // isn't killed before its own deadline. Derived from the pool's own config
+  // so it tracks any requestTimeout change.
+  const requestTimeout = Number(old.config?.requestTimeout) || DEFAULT_REQUEST_TIMEOUT_MS;
+  const t = setTimeout(() => { old.close().catch(() => {}); }, requestTimeout + POOL_DRAIN_GRACE_MS);
+  if (t.unref) t.unref(); // don't keep the process alive just for the close
+  pool = null;
+  poolConfigKey = null;
+}
+
 // ── Sage health check ────────────────────────────────────────────────────────
 //
 // Sage is the highest-likelihood silent-degrade integration in this app:
@@ -242,10 +275,13 @@ const _sageHealthState = {
 
 export async function probeSageHealth() {
   _sageHealthState.lastProbeAt = Date.now();
+  // Track which pool this probe used so a failure only marks THAT pool stale —
+  // not a fresh one a concurrent caller may have swapped in (SYNC-7).
+  let probedPool = null;
   try {
-    const p = await getSagePool();
+    probedPool = await getSagePool();
     // Cheapest possible round-trip — hits the SQL Server but reads nothing.
-    await p.request().query('SELECT 1 AS ok');
+    await probedPool.request().query('SELECT 1 AS ok');
     _sageHealthState.ok = true;
     _sageHealthState.lastOkAt = Date.now();
     _sageHealthState.consecutiveFailures = 0;
@@ -261,17 +297,19 @@ export async function probeSageHealth() {
     if (_sageHealthState.consecutiveFailures === 1) {
       try { logError('bat.sage.health_probe', err, { phase: 'first_failure' }, 'warn'); } catch {} // eslint-disable-line no-empty -- logError wrapper; probe state tracking continues regardless
     }
-    // Reset the cached pool on every probe failure so the next probe
-    // opens a fresh connection from scratch. Without this, the
+    // Mark the cached pool stale on every probe failure so the next probe (or
+    // BAT op) opens a fresh connection from scratch. Without this, the
     // mssql/tedious library can keep reporting pool.connected=true on a
     // pool whose underlying TCP socket has been silently killed (Tailscale
     // re-route, Sage box reboot, etc.), so getSagePool() keeps returning
     // the same dead pool forever — every probe times out, every BAT op
     // that needs Sage stalls, and the operator had to manually run "Test
-    // Connection" in Settings to nuke the cached pool. Self-heal here
-    // removes that workaround: the next probe (60s later, or the next
-    // BAT op, whichever comes first) opens a brand-new pool.
-    try { await resetSagePool(); } catch (e) { console.warn('[bat.sage.health_probe.reset_pool]', e.message); }
+    // Connection" in Settings to nuke the cached pool. We MARK it stale (rather
+    // than resetSagePool()'s synchronous pool.close()) so a single 60s probe
+    // blip doesn't abort a BAT operation that's mid-query on the same pool — the
+    // old pool is closed after a drain grace period (SYNC-7). Pass the probed
+    // pool so we only discard it if it's still the cached one.
+    markSagePoolStale(probedPool);
     return _sageHealthState;
   }
 }
