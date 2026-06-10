@@ -6,6 +6,7 @@ import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/AuthContext";
 import { reportClientError } from "@/lib/clientLog";
 import { getDailyOperatorCodename, getJohannesburgGreeting } from "@/lib/fun";
+import PhosphorTraces from "@/components/login/PhosphorTraces";
 
 const DAILY_LOGIN_QUOTES = [
   "Tiny checks now save heroic fixes later.",
@@ -216,6 +217,9 @@ export default function Login() {
               "radial-gradient(ellipse 80% 60% at 20% 10%, hsla(33, 95%, 55%, 0.08) 0%, transparent 50%), radial-gradient(circle at 80% 90%, hsla(33, 95%, 55%, 0.04) 0%, transparent 50%)",
           }}
         />
+        {/* Live phosphor telemetry — drifting glowing traces (pure decoration;
+            static under prefers-reduced-motion, paused when the tab is hidden) */}
+        <PhosphorTraces />
         {/* Hairline grid */}
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.04]"
