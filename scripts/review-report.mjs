@@ -291,9 +291,12 @@ const sevColor = { P0: [185, 28, 28], P1: [194, 65, 12], P2: [161, 98, 7], P3: [
 function toPdf(preserved = {}) {
   const doc = new jsPDF({ unit: 'pt', format: 'a4' });
   // Deterministic PDF metadata so a content-unchanged regenerate produces NO
-  // binary diff. jsPDF otherwise stamps a fresh /CreationDate and /ID on every
-  // output(), which would make routine tracker refreshes churn the committed PDF.
-  doc.setCreationDate(new Date(`${META.slug.slice(0, 10)}T00:00:00Z`));
+  // binary diff — across machines, not just across runs. jsPDF otherwise stamps a
+  // fresh /CreationDate and /ID on every output(). Pass a fixed PDF date STRING,
+  // NOT a Date: jsPDF formats a Date object using the LOCAL timezone, which makes
+  // the bytes timezone-dependent (the committed PDF then churns for any maintainer
+  // in a different TZ). The string form is used verbatim.
+  doc.setCreationDate(`D:${META.slug.slice(0, 10).replace(/-/g, '')}000000+00'00'`);
   doc.setFileId(createHash('md5').update(META.slug).digest('hex').toUpperCase());
   const W = doc.internal.pageSize.getWidth();
   const H = doc.internal.pageSize.getHeight();
