@@ -339,12 +339,14 @@ $result | ConvertTo-Json -Depth 6 -Compress
 
 /**
  * Build the hub Aged Debtors source rows with a PER-SITE ledger/snapshot
- * decision (SYNC-5). Each site that has open-item ledger rows in
- * hub_debtor_ar_invoice is aged from that ledger; a site whose AR ETL hasn't
- * landed yet falls back to its hub_records snapshot (one pseudo-document per
- * customer aged by the oldest dated unpaid invoice). The earlier GLOBAL
- * ledger-ready check used the ledger for ALL sites the moment ONE site synced,
- * which silently dropped every not-yet-synced site's debtors from the report.
+ * decision (SYNC-5). Each site whose AR open-item sync has COMPLETED (tracked in
+ * hub_debtor_ar_sync) is aged from its open-item ledger — even if that ledger is
+ * empty because the site is fully paid up; a site whose AR ETL hasn't run yet
+ * falls back to its hub_records snapshot (one pseudo-document per customer aged
+ * by the oldest dated unpaid invoice). The earlier GLOBAL ledger-ready check used
+ * the ledger for ALL sites the moment ONE site synced, dropping every
+ * not-yet-synced site's debtors; using row presence as the per-site marker would
+ * conversely show stale snapshot balances for a synced-but-fully-paid site.
  *
  * Exported for unit testing. `prep` is the caching db.prepare wrapper from the
  * router; `siteFilter` is the resolved site name or 'all'.
@@ -352,32 +354,40 @@ $result | ConvertTo-Json -Depth 6 -Compress
  * @returns {{ rows: object[], sites: string[] }}
  */
 export function acquireHubAgedDebtorRows(prep, siteFilter) {
-  // Sites whose open-item ETL has landed. The ledger query inherently returns
-  // only these sites' rows; the snapshot query must EXCLUDE them to avoid
-  // double-counting a site under both sources.
+  // Sites whose AR open-item sync has COMPLETED, tracked in hub_debtor_ar_sync —
+  // NOT inferred from the presence of ledger rows. A synced site that is fully
+  // paid up has zero hub_debtor_ar_invoice rows but must still be aged from the
+  // (empty) ledger, not fall back to its possibly-stale hub_records snapshot
+  // (SYNC-5). The snapshot query EXCLUDES these sites to avoid double-counting.
   const ledgerSiteIds = prep(
-    'SELECT DISTINCT site_id FROM hub_debtor_ar_invoice WHERE outstanding_amount <> 0'
+    'SELECT site_id FROM hub_debtor_ar_sync'
   ).all().map((r) => r.site_id);
 
-  // --- Ledger rows (sites with open-item data) ---
-  const ledgerParams = [];
-  let ledgerWhereSite = '';
-  if (siteFilter !== 'all') { ledgerWhereSite = 'AND COALESCE(s.name, i.site_id) = ?'; ledgerParams.push(siteFilter); }
-  const ledgerRows = prep(
-    `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
-            i.outstanding_amount, i.reference,
-            d.customer_name, d.sales_rep, d.account_type, d.terms,
-            COALESCE(s.name, i.site_id) AS site_name
-     FROM hub_debtor_ar_invoice i
-     LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
-     LEFT JOIN hub_sites s ON s.id = i.site_id
-     WHERE i.outstanding_amount <> 0 ${ledgerWhereSite}`
-  ).all(...ledgerParams);
+  // Placeholder list of synced site ids, reused by the ledger queries below.
+  const inLedger = ledgerSiteIds.map(() => '?').join(',');
 
-  // --- Snapshot rows, ONLY for sites without ledger data yet (no double count) ---
-  const notLedger = ledgerSiteIds.length
-    ? `AND r.site_id NOT IN (${ledgerSiteIds.map(() => '?').join(',')})`
-    : '';
+  // --- Ledger rows: ONLY synced sites. A synced site that is fully paid up has
+  //     no rows here and correctly contributes nothing — it is NOT snapshotted. ---
+  let ledgerRows = [];
+  if (ledgerSiteIds.length) {
+    const ledgerParams = [...ledgerSiteIds];
+    let ledgerWhereSite = '';
+    if (siteFilter !== 'all') { ledgerWhereSite = 'AND COALESCE(s.name, i.site_id) = ?'; ledgerParams.push(siteFilter); }
+    ledgerRows = prep(
+      `SELECT i.site_id, i.customer_code, i.reporting_account, i.document_number, i.document_type, i.document_date, i.due_date,
+              i.outstanding_amount, i.reference,
+              d.customer_name, d.sales_rep, d.account_type, d.terms,
+              COALESCE(s.name, i.site_id) AS site_name
+       FROM hub_debtor_ar_invoice i
+       LEFT JOIN hub_records d ON d.site_id = i.site_id AND TRIM(d.customer_number) = TRIM(i.reporting_account)
+       LEFT JOIN hub_sites s ON s.id = i.site_id
+       WHERE i.outstanding_amount <> 0 AND i.site_id IN (${inLedger}) ${ledgerWhereSite}`
+    ).all(...ledgerParams);
+  }
+
+  // --- Snapshot rows: ONLY sites that have NOT synced AR open-items (no double
+  //     count — synced sites are sourced from the ledger above, even when empty). ---
+  const notLedger = ledgerSiteIds.length ? `AND r.site_id NOT IN (${inLedger})` : '';
   const snapParams = [];
   let snapWhereSite = '';
   if (siteFilter !== 'all') { snapWhereSite = 'AND COALESCE(s.name, r.site_id) = ?'; snapParams.push(siteFilter); }
@@ -412,14 +422,18 @@ export function acquireHubAgedDebtorRows(prep, siteFilter) {
     };
   });
 
-  // Site dropdown = union of ledger sites + snapshot-only sites (so the filter
-  // lists every site that has data under either source).
+  // Site dropdown = synced sites that have ledger rows + not-yet-synced sites
+  // with a snapshot balance, so the filter lists every site that has data to
+  // show. (A synced-but-fully-paid site has no rows under either source and so
+  // correctly does not appear — there is nothing to filter to.)
   const siteSet = new Set();
-  prep(
-    `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
-     FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
-     WHERE i.outstanding_amount <> 0`
-  ).all().forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+  if (ledgerSiteIds.length) {
+    prep(
+      `SELECT DISTINCT COALESCE(s.name, i.site_id) AS site_name
+       FROM hub_debtor_ar_invoice i LEFT JOIN hub_sites s ON s.id = i.site_id
+       WHERE i.outstanding_amount <> 0 AND i.site_id IN (${inLedger})`
+    ).all(...ledgerSiteIds).forEach((r) => { if (r.site_name) siteSet.add(r.site_name); });
+  }
   prep(
     `SELECT DISTINCT COALESCE(s.name, r.site_id) AS site_name
      FROM hub_records r LEFT JOIN hub_sites s ON s.id = r.site_id
