@@ -780,9 +780,9 @@ export default function Layout({ children, currentPageName }) {
                   to={`/${item.page}`}
                   title={isCollapsed ? item.name : undefined}
                   className={cn(
-                    "relative flex items-center text-xs font-medium transition-colors duration-150 group",
+                    "relative flex items-center text-xs font-medium transition-colors duration-150 group rounded-lg",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)] focus-visible:ring-inset",
-                    isCollapsed ? "justify-center w-10 h-10 mx-auto" : "gap-3 pl-4 pr-2 py-2.5 w-full text-sm"
+                    isCollapsed ? "justify-center w-10 h-10 mx-auto" : "gap-2.5 pl-3 pr-2 py-2 w-full text-sm"
                   )}
                   style={{
                     color: isActive
@@ -795,14 +795,14 @@ export default function Layout({ children, currentPageName }) {
                 >
                   {isActive && (
                     <span
-                      className="absolute left-0 top-1 bottom-1 w-[2px]"
+                      className="absolute left-0 top-1.5 bottom-1.5 w-[2.5px] rounded-full"
                       style={{
                         background: "var(--phosphor)",
                         boxShadow: "0 0 12px hsla(33, 95%, 55%, 0.7)",
                       }}
                     />
                   )}
-                  <item.icon className="h-6 w-6 shrink-0" />
+                  <item.icon className="h-5 w-5 shrink-0" />
                   {showAttention && (
                     <span
                       className={cn(
@@ -848,7 +848,7 @@ export default function Layout({ children, currentPageName }) {
               else ungrouped.push(it);
             }
             return (
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {NAV_GROUP_ORDER.map(groupName => {
                   const items = grouped.get(groupName) || [];
                   if (items.length === 0) return null;
@@ -859,19 +859,24 @@ export default function Layout({ children, currentPageName }) {
                       <button
                         type="button"
                         onClick={() => toggleGroup(groupName)}
-                        className="w-full flex items-center justify-between px-2 py-1 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)] focus-visible:ring-inset"
+                        className="w-full flex items-center gap-1.5 rounded-md px-2 pt-2.5 pb-1.5 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors hover:bg-[hsla(var(--sidebar-accent),0.5)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--phosphor)] focus-visible:ring-inset"
                         style={{ color: "hsla(var(--sidebar-foreground), 0.45)" }}
                         onMouseEnter={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.7)"; }}
                         onMouseLeave={(e) => { e.currentTarget.style.color = "hsla(var(--sidebar-foreground), 0.45)"; }}
                       >
                         <span>{groupName}</span>
+                        {/* Chevron rides next to the label (not parked at the far
+                            edge) so the toggle affordance reads as one unit. */}
                         <ChevronDown
-                          className="h-3 w-3 transition-transform duration-150"
+                          className="h-3.5 w-3.5 shrink-0 transition-transform duration-150"
                           style={{ transform: collapsed ? "rotate(-90deg)" : "rotate(0deg)" }}
                         />
                       </button>
                       {!collapsed && (
-                        <div className="space-y-0.5 mt-0.5">
+                        <div
+                          className="space-y-0.5 mt-0.5 ml-3 pl-1.5"
+                          style={{ borderLeft: "1px solid hsla(var(--sidebar-foreground), 0.10)" }}
+                        >
                           {items.map(renderItem)}
                         </div>
                       )}
