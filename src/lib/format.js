@@ -14,6 +14,11 @@
 // otherwise it's thousands grouping ("1,234", "1.234.567"). SA users type
 // grouping as spaces, so a lone comma is almost always the decimal.
 export function parseAmount(value) {
+  // A number is already a number — never run it through the separator-guessing
+  // below, or a value with >2 decimal places (a computed amount, or a float
+  // artifact like 0.1 + 0.2 = 0.30000000000000004) would have its fractional
+  // part read as thousands grouping and balloon by orders of magnitude.
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   let s = String(value ?? "").trim();
   if (!s) return 0;
   s = s.replace(/[^\d.,-]/g, ""); // drop currency symbol, spaces, stray letters

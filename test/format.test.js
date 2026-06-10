@@ -34,6 +34,17 @@ describe('parseAmount', () => {
     expect(parseAmount('abc')).toBe(0);
   });
 
+  it('passes numbers through untouched (no separator guessing)', () => {
+    // A number with >2 decimals (computed amount / float artifact) must NOT have
+    // its fractional part read as thousands grouping.
+    expect(parseAmount(0.1 + 0.2)).toBeCloseTo(0.3, 10);
+    expect(parseAmount(1234.5678)).toBeCloseTo(1234.5678, 4);
+    expect(parseAmount(11710.66)).toBeCloseTo(11710.66, 2);
+    expect(parseAmount(1171066)).toBe(1171066);
+    expect(parseAmount(NaN)).toBe(0);
+    expect(parseAmount(Infinity)).toBe(0);
+  });
+
   it('round-trips its own formatAmount output', () => {
     for (const n of [0, 1.5, 11710.66, 1234.5, 1234567.8, 0.05]) {
       expect(parseAmount(formatAmount(n))).toBeCloseTo(n, 2);
