@@ -17,6 +17,29 @@ import { describeFetchError } from '../lib/errorDescribe.js';
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
 
+// The records pull is incremental: the site returns datarecords whose
+// updated_date is greater than `since`. `since` must come from the PREVIOUS
+// run's START minus a safety margin — NOT its completed_at. completed_at is
+// stamped 30-60s after records were fetched, so a record the site updates DURING
+// the sync window (or one whose site clock trails the hub clock) has an
+// updated_date below completed_at and would never be re-pulled until some later
+// Sage import happened to rewrite it (SYNC-1, a source of stale hub tiles).
+// started_at is before the fetch; the margin absorbs clock skew. Re-pulling the
+// small overlap is harmless — the hub upserts.
+const SINCE_SAFETY_MS = 5 * 60 * 1000;
+
+/**
+ * Build the `?since=...` query fragment for the incremental records pull from
+ * the previous run's started_at (ISO), or '' for a first/full pull. Exported for
+ * testing.
+ */
+export function incrementalSinceParam(lastStartedAtIso, marginMs = SINCE_SAFETY_MS) {
+  if (!lastStartedAtIso) return '';
+  const t = new Date(lastStartedAtIso).getTime();
+  if (Number.isNaN(t)) return '';
+  return `?since=${encodeURIComponent(new Date(t - marginMs).toISOString())}`;
+}
+
 async function checkBackupIntegrity(siteId, filePath) {
   let finalPath = filePath;
   let resultText = 'unchecked';
@@ -192,13 +215,15 @@ async function syncSite(site) {
       .finally(() => clearTimeout(tBatEarly))
       .catch((err) => ({ ok: false, _earlyError: err }));
 
-    // Last sync for incremental pull. 'partial' counts: those runs DID complete
-    // the records pull (a partial failure is in a downstream stanza, not the
-    // records pull, which fails to status='error'), so `since` should advance.
+    // Last sync for the incremental pull — keyed on started_at (see
+    // incrementalSinceParam / SINCE_SAFETY_MS above for why START not completed_at).
+    // 'partial' counts: those runs DID complete the records pull (a partial
+    // failure is in a downstream stanza, not the records pull, which fails to
+    // status='error'), so `since` should advance.
     const lastSync = db.prepare(
-      `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status IN ('ok','partial') ORDER BY completed_at DESC LIMIT 1`
+      `SELECT started_at FROM hub_sync_log WHERE site_id=? AND status IN ('ok','partial') ORDER BY started_at DESC LIMIT 1`
     ).get(site.id);
-    const sinceParam = lastSync ? `?since=${encodeURIComponent(lastSync.completed_at)}` : '';
+    const sinceParam = incrementalSinceParam(lastSync?.started_at);
 
     // Records — paginate until has_more is false
     const upsertRec = db.prepare(`
