@@ -759,16 +759,30 @@ export function startSchedulers() {
       ).all();
       const now = Date.now();
       let triggered = 0;
+      let failed = 0;
+      const errors = [];
       for (const conn of conns) {
         const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
         const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
         if (now - lastSync >= intervalMs) {
           console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
           triggered += 1;
-          runConnectionImport(conn.id, { isShuttingDown: () => shuttingDown }).catch(err => console.error(`[auto-sync] error for ${conn.id}:`, err));
+          // Await each import SEQUENTIALLY rather than firing them all unawaited:
+          // concurrent imports across connections clash on the shared MSSQL pool
+          // (CRIT-1), and the old unawaited fire let track() record the cycle
+          // 'succeeded' before any import finished. A failure now goes to the
+          // System Log (logError) instead of being swallowed to console (SYNC-6).
+          try {
+            await runConnectionImport(conn.id, { isShuttingDown: () => shuttingDown });
+          } catch (err) {
+            failed += 1;
+            errors.push(`conn ${conn.id}: ${err?.message || String(err)}`);
+            try { logError('scheduler.auto_sync', err, { connection_id: conn.id }); } catch { /* logError is best-effort; the cycle keeps going */ }
+          }
+          if (shuttingDown) break;
         }
       }
-      return { triggered, considered: conns.length };
+      return { triggered, considered: conns.length, failed, errors: errors.length ? errors : undefined };
     }, (r) => r),
     5 * 60 * 1000,
   ));
