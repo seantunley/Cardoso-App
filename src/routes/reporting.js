@@ -2820,6 +2820,26 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // Creditor master (vendor name / terms / last_payment_date) — the hub pulls
+  // this into hub_creditor so Aged Creditors can join vendor metadata; the
+  // report's default paid_only=true filter needs last_payment_date, so without
+  // it the default hub view stays empty despite AP open items being present.
+  router.get('/api/reporting/creditors', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
+      const rows = prep(`
+        SELECT vendor_code, vendor_name, terms, contact, phone, email, is_active,
+               last_receipt_date, last_payment_date
+        FROM creditor
+        ORDER BY vendor_code
+        LIMIT ? OFFSET ?
+      `).all(limit, offset);
+      res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, offset, limit, count: rows.length, has_more: rows.length === limit, records: rows });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   router.get('/api/reporting/stock-receipt-expiry', reportingRateLimiter, requireReportingToken, (req, res) => {
     try {
       const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 5000 });
