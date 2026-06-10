@@ -1515,6 +1515,45 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
          LEFT JOIN datarecord d ON TRIM(d.customer_number) = TRIM(i.reporting_account)
          WHERE i.source_table = 'AROBL' AND i.outstanding_amount <> 0`
       ).all(SITE_NAME).map(hydrateSalesRepAndAccountType);
+
+      // Fallback: the AR open-item ledger (debtor_ar_invoice) hasn't been
+      // populated yet — the nightly debtors sync hasn't run since the upgrade, or
+      // the AR query isn't configured. Rather than show all-zero aging tiles while
+      // Customer Balances still shows a real outstanding total, age the
+      // per-customer snapshot (datarecord) by its OLDEST unpaid invoice — one
+      // pseudo-document per customer. This mirrors the hub's snapshot fallback and
+      // self-heals to per-document AR aging on the first debtors sync.
+      if (rows.length === 0) {
+        rows = prep(
+          `SELECT TRIM(customer_number) AS customer_code, TRIM(customer_number) AS reporting_account,
+                  customer_name, sales_rep, account_type, terms, outstanding_balance_num, unpaid_invoices,
+                  data, local_fields, ? AS site_name
+           FROM datarecord
+           WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num <> 0`
+        ).all(SITE_NAME).map(hydrateSalesRepAndAccountType).map((r) => {
+          // Oldest dated unpaid line — the snapshot array isn't guaranteed
+          // oldest-first; null when absent → the engine's "unknown" bucket.
+          const inv = parseJsonSafely(r.unpaid_invoices, []);
+          let oldestDate = null, oldestT = Infinity;
+          if (Array.isArray(inv)) {
+            for (const it of inv) {
+              const raw = it?.date;
+              if (!raw) continue;
+              const t = Date.parse(raw);
+              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+            }
+          }
+          return {
+            ...r,
+            document_number: r.customer_code,
+            document_type: '',
+            document_date: oldestDate,
+            due_date: oldestDate,
+            outstanding_amount: r.outstanding_balance_num,
+            reference: '',
+          };
+        });
+      }
     }
 
     // Age + join on the REPORTING account (national account for a member, else
