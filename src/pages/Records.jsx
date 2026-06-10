@@ -72,6 +72,10 @@ export default function Records() {
   const canEditRecords = hasPermission(currentUser, "can_edit_records");
   const canFlagRecords = hasPermission(currentUser, "can_flag_records");
   const canAccessRecords = hasPermission(currentUser, "can_access_records");
+  // Apply Auto-Flag hits /api/apply-auto-flags, which the server gates on
+  // can_manage_rules (PERM-2). Only show the action to users who can use it,
+  // otherwise it's a guaranteed 403 for record-access-only users.
+  const canManageRules = hasPermission(currentUser, "can_manage_rules");
 
   const { data: recordResult, isLoading, isFetching } = useQuery({
     queryKey: ["records", debouncedSearchQuery, flagFilter, page],
@@ -308,15 +312,17 @@ export default function Records() {
                 Clear
               </Button>
 
-              <Button
-                size="sm"
-                onClick={() => applyAutoFlagMutation.mutate(Array.from(selectedRecords))}
-                disabled={applyAutoFlagMutation.isPending}
-                className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Zap className="w-3.5 h-3.5 mr-1.5" />
-                {applyAutoFlagMutation.isPending ? "Applying…" : "Apply Auto-Flag"}
-              </Button>
+              {canManageRules && (
+                <Button
+                  size="sm"
+                  onClick={() => applyAutoFlagMutation.mutate(Array.from(selectedRecords))}
+                  disabled={applyAutoFlagMutation.isPending}
+                  className="h-8 text-xs bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <Zap className="w-3.5 h-3.5 mr-1.5" />
+                  {applyAutoFlagMutation.isPending ? "Applying…" : "Apply Auto-Flag"}
+                </Button>
+              )}
             </div>
           </div>
         </div>
