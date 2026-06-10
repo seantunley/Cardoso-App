@@ -29,6 +29,7 @@ import { syncCreditorsFromSage } from './services/creditorSync.js';
 import { syncDebtorsFromSage } from './services/debtorSync.js';
 
 let scheduledSyncInProgress = false;
+let autoSyncRunning = false;
 let shuttingDown = false;
 let serverRef = null;
 const cronTasks = [];
@@ -754,35 +755,47 @@ export function startSchedulers() {
   // the #178 form, which is what was intended.)
   intervals.push(setInterval(
     track('auto-sync-cycle', async () => {
-      const conns = db.prepare(
-        "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
-      ).all();
-      const now = Date.now();
-      let triggered = 0;
-      let failed = 0;
-      const errors = [];
-      for (const conn of conns) {
-        const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
-        const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
-        if (now - lastSync >= intervalMs) {
-          console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
-          triggered += 1;
-          // Await each import SEQUENTIALLY rather than firing them all unawaited:
-          // concurrent imports across connections clash on the shared MSSQL pool
-          // (CRIT-1), and the old unawaited fire let track() record the cycle
-          // 'succeeded' before any import finished. A failure now goes to the
-          // System Log (logError) instead of being swallowed to console (SYNC-6).
-          try {
-            await runConnectionImport(conn.id, { isShuttingDown: () => shuttingDown });
-          } catch (err) {
-            failed += 1;
-            errors.push(`conn ${conn.id}: ${err?.message || String(err)}`);
-            try { logError('scheduler.auto_sync', err, { connection_id: conn.id }); } catch { /* logError is best-effort; the cycle keeps going */ }
+      // Cycle-level guard: the 5-min interval keeps firing even while a cycle is
+      // still awaiting its sequential imports. Without this, a cycle that runs
+      // longer than the interval would overlap the next one — which could start
+      // importing a DIFFERENT due connection (runConnectionImport only locks the
+      // SAME connection), reintroducing the cross-connection pool clash this
+      // sequential loop set out to avoid. Mirrors runScheduledSyncCycle.
+      if (autoSyncRunning) return { skipped: 'already_running' };
+      autoSyncRunning = true;
+      try {
+        const conns = db.prepare(
+          "SELECT id, last_sync, sync_interval_hours FROM databaseconnection WHERE status = 'active' AND COALESCE(is_bat_only, 0) = 0 AND sync_interval_hours IS NOT NULL AND sync_interval_hours > 0"
+        ).all();
+        const now = Date.now();
+        let triggered = 0;
+        let failed = 0;
+        const errors = [];
+        for (const conn of conns) {
+          const lastSync = conn.last_sync ? new Date(conn.last_sync).getTime() : 0;
+          const intervalMs = conn.sync_interval_hours * 60 * 60 * 1000;
+          if (now - lastSync >= intervalMs) {
+            console.log(`[auto-sync] triggering sync for connection ${conn.id}`);
+            triggered += 1;
+            // Await each import SEQUENTIALLY rather than firing them all unawaited:
+            // concurrent imports across connections clash on the shared MSSQL pool
+            // (CRIT-1), and the old unawaited fire let track() record the cycle
+            // 'succeeded' before any import finished. A failure now goes to the
+            // System Log (logError) instead of being swallowed to console (SYNC-6).
+            try {
+              await runConnectionImport(conn.id, { isShuttingDown: () => shuttingDown });
+            } catch (err) {
+              failed += 1;
+              errors.push(`conn ${conn.id}: ${err?.message || String(err)}`);
+              try { logError('scheduler.auto_sync', err, { connection_id: conn.id }); } catch { /* logError is best-effort; the cycle keeps going */ }
+            }
+            if (shuttingDown) break;
           }
-          if (shuttingDown) break;
         }
+        return { triggered, considered: conns.length, failed, errors: errors.length ? errors : undefined };
+      } finally {
+        autoSyncRunning = false;
       }
-      return { triggered, considered: conns.length, failed, errors: errors.length ? errors : undefined };
     },
     // contextFn passes the summary through; successCheck records the cycle as
     // 'failed' when any due import failed, so Operations → Job Runs and the
