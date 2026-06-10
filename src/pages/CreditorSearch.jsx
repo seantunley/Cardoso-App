@@ -2,7 +2,8 @@
 // Mirror of CustomerSearch but for AP: receipts (PORCPH1), open
 // invoices (APOBL), payments (APTCR), and POs (POPORH1 + POPORL).
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, Search, Truck, FileText, Wallet, ClipboardList, PackageCheck } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
@@ -41,11 +42,17 @@ function VendorTypeahead({ onPick }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const inputRef = useRef(null);
+  // Drive the query off a debounced copy so a fast typist fires one request per
+  // pause, not per keystroke (the input stays bound to `q` for responsiveness).
+  const debouncedQ = useDebouncedValue(q, 250);
   const { data, isFetching } = useQuery({
-    queryKey: ["creditor-search", q],
-    queryFn: () => searchVendors(q),
-    enabled: q.trim().length >= 2,
-    keepPreviousData: true,
+    queryKey: ["creditor-search", debouncedQ],
+    queryFn: () => searchVendors(debouncedQ),
+    enabled: debouncedQ.trim().length >= 2,
+    // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
+    // keeps the prior results visible while the next query loads instead of
+    // blanking the dropdown on every change (UI-4).
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   });
   const results = data?.results || [];

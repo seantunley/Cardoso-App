@@ -5,7 +5,8 @@
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
@@ -174,6 +175,9 @@ const COLUMNS = [
 export default function CreditorSummary() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  // Debounced copy drives the query (one request per pause, not per keystroke);
+  // the input stays bound to `search` for responsiveness.
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [activeOnly, setActiveOnly] = useState(true);
   const [includeZero, setIncludeZero] = useState(false);
   const [balanceBucket, setBalanceBucket] = useState("all");
@@ -187,9 +191,12 @@ export default function CreditorSummary() {
   const { widths, startResize, resetCol } = useColWidths();
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["creditors", search, activeOnly, includeZero],
-    queryFn: () => fetchCreditors({ search, activeOnly, includeZero }),
-    keepPreviousData: true,
+    queryKey: ["creditors", debouncedSearch, activeOnly, includeZero],
+    queryFn: () => fetchCreditors({ search: debouncedSearch, activeOnly, includeZero }),
+    // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
+    // keeps the vendor table + AP tiles showing the prior data while the next
+    // query loads instead of flashing to empty / R 0.00 on each change (UI-4).
+    placeholderData: keepPreviousData,
     staleTime: 30_000,
   });
 
