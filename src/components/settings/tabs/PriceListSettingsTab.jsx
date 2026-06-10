@@ -144,7 +144,7 @@ export default function PriceListSettingsTab() {
       {!isLoading && !error && (
         exclusions.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border p-8 text-center">
-            <Tag className="h-8 w-8 mx-auto mb-2 text-muted-foreground/60" />
+            <Tag className="h-8 w-8 mx-auto mb-2 text-muted-subtle" />
             <p className="text-sm text-muted-foreground">No exclusions yet. Every Sage item will show in the price list.</p>
           </div>
         ) : (

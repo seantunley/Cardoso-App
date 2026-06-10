@@ -32,7 +32,7 @@ export default function ExtractionProgress({ progress }) {
           </span>
         </div>
         <span className="font-mono text-xs text-foreground tabular-nums">
-          {progress.processed}<span className="text-muted-foreground/50">/{progress.total}</span>
+          {progress.processed}<span className="text-muted-subtle">/{progress.total}</span>
           <span className="text-accent ml-2">{pct}%</span>
         </span>
       </div>
@@ -69,7 +69,7 @@ export default function ExtractionProgress({ progress }) {
             // engine:Tesseract for 80s" even on a row that's only been alive
             // for 90s overall. That's the signal that pinpoints what's wedged.
             const stageStuck = row.stage_at_seconds != null && row.stage_at_seconds >= 60;
-            const stageColor = stageStuck ? 'text-destructive' : 'text-muted-foreground/70';
+            const stageColor = stageStuck ? 'text-destructive' : 'text-muted-subtle';
             return (
               <div key={row.id} className="flex items-center justify-between font-mono text-[11px]">
                 <span className={`truncate ${color}`}>

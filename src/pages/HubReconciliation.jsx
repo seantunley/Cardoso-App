@@ -202,11 +202,11 @@ export default function HubReconciliation() {
                   />
                 );
               })()}
-              <SummaryTile label="Total BAT" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
-              <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
+              <SummaryTile label="Total BAT" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} />
+              <SummaryTile label="Total Credit Notes" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
               <SummaryTile
                 label="Total Variance"
-                value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
+                value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
                 sub={`${summary.total_matched} matched · ${summary.total_mismatch} mismatch · ${summary.total_awaiting} awaiting`}
                 accent={Math.abs(summary.total_variance) < 1 ? REPORT_COLORS.secondary : REPORT_COLORS.danger}
                 big
@@ -220,7 +220,7 @@ export default function HubReconciliation() {
                 return (
                   <SummaryTile
                     label="Current Week"
-                    value={<><span className="text-muted-foreground/60 mr-1">W</span>{currentWeek}</>}
+                    value={<><span className="text-muted-subtle mr-1">W</span>{currentWeek}</>}
                     sub={`${isoYear}`}
                     accent={REPORT_COLORS.info}
                   />
@@ -307,7 +307,7 @@ function SiteCard({ site }) {
                 selected). The summary_year label tells the operator
                 explicitly which year's data is in the card. */}
             {site.summary_year && (
-              <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-foreground/70">
+              <div className="font-mono text-[11px] uppercase tracking-[0.25em] text-muted-subtle">
                 Year {site.summary_year}
               </div>
             )}
@@ -392,8 +392,8 @@ function SiteCard({ site }) {
           </>
         )}
 
-        <div className="pt-2 border-t border-border flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
-          <LabelWithTip tooltip={TIPS.synced} className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-foreground/70">
+        <div className="pt-2 border-t border-border flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.15em] text-muted-subtle">
+          <LabelWithTip tooltip={TIPS.synced} className="font-mono text-[11px] uppercase tracking-[0.15em] text-muted-subtle">
             Synced {syncedAt}
           </LabelWithTip>
           {site.site_url && (
@@ -451,7 +451,7 @@ function DataRow({ label, value, muted, variance, tooltip }) {
         {label}
       </LabelWithTip>
       <span className={`font-mono text-sm tabular-nums ${muted ? 'text-muted-foreground' : 'text-foreground'}`} style={color ? { color } : undefined}>
-        <span className="text-muted-foreground/60 mr-1">R</span>{value}
+        <span className="text-muted-subtle mr-1">R</span>{value}
       </span>
     </div>
   );

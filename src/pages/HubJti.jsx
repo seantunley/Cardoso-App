@@ -183,7 +183,7 @@ export default function HubJti() {
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 No archives yet
               </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
+              <p className="text-xs text-muted-subtle mt-1">
                 No site has pushed an archive yet, and the nightly pull-fallback hasn't run.
               </p>
             </div>
@@ -392,7 +392,7 @@ function SiteRow({ site, archive, isOrphan, onDownload, downloadingId }) {
       <td className="py-2.5 pr-4 font-mono text-xs text-foreground">
         {site.name || site.id}
         {isOrphan && (
-          <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-foreground/70">
+          <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.18em] text-muted-subtle">
             orphan
           </span>
         )}

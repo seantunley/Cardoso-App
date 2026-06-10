@@ -122,7 +122,7 @@ export default function CardosoEasterEgg() {
               value={commandValue}
               onChange={(event) => setCommandValue(event.target.value)}
               placeholder="Type a quiet word"
-              className="w-full border-0 border-b border-border bg-transparent py-2 font-mono text-sm uppercase tracking-[0.16em] text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-accent"
+              className="w-full border-0 border-b border-border bg-transparent py-2 font-mono text-sm uppercase tracking-[0.16em] text-foreground outline-none placeholder:text-muted-subtle focus:border-accent"
             />
           </form>
         </div>

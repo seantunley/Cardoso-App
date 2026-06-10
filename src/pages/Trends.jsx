@@ -315,7 +315,7 @@ function CustomersBySales({ months }) {
             <tbody>
               {rows.map((r, i) => (
                 <tr key={r.customer_code} className="border-b border-border/40 last:border-0 hover:bg-muted/20">
-                  <td className="px-3 py-2 text-right tabular-nums text-muted-foreground/60">{i + 1}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-muted-subtle">{i + 1}</td>
                   <td className="px-3 py-2">
                     <div className="font-medium text-foreground">{r.customer_name || r.customer_code}</div>
                     <div className="mt-1 h-1 max-w-[260px] overflow-hidden rounded-full bg-muted/40">
@@ -745,7 +745,7 @@ function InventoryTrends() {
                 onClick={() => toggleYear(y)}
                 title={isHidden ? `Show ${y}` : `Hide ${y}`}
                 className={`flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                  isHidden ? "text-muted-foreground/60 hover:text-foreground" : "bg-muted/40 text-foreground"
+                  isHidden ? "text-muted-subtle hover:text-foreground" : "bg-muted/40 text-foreground"
                 }`}
               >
                 <span className="h-2.5 w-2.5 rounded-full transition-opacity" style={{ backgroundColor: color, opacity: isHidden ? 0.3 : 1 }} />

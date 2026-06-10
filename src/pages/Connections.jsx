@@ -411,7 +411,7 @@ export default function Connections() {
           </div>
         ) : connections.length === 0 ? (
           <div className="text-center py-16 bg-card rounded-2xl border border-border">
-            <Database className="w-12 h-12 text-muted-foreground/60 mx-auto mb-4" />
+            <Database className="w-12 h-12 text-muted-subtle mx-auto mb-4" />
             <h3 className="text-lg font-medium text-foreground">
               No connections yet
             </h3>

@@ -1231,7 +1231,7 @@ export default function Reconciliation() {
                     <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
                       BAT vs Sage by week
                       {weekStatus.cacheRefreshedAt && (
-                        <span className="ml-3 normal-case tracking-normal text-muted-foreground/70">
+                        <span className="ml-3 normal-case tracking-normal text-muted-subtle">
                           · Sage cache refreshed {new Date(weekStatus.cacheRefreshedAt).toLocaleString('en-ZA', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: 'short' })}
                         </span>
                       )}
@@ -1382,7 +1382,7 @@ export default function Reconciliation() {
                                   )}
                                 </td>
                                 <td className="px-3 py-2 font-mono text-[10px] uppercase tracking-[0.15em]">
-                                  <div className="text-muted-foreground/70">All fees</div>
+                                  <div className="text-muted-subtle">All fees</div>
                                   {missingVat && (
                                     <div
                                       className="mt-0.5 inline-block px-1.5 py-0.5 rounded-sm"
@@ -1398,10 +1398,10 @@ export default function Reconciliation() {
                                   )}
                                 </td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums text-foreground">
-                                  {supTotal ? <><span className="text-muted-foreground/60 mr-0.5">R</span>{fmt(supTotal)}</> : '—'}
+                                  {supTotal ? <><span className="text-muted-subtle mr-0.5">R</span>{fmt(supTotal)}</> : '—'}
                                 </td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums text-foreground">
-                                  {sageTotal ? <><span className="text-muted-foreground/60 mr-0.5">R</span>{fmt(sageTotal)}</> : '—'}
+                                  {sageTotal ? <><span className="text-muted-subtle mr-0.5">R</span>{fmt(sageTotal)}</> : '—'}
                                 </td>
                                 <td className="px-3 py-2 text-right font-mono tabular-nums" style={{ color: headerColor }}>
                                   {(supTotal || sageTotal) ? <><span className="opacity-60 mr-0.5">R</span>{fmt(totalDiff)}</> : '—'}
@@ -1426,10 +1426,10 @@ export default function Reconciliation() {
                                     <td></td>
                                     <td className="px-3 py-1.5 text-muted-foreground pl-6">{c.label}</td>
                                     <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
-                                      {sup ? <><span className="text-muted-foreground/60 mr-0.5">R</span>{fmt(sup)}</> : '—'}
+                                      {sup ? <><span className="text-muted-subtle mr-0.5">R</span>{fmt(sup)}</> : '—'}
                                     </td>
                                     <td className="px-3 py-1.5 text-right font-mono tabular-nums text-foreground">
-                                      {sage ? <><span className="text-muted-foreground/60 mr-0.5">R</span>{fmt(sage)}</> : '—'}
+                                      {sage ? <><span className="text-muted-subtle mr-0.5">R</span>{fmt(sage)}</> : '—'}
                                     </td>
                                     <td className="px-3 py-1.5 text-right font-mono tabular-nums" style={{ color }}>
                                       {(sup || sage) ? <><span className="opacity-60 mr-0.5">R</span>{fmt(diff)}</> : '—'}
@@ -1439,7 +1439,7 @@ export default function Reconciliation() {
                                         <span className="font-mono text-[10px]" style={{ color }}>
                                           {Math.abs(diff) < 0.01 ? '●' : Math.abs(diff) < 100 ? '◐' : '▲'}
                                         </span>
-                                      ) : <span className="text-muted-foreground/40">—</span>}
+                                      ) : <span className="text-muted-subtle">—</span>}
                                     </td>
                                   </tr>
                                 );
@@ -1467,7 +1467,7 @@ export default function Reconciliation() {
                           </thead>
                           <tbody>
                             {rows.length === 0 ? (
-                              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-foreground/60 font-mono text-[10px] uppercase tracking-[0.2em]">No data</td></tr>
+                              <tr><td colSpan={7} className="px-3 py-6 text-center text-muted-subtle font-mono text-[10px] uppercase tracking-[0.2em]">No data</td></tr>
                             ) : rows.map(renderRowGroup)}
                           </tbody>
                         </table>
@@ -1565,12 +1565,12 @@ export default function Reconciliation() {
                           </TooltipTrigger>
                           <TooltipContent side="top">Sum of every invoice across every uploaded week that BAT flagged as an exception (any non-blank "Cardoso Exceptions Reasons" cell). Reasons are normalized — case and word-order variants are merged.</TooltipContent>
                         </Tooltip>
-                        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 tabular-nums mt-1">
+                        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-subtle tabular-nums mt-1">
                           {excCount} flagged invoice{excCount === 1 ? '' : 's'}
                         </div>
                       </div>
                       <div className="font-display text-3xl leading-none tabular-nums" style={{ color: 'var(--phosphor)' }}>
-                        <span className="text-muted-foreground/60 text-2xl mr-1.5">R</span>{fmtR(excAmount)}
+                        <span className="text-muted-subtle text-2xl mr-1.5">R</span>{fmtR(excAmount)}
                       </div>
                     </div>
                     {excByReason.length > 0 && (
@@ -1585,11 +1585,11 @@ export default function Reconciliation() {
                                 </TooltipTrigger>
                                 <TooltipContent side="top">{r.reason}</TooltipContent>
                               </Tooltip>
-                              <span className="tabular-nums text-muted-foreground/70 text-[10px]">
+                              <span className="tabular-nums text-muted-subtle text-[10px]">
                                 {r.count}× · {pct.toFixed(0)}%
                               </span>
                               <span className="tabular-nums text-foreground min-w-[120px] text-right">
-                                <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(r.amount)}
+                                <span className="text-muted-subtle mr-1">R</span>{fmtR(r.amount)}
                               </span>
                             </div>
                           );
@@ -1915,10 +1915,10 @@ export default function Reconciliation() {
                         {c.expected != null && c.actual != null && (
                           <div className="text-muted-foreground mt-0.5">
                             Expected <span className="text-foreground tabular-nums">{c.expected}</span>
-                            <span className="text-muted-foreground/60 mx-1.5">→</span>
+                            <span className="text-muted-subtle mx-1.5">→</span>
                             Actual <span className="text-destructive tabular-nums">{c.actual}</span>
                             {Number.isFinite(c.drift) && Math.abs(c.drift) >= 0.01 && (
-                              <span className="text-muted-foreground/70 ml-2">drift {c.drift > 0 ? '+' : ''}{c.drift.toFixed(2)}</span>
+                              <span className="text-muted-subtle ml-2">drift {c.drift > 0 ? '+' : ''}{c.drift.toFixed(2)}</span>
                             )}
                           </div>
                         )}
@@ -2203,7 +2203,7 @@ export default function Reconciliation() {
             </div>
           </div>
 
-          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/70 text-center my-1">— or —</div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-subtle text-center my-1">— or —</div>
 
           <div
             className="border border-dashed py-5 px-6 text-center transition-colors cursor-pointer"

@@ -30,7 +30,11 @@ module.exports = {
   			},
   			muted: {
   				DEFAULT: 'hsl(var(--muted))',
-  				foreground: 'hsl(var(--muted-foreground))'
+  				foreground: 'hsl(var(--muted-foreground))',
+  				// De-emphasized text that still passes WCAG AA on --card. Use
+  				// text-muted-subtle instead of text-muted-foreground/NN opacity
+  				// fades — alpha blends drop below 4.5:1 on the light theme.
+  				subtle: 'hsl(var(--muted-foreground-subtle))'
   			},
   			accent: {
   				DEFAULT: 'hsl(var(--accent))',

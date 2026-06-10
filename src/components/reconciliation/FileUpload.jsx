@@ -214,7 +214,7 @@ export default function FileUpload({ onComplete }) {
                 Drop one or more supplier spreadsheets
               </p>
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mt-2">
-                or click to browse · <span className="text-muted-foreground/60">expected: Week_XX_…</span>
+                or click to browse · <span className="text-muted-subtle">expected: Week_XX_…</span>
               </p>
             </div>
           </div>

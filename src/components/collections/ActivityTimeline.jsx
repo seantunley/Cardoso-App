@@ -49,7 +49,7 @@ export default function ActivityTimeline({ items }) {
                 {a.source === "sync" && (
                   <span className="rounded bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">auto</span>
                 )}
-                <span className="ml-auto text-muted-foreground/70">
+                <span className="ml-auto text-muted-subtle">
                   {a.user_name || a.user_email || (a.source === "sync" ? "system" : "")}
                 </span>
               </div>

@@ -142,7 +142,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                     <div className="flex items-center justify-between font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                       <span>OCR</span>
                       <span className="tabular-nums">
-                        {r.found_count || 0}<span className="text-muted-foreground/50">/{r.pod_count || 0}</span>
+                        {r.found_count || 0}<span className="text-muted-subtle">/{r.pod_count || 0}</span>
                         <span className="text-accent ml-2">{ocrPct}%</span>
                       </span>
                     </div>
@@ -216,7 +216,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                               <span>OCR pending</span>
                               <span className="tabular-nums">
                                 R {fmt(unverified)}
-                                <span className="text-muted-foreground/70 ml-2">{unverifiedCount} row{unverifiedCount === 1 ? '' : 's'}</span>
+                                <span className="text-muted-subtle ml-2">{unverifiedCount} row{unverifiedCount === 1 ? '' : 's'}</span>
                                 {unknownAmountCount > 0 && (
                                   <span style={{ color: 'hsl(33 70% 60%)' }} className="ml-2">· {unknownAmountCount} unknown</span>
                                 )}
@@ -232,7 +232,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                               <span>Missing PODs</span>
                               <span className="tabular-nums">
                                 R {fmt(missingPodsValue)}
-                                <span className="text-muted-foreground/70 ml-2">{missingPodsCount} order{missingPodsCount === 1 ? '' : 's'}</span>
+                                <span className="text-muted-subtle ml-2">{missingPodsCount} order{missingPodsCount === 1 ? '' : 's'}</span>
                                 {missingPodsUnknown > 0 && (
                                   <span style={{ color: 'hsl(33 70% 60%)' }} className="ml-2">· {missingPodsUnknown} unknown</span>
                                 )}
@@ -258,7 +258,7 @@ export default function WeekSelector({ reconciliations, onSelect, onUnmarkZero }
                               <span>Dup invoices</span>
                               <span className="tabular-nums">
                                 {dupCount}
-                                <span className="text-muted-foreground/70 ml-2">+R {fmt(dupInflation)}</span>
+                                <span className="text-muted-subtle ml-2">+R {fmt(dupInflation)}</span>
                               </span>
                             </div>
                           )}
@@ -281,7 +281,7 @@ function DataRow({ label, value, muted }) {
     <div className="flex items-baseline justify-between gap-2">
       <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
       <span className={`font-mono text-sm tabular-nums ${muted ? 'text-muted-foreground' : 'text-foreground'}`}>
-        <span className="text-muted-foreground/60 mr-1">R</span>{value}
+        <span className="text-muted-subtle mr-1">R</span>{value}
       </span>
     </div>
   );

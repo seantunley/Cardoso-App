@@ -877,7 +877,7 @@ export default function CustomerLookup({
               onChange={(e) => setCustomerNumber(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Customer number or name…"
-              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-foreground/50 focus:border-[var(--phosphor)] focus:ring-[var(--phosphor)]/30 text-sm font-mono"
+              className="h-11 border border-border bg-background pl-10 text-foreground placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:ring-[var(--phosphor)]/30 text-sm font-mono"
               style={{ borderRadius: "12px" }}
             />
             {showSuggestions && suggestions.length > 0 && (

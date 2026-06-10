@@ -82,10 +82,10 @@ export default function SageQueriesTab() {
                     <span className={`font-mono text-[9px] uppercase tracking-[0.15em] px-1.5 py-0.5 rounded ${overridden ? "bg-amber-500/15 text-amber-400" : "bg-emerald-500/10 text-emerald-400"}`}>
                       {overridden ? "Overridden" : "Default"}
                     </span>
-                    <span className="font-mono text-[10px] text-muted-foreground/70">{q.key}</span>
+                    <span className="font-mono text-[10px] text-muted-subtle">{q.key}</span>
                   </div>
                   <div className="text-[11px] text-muted-foreground mt-0.5">{q.purpose}</div>
-                  <div className="font-mono text-[10px] text-muted-foreground/60 mt-1">
+                  <div className="font-mono text-[10px] text-muted-subtle mt-1">
                     pool {q.pool} · tables {q.tables.join(", ")}
                     {q.params.length > 0 ? ` · params ${q.params.map((p) => "@" + p).join(" ")}` : ""}
                   </div>
@@ -101,7 +101,7 @@ export default function SageQueriesTab() {
                     className="w-full h-56 rounded-md border border-border bg-background px-3 py-2 font-mono text-[11px] leading-relaxed outline-none focus:ring-2 focus:ring-ring resize-y"
                   />
                   {q.requiredColumns.length > 0 && (
-                    <div className="font-mono text-[10px] text-muted-foreground/70">
+                    <div className="font-mono text-[10px] text-muted-subtle">
                       must output columns: {q.requiredColumns.join(", ")}
                     </div>
                   )}

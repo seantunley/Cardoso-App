@@ -140,7 +140,7 @@ export default function SchedulePanel() {
       <div className="flex items-center gap-2">
         <Calendar className="w-4 h-4 text-muted-foreground" strokeWidth={1.75} />
         <h2 className="font-display text-lg text-foreground">Scheduled jobs</h2>
-        <span className="text-xs text-muted-foreground/70">
+        <span className="text-xs text-muted-subtle">
           {jobs.length} registered · server time {serverTime ? formatAbsolute(serverTime) : '—'}
         </span>
         <Button onClick={() => refetch()} disabled={isRefetching} variant="outline" size="sm" className="ml-auto border-border text-muted-foreground hover:text-foreground">
@@ -168,7 +168,7 @@ export default function SchedulePanel() {
       {!isLoading && !error && jobs.length === 0 && (
         <div className="border border-dashed border-border px-4 py-6 text-center" style={{ borderRadius: '8px' }}>
           <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">No registered jobs</p>
-          <p className="text-xs text-muted-foreground/70 mt-1">
+          <p className="text-xs text-muted-subtle mt-1">
             Either the scheduler hasn't started or registerJob() isn't being called from scheduler.js.
           </p>
         </div>
@@ -198,7 +198,7 @@ export default function SchedulePanel() {
                     <td className="py-2.5 px-3">
                       <div className="font-mono text-xs text-foreground">{j.name}</div>
                       {j.description && (
-                        <div className="text-[11px] text-muted-foreground/80 mt-0.5 max-w-[420px]">{j.description}</div>
+                        <div className="text-[11px] text-muted-subtle mt-0.5 max-w-[420px]">{j.description}</div>
                       )}
                     </td>
                     <td className="py-2.5 px-3">
@@ -256,13 +256,13 @@ export default function SchedulePanel() {
                           </TooltipContent>
                         </Tooltip>
                       ) : (
-                        <span className="text-xs text-muted-foreground/60">never</span>
+                        <span className="text-xs text-muted-subtle">never</span>
                       )}
                     </td>
                     <td className="py-2.5 px-3">
                       {j.nextRun
                         ? <span className="text-xs text-foreground">{formatAbsolute(j.nextRun)}</span>
-                        : <span className="text-xs text-muted-foreground/60">—</span>}
+                        : <span className="text-xs text-muted-subtle">—</span>}
                       {j.nextRunError && (
                         <div className="text-[10px] text-rose-400 mt-0.5">err: {j.nextRunError}</div>
                       )}
@@ -270,7 +270,7 @@ export default function SchedulePanel() {
                     <td className="py-2.5 px-3">
                       {j.nextRun
                         ? <span className="text-xs text-muted-foreground">{formatRelative(j.nextRun, serverTime)}</span>
-                        : <span className="text-xs text-muted-foreground/60">—</span>}
+                        : <span className="text-xs text-muted-subtle">—</span>}
                     </td>
                   </tr>
                 );

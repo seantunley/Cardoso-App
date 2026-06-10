@@ -195,10 +195,10 @@ export default function AgedCreditors() {
           {/* Summary tiles */}
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-5 gap-3">
             <SummaryTile label="Vendors" value={summary.total_vendors.toLocaleString('en-ZA')} accent="var(--phosphor)" />
-            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
-            <SummaryTile label="1–30 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['1-30'])}</>} sub={`${summary.bucket_counts['1-30']} vend`} accent={BUCKET_META['1-30'].color} />
-            <SummaryTile label="31–60 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['31-60'])}</>} sub={`${summary.bucket_counts['31-60']} vend`} accent={BUCKET_META['31-60'].color} />
-            <SummaryTile label="Over 90 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['over-90'])}</>} sub={`${summary.bucket_counts['over-90']} vend`} accent={BUCKET_META['over-90'].color} />
+            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
+            <SummaryTile label="1–30 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['1-30'])}</>} sub={`${summary.bucket_counts['1-30']} vend`} accent={BUCKET_META['1-30'].color} />
+            <SummaryTile label="31–60 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['31-60'])}</>} sub={`${summary.bucket_counts['31-60']} vend`} accent={BUCKET_META['31-60'].color} />
+            <SummaryTile label="Over 90 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['over-90'])}</>} sub={`${summary.bucket_counts['over-90']} vend`} accent={BUCKET_META['over-90'].color} />
           </div>
 
           {/* Charts (screen only) */}
@@ -264,7 +264,7 @@ export default function AgedCreditors() {
                       );
                     })}
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(r.parsed_balance)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(r.parsed_balance)}
                     </td>
                   </tr>
                 ))}
@@ -275,11 +275,11 @@ export default function AgedCreditors() {
                     <td className="px-2 py-2 text-foreground" colSpan={data?.hub_mode ? 4 : 3}>Total ({sortedRecords.length} vendors)</td>
                     {BUCKET_ORDER.map(k => (
                       <td key={k} className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets[k])}
+                        <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets[k])}
                       </td>
                     ))}
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_outstanding)}
                     </td>
                   </tr>
                 </tfoot>

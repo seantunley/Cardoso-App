@@ -92,11 +92,11 @@ export default function BatYtd() {
         <>
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-4 gap-3">
             <SummaryTile label="Weeks uploaded" value={summary.weeks_uploaded.toLocaleString('en-ZA')} accent={REPORT_COLORS.primary} />
-            <SummaryTile label="Total BAT" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} big />
-            <SummaryTile label="Total Sage" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
+            <SummaryTile label="Total BAT" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_supplier)}</>} accent={REPORT_COLORS.primary} big />
+            <SummaryTile label="Total Sage" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}</>} accent={REPORT_COLORS.secondary} />
             <SummaryTile
               label="Total Variance"
-              value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
+              value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_variance)}</>}
               sub={summary.total_variance > 0 ? 'BAT higher' : summary.total_variance < 0 ? 'Sage higher' : 'matched'}
               accent={Math.abs(summary.total_variance) < 1 ? REPORT_COLORS.secondary : REPORT_COLORS.danger}
             />
@@ -138,10 +138,10 @@ export default function BatYtd() {
                       {f.fee_type}
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(f.supplier)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(f.supplier)}
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(f.sage)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(f.sage)}
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(f.variance) < 0.01 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
                       <span className="opacity-60 mr-1">R</span>{fmtRSigned(f.variance)}
@@ -156,10 +156,10 @@ export default function BatYtd() {
                 <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                   <td className="px-2 py-2 text-foreground">Total</td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                    <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_supplier)}
+                    <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_supplier)}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                    <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_sage)}
+                    <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_sage)}
                   </td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums td-right" style={{ color: Math.abs(summary.total_variance) < 1 ? 'hsl(145 55% 45%)' : 'hsl(0 72% 50%)' }}>
                     <span className="opacity-60 mr-1">R</span>{fmtRSigned(summary.total_variance)}

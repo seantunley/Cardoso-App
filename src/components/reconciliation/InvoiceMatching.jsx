@@ -767,7 +767,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                     </span>
                   ) : (
                     <>
-                      {e.order_amount != null && <span className="text-muted-foreground/60 mr-1">R</span>}
+                      {e.order_amount != null && <span className="text-muted-subtle mr-1">R</span>}
                       {fmt(e.order_amount)}
                     </>
                   )}

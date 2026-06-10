@@ -204,7 +204,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                         </div>
                         <div className="text-right">
                           <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
-                            <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(m.invoice_amount)}
+                            <span className="text-muted-subtle mr-1">R</span>{fmtR(m.invoice_amount)}
                           </div>
                           <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${diffColour}`}>
                             {exact ? "● exact" : `${m.diff > 0 ? "+" : ""}${m.diff.toFixed(2)}`}
@@ -370,7 +370,7 @@ function InvoiceLookupModal({ open, onClose, onPickCustomer }) {
                           </div>
                         </div>
                         <div className={`font-mono text-sm tabular-nums shrink-0 ${balanceColour}`}>
-                          <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(balance)}
+                          <span className="text-muted-subtle mr-1">R</span>{fmtR(balance)}
                         </div>
                       </div>
                     </button>
@@ -490,7 +490,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                       </div>
                       <div className="text-right">
                         <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
-                          <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(m.invoice_amount)}
+                          <span className="text-muted-subtle mr-1">R</span>{fmtR(m.invoice_amount)}
                         </div>
                         {variant === "amount" && typeof m.diff === "number" && (
                           <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${exact ? "text-[hsl(145_55%_75%)]" : "text-muted-foreground"}`}>

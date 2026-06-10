@@ -287,7 +287,7 @@ export default function SageCorrectionsTab() {
             </div>
             <div>
               <label className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1 block">
-                New Description <span className="text-muted-foreground/60">({newDesc.length}/60)</span>
+                New Description <span className="text-muted-subtle">({newDesc.length}/60)</span>
               </label>
               <Input
                 value={newDesc}

@@ -98,7 +98,7 @@ export default function InventoryValue() {
       {data && summary && (
         <>
           <div className="report-print-summary grid grid-cols-2 md:grid-cols-3 gap-3">
-            <SummaryTile label="Total inventory value" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_value)}</>} accent={REPORT_COLORS.primary} big />
+            <SummaryTile label="Total inventory value" value={<><span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_value)}</>} accent={REPORT_COLORS.primary} big />
             <SummaryTile label="Distinct items" value={fmtCount(summary.total_items)} accent={REPORT_COLORS.info} />
             <SummaryTile label="Distinct commodities" value={fmtCount(summary.distinct_commodities)} accent={REPORT_COLORS.purple} />
           </div>
@@ -150,7 +150,7 @@ export default function InventoryValue() {
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{c.total_qty.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{pct.toFixed(1)}%</td>
                       <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(c.total_value)}
+                        <span className="text-muted-subtle mr-1">R</span>{fmtR(c.total_value)}
                       </td>
                     </tr>
                   );
@@ -163,7 +163,7 @@ export default function InventoryValue() {
                   <td className="px-2 py-2"></td>
                   <td className="px-2 py-2"></td>
                   <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                    <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(summary.total_value)}
+                    <span className="text-muted-subtle mr-1">R</span>{fmtR(summary.total_value)}
                   </td>
                 </tr>
               </tfoot>
@@ -191,10 +191,10 @@ export default function InventoryValue() {
                     <td className="px-2 py-1.5 text-muted-foreground">{it.commodity}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">{it.qty_on_hand.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}</td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-muted-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(it.last_cost)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(it.last_cost)}
                     </td>
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtR(it.inventory_value)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtR(it.inventory_value)}
                     </td>
                   </tr>
                 ))}

@@ -175,7 +175,7 @@ export default function Collections() {
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-sm font-semibold text-foreground truncate">{w.name}</div>
-                      <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-colors ${active ? "text-amber-300" : "text-muted-foreground/60"}`} />
+                      <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-colors ${active ? "text-amber-300" : "text-muted-subtle"}`} />
                     </div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground flex items-center gap-1">
                       <UserCircle2 className="h-3 w-3" />
@@ -362,7 +362,7 @@ export default function Collections() {
               </>
             ) : (
               <div className="rounded-xl border border-dashed border-border p-10 text-center">
-                <ClipboardList className="h-10 w-10 mx-auto mb-3 text-muted-foreground/60" />
+                <ClipboardList className="h-10 w-10 mx-auto mb-3 text-muted-subtle" />
                 <p className="text-sm text-muted-foreground">
                   {worklists.data?.length === 0
                     ? "Create your first worklist to get started."

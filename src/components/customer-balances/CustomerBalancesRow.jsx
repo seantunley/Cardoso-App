@@ -55,12 +55,12 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       <td className="px-2 py-1 text-xs">
         <div className="font-mono text-foreground leading-tight">{row.last_unpaid_invoice_1 || "—"}</div>
         {row.last_unpaid_invoice_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_unpaid_invoice_1_amount)}</div>}
-        {row.last_unpaid_invoice_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_unpaid_invoice_1_date}</div>}
+        {row.last_unpaid_invoice_1_date && <div className="text-muted-subtle leading-tight">{row.last_unpaid_invoice_1_date}</div>}
       </td>
       <td className="px-2 py-1 text-xs">
         <div className="font-mono text-foreground leading-tight">{row.last_receipt_1 || "—"}</div>
         {row.last_receipt_1_amount && <div className="tabular-nums text-amber-400 leading-tight">R {formatAmount(row.last_receipt_1_amount)}</div>}
-        {row.last_receipt_1_date && <div className="text-muted-foreground/60 leading-tight">{row.last_receipt_1_date}</div>}
+        {row.last_receipt_1_date && <div className="text-muted-subtle leading-tight">{row.last_receipt_1_date}</div>}
       </td>
       <td className="px-2 py-1 text-right">
         <span

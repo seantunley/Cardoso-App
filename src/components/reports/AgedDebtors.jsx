@@ -207,10 +207,10 @@ export default function AgedDebtors() {
               sub={data?.truncated ? `truncated at ${data.truncated_at?.toLocaleString('en-ZA') || ''}` : undefined}
               accent={data?.truncated ? 'hsl(0 72% 50%)' : 'var(--phosphor)'}
             />
-            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
-            <SummaryTile label="1–7 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} cust`} accent={BUCKET_META['1-7'].color} />
-            <SummaryTile label="8–14 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['8-14'])}</>} sub={`${summary.bucket_counts['8-14']} cust`} accent={BUCKET_META['8-14'].color} />
-            <SummaryTile label="Over 21 days" value={<><span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets['over-21'])}</>} sub={`${summary.bucket_counts['over-21']} cust`} accent={BUCKET_META['over-21'].color} />
+            <SummaryTile label="Total Outstanding" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_outstanding)}</>} accent="var(--phosphor)" big />
+            <SummaryTile label="1–7 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['1-7'])}</>} sub={`${summary.bucket_counts['1-7']} cust`} accent={BUCKET_META['1-7'].color} />
+            <SummaryTile label="8–14 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['8-14'])}</>} sub={`${summary.bucket_counts['8-14']} cust`} accent={BUCKET_META['8-14'].color} />
+            <SummaryTile label="Over 21 days" value={<><span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets['over-21'])}</>} sub={`${summary.bucket_counts['over-21']} cust`} accent={BUCKET_META['over-21'].color} />
           </div>
 
           {/* Charts (screen only) */}
@@ -301,7 +301,7 @@ export default function AgedDebtors() {
                       );
                     })}
                     <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(r.parsed_balance)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(r.parsed_balance)}
                     </td>
                   </tr>
                 ))}
@@ -312,11 +312,11 @@ export default function AgedDebtors() {
                     <td className="px-2 py-2 text-foreground" colSpan={data?.hub_mode ? 6 : 5}>Total ({sortedRecords.length} customers)</td>
                     {BUCKET_ORDER.map(k => (
                       <td key={k} className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                        <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.buckets[k])}
+                        <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.buckets[k])}
                       </td>
                     ))}
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
-                      <span className="text-muted-foreground/60 mr-1">R</span>{fmtRSigned(summary.total_outstanding)}
+                      <span className="text-muted-subtle mr-1">R</span>{fmtRSigned(summary.total_outstanding)}
                     </td>
                   </tr>
                 </tfoot>

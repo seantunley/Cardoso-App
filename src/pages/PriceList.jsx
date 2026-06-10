@@ -207,7 +207,7 @@ export default function PriceList() {
         <p className="text-sm text-muted-foreground mt-3">
           Selling prices sourced live from Sage. Choose a price list and commodity, then print or download a customer-ready PDF.
           {filteredRows.length > 0 && (
-            <span className="ml-2 text-muted-foreground/70">
+            <span className="ml-2 text-muted-subtle">
               · {filteredRows.length.toLocaleString("en-ZA")} items{priceList ? ` · ${priceList}` : ""}
             </span>
           )}

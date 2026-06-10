@@ -102,7 +102,7 @@ function ModuleRoutingCard({ connections, isAdmin }) {
         <div className="flex items-center gap-2">
           <Workflow className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
           <h2 className="text-sm font-medium text-foreground">Module routing</h2>
-          <span className="text-xs text-muted-foreground/70 truncate">— pin a module to a connection, or leave on Auto-pick</span>
+          <span className="text-xs text-muted-subtle truncate">— pin a module to a connection, or leave on Auto-pick</span>
         </div>
         {isLoading || !routing ? (
           <p className="text-xs text-muted-foreground">Loading routing settings…</p>

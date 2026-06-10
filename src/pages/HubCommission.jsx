@@ -202,7 +202,7 @@ export default function HubCommission() {
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 No archives yet
               </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
+              <p className="text-xs text-muted-subtle mt-1">
                 No site has pushed a commission archive yet.
               </p>
             </div>

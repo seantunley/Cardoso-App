@@ -419,7 +419,7 @@ export default function Jti() {
               <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
                 No archives yet
               </p>
-              <p className="text-xs text-muted-foreground/70 mt-1">
+              <p className="text-xs text-muted-subtle mt-1">
                 Run a full-month export, or wait for the 1st-of-month scheduler to fire.
               </p>
             </div>
@@ -605,8 +605,8 @@ export default function Jti() {
         </section>
 
         <div className="text-center pt-4 pb-8">
-          <FileSpreadsheet className="h-4 w-4 inline-block text-muted-foreground/50 mr-2" strokeWidth={1.5} />
-          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground/50">
+          <FileSpreadsheet className="h-4 w-4 inline-block text-muted-subtle mr-2" strokeWidth={1.5} />
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-subtle">
             Output: JTI_Cardoso_Sales_&lt;Site&gt;_YYYYMMDD.xlsx
           </span>
         </div>
@@ -631,7 +631,7 @@ function LabeledInput({ label, value, onChange, disabled, placeholder, type = 't
         style={{ borderRadius: '8px' }}
       />
       {hint && (
-        <p className="font-mono text-[9px] text-muted-foreground/60 mt-1">{hint}</p>
+        <p className="font-mono text-[9px] text-muted-subtle mt-1">{hint}</p>
       )}
     </div>
   );
