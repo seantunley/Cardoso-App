@@ -79,7 +79,7 @@ export default function HubSyncLog() {
             </thead>
             <tbody>
               {rows.map((row, i) => {
-                const statusKey = row.status === "success" ? "success" : row.status === "error" ? "error" : row.status === "partial" ? "partial" : null;
+                const statusKey = (row.status === "success" || row.status === "ok") ? "success" : row.status === "error" ? "error" : row.status === "partial" ? "partial" : null;
                 const meta = statusKey ? STATUS_META[statusKey] : null;
                 const Icon = meta?.icon || Clock;
                 return (

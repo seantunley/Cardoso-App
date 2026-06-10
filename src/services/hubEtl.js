@@ -131,6 +131,21 @@ async function syncSite(site) {
   const startedAt = new Date().toISOString();
   let recordsFetched = 0;
   let syncError = null;
+
+  // Each isolated pull stanza below catches its own failure so one bad dataset
+  // doesn't abort the whole site. But a stanza that fails every tick (e.g. an
+  // old site version permanently 404-ing an endpoint) used to log to the console
+  // and nothing else — the run still recorded status='ok', so the hub tile went
+  // stale forever with zero operator signal (SYNC-3, no-silent-failures). Each
+  // stanza now routes its failure here: System Log via logError + accumulated so
+  // the run is recorded status='partial' with the reasons in hub_sync_log.error.
+  const stageErrors = [];
+  const recordStageFailure = (stage, e) => {
+    const msg = e?.message || String(e);
+    console.log(`[hub-etl] ${stage} skipped for ${site.id}: ${msg}`);
+    try { logError('hub.etl.stage', e, { site: site.id, site_url: site.url, stage }); } catch { /* logger is best-effort; the stanza already degraded gracefully */ }
+    stageErrors.push(`${stage}: ${msg}`);
+  };
   // True once the health check confirms the reporting endpoint answers. Lets the
   // catch tell a reachability failure (health check / TCP) apart from a downstream
   // data-pull timeout, so only genuine unreachability flips the site Offline.
@@ -177,9 +192,11 @@ async function syncSite(site) {
       .finally(() => clearTimeout(tBatEarly))
       .catch((err) => ({ ok: false, _earlyError: err }));
 
-    // Last sync for incremental pull
+    // Last sync for incremental pull. 'partial' counts: those runs DID complete
+    // the records pull (a partial failure is in a downstream stanza, not the
+    // records pull, which fails to status='error'), so `since` should advance.
     const lastSync = db.prepare(
-      `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status='ok' ORDER BY completed_at DESC LIMIT 1`
+      `SELECT completed_at FROM hub_sync_log WHERE site_id=? AND status IN ('ok','partial') ORDER BY completed_at DESC LIMIT 1`
     ).get(site.id);
     const sinceParam = lastSync ? `?since=${encodeURIComponent(lastSync.completed_at)}` : '';
 
@@ -462,7 +479,7 @@ async function syncSite(site) {
         }
       })();
     } catch (movErr) {
-      console.log(`[hub-etl] Inventory movement sync skipped for ${site.id}: ${movErr.message}`);
+      recordStageFailure('Inventory movement', movErr);
     }
 
     // Inventory item sales (inter-branch transfers excluded) → for the dashboard
@@ -508,7 +525,7 @@ async function syncSite(site) {
         }
       })();
     } catch (itemErr) {
-      console.log(`[hub-etl] Inventory item-sales sync skipped for ${site.id}: ${itemErr.message}`);
+      recordStageFailure('Inventory item-sales', itemErr);
     }
 
     // Inventory customer sales (inter-branch transfers excluded) → for the
@@ -554,7 +571,7 @@ async function syncSite(site) {
         }
       })();
     } catch (custErr) {
-      console.log(`[hub-etl] Inventory customer-sales sync skipped for ${site.id}: ${custErr.message}`);
+      recordStageFailure('Inventory customer-sales', custErr);
     }
 
     // Debtor AR open items → hub_debtor_ar_invoice, so Aged Debtors ages
@@ -610,7 +627,7 @@ async function syncSite(site) {
       db.prepare(`INSERT INTO hub_debtor_ar_sync (site_id, synced_at) VALUES (?, now_local())
         ON CONFLICT(site_id) DO UPDATE SET synced_at = excluded.synced_at`).run(site.id);
     } catch (arErr) {
-      console.log(`[hub-etl] Debtor AR open-items sync skipped for ${site.id}: ${arErr.message}`);
+      recordStageFailure('Debtor AR open-items', arErr);
     }
 
     // Creditor AP open items → hub_creditor_ap_invoice, so Aged Creditors works
@@ -658,7 +675,7 @@ async function syncSite(site) {
         }
       })();
     } catch (apErr) {
-      console.log(`[hub-etl] Creditor AP open-items sync skipped for ${site.id}: ${apErr.message}`);
+      recordStageFailure('Creditor AP open-items', apErr);
     }
 
     // Creditor master → hub_creditor, so Aged Creditors can join vendor name /
@@ -708,7 +725,7 @@ async function syncSite(site) {
         }
       })();
     } catch (credErr) {
-      console.log(`[hub-etl] Creditor master sync skipped for ${site.id}: ${credErr.message}`);
+      recordStageFailure('Creditor master', credErr);
     }
 
     // Stock receipt expiry — read-only hub copy for cross-site visibility.
@@ -768,7 +785,7 @@ async function syncSite(site) {
         }
       })();
     } catch (sreErr) {
-      console.log(`[hub-etl] Stock receipt expiry sync skipped for ${site.id}: ${sreErr.message}`);
+      recordStageFailure('Stock receipt expiry', sreErr);
     }
 
     // BAT Reconciliation summary — recorded into hub_bat_summary.
@@ -859,7 +876,7 @@ async function syncSite(site) {
           VALUES (?, ?, ?)
           ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
         `).run(site.id, msg, new Date().toISOString());
-        console.warn(`[HUB] ${site.name}: ${msg}`);
+        recordStageFailure('BAT summary', new Error(msg));
       }
     } catch (batErr) {
       const msg = describeFetchError(batErr, `${site.url}/api/reporting/bat-summary`).slice(0, 500);
@@ -868,7 +885,7 @@ async function syncSite(site) {
         VALUES (?, ?, ?)
         ON CONFLICT(site_id) DO UPDATE SET last_error=excluded.last_error, synced_at=excluded.synced_at
       `).run(site.id, msg, new Date().toISOString());
-      console.warn(`[HUB] ${site.name}: BAT summary fetch failed — ${msg}`);
+      recordStageFailure('BAT summary', batErr);
     }
 
     // Update hub_sites
@@ -1014,10 +1031,15 @@ async function syncSite(site) {
     });
   }
 
+  // status: 'error' = the whole site sync failed (records pull / fatal); 'partial'
+  // = records synced but one or more downstream stanzas failed (recorded in
+  // error so the operator sees WHICH); 'ok' = clean. A fatal error dominates.
+  const finalStatus = syncError ? 'error' : (stageErrors.length ? 'partial' : 'ok');
+  const finalError = syncError || (stageErrors.length ? stageErrors.join(' | ') : null);
   db.prepare(`
     INSERT INTO hub_sync_log (site_id, started_at, completed_at, records_fetched, status, error)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, syncError ? 'error' : 'ok', syncError || null);
+  `).run(site.id, startedAt, new Date().toISOString(), recordsFetched, finalStatus, finalError);
 
   return { site_id: site.id, site_slug: site.slug, records_fetched: recordsFetched, error: syncError };
 }
