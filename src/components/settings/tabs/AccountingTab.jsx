@@ -1,16 +1,18 @@
 import { useState, useEffect } from "react";
 import { toast } from "sonner";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 // ─── Accounting Settings Tab ──────────────────────────────────────────────
 // Stores company-wide accounting parameters (currently just VAT %) used by
 // the Reconciliation page to detect VAT-shaped variances between BAT and
 // Sage credit notes. Backed by the bat_settings key/value table; the
 // /api/bat/settings endpoint is already gated behind requireAdmin so the
-// PUT here is admin-only by construction. The native confirm() before
-// save is a guard so an admin doesn't fat-finger the rate (the value
-// retroactively changes how every weekly variance is interpreted).
+// PUT here is admin-only by construction. The confirm before save is a
+// guard so an admin doesn't fat-finger the rate (the value retroactively
+// changes how every weekly variance is interpreted).
 const VAT_DEFAULT = 15;
 export default function AccountingTab() {
+  const confirm = useConfirm();
   const [vatPercent, setVatPercent] = useState(VAT_DEFAULT);
   const [originalVat, setOriginalVat] = useState(VAT_DEFAULT);
   const [loading, setLoading] = useState(true);
@@ -42,11 +44,13 @@ export default function AccountingTab() {
       toast.info('No change');
       return;
     }
-    const ok = window.confirm(
-      `Change VAT rate from ${originalVat}% to ${v}%?\n\n` +
-      `This affects how every weekly BAT-vs-Sage variance is interpreted on the Reconciliation page. ` +
-      `Existing reconciliations are not modified, but the "Missing VAT" indicator will recalculate using the new rate.`
-    );
+    const ok = await confirm({
+      title: `Change VAT rate from ${originalVat}% to ${v}%?`,
+      description:
+        `This affects how every weekly BAT-vs-Sage variance is interpreted on the Reconciliation page. ` +
+        `Existing reconciliations are not modified, but the "Missing VAT" indicator will recalculate using the new rate.`,
+      confirmLabel: "Change rate",
+    });
     if (!ok) return;
     setSaving(true);
     try {

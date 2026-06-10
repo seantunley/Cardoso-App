@@ -13,9 +13,11 @@ import UserPermissionsModal from "../components/users/UserPermissionsModal";
 import ChangePasswordModal from "../components/users/ChangePasswordModal";
 import EditUserModal from "../components/users/EditUserModal";
 import HubUserManager from "../components/users/HubUserManager";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 export default function Users({ embedded = false }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const { user: currentUser } = useAuth();
   const isAdmin = currentUser?.role === "admin";
 
@@ -67,7 +69,12 @@ export default function Users({ embedded = false }) {
   const handleDeleteUser = async (user) => {
     if (!isAdmin) { toast.error("Only admins can delete users"); return; }
     if (currentUser?.id === user.id) { toast.error("Cannot delete your own account"); return; }
-    if (!window.confirm(`Delete ${user.full_name || user.email}? This cannot be undone.`)) return;
+    if (!(await confirm({
+      title: `Delete ${user.full_name || user.email}?`,
+      description: "This cannot be undone.",
+      confirmLabel: "Delete",
+      destructive: true,
+    }))) return;
     await deleteUserMutation.mutateAsync(user.id);
   };
 

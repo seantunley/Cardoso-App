@@ -26,12 +26,14 @@ import NewWorklistDialog from "@/components/collections/NewWorklistDialog";
 import AssignCustomersDialog from "@/components/collections/AssignCustomersDialog";
 import { ASSIGNMENT_STATUS_META } from "@/components/collections/meta";
 import { apiGet, apiSend, parseAmount, formatCurrency, timeAgo } from "@/components/collections/utils";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 // ── Main page ────────────────────────────────────────────────────
 
 export default function Collections() {
   useColorScheme();
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const [selectedWorklistId, setSelectedWorklistId] = useState(/** @type {number | null} */ (null));
   const [statusFilter, setStatusFilter] = useState("active");
   const [searchFilter, setSearchFilter] = useState("");
@@ -111,9 +113,12 @@ export default function Collections() {
     },
     onError: (err) => toast.error(`Bulk update failed: ${err.message}`),
   });
-  const runBulk = (status, label, reason) => {
+  const runBulk = async (status, label, reason) => {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`${label} ${selectedIds.size} selected customer${selectedIds.size === 1 ? "" : "s"}?`)) return;
+    if (!(await confirm({
+      title: `${label} ${selectedIds.size} selected customer${selectedIds.size === 1 ? "" : "s"}?`,
+      confirmLabel: label,
+    }))) return;
     bulkStatus.mutate({ status, reason });
   };
 

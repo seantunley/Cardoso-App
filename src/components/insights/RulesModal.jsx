@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Trash2, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 async function api(url, options) {
   const res = await fetch(url, { credentials: "include", ...options });
@@ -28,6 +29,7 @@ const blankDraft = (metrics) => ({
 });
 
 export default function RulesModal({ open, onClose, onChanged }) {
+  const confirm = useConfirm();
   const [rules, setRules] = useState([]);
   const [metrics, setMetrics] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -63,7 +65,7 @@ export default function RulesModal({ open, onClose, onChanged }) {
     catch (e) { toast.error("Update failed", { description: e.message }); }
   };
   const remove = async (rule) => {
-    if (!window.confirm(`Delete rule "${rule.name}"?`)) return;
+    if (!(await confirm({ title: `Delete rule "${rule.name}"?`, confirmLabel: "Delete", destructive: true }))) return;
     try { await api(`/api/insights/rules/${rule.id}`, { method: "DELETE" }); load(); onChanged?.(); }
     catch (e) { toast.error("Delete failed", { description: e.message }); }
   };

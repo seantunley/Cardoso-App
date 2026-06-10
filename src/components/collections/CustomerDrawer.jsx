@@ -10,9 +10,11 @@ import { PhoneCall, CalendarClock, RotateCcw } from "lucide-react";
 import ActivityTimeline from "./ActivityTimeline";
 import { ASSIGNMENT_STATUS_META } from "./meta";
 import { apiGet, apiSend, formatCurrency, parseAmount } from "./utils";
+import { useConfirm } from "@/components/shared/ConfirmProvider";
 
 export default function CustomerDrawer({ assignment, onClose, onChange }) {
   const queryClient = useQueryClient();
+  const confirm = useConfirm();
   const { toast } = useToast();
   const customerId = assignment?.customer_id;
   const activity = useQuery({
@@ -179,8 +181,8 @@ export default function CustomerDrawer({ assignment, onClose, onChange }) {
             )}
             {assignment.status === "active" && (
               <>
-                <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Escalate ${assignment.customer_name || "this customer"} (hand off)?`)) setStatus.mutate({ status: "escalated", reason: "Handed off" }); }}>Escalate</Button>
-                <Button variant="outline" size="sm" onClick={() => { if (window.confirm(`Write off ${assignment.customer_name || "this customer"} as bad debt? This marks the assignment written off.`)) setStatus.mutate({ status: "written_off", reason: "Bad debt" }); }}>Write off</Button>
+                <Button variant="outline" size="sm" onClick={async () => { if (await confirm({ title: `Escalate ${assignment.customer_name || "this customer"}?`, description: "Hands this customer off.", confirmLabel: "Escalate" })) setStatus.mutate({ status: "escalated", reason: "Handed off" }); }}>Escalate</Button>
+                <Button variant="outline" size="sm" onClick={async () => { if (await confirm({ title: `Write off ${assignment.customer_name || "this customer"} as bad debt?`, description: "This marks the assignment written off.", confirmLabel: "Write off", destructive: true })) setStatus.mutate({ status: "written_off", reason: "Bad debt" }); }}>Write off</Button>
                 <Button variant="outline" size="sm" onClick={() => setStatus.mutate({ status: "closed", reason: "Closed manually" })}>Close</Button>
               </>
             )}
