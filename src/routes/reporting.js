@@ -1622,15 +1622,19 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
            WHERE outstanding_balance_num IS NOT NULL AND outstanding_balance_num <> 0`
         ).all(SITE_NAME).map(hydrateSalesRepAndAccountType).map((r) => {
           // Oldest dated unpaid line — the snapshot array isn't guaranteed
-          // oldest-first; null when absent → the engine's "unknown" bucket.
+          // oldest-first; null when absent → the engine's "unknown" bucket. Parse
+          // with parseBalanceDate, NOT Date.parse: the snapshot stores Sage-style
+          // YYYYMMDD or local DD/MM/YYYY, which Date.parse rejects (leaving every
+          // dated balance in "unknown"). parseBalanceDate handles those forms and
+          // the engine's toLocalMidnight accepts the resulting Date directly.
           const inv = parseJsonSafely(r.unpaid_invoices, []);
           let oldestDate = null, oldestT = Infinity;
           if (Array.isArray(inv)) {
             for (const it of inv) {
-              const raw = it?.date;
-              if (!raw) continue;
-              const t = Date.parse(raw);
-              if (!Number.isNaN(t) && t < oldestT) { oldestT = t; oldestDate = raw; }
+              const d = parseBalanceDate(it?.date);
+              if (!d) continue;
+              const t = d.getTime();
+              if (t < oldestT) { oldestT = t; oldestDate = d; }
             }
           }
           return {
