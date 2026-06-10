@@ -1,5 +1,6 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { useColorScheme } from "@/lib/useColorScheme";
+import { useSearchParamState } from "@/hooks/useSearchParamState";
 import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Scale } from "lucide-react";
@@ -47,22 +48,41 @@ export default function CustomerBalances() {
     retry: false,
   });
   const creditLogicConfig = creditLogicState?.analysis?.config || DEFAULT_CREDIT_LOGIC_CONFIG;
-  const [page, setPage] = useState(1);
-  const [siteFilter, setSiteFilter] = useState("all");
-  const [ageBucket, setAgeBucket] = useState("all");
-  const [salesRepFilter, setSalesRepFilter] = useState("all");
+  // Filters live in the URL query string (useSearchParamState) so a filtered
+  // view is a shareable deep link and survives refresh — e.g.
+  // /CustomerBalances?age=21%2B&site=Welkom&rep=JS. Defaults are omitted from
+  // the URL; setters keep the same call shape the child components already use.
+  const [pageRaw, setPageRaw] = useSearchParamState("page", "1");
+  const page = Math.max(1, parseInt(pageRaw, 10) || 1);
+  const setPage = useCallback(
+    (next) => setPageRaw(String(typeof next === "function" ? next(page) : next)),
+    [setPageRaw, page],
+  );
+  const [siteFilter, setSiteFilter] = useSearchParamState("site", "all");
+  const [ageBucket, setAgeBucket] = useSearchParamState("age", "all");
+  const [salesRepFilter, setSalesRepFilter] = useSearchParamState("rep", "all");
   // Client-side page filters (applied to the current page only — server
   // pagination / totals remain authoritative). lastPurchaseDays: "all"
   // or a string number of days ("30", "60", "90", "180", "365").
-  const [lastPurchaseDays, setLastPurchaseDays] = useState("all");
-  const [dormantOnly, setDormantOnly] = useState(false);
-  const [accountTypeFilter, setAccountTypeFilter] = useState("all"); // all | national | standard
+  const [lastPurchaseDays, setLastPurchaseDays] = useSearchParamState("last", "all");
+  const [dormantOnlyRaw, setDormantOnlyRaw] = useSearchParamState("dormant", "");
+  const dormantOnly = dormantOnlyRaw === "1";
+  const setDormantOnly = useCallback(
+    (next) => setDormantOnlyRaw((typeof next === "function" ? next(dormantOnly) : next) ? "1" : ""),
+    [setDormantOnlyRaw, dormantOnly],
+  );
+  const [accountTypeFilter, setAccountTypeFilter] = useSearchParamState("acct", "all"); // all | national | standard
   // Controlled <details> open state so the filter panel stays put
   // across React re-renders (refetches, sort clicks, etc.) — without
   // this, native <details> gets unmounted by conditional rendering and
   // snaps back to closed every time the data changes.
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance] = useState(false);
+  const [hideMatchRaw, setHideMatchRaw] = useSearchParamState("hidematch", "");
+  const hideInvoiceMatchesBalance = hideMatchRaw === "1";
+  const setHideInvoiceMatchesBalance = useCallback(
+    (next) => setHideMatchRaw((typeof next === "function" ? next(hideInvoiceMatchesBalance) : next) ? "1" : ""),
+    [setHideMatchRaw, hideInvoiceMatchesBalance],
+  );
   const tableContainerRef = useRef(null);
   const { widths: colWidths, setWidths: setColWidths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
