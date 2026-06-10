@@ -219,7 +219,15 @@ export default function Login() {
         />
         {/* Live phosphor telemetry — drifting glowing traces (pure decoration;
             static under prefers-reduced-motion, paused when the tab is hidden) */}
-        <PhosphorTraces />
+        {/* Confined to the upper two-thirds: the mask fades the canvas out
+            before the quote card / footer zone so content never competes
+            with the visualisation. */}
+        <PhosphorTraces
+          style={{
+            maskImage: "linear-gradient(to bottom, black 0%, black 52%, rgba(0,0,0,0.25) 72%, transparent 88%)",
+            WebkitMaskImage: "linear-gradient(to bottom, black 0%, black 52%, rgba(0,0,0,0.25) 72%, transparent 88%)",
+          }}
+        />
         {/* Soft dot matrix — replaces the old square hairline grid */}
         <div
           className="absolute inset-0 pointer-events-none opacity-[0.06]"
@@ -258,7 +266,7 @@ export default function Login() {
 
         {/* Bottom meta */}
         <div className="relative z-10 space-y-8">
-          <div className="max-w-md rounded-2xl border border-accent/25 bg-card/40 p-5">
+          <div className="max-w-md rounded-2xl border border-accent/25 bg-card/85 backdrop-blur-md p-5">
             <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent mb-3">
               Quote of the day
             </div>
