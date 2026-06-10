@@ -52,4 +52,15 @@ describe('isNoOpDataUpdate (SYNC-2)', () => {
   it('detects a custom field going null → value', () => {
     expect(isNoOpDataUpdate({ ...base }, { ...base, custom_field_1: 'X' })).toBe(false);
   });
+
+  it('flags a difference when created_by is not loaded — so the lookup MUST select it', () => {
+    // Regression for SYNC-2: upd.created_by is always 'import'. If the keyed
+    // lookup omits created_by, existing.created_by is undefined, never matches,
+    // and NOTHING is ever skipped — defeating the whole optimization.
+    const existingMissingCreatedBy = { ...base };
+    delete existingMissingCreatedBy.created_by;
+    expect(isNoOpDataUpdate(existingMissingCreatedBy, { ...base })).toBe(false);
+    // With it loaded as the stored 'import', the unchanged row is a no-op.
+    expect(isNoOpDataUpdate({ ...base, created_by: 'import' }, { ...base })).toBe(true);
+  });
 });

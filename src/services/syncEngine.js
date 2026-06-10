@@ -283,7 +283,7 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
         const uniqueIds = [...new Set(incomingIds)];
         const placeholders = uniqueIds.map(() => '?').join(',');
         const keyedRows = db.prepare(`
-          SELECT id, source_id, source_table, customer_number, customer_name,
+          SELECT id, created_by, source_id, source_table, customer_number, customer_name,
                  age_analysis, age_current, age_7_days, age_14_days, age_21_days,
                  note, local_fields, flag_color, flag_reason, flag_created_by, data,
                  outstanding_balance, terms, sales_rep, account_type, unpaid_invoices, receipts
