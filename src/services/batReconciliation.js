@@ -65,6 +65,10 @@ function emitExtractionUpdate(reconId) {
 
 let pool = null;
 let poolConfigKey = null; // tracks which config the current pool was opened with
+// In-flight connect promise (+ its config key), shared by concurrent callers so
+// two simultaneous opens don't each create a pool and leak one (CRIT-1 race).
+let connecting = null;
+let connectingKey = null;
 
 // Picks the Sage MSSQL config in this order:
 //   1. The connection pinned to role 'bat_sage' in connection_role
@@ -155,22 +159,35 @@ export async function getSagePool() {
   }
 
   if (pool) return pool;
+  // Share an in-flight connect for the same config (CRIT-1 race): otherwise two
+  // concurrent callers both pass the `if (pool)` check, open separate pools, and
+  // the loser is overwritten — left open and never closed.
+  if (connecting && connectingKey === loaded.key) return connecting;
+
   console.log(`[bat-sage] Opening Sage pool from ${loaded.source}`);
-  try {
-    // Own pool — NOT sql.connect()/the global pool. mssql's global connect()
-    // returns whatever pool connected first and ignores this config, so a
-    // BAT-only Sage connection could end up serving customer queries (and vice
-    // versa) and modules would close each other's pools (CRIT-1).
-    pool = await new sql.ConnectionPool(loaded.config).connect();
-  } catch (err) {
-    // A Sage pool failure stalls every BAT operation that needs Sage data
-    // (week-status, credit notes, dashboards). Surface it in System Log so
-    // a remote operator doesn't have to ssh in to diagnose.
-    try { logError('bat.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
-    throw err;
-  }
-  poolConfigKey = loaded.key;
-  return pool;
+  connectingKey = loaded.key;
+  connecting = (async () => {
+    try {
+      // Own pool — NOT sql.connect()/the global pool. mssql's global connect()
+      // returns whatever pool connected first and ignores this config, so a
+      // BAT-only Sage connection could end up serving customer queries (and vice
+      // versa) and modules would close each other's pools (CRIT-1).
+      const p = await new sql.ConnectionPool(loaded.config).connect();
+      pool = p;
+      poolConfigKey = loaded.key;
+      return p;
+    } catch (err) {
+      // A Sage pool failure stalls every BAT operation that needs Sage data
+      // (week-status, credit notes, dashboards). Surface it in System Log so
+      // a remote operator doesn't have to ssh in to diagnose.
+      try { logError('bat.sage.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
+      throw err;
+    } finally {
+      connecting = null;
+      connectingKey = null;
+    }
+  })();
+  return connecting;
 }
 
 // Run a Sage query with one auto-retry if the cached pool turns out to be dead.

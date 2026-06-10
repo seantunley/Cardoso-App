@@ -18,6 +18,10 @@ import { logError } from '../lib/errorLog.js';
 
 let pool = null;
 let poolKey = null;
+// In-flight connect promise (+ its config key), shared by concurrent callers so
+// two simultaneous opens don't each create a pool and leak one (CRIT-1 race).
+let connecting = null;
+let connectingKey = null;
 
 function loadCustomerSqlConfig() {
   const selectCols = `
@@ -74,18 +78,31 @@ async function getCustomerSqlPool() {
     pool = null;
   }
   if (pool) return pool;
+  // Share an in-flight connect for the same config (CRIT-1 race): otherwise two
+  // concurrent callers both pass the `if (pool)` check, open separate pools, and
+  // the loser is overwritten — left open and never closed.
+  if (connecting && connectingKey === loaded.key) return connecting;
+
   console.log(`[customer-sql] Opening pool from ${loaded.source}`);
-  try {
-    // Own pool — NOT sql.connect()/the global pool. The global API ignores this
-    // config when a pool already exists, so the customer import could run
-    // against the BAT-only Sage DB (CRIT-1).
-    pool = await new sql.ConnectionPool(loaded.config).connect();
-  } catch (err) {
-    try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
-    throw err;
-  }
-  poolKey = loaded.key;
-  return pool;
+  connectingKey = loaded.key;
+  connecting = (async () => {
+    try {
+      // Own pool — NOT sql.connect()/the global pool. The global API ignores this
+      // config when a pool already exists, so the customer import could run
+      // against the BAT-only Sage DB (CRIT-1).
+      const p = await new sql.ConnectionPool(loaded.config).connect();
+      pool = p;
+      poolKey = loaded.key;
+      return p;
+    } catch (err) {
+      try { logError('customer.sql.pool', err, { source: loaded.source }); } catch {} // eslint-disable-line no-empty -- logError wrapper; we still re-throw the original error
+      throw err;
+    } finally {
+      connecting = null;
+      connectingKey = null;
+    }
+  })();
+  return connecting;
 }
 
 // Run a query with one auto-retry if the cached pool turns out to be dead.

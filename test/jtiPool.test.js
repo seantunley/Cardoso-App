@@ -182,6 +182,23 @@ describe('getJtiSagePool — happy path', () => {
     expect(sql.ConnectionPool).toHaveBeenCalledTimes(2);
     expect(dead.close).toHaveBeenCalled();
   });
+
+  it('shares a single pool open across concurrent callers (no leak)', async () => {
+    // Hold connect() pending so both callers are in flight at the same time.
+    const fakePool = { connected: true, request: vi.fn(), close: vi.fn() };
+    let resolveConnect;
+    sql.ConnectionPool.mockImplementation(function (config) {
+      return { config, connect: () => new Promise((res) => { resolveConnect = () => res(fakePool); }) };
+    });
+    const p1 = getJtiSagePool();
+    const p2 = getJtiSagePool();
+    resolveConnect();
+    const [a, b] = await Promise.all([p1, p2]);
+    expect(a).toBe(fakePool);
+    expect(b).toBe(fakePool);
+    // Only ONE pool opened despite two concurrent callers (CRIT-1 race fix).
+    expect(sql.ConnectionPool).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('resetJtiSagePool', () => {
