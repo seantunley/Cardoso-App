@@ -13,6 +13,275 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-10': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '10 June 2026',
+    slug: '10-June-2026',
+    intro:
+      "This update (v2026.5.9.2) is a broad polish-and-hardening release. The " +
+      "interface gets a refresh — a redesigned sign-in screen with a daily-" +
+      "changing ambient visualisation, a tidier sidebar, smoother page-to-page " +
+      "navigation, and consistent in-app confirmation dialogs — alongside a long " +
+      "list of reliability and security fixes: faster and more dependable site-" +
+      "to-head-office syncing, stricter permission checks, hardened Sage query " +
+      "validation, and accessibility-grade text contrast throughout. Every " +
+      "figure continues to be drawn from, and reconcile to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Redesigned sign-in screen',
+            body:
+              "The sign-in page has been redesigned with a softer, rounded look and " +
+              "a live ambient visualisation behind the welcome panel.",
+            details: [
+              "Three visualisation styles — drifting phosphor traces, a constellation network, and breathing ledger bars — rotate automatically by day, with gentle colour blooms.",
+              "Respects reduced-motion settings (shows a still image) and pauses when the tab is in the background.",
+              "Rounded input fields with a clear focus glow, a pill-shaped sign-in button, and clearer error messages.",
+            ],
+          },
+          {
+            title: 'Shareable filtered views on Customer Balances',
+            body:
+              "Filters on Customer Balances (age bucket, branch, sales rep, and more) " +
+              "are now part of the page address — copy the link to share exactly the " +
+              "view you're looking at, or bookmark it. Filters also survive a refresh.",
+            details: [
+              "Every filter is encoded: age bucket, branch, sales rep, last-purchase window, dormant-only, account type, hide-invoice-matches and the page number.",
+              "Defaults stay out of the address, so unfiltered views keep a clean link.",
+              "Filter clicks don't clutter browser history — Back still leaves the page in one step.",
+            ],
+          },
+          {
+            title: 'Data-freshness badge on Creditor Balances',
+            body:
+              "A colour-coded badge shows at a glance how current the creditor data " +
+              "is: green when fresh, amber when it has missed its nightly sync, red " +
+              "if it has never synced. Hover for the exact timestamp.",
+            details: [
+              "Green: synced within the expected nightly window. Amber: stale (older than 26 hours). Red: never synced.",
+              "The relative age ('Synced 3h ago') keeps itself up to date while the page is open.",
+              "The tooltip carries the raw sync timestamp plus the schedule, e.g. 'Nightly at 04:30'.",
+            ],
+          },
+          {
+            title: 'Clean-up tool for BAT reconciliation integrity warnings',
+            body:
+              "When the integrity banner reports orphaned extraction rows (stale " +
+              "rows from a prior upload), an admin can now review the exact rows and " +
+              "tick which to remove — nothing is deleted automatically, and rows " +
+              "retained from a second branch's upload are never touched.",
+            details: [
+              "The picker lists each orphaned row with its order number, OCR status, amount and a link to the POD PDF.",
+              "Deletion is admin-only and audited; the server re-checks each ticked row is genuinely orphaned before removing it.",
+              "POD PDFs themselves are never deleted — only the stale database rows.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Smoother, steadier navigation',
+            body:
+              "Moving between pages no longer blanks the whole screen while a page " +
+              "loads — the sidebar and header stay put and only the content area " +
+              "shows a brief loading spinner.",
+            details: [
+              "Previously, opening a page for the first time replaced the entire screen — sidebar included — with a blank loading state.",
+              "Pages you have already visited continue to open instantly.",
+            ],
+          },
+          {
+            title: 'Tidier sidebar',
+            body:
+              "Even spacing between groups, a rounded highlight with an amber marker " +
+              "on the current page, and group chevrons that sit next to their labels. " +
+              "Items are indented under a subtle guide line so grouping reads at a glance.",
+            details: [
+              "Collapsed group headers no longer cram together while expanded groups sprawl — the vertical rhythm is even throughout.",
+              "The current page is marked with a rounded highlight and a glowing amber rail instead of a square block.",
+              "Icons are slightly smaller so their colours read as accents rather than dominating each row.",
+            ],
+          },
+          {
+            title: 'Faster, lighter searching',
+            body:
+              "Vendor, stock-receipt and collections searches now send one request " +
+              "per typing pause instead of one per keystroke, and search results no " +
+              "longer flash to empty while new results load.",
+            details: [
+              "Applies to Creditor Search, Creditor Balances, Stock Receipts and the Collections assign-customers dialog (including its minimum-value and days-overdue fields).",
+              "The Operations OCR panel now polls quickly only while OCR is actually running, dropping to a slow check when idle.",
+            ],
+          },
+          {
+            title: 'Large vendor lists render instantly',
+            body:
+              "Creditor Balances now draws only the rows on screen, so the table " +
+              "stays smooth no matter how many vendors are listed. Column sorting " +
+              "also works from the keyboard.",
+            details: [
+              "Only the visible rows are rendered, so scrolling stays smooth at any list size.",
+              "Column widths remain resizable and are remembered per user, exactly as before.",
+              "Sortable headers are reachable with Tab and toggled with Enter or Space, with the sort direction announced to screen readers.",
+            ],
+          },
+          {
+            title: 'Accessibility-grade text contrast',
+            body:
+              "Every de-emphasised label across the app has been lifted to meet the " +
+              "WCAG AA contrast standard — easier on the eyes in both themes, " +
+              "especially on warehouse screens.",
+            details: [
+              "167 instances of faded text across 60 screens were below the 4.5:1 contrast standard; all now meet it in both themes.",
+              "An accessibility linter now runs in the build pipeline so new screens can't regress.",
+            ],
+          },
+          {
+            title: 'In-app confirmation dialogs',
+            body:
+              "Actions that previously used the browser's built-in confirm popup " +
+              "(deleting a user, bulk collections updates, forcing a full re-sync, " +
+              "changing the VAT rate) now use a themed dialog, with destructive " +
+              "actions clearly marked in red.",
+            details: [
+              "Browser popups ignored the app theme and could be suppressed by the browser after repeated prompts.",
+              "The new dialogs support keyboard confirmation and cancelling with Escape.",
+            ],
+          },
+          {
+            title: 'Aged Creditors — filter by payment history',
+            body:
+              "The Aged Creditors report gains a Payments filter, on by default, " +
+              "matching the Creditor Balances page: 'With payment history' hides " +
+              "never-paid accounts; switch to 'All vendors' to include them. The " +
+              "choice carries through to the PDF and Excel exports.",
+          },
+          {
+            title: 'BAT weekly chart — total value per week',
+            body:
+              "The second chart on the BAT Weekly Reconciliation report now shows " +
+              "each week's BAT and Sage credit-note totals. The two lines track " +
+              "closely when a week reconciles; a visible gap is that week's variance.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'First-time password setup no longer loops',
+            body:
+              "Setting your password on first sign-in now completes properly instead " +
+              "of asking again on the next sign-in.",
+            details: [
+              "The 'must change password' flag was never cleared after a successful first-time setup, so every subsequent sign-in demanded a new password again.",
+            ],
+          },
+          {
+            title: 'Amounts typed with a comma decimal are read correctly',
+            body:
+              "Typing an amount like 1.234,56 into search-by-amount no longer reads " +
+              "it 100 times too large.",
+            details: [
+              "South African formats (1 234,56 and 1.234,56) and plain formats (1234.56) are all recognised; the last separator typed is treated as the decimal mark.",
+            ],
+          },
+          {
+            title: 'Site-to-head-office syncing is faster and more honest',
+            body:
+              "Sites no longer rewrite every record on each 30-minute sync (the hub " +
+              "now pulls only what changed), updates made during a sync window are " +
+              "no longer missed, and a sync where one dataset fails is reported as " +
+              "partial instead of silently logged as OK.",
+            details: [
+              "Unchanged records are skipped instead of rewritten, so head office stops re-downloading the entire customer book every half hour.",
+              "The incremental window is stamped from when a sync starts (with a safety margin), so an update made mid-sync is picked up by the next one.",
+              "Partial syncs show amber in the Hub Sync Log with the failing dataset named; scheduled imports run one at a time and failures are recorded in Job Runs and can raise alerts.",
+              "Hub Aged Debtors decides per branch whether to use detailed open-item data or the snapshot, so one un-synced branch no longer affects the others.",
+            ],
+          },
+          {
+            title: 'Very large depots sync reliably',
+            body:
+              "Branches with more than ~32,000 stock items no longer fail their " +
+              "inventory sync to head office.",
+            details: [
+              "The previous approach hit a database parameter limit at ~32,000 items, failing the whole sync every cycle so the branch's data went stale.",
+            ],
+          },
+          {
+            title: 'Keyboard shortcut collision',
+            body:
+              "Ctrl+K opened two overlays at once. It now opens only the page-jump " +
+              "command palette; the hidden console moved to Ctrl+Shift+K — and it " +
+              "now answers back whatever you type.",
+            details: [
+              "Ctrl+K: fuzzy page-jump across every page you have permission to open, grouped like the sidebar.",
+              "Ctrl+Shift+K: the quiet-word console — it knows a few words now, and unknown words get a reply instead of silence.",
+            ],
+          },
+          {
+            title: 'Fresh installations start correctly',
+            body:
+              "A brand-new installation could fail on its very first start before " +
+              "the database existed. New installs now boot cleanly.",
+            details: [
+              "Existing sites were never affected — the issue only occurred when the application started against a completely empty database.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'SECURITY',
+        heading: 'Security',
+        items: [
+          {
+            title: 'Hardened Sage query validation',
+            body:
+              "Custom Sage query overrides are validated with a stricter read-only " +
+              "check that can't be bypassed through comments or quoted text, with a " +
+              "wider list of blocked commands.",
+            details: [
+              "The validator now understands quoted text and comments, so a forbidden command can't be smuggled past it inside a string.",
+              "Blocked keywords now include data-export and server-configuration commands in addition to writes; stored-procedure calls are rejected outright.",
+              "Legitimate queries that use reserved words as column aliases still validate correctly.",
+            ],
+          },
+          {
+            title: 'Tighter permission checks',
+            body:
+              "Several report and rule-management endpoints that previously only " +
+              "required sign-in now enforce the same permissions as the pages that " +
+              "use them.",
+            details: [
+              "Report data endpoints now require the same Reports permission as their export buttons.",
+              "Auto-flag rule testing and editing requires the manage-rules permission.",
+              "The head-office commission bundle download aligns with the Monthly Reports permission.",
+            ],
+          },
+          {
+            title: 'Safer service-to-service authentication',
+            body:
+              "Internal reporting and backup tokens are compared in constant time, " +
+              "and the backup configuration export now defaults to redacting secrets " +
+              "unless explicitly configured otherwise.",
+            details: [
+              "Constant-time comparison prevents an attacker from recovering a token byte-by-byte from response timing.",
+              "Exporting the full unredacted configuration now requires an explicit opt-in setting, instead of depending on an environment flag being set.",
+            ],
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-09': {
     product: 'Cardoso App',
     title: 'Product Update',
