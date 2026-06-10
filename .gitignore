@@ -194,3 +194,8 @@ scripts/probe-hub-backup.mjs
 
 # Generated release-note PDFs (the .md source IS tracked).
 docs/release-notes/*.pdf
+
+# Playwright e2e artifacts + scratch DB
+test-results/
+playwright-report/
+database/e2e-cardoso.db*

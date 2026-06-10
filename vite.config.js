@@ -1,5 +1,6 @@
 import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createRequire } from 'node:module'
@@ -10,6 +11,11 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 export default defineConfig({
+  test: {
+    // e2e/ holds Playwright specs (run via `npm run test:e2e`), which import
+    // @playwright/test and would crash under vitest's default *.spec.js glob.
+    exclude: [...configDefaults.exclude, 'e2e/**'],
+  },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
