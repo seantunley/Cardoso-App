@@ -604,6 +604,11 @@ async function syncSite(site) {
           upsertAr.run(site.id, r.customer_code, r.reporting_account || r.customer_code || null, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
         }
       })();
+      // Mark this site's AR open-item sync as COMPLETED — even when it returned
+      // zero open items — so Aged Debtors ages it from the (now-empty) ledger
+      // instead of falling back to its possibly-stale hub_records snapshot (SYNC-5).
+      db.prepare(`INSERT INTO hub_debtor_ar_sync (site_id, synced_at) VALUES (?, now_local())
+        ON CONFLICT(site_id) DO UPDATE SET synced_at = excluded.synced_at`).run(site.id);
     } catch (arErr) {
       console.log(`[hub-etl] Debtor AR open-items sync skipped for ${site.id}: ${arErr.message}`);
     }
