@@ -128,9 +128,19 @@ export function parseBalanceDate(value) {
   return parsed;
 }
 
+// Calendar-day difference (today - date) computed from UTC-normalised date
+// components, so it's exact across DST boundaries. Subtracting two local-midnight
+// instants and dividing by 86,400,000 is wrong on a spring-forward/fall-back day
+// (the interval is 23h/25h), which Math.floor would round to the previous day —
+// shifting the bucket / lastPurchaseDays filters (UI-2). Exported for testing.
+export function calendarDayAge(date, today = new Date()) {
+  const a = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate());
+  const b = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.round((a - b) / 86400000);
+}
+
 export function getBalanceInvoiceAges(record) {
   const today = new Date();
-  today.setHours(0, 0, 0, 0);
   return [1, 2, 3, 4, 5]
     .filter((index) => {
       const amt = record?.[`last_unpaid_invoice_${index}_amount`];
@@ -138,7 +148,7 @@ export function getBalanceInvoiceAges(record) {
     })
     .map((index) => parseBalanceDate(record?.[`last_unpaid_invoice_${index}_date`]))
     .filter(Boolean)
-    .map((date) => Math.floor((today - date) / 86400000))
+    .map((date) => calendarDayAge(date, today))
     .filter((days) => Number.isFinite(days) && days >= 0);
 }
 
@@ -948,7 +958,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           if (lastPurchaseDays > 0) {
             const dt = parseBalanceDate(row.LastInvoiceDate ?? row.last_invoice_date ?? row.last_unpaid_invoice_1_date);
             if (!dt) return false;
-            const days = Math.floor((today - dt) / 86400000);
+            const days = calendarDayAge(dt, today);
             if (days < lastPurchaseDays) return false;
           }
           // Dormant — derived from analyseInvoiceCredit using the active
