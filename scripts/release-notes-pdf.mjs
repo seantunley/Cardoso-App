@@ -24,9 +24,12 @@ const RELEASES = {
       "for all branches consolidated, or narrowed to a single branch, and the " +
       "dashboard's sales and inventory highlights now work at head office. It also " +
       "adds at-a-glance dashboard tiles, a daily sales report, a new customers-by-" +
-      "sales view, clearer charts, on-screen help, and several accuracy and " +
-      "permission fixes. Every figure continues to be drawn from, and reconcile " +
-      "to, Sage.",
+      "sales view, and a commission monthly bundle download. Insight cards now " +
+      "deep-link directly to the relevant report tabs, and the sidebar opens to " +
+      "your first accessible group by default for faster navigation. The Sales " +
+      "Commission module defaults VAT to 15%, saving a manual step each month. " +
+      "On-screen help, clearer charts, and several accuracy and permission fixes " +
+      "round out the release. Every figure is drawn from, and reconciles to, Sage.",
     sections: [
       {
         label: 'NEW',
@@ -86,12 +89,33 @@ const RELEASES = {
               "The Customer area now uses the same tabbed layout as Inventory (Record trends / By sales), with the filter in a consistent place.",
             ],
           },
+          {
+            title: 'Commission monthly bundle download',
+            body:
+              "The head-office hub now lets you download the current month's " +
+              "commission bundle in one click — all branches' PDF reports, zipped " +
+              "and ready to distribute.",
+          },
         ],
       },
       {
         label: 'IMPROVED',
         heading: 'Improvements',
         items: [
+          {
+            title: 'Insights cards deep-link to the correct report tab',
+            body:
+              "Clicking an Insights card now navigates directly to the relevant " +
+              "tab in the associated report — no extra steps to reach the data " +
+              "behind an alert.",
+          },
+          {
+            title: 'Sidebar opens to your first accessible group by default',
+            body:
+              "The sidebar now opens fully expanded with only the first group you " +
+              "have access to shown, so the most relevant navigation is visible " +
+              "the moment you open any page.",
+          },
           {
             title: 'Aged Creditors - filter by payment history',
             body:
@@ -142,6 +166,13 @@ const RELEASES = {
               "Consistent 'R' prefix on every figure and the totals row, on screen and in exports.",
             ],
           },
+          {
+            title: 'Sales Commission VAT defaults to 15%',
+            body:
+              "When running a Sales Commission report the VAT rate now defaults " +
+              "to 15% — the standard South African rate — so it no longer needs " +
+              "to be entered manually each month.",
+          },
         ],
       },
       {
@@ -184,6 +215,20 @@ const RELEASES = {
             details: [
               "Previously a failed run could still stamp a 'last synced' time, making stale data look fresh; the sync now surfaces the error to the screen and to the scheduled-job status.",
             ],
+          },
+          {
+            title: 'Commission bundle archive timestamps corrected',
+            body:
+              "Commission bundle archives are now stamped with the correct creation " +
+              "time, so the hub shows the right date and time for each month's " +
+              "bundled report.",
+          },
+          {
+            title: 'BAT invoice reconciliation and local timestamps',
+            body:
+              "The BAT Cardoso-invoice matching query now works reliably across all " +
+              "server configurations, and all BAT date and time values reflect local " +
+              "South African time (UTC+2) rather than UTC.",
           },
         ],
       },
