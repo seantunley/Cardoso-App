@@ -131,6 +131,10 @@ async function syncSite(site) {
   const startedAt = new Date().toISOString();
   let recordsFetched = 0;
   let syncError = null;
+  // True once the health check confirms the reporting endpoint answers. Lets the
+  // catch tell a reachability failure (health check / TCP) apart from a downstream
+  // data-pull timeout, so only genuine unreachability flips the site Offline.
+  let reachable = false;
 
   try {
     const controller = new AbortController();
@@ -141,6 +145,7 @@ async function syncSite(site) {
     const healthRes = await fetch(`${site.url}/api/reporting/health`, { headers, signal: controller.signal });
     clearTimeout(timeout);
     if (!healthRes.ok) throw new Error(`Health check failed: ${healthRes.status}`);
+    reachable = true; // reporting endpoint answered — failures below are data-pull, not reachability
 
     // KPIs
     const ctrl2 = new AbortController();
@@ -870,17 +875,26 @@ async function syncSite(site) {
     // helper just returns err.message verbatim, so this is safe to use as
     // a single funnel.
     syncError = describeFetchError(err, site.url);
-    // A failed/slow data pull is a freshness problem, NOT a reachability one.
-    // Record it on the Accpac freshness fields (shown in the tile footer) and
-    // leave hub_sites.status to the health-ping — otherwise a single slow sync
-    // flips a reachable, pingable site to Offline (the online/offline flip-flop).
-    db.prepare(`UPDATE hub_sites SET last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
+    const raw = String(err?.message || err);
+    const isConnError = /fetch failed|ECONNREFUSED|ENOTFOUND|ECONNRESET|EHOSTUNREACH|ENETUNREACH/i.test(raw);
+    // Only flip the site Offline for genuine UNREACHABILITY: the health check
+    // itself failed (we never confirmed the reporting endpoint is up), or a
+    // connection-level error dropped the link mid-sync. A downstream data-pull
+    // TIMEOUT (or an HTTP/SQLite error) means the site is reachable but slow or
+    // erroring — a freshness problem, not offline — so leave hub_sites.status to
+    // the health-ping (that was the flip-flop). Distinguishing these also stops a
+    // site that drops just after a ping from rendering online for up to the
+    // 15-minute ping interval despite this sync having proven it unreachable.
+    if (!reachable || isConnError) {
+      db.prepare(`UPDATE hub_sites SET status='error', last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
+    } else {
+      db.prepare(`UPDATE hub_sites SET last_accpac_status='error', last_accpac_error=? WHERE id=?`).run(syncError, site.id);
+    }
 
     // Verbose, plain-English log so an operator can triage from the System
     // Log alone without source-diving. Default fetch errors ("fetch failed",
     // "This operation was aborted") are too cryptic — they don't say which
     // site, which fetch, or what to do about it.
-    const raw = String(err?.message || err);
     const siteLabel = site.name || site.slug;
     let friendlyMsg;
     if (/aborted/i.test(raw)) {
