@@ -21,6 +21,11 @@ describe('parseBalanceDate (UI-2)', () => {
     expect(parseBalanceDate('1-6-2026').getTime()).toBe(new Date(2026, 5, 1).getTime());
   });
 
+  it('parses YYYY-MM-DD (date-only ISO) at LOCAL midnight, not UTC', () => {
+    expect(parseBalanceDate('2026-06-10').getTime()).toBe(new Date(2026, 5, 10).getTime());
+    expect(parseBalanceDate('2026/6/1').getTime()).toBe(new Date(2026, 5, 1).getTime());
+  });
+
   it('returns null for empty / unparseable input', () => {
     expect(parseBalanceDate('')).toBeNull();
     expect(parseBalanceDate(null)).toBeNull();

@@ -111,6 +111,16 @@ export function parseBalanceDate(value) {
     return new Date(Number(dmy[3]), Number(dmy[2]) - 1, Number(dmy[1]));
   }
 
+  // YYYY-MM-DD / YYYY/M/D — handle explicitly at LOCAL midnight. The fallback
+  // below (new Date(input)) parses a date-only ISO string as UTC midnight, which
+  // on a host WEST of UTC is the previous local evening; the setHours() there
+  // would then shift it to the previous local day, making same-day ISO invoices
+  // read as 1 day old (UI-2).
+  const ymd = input.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
+  if (ymd) {
+    return new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]));
+  }
+
   const parsed = new Date(input);
   if (Number.isNaN(parsed.getTime())) return null;
   // Normalise an arbitrary parsed value to local midnight of its local day.
