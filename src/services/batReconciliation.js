@@ -217,12 +217,16 @@ export async function resetSagePool() {
   poolConfigKey = null;
 }
 
-// Grace period before a stale-marked pool is actually closed, so in-flight
-// queries on it can drain first.
-const POOL_DRAIN_MS = 30_000;
+// Extra margin added on top of the pool's request timeout before a stale-marked
+// pool is actually closed. The drain must be at least the request timeout so a
+// slow-but-still-valid in-flight query (allowed up to requestTimeout) finishes
+// or hits its own deadline before the pool is torn down — closing earlier would
+// abort it mid-flight. Fallback when the config is unreadable.
+const POOL_DRAIN_GRACE_MS = 5_000;
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 
 // Drop the cached pool so the next getSagePool() opens a FRESH one, but DON'T
-// close it synchronously — close it after a grace period so any BAT query
+// close it synchronously — close it after a drain window so any BAT query
 // mid-flight on it can finish. Used by the health probe on failure:
 // resetSagePool()'s immediate pool.close() would abort whatever was mid-query
 // (SYNC-7). A genuinely-dead pool's in-flight queries are already failing, so the
@@ -230,7 +234,11 @@ const POOL_DRAIN_MS = 30_000;
 function markSagePoolStale() {
   if (pool) {
     const old = pool;
-    const t = setTimeout(() => { old.close().catch(() => {}); }, POOL_DRAIN_MS);
+    // Drain ≥ the configured request timeout (+ margin) so a slow valid query
+    // isn't killed before its own deadline. Derived from the pool's own config
+    // so it tracks any requestTimeout change.
+    const requestTimeout = Number(old.config?.requestTimeout) || DEFAULT_REQUEST_TIMEOUT_MS;
+    const t = setTimeout(() => { old.close().catch(() => {}); }, requestTimeout + POOL_DRAIN_GRACE_MS);
     if (t.unref) t.unref(); // don't keep the process alive just for the close
   }
   pool = null;
