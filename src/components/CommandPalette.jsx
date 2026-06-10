@@ -12,7 +12,9 @@ export default function CommandPalette({ open, onOpenChange, items, onSelect }) 
   // in an input/textarea/contenteditable so it doesn't hijack those.
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && (e.key === "k" || e.key === "K")) {
+      // Plain Ctrl/Cmd+K only — Ctrl+Shift+K belongs to the easter-egg console
+      // (CardosoEasterEgg.jsx); without the shift guard both opened at once.
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && (e.key === "k" || e.key === "K")) {
         const t = e.target;
         const tag = t?.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || t?.isContentEditable) return;

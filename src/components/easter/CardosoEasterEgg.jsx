@@ -39,7 +39,10 @@ export default function CardosoEasterEgg() {
         target?.isContentEditable;
       if (isEditable) return;
 
-      if ((event.ctrlKey || event.metaKey) && event.code === "KeyK") {
+      // Ctrl+SHIFT+K — plain Ctrl+K belongs to the navigation command palette
+      // (src/components/CommandPalette.jsx); both used to bind Ctrl+K and
+      // opened stacked on top of each other.
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.code === "KeyK") {
         event.preventDefault();
         setCommandOpen(true);
         setCommandValue("");
