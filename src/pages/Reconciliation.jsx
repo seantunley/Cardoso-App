@@ -324,6 +324,11 @@ export default function Reconciliation() {
   // open, null otherwise.
   const [unmarkZeroTarget, setUnmarkZeroTarget] = useState(null);
   const [unmarkZeroBusy, setUnmarkZeroBusy] = useState(false);
+  // Orphan-extraction prune picker. `orphanReview` is { rows: [...] } when the
+  // dialog is open, null otherwise; `orphanSelected` is the Set of ticked ids.
+  const [orphanReview, setOrphanReview] = useState(null);
+  const [orphanSelected, setOrphanSelected] = useState(() => new Set());
+  const [orphanBusy, setOrphanBusy] = useState(false);
   // Page-level viewing year — drives which reconciliations show up in the
   // archive list, the per-week comparison, and (eventually) the dashboard
   // summary tiles. Persisted in localStorage so a page reload doesn't reset
@@ -790,36 +795,56 @@ export default function Reconciliation() {
     }
   };
 
-  // Remove orphan extraction rows (order_number not in BAT's Overview pivot) for
-  // this recon — clears the integrity I5 drift. Admin-only on the server; a
-  // non-admin gets a clear 403 toast. Re-loads the recon so the banner updates.
+  // Open the orphan-extraction prune picker: fetch the orphan rows (order_number
+  // not in BAT's Overview pivot) so the admin can tick exactly which to delete.
+  // We DON'T auto-classify — a retained row from another branch's upload can be in
+  // any OCR status, so the operator decides. Admin-only on the server (403 toast).
   const handlePruneOrphans = async () => {
     if (!selected) return;
-    if (!window.confirm(
-      'Remove the STALE orphan extraction rows from this reconciliation?\n\n'
-      + 'Only rows with NO successfully-extracted invoice (status not “found”, and not in '
-      + 'BAT’s Overview pivot) are deleted. Rows with a real OCR/manual invoice — e.g. retained '
-      + 'rows from another branch’s upload in the same week — are kept. The POD PDFs are not affected.'
-    )) return;
+    try {
+      const r = await fetch(`/api/bat/reconciliation/${selected.id}/orphan-extractions`, { credentials: 'include' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      if (!d.orphans || d.orphans.length === 0) {
+        toast.message('No orphan extraction rows to review.');
+        return;
+      }
+      setOrphanSelected(new Set());
+      setOrphanReview({ rows: d.orphans });
+    } catch (e) {
+      toast.error(`Could not load orphan rows: ${e.message}`);
+    }
+  };
+
+  const toggleOrphan = (rowId) => {
+    setOrphanSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) next.delete(rowId); else next.add(rowId);
+      return next;
+    });
+  };
+
+  const closeOrphanReview = () => { setOrphanReview(null); setOrphanSelected(new Set()); };
+
+  const confirmPruneOrphans = async () => {
+    if (!selected || orphanSelected.size === 0 || orphanBusy) return;
+    setOrphanBusy(true);
     try {
       const r = await fetch(`/api/bat/reconciliation/${selected.id}/prune-orphan-extractions`, {
         method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(orphanSelected) }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
-      const pruned = d.pruned || 0;
-      const retained = (d.retained || []).length;
-      if (pruned === 0) {
-        toast.message(retained > 0
-          ? `No stale rows to prune. ${retained} orphan row${retained === 1 ? '' : 's'} kept — they have OCR/manual data (likely another branch’s upload).`
-          : 'No orphan rows to prune.');
-      } else {
-        toast.success(`Pruned ${pruned} stale orphan row${pruned === 1 ? '' : 's'}.`
-          + (retained > 0 ? ` Kept ${retained} with OCR/manual data (another branch).` : ''));
-      }
+      toast.success(`Deleted ${d.pruned} orphan extraction row${d.pruned === 1 ? '' : 's'}.`
+        + (d.refused?.length ? ` (${d.refused.length} no longer orphaned, skipped.)` : ''));
+      closeOrphanReview();
       loadReconciliation(selected.id);
     } catch (e) {
-      toast.error(`Failed to prune orphan rows: ${e.message}`);
+      toast.error(`Failed to delete orphan rows: ${e.message}`);
+    } finally {
+      setOrphanBusy(false);
     }
   };
 
@@ -1895,9 +1920,9 @@ export default function Reconciliation() {
                       onClick={handlePruneOrphans}
                       className="mt-3 px-3 py-1.5 font-mono text-[10px] uppercase tracking-[0.2em] border transition-colors hover:bg-destructive/10"
                       style={{ borderColor: 'hsl(var(--destructive))', color: 'hsl(var(--destructive))', borderRadius: '8px' }}
-                      title="Delete the stale extraction rows whose order_number isn't in BAT's Overview pivot (admin only)"
+                      title="Review the extraction rows whose order_number isn't in BAT's Overview pivot, and pick which to delete (admin only)"
                     >
-                      Prune orphan extraction rows
+                      Review &amp; prune orphan rows
                     </button>
                   )}
                   <div className="font-mono text-[9px] uppercase tracking-[0.2em] text-muted-foreground mt-3">
@@ -1987,6 +2012,82 @@ export default function Reconciliation() {
                 handleUploadComplete(recon, backfilled);
               }}
             />
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Orphan-extraction prune picker — admin ticks exactly which orphan rows to
+          delete. No auto-classification: a retained row from another branch's
+          upload can be in any OCR status, so the operator decides. */}
+      <Dialog open={!!orphanReview} onOpenChange={(v) => { if (!v) closeOrphanReview(); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Review &amp; prune orphan extraction rows</DialogTitle>
+            <DialogDescription>
+              These extraction rows have an order number that isn’t in BAT’s Overview pivot for this
+              recon. Tick the <strong>stale</strong> rows (typically a prior upload, no longer claimed)
+              to delete them. <strong>Leave</strong> any row that’s a valid POD from another branch’s
+              upload in the same week — those can still be pending/awaiting OCR. The POD PDFs are not affected.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[50vh] overflow-auto border border-border rounded-md">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-muted">
+                <tr>
+                  <th className="px-2 py-1.5 w-8"></th>
+                  <th className="px-2 py-1.5 text-left">Order #</th>
+                  <th className="px-2 py-1.5 text-left">OCR status</th>
+                  <th className="px-2 py-1.5 text-right">Amount</th>
+                  <th className="px-2 py-1.5 text-left">POD</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orphanReview?.rows.map((o) => (
+                  <tr
+                    key={o.id}
+                    className="border-t border-border hover:bg-muted/40 cursor-pointer"
+                    onClick={() => toggleOrphan(o.id)}
+                  >
+                    <td className="px-2 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        checked={orphanSelected.has(o.id)}
+                        onChange={() => toggleOrphan(o.id)}
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                    </td>
+                    <td className="px-2 py-1.5 font-mono">{o.order_number}</td>
+                    <td className="px-2 py-1.5">{o.extraction_status || '—'}</td>
+                    <td className="px-2 py-1.5 text-right tabular-nums">R {(Number(o.order_amount) || 0).toFixed(2)}</td>
+                    <td className="px-2 py-1.5">
+                      {o.pdf_url
+                        ? <a href={o.pdf_url} target="_blank" rel="noreferrer" className="text-primary underline" onClick={(e) => e.stopPropagation()}>view</a>
+                        : '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="flex items-center justify-between mt-3">
+            <span className="text-xs text-muted-foreground">
+              {orphanSelected.size} of {orphanReview?.rows.length || 0} selected
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={closeOrphanReview}
+                className="px-3 py-1.5 text-xs border border-border rounded-md hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmPruneOrphans}
+                disabled={orphanSelected.size === 0 || orphanBusy}
+                className="px-3 py-1.5 text-xs rounded-md bg-destructive text-destructive-foreground disabled:opacity-50 transition-opacity"
+              >
+                {orphanBusy ? 'Deleting…' : `Delete selected (${orphanSelected.size})`}
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

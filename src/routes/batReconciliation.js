@@ -643,59 +643,75 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     }
   });
 
-  // Prune orphan extractions — bat_invoice_extractions rows whose order_number is
-  // NOT in this recon's bat_overview_orders (the integrity I5 failure). These are
-  // stale rows from a prior upload: the Overview re-upload only clean-slates
-  // bat_overview_orders, never the extractions, so re-uploading can't clear them.
-  // Admin-only + audited. The orphans are returned so the UI can confirm exactly
-  // what was removed; the caller re-fetches the recon to refresh the banner.
-  router.post('/api/bat/reconciliation/:id/prune-orphan-extractions', ...gate, requireAdmin, (req, res) => {
+  // Orphan extractions = bat_invoice_extractions rows whose order_number is NOT in
+  // this recon's CURRENT bat_overview_orders (the integrity I5 failure). The
+  // Overview re-upload clean-slates bat_overview_orders but never the extractions,
+  // so re-uploading can't clear stale rows. CAUTION: on a multi-branch recon
+  // (e.g. Welkom + JHB in the same week) the latest upload replaces
+  // bat_overview_orders while the OTHER branch's extraction rows are intentionally
+  // retained — and those legitimately show as orphans here, in ANY OCR status
+  // (a freshly-uploaded second-branch POD may still be pending/not_found/failed,
+  // awaiting retry). No field on the row distinguishes "stale" from "valid other
+  // branch", so we DON'T guess: the admin reviews the list and ticks exactly which
+  // rows to delete. This GET feeds that picker.
+  const orphanExtractionsSql = `
+    SELECT e.id, e.order_number, e.order_amount, e.pdf_url, e.extraction_status
+    FROM bat_invoice_extractions e
+    WHERE e.reconciliation_id = ?
+      AND e.order_number IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM bat_overview_orders o
+        WHERE o.reconciliation_id = e.reconciliation_id AND o.order_number = e.order_number
+      )`;
+
+  router.get('/api/bat/reconciliation/:id/orphan-extractions', ...gate, requireAdmin, (req, res) => {
     const id = parseInt(req.params.id, 10);
     if (!id) return res.status(400).json({ error: 'invalid id' });
     try {
-      // Every extraction whose order_number isn't in the recon's CURRENT Overview
-      // pivot. CAUTION: on a multi-branch recon (e.g. Welkom + JHB in the same
-      // week) the latest upload REPLACES bat_overview_orders, but extraction rows
-      // from the other branch are intentionally retained with their OCR/manual
-      // corrections — so they legitimately show as orphans here and must NOT be
-      // deleted.
-      const orphans = db.prepare(`
-        SELECT e.id, e.order_number, e.order_amount, e.pdf_url, e.extraction_status
-        FROM bat_invoice_extractions e
-        WHERE e.reconciliation_id = ?
-          AND e.order_number IS NOT NULL
-          AND NOT EXISTS (
-            SELECT 1 FROM bat_overview_orders o
-            WHERE o.reconciliation_id = e.reconciliation_id AND o.order_number = e.order_number
-          )
-      `).all(id);
+      const orphans = db.prepare(`${orphanExtractionsSql} ORDER BY e.order_number`).all(id);
+      res.json({ orphans });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-      // Only prune TRULY STALE rows: those with NO successful OCR/manual invoice.
-      // extraction_status='found' is the single reliable signal of a real invoice
-      // — both OCR success and manualSetInvoice set it. order_amount is NOT
-      // reliable: it's copied from the supplier spreadsheet at insert time, before
-      // OCR, so a stale pending/not_found/failed row routinely carries a nonzero
-      // amount. So a 'found' orphan (a real invoice, e.g. retained from another
-      // branch's upload) is kept; everything else is the stale empty case.
-      const isStale = (o) => o.extraction_status !== 'found';
-      const stale = orphans.filter(isStale);
-      const retained = orphans.filter((o) => !isStale(o));
+  // Delete ONLY the operator-selected ids, after re-validating each is a genuine
+  // orphan for THIS recon — so a stale/hand-crafted request can never delete a
+  // matched row or a row from another recon. Admin-only + audited.
+  router.post('/api/bat/reconciliation/:id/prune-orphan-extractions', ...gate, requireAdmin, (req, res) => {
+    const id = parseInt(req.params.id, 10);
+    if (!id) return res.status(400).json({ error: 'invalid id' });
+    const requestedIds = Array.isArray(req.body?.ids)
+      ? [...new Set(req.body.ids.map((x) => parseInt(x, 10)).filter((n) => Number.isInteger(n) && n > 0))]
+      : null;
+    if (!requestedIds || requestedIds.length === 0) {
+      return res.status(400).json({ error: 'No extraction ids supplied to prune.' });
+    }
+    try {
+      const orphanIds = new Set(db.prepare(orphanExtractionsSql).all(id).map((r) => r.id));
+      const toDelete = requestedIds.filter((x) => orphanIds.has(x));
+      const refused = requestedIds.filter((x) => !orphanIds.has(x));
 
-      if (stale.length === 0) {
-        return res.json({ ok: true, pruned: 0, stale: [], retained });
+      if (toDelete.length === 0) {
+        return res.status(400).json({
+          error: 'None of the selected rows are orphan extractions for this reconciliation (they may have been re-matched or already removed).',
+          refused,
+        });
       }
 
-      const ids = stale.map((o) => o.id);
-      const placeholders = ids.map(() => '?').join(',');
-      const info = db.prepare(`DELETE FROM bat_invoice_extractions WHERE id IN (${placeholders})`).run(...ids);
+      const placeholders = toDelete.map(() => '?').join(',');
+      const rows = db.prepare(
+        `SELECT id, order_number, order_amount, extraction_status FROM bat_invoice_extractions WHERE id IN (${placeholders})`
+      ).all(...toDelete);
+      const info = db.prepare(`DELETE FROM bat_invoice_extractions WHERE id IN (${placeholders})`).run(...toDelete);
 
       logAudit({
         req, action: 'bat_prune_orphan_extractions', resourceType: 'system',
         resourceId: id, resourceName: `Reconciliation ${id}`,
-        details: `Pruned ${info.changes} STALE orphan extraction(s) (no OCR/manual amount, not in Overview pivot): ${stale.map((o) => `${o.order_number}#${o.id}`).join('; ')}. Retained ${retained.length} orphan(s) with OCR/manual data (likely another branch's upload).`,
+        details: `Operator-selected prune of ${info.changes} orphan extraction(s): ${rows.map((o) => `${o.order_number}#${o.id} [${o.extraction_status || 'no-status'}]`).join('; ')}.${refused.length ? ` Refused ${refused.length} non-orphan id(s): ${refused.join(', ')}.` : ''}`,
       });
 
-      res.json({ ok: true, pruned: info.changes, stale, retained });
+      res.json({ ok: true, pruned: info.changes, deleted: rows, refused });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
