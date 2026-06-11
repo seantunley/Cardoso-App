@@ -233,6 +233,25 @@ define({
 });
 
 define({
+  key: 'creditor.payment_capture_meta',
+  label: 'Creditors — payment-capture recency',
+  purpose: 'Newest vendor-payment activity in each capture stage: the cashbook (any vendor-allocated entry, posted or not) and AP (any payment transaction). Drives the "payments captured up to DATE — anything paid since is not in Sage yet" line on Creditor Balances, so the operator can see how far behind capture is.',
+  pool: 'bat_sage',
+  tables: ['CBBTSD', 'CBBTHD', 'APVEN', 'APTCR'],
+  params: [],
+  requiredColumns: ['last_cb_capture_int', 'last_ap_payment_int'],
+  // Meta query — no operator override store yet; the default is the contract.
+  getOverride: () => null,
+  defaultSql: `
+  SELECT
+    (SELECT MAX(h.[DATE]) FROM CBBTSD s
+       JOIN CBBTHD h ON h.BATCHID = s.BATCHID AND h.ENTRYNO = s.ENTRYNO
+       JOIN APVEN v ON LTRIM(RTRIM(v.VENDORID)) = LTRIM(RTRIM(s.IDCUST))) AS last_cb_capture_int,
+    (SELECT MAX(DATERMIT) FROM APTCR) AS last_ap_payment_int
+`,
+});
+
+define({
   key: 'creditor.ap_payment',
   label: 'Creditors — AP payments',
   purpose: 'Vendor payment (cheque) history within the sync window.',

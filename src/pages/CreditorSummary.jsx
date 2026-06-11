@@ -400,6 +400,28 @@ export default function CreditorSummary() {
             </span>
           </div>
         )}
+        {/* Payment-capture recency — how far behind accounts is on CAPTURING
+            vendor payments. Payments that exist only at the bank are invisible
+            to every Sage table (and therefore to every figure above); this
+            states the cutoff plainly so nobody mistakes "true outstanding"
+            for "includes last week's EFTs". Site mode only. */}
+        {rows.length > 0 && !meta?.hub && meta?.last_cb_payment_capture && (() => {
+          const lastCapture = meta.last_cb_payment_capture > (meta.last_ap_payment_date || "")
+            ? meta.last_cb_payment_capture : (meta.last_ap_payment_date || meta.last_cb_payment_capture);
+          const days = Math.floor((Date.now() - new Date(lastCapture).getTime()) / 86_400_000);
+          if (!Number.isFinite(days) || days < 0) return null;
+          const stale = days > 7;
+          return (
+            <div className="-mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <span className={`h-1.5 w-1.5 rounded-full ${stale ? "bg-red-500" : "bg-muted-foreground"}`} aria-hidden="true" />
+              <span className={stale ? "text-red-300" : "text-muted-foreground"}>
+                Vendor payments captured in the Cashbook up to{" "}
+                <span className="font-medium tabular-nums">{lastCapture}</span>
+                {" "}({days} {days === 1 ? "day" : "days"} ago) — anything paid since is not in Sage yet and cannot reflect in these figures.
+              </span>
+            </div>
+          );
+        })()}
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (

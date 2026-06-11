@@ -80,7 +80,7 @@ export function setSyncSettings({
 
 export function getSyncMeta() {
   try {
-    return db.prepare('SELECT last_synced_at, last_synced_to, rows_synced FROM creditor_sync_meta WHERE id = 1').get() || {};
+    return db.prepare('SELECT last_synced_at, last_synced_to, rows_synced, last_cb_payment_capture, last_ap_payment_date FROM creditor_sync_meta WHERE id = 1').get() || {};
   } catch (err) {
     console.error('[creditor-sync] read meta failed:', err.message);
     return {};
@@ -278,6 +278,24 @@ async function syncUnpostedPayments(pool) {
 // build time: R44.65M across 17 ready-to-post batches). Amounts arrive signed
 // (credit notes negative). Same FULL-refresh lifecycle: rows vanish when the
 // batch posts and the invoice flows through the normal APOBL sync instead.
+// Payment-capture recency — records the newest vendor-payment activity in
+// each capture stage (cashbook + AP) into creditor_sync_meta, so the page can
+// state "payments captured up to DATE". Payments that exist only at the bank
+// are invisible to every Sage table; this line is how the operator knows the
+// figures can't include them yet (live case: capture 42 days behind).
+async function syncCaptureMeta(pool) {
+  const queryText = resolveSageQuery('creditor.payment_capture_meta');
+  const result = await pool.request().query(queryText);
+  const row = (result.recordset || [])[0] || {};
+  db.prepare(`
+    UPDATE creditor_sync_meta SET
+      last_cb_payment_capture = ?,
+      last_ap_payment_date    = ?
+    WHERE id = 1
+  `).run(intToDateStr(row.last_cb_capture_int), intToDateStr(row.last_ap_payment_int));
+  return { last_cb: intToDateStr(row.last_cb_capture_int), last_ap: intToDateStr(row.last_ap_payment_int) };
+}
+
 async function syncUnpostedInvoices(pool) {
   const queryText = resolveSageQuery('creditor.ap_unposted_invoice');
   const result = await pool.request().query(queryText);
@@ -490,6 +508,7 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
     ['ap_payments',       () => syncApPayments(pool, fromInt, toInt)],
     ['unposted_payments', () => syncUnpostedPayments(pool)],
     ['unposted_invoices', () => syncUnpostedInvoices(pool)],
+    ['capture_meta',      () => syncCaptureMeta(pool)],
     ['pos',               () => syncPos(pool, fromInt, toInt)],
   ]) {
     try {
