@@ -172,6 +172,44 @@ export function pruneHubInventory(database, siteId, itemNumbers) {
   prune(itemNumbers);
 }
 
+// ── Yielding staged loads ──────────────────────────────────────────────
+//
+// better-sqlite3 transactions run synchronously ON THE MAIN THREAD — every
+// API request and page in the whole app waits while one runs. Refreshing a
+// big site's full AR/AP open-item set (tens of thousands of documents) in a
+// single transaction with a JS upsert loop froze the entire app for seconds
+// at a time, every ETL cycle (operator report: "the whole application
+// hangs… a lot"; confirmed by the main-thread freeze forensics naming
+// hub-etl ops). The fix is stage-and-swap:
+//   1. chunkedStageLoad: INSERT the rows into a per-connection TEMP stage
+//      table in chunks of STAGE_CHUNK, yielding to the event loop between
+//      chunks so pending requests interleave;
+//   2. the caller then runs ONE small transaction: DELETE the site's live
+//      rows + INSERT … SELECT from the stage — a native bulk copy with no
+//      JS loop inside, milliseconds even for huge sets;
+//   3. and clears its stage rows inside that same transaction.
+// Requests that run between chunks still see the OLD live rows, so the
+// visible update stays exactly as atomic as the old single-transaction
+// version. TEMP tables are per-connection (the app has one), so sites
+// syncing concurrently just interleave rows keyed by site_id.
+const STAGE_CHUNK = 800;
+const yieldEventLoop = () => new Promise((resolve) => setImmediate(resolve));
+
+// Takes the db handle (like pruneHubInventory) so it's unit-testable
+// against an in-memory database.
+export async function chunkedStageLoad(database, { ddl, clearSql, insertSql, rows, mapRow, siteId }) {
+  database.exec(ddl);
+  database.prepare(clearSql).run(siteId);
+  const ins = database.prepare(insertSql);
+  const insertChunk = database.transaction((chunk) => {
+    for (const r of chunk) ins.run(...mapRow(r));
+  });
+  for (let i = 0; i < rows.length; i += STAGE_CHUNK) {
+    insertChunk(rows.slice(i, i + STAGE_CHUNK));
+    if (i + STAGE_CHUNK < rows.length) await yieldEventLoop();
+  }
+}
+
 // --- ETL function ---
 async function syncSite(site) {
   const startedAt = new Date().toISOString();
@@ -646,23 +684,34 @@ async function syncSite(site) {
         arOffset += consumed;
         if (!nextArPromise) break;
       }
-      const upsertAr = db.prepare(`
-        INSERT INTO hub_debtor_ar_invoice (site_id, customer_code, reporting_account, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
-        ON CONFLICT(site_id, customer_code, document_number) DO UPDATE SET
-          reporting_account=excluded.reporting_account, document_type=excluded.document_type,
-          document_date=excluded.document_date, due_date=excluded.due_date,
-          original_amount=excluded.original_amount, outstanding_amount=excluded.outstanding_amount,
-          reference=excluded.reference, synced_at=excluded.synced_at
-      `);
+      // Stage-and-swap (see chunkedStageLoad above) — the old version did the
+      // whole set in one transaction with a JS upsert loop, blocking the
+      // entire app for its duration.
+      await chunkedStageLoad(db, {
+        ddl: `CREATE TEMP TABLE IF NOT EXISTS stage_debtor_ar (
+          site_id TEXT, customer_code TEXT, reporting_account TEXT, document_number TEXT,
+          document_type TEXT, document_date TEXT, due_date TEXT,
+          original_amount REAL, outstanding_amount REAL, reference TEXT)`,
+        clearSql: 'DELETE FROM stage_debtor_ar WHERE site_id = ?',
+        insertSql: 'INSERT INTO stage_debtor_ar VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        rows: allArRecords,
+        siteId: site.id,
+        // reporting_account rolls national-account children up to the parent on
+        // the hub (buildAgedDebtorsReport joins/aggregates by it); falls back to
+        // the child code, matching debtorSync + the v093 backfill.
+        mapRow: (r) => [site.id, r.customer_code, r.reporting_account || r.customer_code || null, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null],
+      });
       db.transaction(() => {
         db.prepare('DELETE FROM hub_debtor_ar_invoice WHERE site_id = ?').run(site.id);
-        for (const r of allArRecords) {
-          // reporting_account rolls national-account children up to the parent on
-          // the hub (buildAgedDebtorsReport joins/aggregates by it); falls back to
-          // the child code, matching debtorSync + the v093 backfill.
-          upsertAr.run(site.id, r.customer_code, r.reporting_account || r.customer_code || null, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
-        }
+        // INSERT OR REPLACE keeps the old upsert's last-one-wins behaviour for
+        // feeds that repeat (site_id, customer_code, document_number) in one pull.
+        db.prepare(`
+          INSERT OR REPLACE INTO hub_debtor_ar_invoice
+            (site_id, customer_code, reporting_account, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+          SELECT site_id, customer_code, reporting_account, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, now_local()
+          FROM stage_debtor_ar WHERE site_id = ?
+        `).run(site.id);
+        db.prepare('DELETE FROM stage_debtor_ar WHERE site_id = ?').run(site.id);
       })();
       // Mark this site's AR open-item sync as COMPLETED — even when it returned
       // zero open items — so Aged Debtors ages it from the (now-empty) ledger
@@ -702,20 +751,28 @@ async function syncSite(site) {
         apOffset += consumed;
         if (!nextApPromise) break;
       }
-      const upsertAp = db.prepare(`
-        INSERT INTO hub_creditor_ap_invoice (site_id, vendor_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, now_local())
-        ON CONFLICT(site_id, vendor_code, document_number) DO UPDATE SET
-          document_type=excluded.document_type, document_date=excluded.document_date,
-          due_date=excluded.due_date, original_amount=excluded.original_amount,
-          outstanding_amount=excluded.outstanding_amount, reference=excluded.reference,
-          synced_at=excluded.synced_at
-      `);
+      // Stage-and-swap (see chunkedStageLoad above) — same main-thread-freeze
+      // fix as the AR block.
+      await chunkedStageLoad(db, {
+        ddl: `CREATE TEMP TABLE IF NOT EXISTS stage_creditor_ap (
+          site_id TEXT, vendor_code TEXT, document_number TEXT, document_type TEXT,
+          document_date TEXT, due_date TEXT,
+          original_amount REAL, outstanding_amount REAL, reference TEXT)`,
+        clearSql: 'DELETE FROM stage_creditor_ap WHERE site_id = ?',
+        insertSql: 'INSERT INTO stage_creditor_ap VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        rows: allApRecords,
+        siteId: site.id,
+        mapRow: (r) => [site.id, r.vendor_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null],
+      });
       db.transaction(() => {
         db.prepare('DELETE FROM hub_creditor_ap_invoice WHERE site_id = ?').run(site.id);
-        for (const r of allApRecords) {
-          upsertAp.run(site.id, r.vendor_code, r.document_number, r.document_type || null, r.document_date || null, r.due_date || null, r.original_amount || 0, r.outstanding_amount || 0, r.reference || null);
-        }
+        db.prepare(`
+          INSERT OR REPLACE INTO hub_creditor_ap_invoice
+            (site_id, vendor_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, synced_at)
+          SELECT site_id, vendor_code, document_number, document_type, document_date, due_date, original_amount, outstanding_amount, reference, now_local()
+          FROM stage_creditor_ap WHERE site_id = ?
+        `).run(site.id);
+        db.prepare('DELETE FROM stage_creditor_ap WHERE site_id = ?').run(site.id);
       })();
     } catch (apErr) {
       recordStageFailure('Creditor AP open-items', apErr);
