@@ -13,6 +13,165 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-11': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '11 June 2026',
+    slug: '11-June-2026',
+    intro:
+      "This update (v2026.5.9.3) sharpens the money pages. Creditor Balances " +
+      "now shows each vendor's TRUE position — including invoices and payments " +
+      "still sitting in unposted batches — with a plain-language breakdown and a " +
+      "Cashbook capture warning so you always know how far behind posting is. The " +
+      "credit-risk verdicts on Customer Balances have been rebuilt to be both more " +
+      "accurate and fully explainable. Both balance pages gain in-place detail " +
+      "popups, creditors get a dedicated search page and a printable report, and " +
+      "overnight syncing is more resilient with automatic retries and clear " +
+      "staleness warnings. Every figure continues to be drawn from, and reconcile " +
+      "to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'True creditor position — including unposted batches',
+            body:
+              "Creditor Balances now shows what you ACTUALLY owe each vendor, not " +
+              "just what Sage has finished posting. When accounts are behind on " +
+              "posting batches, the figure is corrected on screen and the maths is " +
+              "spelled out so it always adds up.",
+            details: [
+              "Each vendor's Outstanding is Sage's posted balance PLUS invoices captured in unposted batches (which Sage understates) MINUS payments captured but not yet posted (which Sage overstates).",
+              "A headline line spells out the arithmetic: Total Outstanding + unposted invoices − unposted payments = true outstanding, for the vendors currently shown.",
+              "Affected vendors carry an amber dot; hovering a row shows a breakdown card (posted vs unposted, with the true figure) that follows your cursor.",
+              "A Cashbook capture line states the date vendor payments were last captured and how many days behind that is — turning red past a week — so figures are never mistaken for 'includes last week's payments'.",
+            ],
+          },
+          {
+            title: 'Vendor detail popup and a dedicated Creditor Search',
+            body:
+              "The full vendor picture now opens in a popup, and creditors get " +
+              "their own 'Search the creditors' page that mirrors Customer Search.",
+            details: [
+              "Click a vendor on Creditor Balances — or look one up on the new Creditor Search page — to open a popup with the vendor's receipts, open invoices, payments, and purchase orders. Closing it leaves you exactly where you were.",
+              "Creditor Search opens with a clean overview: vendor count, true outstanding, and unposted-batch totals, plus a last-sync card and a payment-capture status strip.",
+              "Creditor Balances gains a Print / PDF button with the same letterhead as Customer Balances, and the sync controls now sit tidily on the headline row.",
+            ],
+          },
+          {
+            title: 'Open the full customer popup straight from Customer Balances',
+            body:
+              "Clicking a customer on the balances table now opens the same full " +
+              "customer popup you'd get from a search — without leaving the page.",
+            details: [
+              "The popup carries the customer's credit verdict, recent invoices and receipts, and flag actions; closing it returns you to the balances list with your filters intact.",
+              "Hovering a row shows the credit verdict and the reasons behind it in a prominent card that follows your cursor (see Improvements).",
+            ],
+          },
+          {
+            title: 'Show or hide small balances on Customer Balances',
+            body:
+              "A previously fixed 'hide anything under R3' rule is now an option you " +
+              "control.",
+            details: [
+              "A new Minimum balance filter offers Off / R3+ / R10+ / R100+ / R1 000+, so you can surface tiny balances or focus on material ones.",
+              "The choice is part of the page link, so a filtered view can be bookmarked or shared.",
+            ],
+          },
+          {
+            title: 'Creditors at head office',
+            body:
+              "Creditor balances and aged-creditor figures are now available on the " +
+              "head-office (hub) view, per branch, alongside the existing debtor " +
+              "reports.",
+            details: [],
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Credit-risk verdicts — accurate and fully explainable',
+            body:
+              "The credit verdict shown against each customer has been rebuilt so it " +
+              "reflects how the account actually behaves, and so you can always see " +
+              "WHY a verdict was reached.",
+            details: [
+              "Payments now settle invoices by VALUE, oldest first — a small same-day receipt can no longer 'clear' a large invoice.",
+              "Each account is judged against its OWN payment terms (e.g. 7-day vs 30-day) instead of one blanket threshold.",
+              "Prepaid (PP) accounts with any outstanding balance are held — no new credit until they are clear.",
+              "Payment reversals are no longer mistaken for payments, and tiny rounding residues (under R10) no longer trigger a hold.",
+              "Hovering a customer row shows a prominent card with the verdict, its score, the contributing factors, and — when an account is held — the exact offending invoice (number, amount and date).",
+              "Average days-to-pay, exposure limits, flag history and dormant-account detection all continue to work, now fed accurate inputs.",
+            ],
+          },
+          {
+            title: 'Overnight syncs retry themselves, and warn when data is stale',
+            body:
+              "Sites no longer quietly run on yesterday's numbers when an overnight " +
+              "sync misses.",
+            details: [
+              "A failed nightly sync now retries automatically a short time later.",
+              "If data is more than about a day old — for example because a machine was switched off — the app says so plainly instead of silently showing stale figures.",
+            ],
+          },
+          {
+            title: 'Branch shown in front of top customers at head office',
+            body:
+              "On the head-office reporting dashboard, viewing all branches now " +
+              "prefixes each top customer with its branch name — matching the Top " +
+              "Dead Stock card.",
+            details: [],
+          },
+          {
+            title: 'Smoother app during head-office data loads',
+            body:
+              "Large head-office syncs no longer make the interface stutter, and a " +
+              "new safeguard catches the rare freeze.",
+            details: [
+              "Head-office data is now written in small yielding chunks, so the screen stays responsive while a sync runs.",
+              "A background watchdog detects and reports any unexpected freeze, so stability issues surface instead of going unnoticed.",
+            ],
+          },
+          {
+            title: 'Consistent buttons and tidier list pages',
+            body:
+              "Several pages were brought in line with the app's look and feel.",
+            details: [
+              "The Inventory list's Print, Export CSV and Refresh buttons now match the Customer Balances styling.",
+              "Vendor lookup moved off Creditor Balances onto the dedicated Creditor Search page, leaving Balances as a clean overview.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Creditor totals now agree across pages',
+            body:
+              "The 'true outstanding' figure on Creditor Balances now reconciles with " +
+              "the Creditor Search overview — a filter had been quietly excluding part " +
+              "of the total, so the two could disagree.",
+            details: [],
+          },
+          {
+            title: 'Last payment dates and missing payments surfaced',
+            body:
+              "Where vendor payments existed only in the Cashbook (captured but not " +
+              "yet posted), the previous view could show an out-of-date 'last payment'. " +
+              "The true position and the capture-date warning now make this visible " +
+              "rather than misleading.",
+            details: [],
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-10': {
     product: 'Cardoso App',
     title: 'Product Update',
