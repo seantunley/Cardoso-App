@@ -1,4 +1,5 @@
 import { memo } from "react";
+import { useNavigate } from "react-router-dom";
 import FlagDot from "./FlagDot";
 import CreditBadge from "./CreditBadge";
 import {
@@ -17,11 +18,25 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
   row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
 }) {
   const amount = parseAmount(row.outstanding_balance);
+  const navigate = useNavigate();
+  // Drill into the customer lookup popup on Customer Search — the same one
+  // that opens when you type this account into the search box (?lookup= seeds
+  // the trigger there). Guard: clicks on interactive children (flag dot
+  // tooltips, links, buttons) keep their own behaviour.
+  const drill = (e) => {
+    if (!row.customer_number) return;
+    if (e.target.closest("button, a, input, select, textarea, [role='button']")) return;
+    navigate(`/CustomerSearch?lookup=${encodeURIComponent(row.customer_number)}`);
+  };
   return (
     <tr
       ref={measureRef}
       data-index={idx}
-      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
+      onClick={drill}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(e); } }}
+      tabIndex={row.customer_number ? 0 : undefined}
+      title={row.customer_number ? `Open ${row.customer_name || row.customer_number} in Customer Search` : undefined}
+      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
     >
       <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
       <td className="px-2 py-1 pr-3">

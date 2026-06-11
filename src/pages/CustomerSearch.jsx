@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { AlertCircle, Database, Flag, CheckCircle, RefreshCw, FileSearch, Search, X } from "lucide-react";
@@ -515,7 +516,10 @@ export default function CustomerSearch() {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [flagModalOpen, setFlagModalOpen] = useState(false);
   const [selectedFlagColor, setSelectedFlagColor] = useState(null);
-  const [customerNumberToLookup, setCustomerNumberToLookup] = useState("");
+  // Seeded from ?lookup= so Customer Balances rows can drill straight into
+  // the lookup popup - same path as typing the account into the search box.
+  const [searchParams] = useSearchParams();
+  const [customerNumberToLookup, setCustomerNumberToLookup] = useState(() => searchParams.get("lookup") || "");
   const [invoiceModalOpen, setInvoiceModalOpen] = useState(false);
   const [amountModalOpen, setAmountModalOpen] = useState(false);
 
