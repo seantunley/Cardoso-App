@@ -5,7 +5,6 @@
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, RefreshCw, Search } from "lucide-react";
@@ -14,6 +13,7 @@ import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
 import DataTable from "@/components/shared/DataTable";
 import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
+import VendorDetailModal from "@/components/creditors/VendorDetailModal";
 
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
 const AP_TILES = [
@@ -146,7 +146,9 @@ const COLUMNS = [
 
 export default function CreditorSummary() {
   const qc = useQueryClient();
-  const navigate = useNavigate();
+  // Row drill → the full vendor popup, opened IN PLACE on this page
+  // (mirrors the customer popup on Customer Balances).
+  const [drillVendor, setDrillVendor] = useState("");
   const [search, setSearch] = useState("");
   // Debounced copy drives the query (one request per pause, not per keystroke);
   // the input stays bound to `search` for responsiveness.
@@ -453,12 +455,15 @@ export default function CreditorSummary() {
             storageKey={COL_WIDTHS_KEY}
             defaultWidths={COL_DEFAULTS}
             maxHeight="70vh"
-            rowTitle={(r) => `Open ${r.vendor_name || r.vendor_code} in Creditor Search`}
+            rowTitle={(r) => `Open ${r.vendor_name || r.vendor_code} — full vendor popup`}
             // Drill into the vendor detail page (Creditor Search reads ?code=).
-            // Site mode only — Creditor Search doesn't exist on the hub.
-            onRowClick={data?.hub ? undefined : (r) => navigate(`/CreditorSearch?code=${encodeURIComponent(r.vendor_code)}`)}
+            // Site mode only — the vendor drilldown tabs read site-local
+            // creditor_* tables the hub does not carry.
+            onRowClick={data?.hub ? undefined : (r) => setDrillVendor(String(r.vendor_code))}
           />
         )}
+        {/* Row drill target — full vendor popup, in place (close → stay here). */}
+        <VendorDetailModal code={drillVendor} onClose={() => setDrillVendor("")} />
       </div>
     </div>
   );
