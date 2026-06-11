@@ -202,6 +202,37 @@ define({
 });
 
 define({
+  key: 'creditor.ap_unposted_invoice',
+  label: 'Creditors — UNPOSTED AP invoices',
+  purpose: 'Vendor invoices/credit notes captured in AP Invoice Entry whose batch has not been posted — APOBL does not list them yet, so vendor outstanding is UNDERSTATED until posting. The Creditor Balances page adds these on. Amounts are signed: invoices positive, credit notes negative.',
+  pool: 'bat_sage',
+  tables: ['APIBH', 'APIBC'],
+  params: [],
+  requiredColumns: ['vendor_code', 'invoice_number', 'invoice_date_int', 'amount', 'batch_number'],
+  getOverride: readerSql('SELECT ap_unposted_invoice_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  // Verified against live Sage (CARDAT): "unposted" = APIBC.POSTSEQNBR = 0
+  // AND BTCHSTTS <> 4 (not deleted) — same code-agnostic predicate as the
+  // payments query. Sign rule TEXTTRX 3 (credit note) → negative was proven
+  // by reconciling the signed sum against the APIBC batch control totals to
+  // the cent (43,979,930.73 across 18 live unposted batches at build time).
+  // Unknown TEXTTRX values default to positive (debit notes increase debt).
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(h.IDVEND))     AS vendor_code,
+    LTRIM(RTRIM(h.IDINVC))     AS invoice_number,
+    h.TEXTTRX                  AS doc_type,
+    h.DATEINVC                 AS invoice_date_int,
+    h.DATEDUE                  AS due_date_int,
+    CASE WHEN h.TEXTTRX = 3 THEN -h.AMTGROSTOT ELSE h.AMTGROSTOT END AS amount,
+    h.CNTBTCH                  AS batch_number,
+    b.BTCHSTTS                 AS batch_status
+  FROM APIBH h
+  JOIN APIBC b ON b.CNTBTCH = h.CNTBTCH
+  WHERE b.POSTSEQNBR = 0 AND b.BTCHSTTS <> 4
+`,
+});
+
+define({
   key: 'creditor.ap_payment',
   label: 'Creditors — AP payments',
   purpose: 'Vendor payment (cheque) history within the sync window.',

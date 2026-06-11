@@ -124,17 +124,23 @@ const COLUMNS = [
   { key: "last_receipt_date",  label: "Last receipt",  align: "left",  format: fmtDate },
   { key: "last_payment_date",  label: "Last payment",  align: "left",  format: fmtDate },
   { key: "ytd_receipt_count",  label: "YTD receipts",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  // Outstanding is NET of captured-but-unposted Sage payment batches
-  // (operator decision: accounts posts batches late, so the raw APOBL figure
-  // overstates what's owed). Affected vendors get an amber dot; hover shows
-  // the gross figure and how much sits in unposted batches.
-  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v, r) => (
-    Number(r?.unposted_payments) > 0 ? (
-      <span title={`Net of R ${fmtR(r.unposted_payments)} in payment batches captured but not yet posted in Sage (gross outstanding R ${fmtR(r.outstanding_gross)})`}>
+  // Outstanding is the vendor's TRUE position: Sage's posted open items
+  // (APOBL) PLUS invoices sitting in unposted AP batches (Sage understates)
+  // MINUS payments captured but not yet posted (Sage overstates). Affected
+  // vendors get an amber dot; hover shows the exact breakdown.
+  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v, r) => {
+    const inv = Number(r?.unposted_invoices) || 0;
+    const pay = Number(r?.unposted_payments) || 0;
+    if (!inv && !pay) return `R ${fmtR(v)}`;
+    const parts = [`Posted (Sage APOBL): R ${fmtR(r.outstanding_gross)}`];
+    if (inv) parts.push(`+ R ${fmtR(inv)} invoices in unposted AP batches`);
+    if (pay) parts.push(`− R ${fmtR(pay)} payments captured but not yet posted`);
+    return (
+      <span title={parts.join("\n")}>
         R {fmtR(v)} <span className="text-accent" aria-hidden="true">●</span>
       </span>
-    ) : `R ${fmtR(v)}`
-  ) },
+    );
+  } },
 ];
 
 export default function CreditorSummary() {
@@ -203,13 +209,17 @@ export default function CreditorSummary() {
     const buckets = Object.fromEntries(keys.map((k) => [k, 0]));
     const bucket_counts = Object.fromEntries(keys.map((k) => [k, 0]));
     let total = 0;
-    // Unposted-payment netting at TOTAL level only (operator decision): the
-    // buckets keep Sage's true aging distribution — a vendor-level cheque
-    // can't honestly say WHICH bucket it pays — but the headline shows the
-    // net figure alongside. Summed over the same filtered rows as the tiles.
-    let unposted = 0;
+    // Unposted adjustments at TOTAL level only (operator decision): the
+    // buckets keep Sage's true POSTED aging distribution — vendor-level
+    // adjustments can't honestly claim a bucket — but the headline shows the
+    // true net figure alongside: + invoices in unposted batches (Sage
+    // understates), − payments captured but unposted (Sage overstates).
+    // Summed over the same filtered rows as the tiles.
+    let unpostedPay = 0;
+    let unpostedInv = 0;
     for (const r of rows) {
-      unposted += Number(r.unposted_payments) || 0;
+      unpostedPay += Number(r.unposted_payments) || 0;
+      unpostedInv += Number(r.unposted_invoices) || 0;
       const b = r.aging_buckets;
       if (!b) continue;
       for (const k of keys) {
@@ -219,7 +229,12 @@ export default function CreditorSummary() {
         total += v;
       }
     }
-    return { buckets, bucket_counts, total_outstanding: total, unposted_total: unposted, net_total: total - unposted };
+    return {
+      buckets, bucket_counts, total_outstanding: total,
+      unposted_payments_total: unpostedPay,
+      unposted_invoices_total: unpostedInv,
+      net_total: total + unpostedInv - unpostedPay,
+    };
   }, [rows]);
 
   const toggleSort = (key) => {
@@ -358,22 +373,28 @@ export default function CreditorSummary() {
             Outstanding, so no separate outstanding tile below. */}
         {rows.length > 0 && <AgingSummaryTiles aging={apAging} tiles={AP_TILES} showCount={false} />}
         {/* Net-of-unposted line — only while a posting backlog exists. The
-            tiles above keep Sage's true (gross) aging distribution; this line
-            gives the honest net headline (operator decision: net the total,
-            buckets stay pure). Follows the same filters as the tiles. */}
-        {rows.length > 0 && apAging.unposted_total > 0 && (
-          <div className="-mt-3 flex items-center gap-2 text-sm">
+            tiles above keep Sage's true POSTED aging distribution; this line
+            gives the honest net headline (operator decision: adjust the
+            total, buckets stay pure). Follows the same filters as the tiles. */}
+        {rows.length > 0 && (apAging.unposted_invoices_total !== 0 || apAging.unposted_payments_total > 0) && (
+          <div className="-mt-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
             <span className="text-muted-foreground">
-              Less <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_total)}</span> captured
-              in unposted Sage payment batches →
+              {apAging.unposted_invoices_total !== 0 && (
+                <>Plus <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_invoices_total)}</span> invoices in unposted batches</>
+              )}
+              {apAging.unposted_invoices_total !== 0 && apAging.unposted_payments_total > 0 && ", "}
+              {apAging.unposted_payments_total > 0 && (
+                <>less <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_payments_total)}</span> unposted payments</>
+              )}
+              {" →"}
             </span>
             <span className="font-medium tabular-nums text-foreground">
-              net outstanding R {fmtR(apAging.net_total)}
+              true outstanding R {fmtR(apAging.net_total)}
             </span>
             <span
               className="cursor-help text-muted-subtle"
-              title="The aging tiles above show Sage's true aged figures (gross). Cheques captured in AP Payment Entry whose batch hasn't been posted yet can't be assigned to a specific aging bucket, so they're netted off the total here instead. This line disappears once accounts posts the batches."
+              title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. This line disappears once the batches post."
             >
               ⓘ
             </span>

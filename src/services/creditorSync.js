@@ -11,6 +11,7 @@ export const DEFAULT_VENDOR_SQL     = getSageQuery('creditor.vendor').defaultSql
 export const DEFAULT_AP_INVOICE_SQL = getSageQuery('creditor.ap_invoice').defaultSql;
 export const DEFAULT_AP_PAYMENT_SQL = getSageQuery('creditor.ap_payment').defaultSql;
 export const DEFAULT_AP_UNPOSTED_SQL = getSageQuery('creditor.ap_unposted_payment').defaultSql;
+export const DEFAULT_AP_UNPOSTED_INVOICE_SQL = getSageQuery('creditor.ap_unposted_invoice').defaultSql;
 export const DEFAULT_PO_HEADER_SQL  = getSageQuery('creditor.po_header').defaultSql;
 export const DEFAULT_PO_LINE_SQL    = getSageQuery('creditor.po_line').defaultSql;
 
@@ -42,6 +43,7 @@ export function setSyncSettings({
   ap_invoice_sql_override,
   ap_payment_sql_override,
   ap_unposted_sql_override,
+  ap_unposted_invoice_sql_override,
   po_header_sql_override,
   po_line_sql_override,
   history_months,
@@ -54,6 +56,7 @@ export function setSyncSettings({
         ap_invoice_sql_override  = COALESCE(?, ap_invoice_sql_override),
         ap_payment_sql_override  = COALESCE(?, ap_payment_sql_override),
         ap_unposted_sql_override = COALESCE(?, ap_unposted_sql_override),
+        ap_unposted_invoice_sql_override = COALESCE(?, ap_unposted_invoice_sql_override),
         po_header_sql_override   = COALESCE(?, po_header_sql_override),
         po_line_sql_override     = COALESCE(?, po_line_sql_override),
         history_months           = COALESCE(?, history_months)
@@ -63,6 +66,7 @@ export function setSyncSettings({
       ap_invoice_sql_override  ?? null,
       ap_payment_sql_override  ?? null,
       ap_unposted_sql_override ?? null,
+      ap_unposted_invoice_sql_override ?? null,
       po_header_sql_override   ?? null,
       po_line_sql_override     ?? null,
       Number.isFinite(history_months) ? history_months : null,
@@ -268,6 +272,47 @@ async function syncUnpostedPayments(pool) {
   return { rows: rows.length, inserted };
 }
 
+// Unposted AP invoices — the mirror of syncUnpostedPayments: vendor invoices
+// captured in AP Invoice Entry whose batch hasn't posted. APOBL doesn't list
+// them yet, so vendor outstanding is UNDERSTATED until posting (live data at
+// build time: R44.65M across 17 ready-to-post batches). Amounts arrive signed
+// (credit notes negative). Same FULL-refresh lifecycle: rows vanish when the
+// batch posts and the invoice flows through the normal APOBL sync instead.
+async function syncUnpostedInvoices(pool) {
+  const queryText = resolveSageQuery('creditor.ap_unposted_invoice');
+  const result = await pool.request().query(queryText);
+  const rows = result.recordset || [];
+
+  const insert = db.prepare(`
+    INSERT INTO creditor_ap_unposted_invoice (
+      vendor_code, invoice_number, doc_type, invoice_date, due_date,
+      amount, batch_number, batch_status, synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, now_local())
+  `);
+
+  let inserted = 0;
+  const run = db.transaction(() => {
+    db.prepare('DELETE FROM creditor_ap_unposted_invoice').run();
+    for (const r of rows) {
+      if (!r.vendor_code) continue;
+      insert.run(
+        r.vendor_code,
+        r.invoice_number || null,
+        Number(r.doc_type) || null,
+        intToDateStr(r.invoice_date_int),
+        intToDateStr(r.due_date_int),
+        Number(r.amount) || 0,
+        Number(r.batch_number) || null,
+        Number(r.batch_status) || null,
+      );
+      inserted++;
+    }
+  });
+  run();
+  return { rows: rows.length, inserted };
+}
+
 async function syncPos(pool, fromInt, toInt) {
   // Two queries — header then lines. We upsert headers first, look up
   // their local ids, then upsert lines keyed by po_id.
@@ -444,6 +489,7 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
     ['ap_invoices',       () => syncApInvoices(pool)],
     ['ap_payments',       () => syncApPayments(pool, fromInt, toInt)],
     ['unposted_payments', () => syncUnpostedPayments(pool)],
+    ['unposted_invoices', () => syncUnpostedInvoices(pool)],
     ['pos',               () => syncPos(pool, fromInt, toInt)],
   ]) {
     try {
