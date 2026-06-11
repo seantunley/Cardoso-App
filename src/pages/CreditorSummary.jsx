@@ -4,15 +4,18 @@
 //
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
-import { Building2, RefreshCw, Search } from "lucide-react";
+import { Building2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
 import DataTable from "@/components/shared/DataTable";
 import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
+import VendorDetailModal from "@/components/creditors/VendorDetailModal";
+import VendorBatchHoverCard from "@/components/creditors/VendorBatchHoverCard";
+import CreditorPrintableTable from "@/components/creditors/CreditorPrintableTable";
+import { CREDITOR_PRINT_STYLE } from "@/components/creditors/creditorPrintStyle";
 import BranchFilter from "@/components/reports/BranchFilter";
 import { useSearchParamState } from "../hooks/useSearchParamState.js";
 
@@ -127,7 +130,22 @@ const COLUMNS = [
   { key: "last_receipt_date",  label: "Last receipt",  align: "left",  format: fmtDate },
   { key: "last_payment_date",  label: "Last payment",  align: "left",  format: fmtDate },
   { key: "ytd_receipt_count",  label: "YTD receipts",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v) => `R ${fmtR(v)}` },
+  // Outstanding is the vendor's TRUE position: Sage's posted open items
+  // (APOBL) PLUS invoices sitting in unposted AP batches (Sage understates)
+  // MINUS payments captured but not yet posted (Sage overstates). Affected
+  // vendors get an amber dot; hover shows the exact breakdown.
+  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v, r) => {
+    const inv = Number(r?.unposted_invoices) || 0;
+    const pay = Number(r?.unposted_payments) || 0;
+    if (!inv && !pay) return `R ${fmtR(v)}`;
+    // Amber dot flags an adjusted true position; the full posted/unposted
+    // breakdown is in the row's cursor-following hover card (hoverCard prop).
+    return (
+      <span>
+        R {fmtR(v)} <span className="text-accent" aria-hidden="true">●</span>
+      </span>
+    );
+  } },
 ];
 
 export default function CreditorSummary() {
@@ -135,10 +153,11 @@ export default function CreditorSummary() {
   // Hub branch filter — shared `site` URL param, exactly like the hub
   // reports. In site mode it stays "all" and BranchFilter renders nothing.
   const [site] = useSearchParamState("site", "all");
-  const [search, setSearch] = useState("");
-  // Debounced copy drives the query (one request per pause, not per keystroke);
-  // the input stays bound to `search` for responsiveness.
-  const debouncedSearch = useDebouncedValue(search, 250);
+  // Row drill → the full vendor popup, opened IN PLACE on this page
+  // (mirrors the customer popup on Customer Balances).
+  const [drillVendor, setDrillVendor] = useState("");
+  // Vendor search removed from this page — the dedicated Creditor Search page
+  // owns lookup now (operator request); this page is the balances overview.
   const [activeOnly, setActiveOnly] = useState(true);
   const [includeZero, setIncludeZero] = useState(false);
   const [balanceBucket, setBalanceBucket] = useState("all");
@@ -151,8 +170,8 @@ export default function CreditorSummary() {
   const [syncing, setSyncing] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["creditors", debouncedSearch, activeOnly, includeZero, site],
-    queryFn: () => fetchCreditors({ search: debouncedSearch, activeOnly, includeZero, site }),
+    queryKey: ["creditors", activeOnly, includeZero, site],
+    queryFn: () => fetchCreditors({ search: "", activeOnly, includeZero, site }),
     // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
     // keeps the vendor table + AP tiles showing the prior data while the next
     // query loads instead of flashing to empty / R 0.00 on each change (UI-4).
@@ -164,6 +183,22 @@ export default function CreditorSummary() {
     queryKey: ["creditors-sync-meta"],
     queryFn: fetchSyncMeta,
     staleTime: 60_000,
+  });
+
+  // Inject the creditor print stylesheet once (same pattern as Customer
+  // Balances) so the Print / PDF button produces the same letterhead sheet.
+  useEffect(() => {
+    const id = "creditor-print-style";
+    if (!document.getElementById(id)) {
+      const el = document.createElement("style");
+      el.id = id;
+      el.textContent = CREDITOR_PRINT_STYLE;
+      document.head.appendChild(el);
+    }
+  }, []);
+
+  const printDate = new Date().toLocaleString("en-ZA", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 
   const rows = useMemo(() => {
@@ -199,7 +234,24 @@ export default function CreditorSummary() {
     const buckets = Object.fromEntries(keys.map((k) => [k, 0]));
     const bucket_counts = Object.fromEntries(keys.map((k) => [k, 0]));
     let total = 0;
+    // Unposted adjustments at TOTAL level only (operator decision): the
+    // buckets keep Sage's true POSTED aging distribution — vendor-level
+    // adjustments can't honestly claim a bucket — but the headline shows the
+    // true net figure alongside: + invoices in unposted batches (Sage
+    // understates), − payments captured but unposted (Sage overstates).
+    // Summed over the same filtered rows as the tiles.
+    let unpostedPay = 0;
+    let unpostedInv = 0;
+    // Everything here is summed over the SAME filtered rows as the tiles, so
+    // the headline always reconciles with what's on screen:
+    //   visible Total Outstanding (posted buckets) + unposted invoices
+    //   − unposted payments = the headline.
+    // (Operator decision: the headline matches the tiles. Creditor Search's
+    // True Outstanding tile is its own, whole-company figure — a different
+    // scope by design, since this page keeps the paid-history filter.)
     for (const r of rows) {
+      unpostedPay += Number(r.unposted_payments) || 0;
+      unpostedInv += Number(r.unposted_invoices) || 0;
       const b = r.aging_buckets;
       if (!b) continue;
       for (const k of keys) {
@@ -209,7 +261,12 @@ export default function CreditorSummary() {
         total += v;
       }
     }
-    return { buckets, bucket_counts, total_outstanding: total };
+    return {
+      buckets, bucket_counts, total_outstanding: total,
+      unposted_payments_total: unpostedPay,
+      unposted_invoices_total: unpostedInv,
+      net_total: total + unpostedInv - unpostedPay,
+    };
   }, [rows]);
 
   const toggleSort = (key) => {
@@ -235,57 +292,50 @@ export default function CreditorSummary() {
     }
   };
 
+  const printTitle = "Creditor Balances";
+
   return (
     <div className="min-h-screen bg-background px-2 py-4 text-foreground sm:px-3">
+      {/* Print-only block (hidden on screen) — same letterhead/rules as the
+          Customer Balances print, vendor columns. Prints all filtered rows. */}
+      <CreditorPrintableTable
+        printTitle={printTitle}
+        printDate={printDate}
+        rows={rows}
+        aging={apAging}
+        site="all"
+        showSite={false}
+      />
       <div className="space-y-6">
-        <div className="border-b border-border pb-5 flex items-end justify-between gap-6">
+        <div className="border-b border-border pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
 
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Who you <em className="text-phosphor">owe</em>.
             </h1>
             <p className="text-sm text-muted-foreground mt-3">
-              Vendors with outstanding balances, sortable and searchable.
+              Vendors with outstanding balances, sortable and filterable.
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
-            {/* Hub gets its creditor data from the sites via the ETL — there
-                is no Sage to sync from here, so the button hides and the
-                branch selector takes its place. */}
-            {data?.hub ? (
-              <div className="min-w-[180px]">
-                <BranchFilter hubMode sites={data?.sites} />
-              </div>
-            ) : (
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-                title="Pull latest vendor, invoice, payment, and PO data from Sage"
-              >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Syncing…" : "Sync from Sage"}
-              </button>
-            )}
-            <LastSyncedBadge
-              iso={meta?.last_synced_at}
-              staleAfterHours={meta?.hub ? 2 : 26}
-              detail={meta?.hub
-                ? "Pulled from branches by the hub ETL (runs every few minutes)"
-                : "Scheduled nightly at 04:30 (Operations page lists every job)"}
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search vendor code or name…"
-              className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            />
+          {/* Print / PDF — styled identically to the Customer Balances button.
+              Sync / branch filter / last-synced live on the headline row below. */}
+          <div className="flex items-center gap-2 cb-no-print">
+            <button
+              onClick={() => window.print()}
+              disabled={rows.length === 0}
+              className="flex items-center gap-2 border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+              style={{ borderRadius: "12px", borderColor: "var(--phosphor)", color: "var(--phosphor)", background: "hsla(33, 95%, 55%, 0.08)" }}
+              onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+              title="Print or save as PDF"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" />
+              </svg>
+              Print / PDF
+            </button>
           </div>
         </div>
 
@@ -359,6 +409,90 @@ export default function CreditorSummary() {
             Aged Creditors (due date + monthly periods). Already shows Total
             Outstanding, so no separate outstanding tile below. */}
         {rows.length > 0 && <AgingSummaryTiles aging={apAging} tiles={AP_TILES} showCount={false} />}
+        {/* Net-of-unposted headline (left) + Sync controls (right) share one
+            row tucked under the tiles, so the sync badge/button no longer
+            float in dead space above the table (operator request). The
+            headline only renders while a posting backlog exists; the tiles
+            keep Sage's true POSTED aging, this line gives the honest net. */}
+        {rows.length > 0 && (
+          <div className="-mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            {(apAging.unposted_invoices_total !== 0 || apAging.unposted_payments_total > 0) ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+                <span className="text-muted-foreground">
+                  {/* Spelled out as arithmetic so it visibly adds up against
+                      the Total Outstanding tile above. */}
+                  Total Outstanding <span className="tabular-nums text-foreground">R {fmtR(apAging.total_outstanding)}</span>
+                  {apAging.unposted_invoices_total !== 0 && (
+                    <> + <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_invoices_total)}</span> unposted invoices</>
+                  )}
+                  {apAging.unposted_payments_total > 0 && (
+                    <> − <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_payments_total)}</span> unposted payments</>
+                  )}
+                  {" ="}
+                </span>
+                <span className="font-medium tabular-nums text-foreground">
+                  true outstanding R {fmtR(apAging.net_total)}
+                </span>
+                <span
+                  className="cursor-help text-muted-subtle"
+                  title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. All three figures cover the same vendors currently shown in the table below. This line disappears once the batches post."
+                >
+                  ⓘ
+                </span>
+              </div>
+            ) : <span />}
+            {/* Last-synced + Sync from Sage — right-aligned on the headline row.
+                Hub has no Sage to sync from (data comes via the ETL), so the
+                button becomes the branch selector there. */}
+            <div className="flex items-center gap-3 cb-no-print">
+              <LastSyncedBadge
+                iso={meta?.last_synced_at}
+                staleAfterHours={meta?.hub ? 2 : 26}
+                detail={meta?.hub
+                  ? "Pulled from branches by the hub ETL (runs every few minutes)"
+                  : "Scheduled nightly at 04:30 (Operations page lists every job)"}
+              />
+              {data?.hub ? (
+                <div className="min-w-[180px]">
+                  <BranchFilter hubMode sites={data?.sites} />
+                </div>
+              ) : (
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                  title="Pull latest vendor, invoice, payment, and PO data from Sage"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "Syncing…" : "Sync from Sage"}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Payment-capture recency — how far behind accounts is on CAPTURING
+            vendor payments. Payments that exist only at the bank are invisible
+            to every Sage table (and therefore to every figure above); this
+            states the cutoff plainly so nobody mistakes "true outstanding"
+            for "includes last week's EFTs". Site mode only. */}
+        {rows.length > 0 && !meta?.hub && meta?.last_cb_payment_capture && (() => {
+          const lastCapture = meta.last_cb_payment_capture > (meta.last_ap_payment_date || "")
+            ? meta.last_cb_payment_capture : (meta.last_ap_payment_date || meta.last_cb_payment_capture);
+          const days = Math.floor((Date.now() - new Date(lastCapture).getTime()) / 86_400_000);
+          if (!Number.isFinite(days) || days < 0) return null;
+          const stale = days > 7;
+          return (
+            <div className="-mt-2 flex flex-wrap items-center gap-2 text-sm">
+              <span className={`h-1.5 w-1.5 rounded-full ${stale ? "bg-red-500" : "bg-muted-foreground"}`} aria-hidden="true" />
+              <span className={stale ? "text-red-300" : "text-muted-foreground"}>
+                Vendor payments captured in the Cashbook up to{" "}
+                <span className="font-medium tabular-nums">{lastCapture}</span>
+                {" "}({days} {days === 1 ? "day" : "days"} ago) — anything paid since is not in Sage yet and cannot reflect in these figures.
+              </span>
+            </div>
+          );
+        })()}
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (
@@ -388,8 +522,18 @@ export default function CreditorSummary() {
             storageKey={COL_WIDTHS_KEY}
             defaultWidths={COL_DEFAULTS}
             maxHeight="70vh"
+            // Cursor-following popup with the posted/unposted batch breakdown
+            // (same style as the Customer Balances verdict card). Replaces the
+            // native title tooltip that was on the Outstanding cell.
+            hoverCard={(r) => <VendorBatchHoverCard vendor={r} />}
+            // Drill into the vendor detail page (Creditor Search reads ?code=).
+            // Site mode only — the vendor drilldown tabs read site-local
+            // creditor_* tables the hub does not carry.
+            onRowClick={data?.hub ? undefined : (r) => setDrillVendor(String(r.vendor_code))}
           />
         )}
+        {/* Row drill target — full vendor popup, in place (close → stay here). */}
+        <VendorDetailModal code={drillVendor} onClose={() => setDrillVendor("")} />
       </div>
     </div>
   );

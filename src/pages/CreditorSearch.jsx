@@ -1,20 +1,21 @@
-// Creditor Search — typeahead lookup + four drilldown tabs per vendor.
-// Mirror of CustomerSearch but for AP: receipts (PORCPH1), open
-// invoices (APOBL), payments (APTCR), and POs (POPORH1 + POPORL).
-import { useEffect, useRef, useState } from "react";
+// Creditor Search — the AP twin of Customer Search ("Search the ledger").
+// SAME page skeleton as CustomerSearch.jsx (max-w-5xl centred container,
+// border-b hero, 3-up stat tiles, lookup + last-sync row, a status strip),
+// with money facts in place of flag counts and no flagging. Picking a vendor
+// opens the full detail in a popup (VendorDetailModal: true-position header +
+// receipts / open invoices / payments / POs tabs). ?code= deep links open it
+// directly; Creditor Balances opens the same modal in place.
+import { useRef, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
-import { Building2, Search, Truck, FileText, Wallet, ClipboardList, PackageCheck } from "lucide-react";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Building2, Search, RefreshCw, Wallet, FileText, Database } from "lucide-react";
+import { useSearchParamState } from "../hooks/useSearchParamState.js";
+import VendorDetailModal from "@/components/creditors/VendorDetailModal";
 
 function fmtR(v) {
   const n = Number(v) || 0;
   return n.toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-function fmtNum(v) {
-  return (Number(v) || 0).toLocaleString();
-}
-function fmtDate(s) { return s || "—"; }
 
 async function searchVendors(q) {
   if (!q || q.trim().length < 2) return { results: [] };
@@ -23,18 +24,17 @@ async function searchVendors(q) {
   return r.json();
 }
 
-async function fetchVendor(code) {
-  const r = await fetch(`/api/creditors/${encodeURIComponent(code)}`, { credentials: "include" });
-  if (!r.ok) throw new Error(`Vendor not found (HTTP ${r.status})`);
+// Same record set as Creditor Balances' default (active vendors), so this
+// page's True Outstanding tile and the Balances headline are one number.
+async function fetchCreditorStats() {
+  const r = await fetch(`/api/creditors?active_only=true`, { credentials: "include" });
+  if (!r.ok) return null;
   return r.json();
 }
 
-async function fetchTab(code, tab) {
-  const r = await fetch(`/api/creditors/${encodeURIComponent(code)}/${tab}`, { credentials: "include" });
-  if (!r.ok) {
-    const d = await r.json().catch(() => ({}));
-    throw new Error(d.error || `HTTP ${r.status}`);
-  }
+async function fetchSyncMeta() {
+  const r = await fetch(`/api/creditors/sync-meta`, { credentials: "include" });
+  if (!r.ok) return null;
   return r.json();
 }
 
@@ -42,16 +42,11 @@ function VendorTypeahead({ onPick }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const inputRef = useRef(null);
-  // Drive the query off a debounced copy so a fast typist fires one request per
-  // pause, not per keystroke (the input stays bound to `q` for responsiveness).
   const debouncedQ = useDebouncedValue(q, 250);
   const { data, isFetching } = useQuery({
     queryKey: ["creditor-search", debouncedQ],
     queryFn: () => searchVendors(debouncedQ),
     enabled: debouncedQ.trim().length >= 2,
-    // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
-    // keeps the prior results visible while the next query loads instead of
-    // blanking the dropdown on every change (UI-4).
     placeholderData: keepPreviousData,
     staleTime: 15_000,
   });
@@ -59,32 +54,40 @@ function VendorTypeahead({ onPick }) {
 
   return (
     <div className="relative">
-      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <Search className="absolute left-3.5 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-slate-400" />
       <input
         ref={inputRef}
         value={q}
         onChange={(e) => { setQ(e.target.value); setOpen(true); }}
         onFocus={() => setOpen(true)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
-        placeholder="Search vendor by code or name…"
-        className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+        placeholder="Vendor code or supplier name…"
+        className="h-11 w-full border border-border bg-background pl-10 pr-4 text-sm font-mono text-foreground placeholder:text-muted-subtle focus:border-[var(--phosphor)] focus:outline-none focus:ring-2 focus:ring-[var(--phosphor)]/30"
+        style={{ borderRadius: "12px" }}
       />
       {open && q.trim().length >= 2 && (
-        <div className="absolute z-20 mt-1 w-full rounded-xl border border-border bg-card shadow-lg max-h-[400px] overflow-auto">
-          {isFetching && <div className="px-4 py-2 text-xs text-muted-foreground">Searching…</div>}
-          {!isFetching && results.length === 0 && <div className="px-4 py-2 text-xs text-muted-foreground">No vendors found.</div>}
+        <div
+          className="absolute left-0 right-0 top-full z-50 mt-1.5 max-h-[400px] overflow-y-auto bg-background"
+          style={{
+            borderRadius: "12px",
+            border: "1px solid hsl(var(--border))",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.55), 0 0 0 1px hsla(33,95%,55%,0.12), 0 0 24px hsla(33,95%,55%,0.08)",
+          }}
+        >
+          {isFetching && <div className="px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Searching…</div>}
+          {!isFetching && results.length === 0 && <div className="px-4 py-2 font-mono text-[11px] uppercase tracking-wider text-muted-foreground">No vendors found</div>}
           {results.map((r) => (
             <button
               key={r.vendor_code}
               type="button"
               onMouseDown={() => { onPick(r.vendor_code); setQ(""); setOpen(false); inputRef.current?.blur(); }}
-              className="w-full text-left px-4 py-2 hover:bg-muted/40 border-b border-border last:border-0 flex items-center justify-between gap-3"
+              className="flex w-full items-center justify-between gap-3 border-b border-border/60 px-4 py-3 text-left transition-colors last:border-0 hover:bg-muted/40"
             >
               <div className="min-w-0">
-                <div className="text-sm text-foreground truncate">{r.vendor_name || "(no name)"}</div>
-                <div className="font-mono text-xs text-muted-foreground">{r.vendor_code}</div>
+                <div className="truncate text-sm font-semibold leading-tight text-foreground">{r.vendor_name || <span className="italic text-muted-foreground">(no name)</span>}</div>
+                <div className="mt-1 font-mono text-[11px] tracking-wider text-muted-foreground">{r.vendor_code}</div>
               </div>
-              <span className={`text-[10px] uppercase tracking-wider ${r.is_active ? "text-emerald-400" : "text-muted-foreground"}`}>
+              <span className={`font-mono text-[10px] uppercase tracking-wider ${r.is_active ? "text-emerald-400" : "text-muted-foreground"}`}>
                 {r.is_active ? "Active" : "Inactive"}
               </span>
             </button>
@@ -95,334 +98,164 @@ function VendorTypeahead({ onPick }) {
   );
 }
 
-function VendorHeader({ vendor }) {
+// Stat tile — IDENTICAL markup to the flag tiles on Customer Search
+// (px-5 py-4, 14px radius, 2px coloured bottom bar, mono label + sub, icon
+// top-right), money facts instead of flag counts. The figure size is a prop:
+// the flag tiles show single digits at 4xl, but a rand value like
+// "R 95 541 341,12" overflows the tile at that size, so money tiles render
+// smaller (2xl) — same tile, sized to its content.
+function StatTile({ label, value, sub, hue, glow, icon: Icon, big = false }) {
   return (
-    <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between gap-4">
+    <div
+      className="relative bg-card px-5 py-4 border border-border overflow-hidden"
+      style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
+    >
+      <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: hue, boxShadow: `0 0 12px ${glow}` }} />
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">{vendor.vendor_code}</div>
-          <h2 className="text-2xl font-semibold mt-1 truncate">{vendor.vendor_name || "—"}</h2>
-          <div className="mt-2 flex flex-wrap gap-4 text-sm text-muted-foreground">
-            {vendor.terms ? <span title="Sage terms code">Terms: <span className="text-foreground">{vendor.terms}</span></span> : null}
-            {vendor.contact ? <span>Contact: <span className="text-foreground">{vendor.contact}</span></span> : null}
-            {vendor.phone ? <span>Phone: <span className="text-foreground">{vendor.phone}</span></span> : null}
-            {vendor.email ? <span>Email: <span className="text-foreground">{vendor.email}</span></span> : null}
-          </div>
+          <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">{label}</div>
+          <div className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${big ? "text-4xl" : "text-2xl"}`}>{value}</div>
+          <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">{sub}</div>
         </div>
-        <div className="text-right">
-          <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${vendor.is_active ? "bg-emerald-500/10 text-emerald-300" : "bg-muted text-muted-foreground"}`}>
-            {vendor.is_active ? "Active" : "Inactive"}
-          </span>
-          <div className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground space-y-0.5">
-            {vendor.last_receipt_date && <div>Last receipt: <span className="text-foreground">{vendor.last_receipt_date}</span></div>}
-            {vendor.last_payment_date && <div>Last payment: <span className="text-foreground">{vendor.last_payment_date}</span></div>}
-          </div>
-        </div>
+        <Icon className="w-4 h-4 shrink-0 opacity-60" style={{ color: hue }} strokeWidth={1.5} />
       </div>
     </div>
   );
 }
 
-function TabContainer({ children, loading, error, empty }) {
-  if (loading) return <div className="h-[300px] animate-pulse rounded-xl border border-border bg-card" />;
-  if (error) return <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-300">{error}</div>;
-  if (empty) return <div className="rounded-xl border border-border bg-card px-6 py-12 text-center text-sm text-muted-foreground">{empty}</div>;
-  return children;
-}
-
-function ReceiptsTab({ code }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["creditor-receipts", code],
-    queryFn: () => fetchTab(code, "receipts"),
-    staleTime: 60_000,
-  });
-  const rows = data?.records || [];
-
-  // Group lines by receipt # so the operator sees one row per receipt
-  // and can drill into the line detail on demand. Preserves the API's
-  // ordering (date DESC, line ASC) by streaming into a Map.
-  const receipts = (() => {
-    const byNum = new Map();
-    for (const r of rows) {
-      if (!byNum.has(r.receipt_number)) {
-        byNum.set(r.receipt_number, {
-          receipt_number: r.receipt_number,
-          receipt_date: r.receipt_date,
-          lines: [],
-        });
-      }
-      byNum.get(r.receipt_number).lines.push(r);
-    }
-    return [...byNum.values()];
-  })();
-
-  return (
-    <TabContainer loading={isLoading} error={error?.message} empty={!isLoading && rows.length === 0 ? "No goods receipts found for this vendor." : null}>
-      <div className="space-y-3">
-        {receipts.map((rcp) => {
-          const totalQty = rcp.lines.reduce((acc, l) => acc + (Number(l.qty_received) || 0), 0);
-          const totalCost = rcp.lines.reduce((acc, l) => acc + ((Number(l.qty_received) || 0) * (Number(l.unit_cost) || 0)), 0);
-          return (
-            <details key={rcp.receipt_number} className="rounded-xl border border-border bg-card overflow-hidden group">
-              <summary className="cursor-pointer px-4 py-3 flex items-center justify-between gap-4 list-none hover:bg-muted/30">
-                <div className="flex items-center gap-3 min-w-0">
-                  <PackageCheck className="h-4 w-4 text-muted-foreground" />
-                  <span className="font-mono text-sm">{rcp.receipt_number}</span>
-                  <span className="text-xs text-muted-foreground">{fmtDate(rcp.receipt_date)}</span>
-                </div>
-                <div className="text-right tabular-nums">
-                  <div className="text-sm">R {fmtR(totalCost)}</div>
-                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {rcp.lines.length} line{rcp.lines.length === 1 ? "" : "s"} · {fmtNum(totalQty)} units
-                  </div>
-                </div>
-              </summary>
-              <div className="border-t border-border">
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                    <th className="px-3 py-2 text-left">Item</th>
-                    <th className="px-3 py-2 text-left">Description</th>
-                    <th className="px-3 py-2 text-right">Qty</th>
-                    <th className="px-3 py-2 text-left">UOM</th>
-                    <th className="px-3 py-2 text-right">Unit cost</th>
-                  </tr></thead>
-                  <tbody>
-                    {rcp.lines.map((l, i) => (
-                      <tr key={`${rcp.receipt_number}-${l.line_no}-${i}`} className="border-b border-border last:border-0">
-                        <td className="px-3 py-1.5 font-mono text-xs">{l.item_number}</td>
-                        <td className="px-3 py-1.5">{l.item_description || "—"}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(l.qty_received)}</td>
-                        <td className="px-3 py-1.5">{l.uom || "—"}</td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(l.unit_cost)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
-          );
-        })}
-      </div>
-    </TabContainer>
-  );
-}
-
-function InvoicesTab({ code }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["creditor-ap-invoices", code],
-    queryFn: () => fetchTab(code, "ap-invoices"),
-    staleTime: 60_000,
-  });
-  const rows = data?.records || [];
-  const total = rows.reduce((acc, r) => acc + (Number(r.outstanding_amount) || 0), 0);
-  return (
-    <TabContainer loading={isLoading} error={error?.message} empty={!isLoading && rows.length === 0 ? "No outstanding AP invoices for this vendor." : null}>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2 text-left">Document #</th>
-            <th className="px-3 py-2 text-left">Type</th>
-            <th className="px-3 py-2 text-left">Invoice date</th>
-            <th className="px-3 py-2 text-left">Due date</th>
-            <th className="px-3 py-2 text-left">Reference</th>
-            <th className="px-3 py-2 text-right">Original</th>
-            <th className="px-3 py-2 text-right">Outstanding</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.document_number} className="border-b border-border last:border-0">
-                <td className="px-3 py-1.5 font-mono text-xs">{r.document_number}</td>
-                <td className="px-3 py-1.5">{r.document_type || "—"}</td>
-                <td className="px-3 py-1.5">{fmtDate(r.document_date)}</td>
-                <td className="px-3 py-1.5">{fmtDate(r.due_date)}</td>
-                <td className="px-3 py-1.5">{r.reference || "—"}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(r.original_amount)}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-amber-300">R {fmtR(r.outstanding_amount)}</td>
-              </tr>
-            ))}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot>
-              <tr className="border-t border-border bg-muted/30">
-                <td colSpan={6} className="px-3 py-2 text-right text-xs uppercase tracking-wider text-muted-foreground">Total outstanding</td>
-                <td className="px-3 py-2 text-right tabular-nums font-semibold">R {fmtR(total)}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </TabContainer>
-  );
-}
-
-function PaymentsTab({ code }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["creditor-ap-payments", code],
-    queryFn: () => fetchTab(code, "ap-payments"),
-    staleTime: 60_000,
-  });
-  const rows = data?.records || [];
-  const total = rows.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
-  return (
-    <TabContainer loading={isLoading} error={error?.message} empty={!isLoading && rows.length === 0 ? "No payments to this vendor in the sync window." : null}>
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-            <th className="px-3 py-2 text-left">Payment #</th>
-            <th className="px-3 py-2 text-left">Date</th>
-            <th className="px-3 py-2 text-left">Method</th>
-            <th className="px-3 py-2 text-left">Bank</th>
-            <th className="px-3 py-2 text-left">Reference</th>
-            <th className="px-3 py-2 text-right">Amount</th>
-          </tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.payment_number} className="border-b border-border last:border-0">
-                <td className="px-3 py-1.5 font-mono text-xs">{r.payment_number}</td>
-                <td className="px-3 py-1.5">{fmtDate(r.payment_date)}</td>
-                <td className="px-3 py-1.5">{r.payment_method || "—"}</td>
-                <td className="px-3 py-1.5">{r.bank_code || "—"}</td>
-                <td className="px-3 py-1.5">{r.reference || "—"}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums text-emerald-300">R {fmtR(r.amount)}</td>
-              </tr>
-            ))}
-          </tbody>
-          {rows.length > 0 && (
-            <tfoot>
-              <tr className="border-t border-border bg-muted/30">
-                <td colSpan={5} className="px-3 py-2 text-right text-xs uppercase tracking-wider text-muted-foreground">Total paid</td>
-                <td className="px-3 py-2 text-right tabular-nums font-semibold">R {fmtR(total)}</td>
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </div>
-    </TabContainer>
-  );
-}
-
-function PosTab({ code }) {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ["creditor-pos", code],
-    queryFn: () => fetchTab(code, "pos"),
-    staleTime: 60_000,
-  });
-  const rows = data?.records || [];
-  return (
-    <TabContainer loading={isLoading} error={error?.message} empty={!isLoading && rows.length === 0 ? "No purchase orders for this vendor in the sync window." : null}>
-      <div className="space-y-3">
-        {rows.map((po) => (
-          <details key={po.id} className="rounded-xl border border-border bg-card overflow-hidden group">
-            <summary className="cursor-pointer px-4 py-3 flex items-center justify-between gap-4 list-none hover:bg-muted/30">
-              <div className="flex items-center gap-3 min-w-0">
-                <ClipboardList className="h-4 w-4 text-muted-foreground" />
-                <span className="font-mono text-sm">{po.po_number}</span>
-                <span className="text-xs text-muted-foreground">{fmtDate(po.po_date)}</span>
-                {po.status && <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{po.status}</span>}
-              </div>
-              <div className="text-right tabular-nums">
-                <div className="text-sm">R {fmtR(po.total_amount)}</div>
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{po.lines?.length || 0} lines</div>
-              </div>
-            </summary>
-            <div className="border-t border-border">
-              <table className="w-full text-sm">
-                <thead><tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-2 text-left">Item</th>
-                  <th className="px-3 py-2 text-left">Description</th>
-                  <th className="px-3 py-2 text-right">Ordered</th>
-                  <th className="px-3 py-2 text-right">Received</th>
-                  <th className="px-3 py-2 text-right">Unit cost</th>
-                  <th className="px-3 py-2 text-right">Extended</th>
-                </tr></thead>
-                <tbody>
-                  {(po.lines || []).map((l) => (
-                    <tr key={`${po.id}-${l.line_no}`} className="border-b border-border last:border-0">
-                      <td className="px-3 py-1.5 font-mono text-xs">{l.item_number}</td>
-                      <td className="px-3 py-1.5">{l.item_description || "—"}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(l.qty_ordered)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">{fmtNum(l.qty_received)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(l.unit_cost)}</td>
-                      <td className="px-3 py-1.5 text-right tabular-nums">R {fmtR(l.extended_cost)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        ))}
-      </div>
-    </TabContainer>
-  );
-}
-
 export default function CreditorSearch() {
-  const [code, setCode] = useState(null);
-  const [tab, setTab] = useState("receipts");
+  const [code, setCode] = useSearchParamState("code", "");
 
-  const { data: vendor, isLoading: vLoading, error: vError } = useQuery({
-    queryKey: ["creditor", code],
-    queryFn: () => fetchVendor(code),
-    enabled: !!code,
+  const { data: stats } = useQuery({
+    queryKey: ["creditor-search-stats"],
+    queryFn: fetchCreditorStats,
+    staleTime: 60_000,
+  });
+  const { data: meta } = useQuery({
+    queryKey: ["creditors-sync-meta"],
+    queryFn: fetchSyncMeta,
+    staleTime: 60_000,
   });
 
-  // Reset tab when switching vendors so we always land on Receipts first.
-  useEffect(() => { setTab("receipts"); }, [code]);
+  const records = stats?.records || [];
+  const vendorCount = records.length;
+  const trueOutstanding = records.reduce((sum, r) => sum + (Number(r.outstanding_amount) || 0), 0);
+  const unpostedInv = records.reduce((sum, r) => sum + (Number(r.unposted_invoices) || 0), 0);
+  const unpostedPay = records.reduce((sum, r) => sum + (Number(r.unposted_payments) || 0), 0);
+
+  const lastCapture = (meta?.last_cb_payment_capture || "") > (meta?.last_ap_payment_date || "")
+    ? meta?.last_cb_payment_capture
+    : (meta?.last_ap_payment_date || meta?.last_cb_payment_capture);
+  const captureDays = lastCapture ? Math.floor((Date.now() - new Date(lastCapture).getTime()) / 86_400_000) : null;
+  const captureStale = Number.isFinite(captureDays) && captureDays > 7;
+
+  const lastSync = meta?.last_synced_at || null;
+  const lastSyncMs = lastSync ? new Date(lastSync + (String(lastSync).endsWith("Z") ? "" : "Z")) : null;
 
   return (
-    <div className="min-h-screen bg-background px-2 py-4 text-foreground sm:px-3">
-      <div className="space-y-6">
+    <div className="min-h-screen bg-background">
+      <div className="max-w-5xl mx-auto px-8 py-10 space-y-6">
+        {/* Header — same border-b hero as Customer Search */}
         <div className="border-b border-border pb-5">
-
           <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
-            <em className="text-phosphor">Drill</em> into a vendor.
+            Search the <em className="text-phosphor">creditors</em>.
           </h1>
           <p className="text-sm text-muted-foreground mt-3">
-            Goods receipts, open invoices, payments, and purchase orders — all synced from Sage.
+            Review vendor accounts, balances, payments, and purchase activity.
           </p>
         </div>
 
-        <VendorTypeahead onPick={setCode} />
+        {/* Stat tiles — same 3-up grid as the flag tiles */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 stagger-in">
+          <StatTile
+            label="Vendors"
+            value={vendorCount.toLocaleString()}
+            sub="With outstanding balance"
+            hue="hsl(33 95% 55%)"
+            glow="hsla(33,95%,55%,0.35)"
+            icon={Building2}
+            big
+          />
+          <StatTile
+            label="True Outstanding"
+            value={`R ${fmtR(trueOutstanding)}`}
+            sub="All active vendors · incl. unposted"
+            hue="hsl(0 72% 50%)"
+            glow="hsla(0,72%,50%,0.3)"
+            icon={Wallet}
+          />
+          <StatTile
+            label="Unposted Batches"
+            value={`R ${fmtR(unpostedInv - unpostedPay)}`}
+            sub={`+R ${fmtR(unpostedInv)} inv · −R ${fmtR(unpostedPay)} pay`}
+            hue="hsl(280 70% 65%)"
+            glow="hsla(280,70%,65%,0.3)"
+            icon={FileText}
+          />
+        </div>
 
-        {!code && (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-border bg-card px-6 py-16 text-center">
-            <Building2 className="mb-4 h-12 w-12 text-muted-foreground" />
-            <h2 className="text-lg font-semibold">Pick a vendor</h2>
-            <p className="mt-1 max-w-md text-sm text-muted-foreground">
-              Type a vendor code or supplier name above to drill into receipts, payments, and POs.
+        {/* Lookup + last-sync row — same flex layout, sizes, radii */}
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+          <div className="flex-1 bg-card border border-border min-w-0 px-5 py-4" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
+            <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">Vendor Lookup</p>
+            <VendorTypeahead onPick={setCode} />
+            <p className="mt-3 font-mono text-[10px] uppercase tracking-wider text-muted-subtle">
+              Full detail opens in a popup
             </p>
           </div>
-        )}
 
-        {code && vLoading && <div className="h-[140px] animate-pulse rounded-xl border border-border bg-card" />}
-        {code && vError && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-6 text-sm text-red-300">{vError.message}</div>
-        )}
-        {code && vendor && <VendorHeader vendor={vendor} />}
+          <div
+            className="w-full sm:flex-shrink-0 sm:w-56 bg-card border border-border relative px-5 py-4 flex flex-col justify-center overflow-hidden"
+            style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
+          >
+            <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: "var(--phosphor)", boxShadow: "0 0 12px hsla(33,95%,55%,0.35)" }} />
+            <div className="flex items-center gap-2 mb-2">
+              <RefreshCw className="w-3 h-3 text-accent" />
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Last Sync</p>
+            </div>
+            <div>
+              {lastSyncMs ? (
+                <>
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {lastSyncMs.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "2-digit", month: "short", year: "numeric" })}
+                  </p>
+                  <p className="font-display text-3xl leading-none text-foreground tabular-nums mt-1">
+                    {lastSyncMs.toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", minute: "2-digit", hour12: false })}
+                  </p>
+                  <p className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">Creditors · Sage</p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">Never synced</p>
+              )}
+            </div>
+          </div>
+        </div>
 
-        {code && vendor && (
-          <Tabs value={tab} onValueChange={setTab} className="space-y-4">
-            <TabsList className="inline-flex h-10 rounded-2xl border border-border bg-muted p-1 gap-1">
-              <TabsTrigger value="receipts" title="Goods received from this vendor (PORCPH1)" className="rounded-xl px-4 py-1.5 text-sm">
-                <Truck className="h-4 w-4 mr-1.5 inline-block" /> Receipts
-              </TabsTrigger>
-              <TabsTrigger value="invoices" title="Open AP invoices (APOBL)" className="rounded-xl px-4 py-1.5 text-sm">
-                <FileText className="h-4 w-4 mr-1.5 inline-block" /> Open invoices
-              </TabsTrigger>
-              <TabsTrigger value="payments" title="Payments made to this vendor (APTCR)" className="rounded-xl px-4 py-1.5 text-sm">
-                <Wallet className="h-4 w-4 mr-1.5 inline-block" /> Payments
-              </TabsTrigger>
-              <TabsTrigger value="pos" title="Issued purchase orders (POPORH1)" className="rounded-xl px-4 py-1.5 text-sm">
-                <ClipboardList className="h-4 w-4 mr-1.5 inline-block" /> Purchase orders
-              </TabsTrigger>
-            </TabsList>
+        {/* Capture-status strip — same shape as the CONNECTED banner (left bar). */}
+        <div className="border border-border bg-card relative overflow-hidden px-5 py-3" style={{ borderRadius: "12px" }}>
+          <div
+            className="absolute left-0 top-0 bottom-0 w-[2px]"
+            style={{
+              background: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)",
+              boxShadow: captureStale ? "0 0 12px hsla(0,72%,50%,0.3)" : "0 0 12px hsla(145,55%,45%,0.3)",
+            }}
+          />
+          <div className="flex items-start gap-3 pl-2">
+            <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)" }} strokeWidth={1.5} />
+            <div className="flex-1">
+              <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: captureStale ? "hsl(0 72% 50%)" : "hsl(145 55% 45%)" }}>
+                {captureStale ? "Capture Behind" : "Capture Current"}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {lastCapture
+                  ? `Vendor payments captured up to ${lastCapture} (${captureDays} day${captureDays === 1 ? "" : "s"} ago)${captureStale ? " — payments made since are not in Sage yet" : ""}`
+                  : "No payment capture data yet — run a creditors sync"}
+              </p>
+            </div>
+          </div>
+        </div>
 
-            <TabsContent value="receipts"><ReceiptsTab code={code} /></TabsContent>
-            <TabsContent value="invoices"><InvoicesTab code={code} /></TabsContent>
-            <TabsContent value="payments"><PaymentsTab code={code} /></TabsContent>
-            <TabsContent value="pos"><PosTab code={code} /></TabsContent>
-          </Tabs>
-        )}
+        <VendorDetailModal code={code} onClose={() => setCode("")} />
       </div>
     </div>
   );

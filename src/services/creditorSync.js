@@ -10,6 +10,8 @@ import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 export const DEFAULT_VENDOR_SQL     = getSageQuery('creditor.vendor').defaultSql;
 export const DEFAULT_AP_INVOICE_SQL = getSageQuery('creditor.ap_invoice').defaultSql;
 export const DEFAULT_AP_PAYMENT_SQL = getSageQuery('creditor.ap_payment').defaultSql;
+export const DEFAULT_AP_UNPOSTED_SQL = getSageQuery('creditor.ap_unposted_payment').defaultSql;
+export const DEFAULT_AP_UNPOSTED_INVOICE_SQL = getSageQuery('creditor.ap_unposted_invoice').defaultSql;
 export const DEFAULT_PO_HEADER_SQL  = getSageQuery('creditor.po_header').defaultSql;
 export const DEFAULT_PO_LINE_SQL    = getSageQuery('creditor.po_line').defaultSql;
 
@@ -40,6 +42,8 @@ export function setSyncSettings({
   vendor_sql_override,
   ap_invoice_sql_override,
   ap_payment_sql_override,
+  ap_unposted_sql_override,
+  ap_unposted_invoice_sql_override,
   po_header_sql_override,
   po_line_sql_override,
   history_months,
@@ -51,16 +55,20 @@ export function setSyncSettings({
         vendor_sql_override      = COALESCE(?, vendor_sql_override),
         ap_invoice_sql_override  = COALESCE(?, ap_invoice_sql_override),
         ap_payment_sql_override  = COALESCE(?, ap_payment_sql_override),
+        ap_unposted_sql_override = COALESCE(?, ap_unposted_sql_override),
+        ap_unposted_invoice_sql_override = COALESCE(?, ap_unposted_invoice_sql_override),
         po_header_sql_override   = COALESCE(?, po_header_sql_override),
         po_line_sql_override     = COALESCE(?, po_line_sql_override),
         history_months           = COALESCE(?, history_months)
       WHERE id = 1
     `).run(
-      vendor_sql_override     ?? null,
-      ap_invoice_sql_override ?? null,
-      ap_payment_sql_override ?? null,
-      po_header_sql_override  ?? null,
-      po_line_sql_override    ?? null,
+      vendor_sql_override      ?? null,
+      ap_invoice_sql_override  ?? null,
+      ap_payment_sql_override  ?? null,
+      ap_unposted_sql_override ?? null,
+      ap_unposted_invoice_sql_override ?? null,
+      po_header_sql_override   ?? null,
+      po_line_sql_override     ?? null,
       Number.isFinite(history_months) ? history_months : null,
     );
     return getSyncSettings();
@@ -72,7 +80,7 @@ export function setSyncSettings({
 
 export function getSyncMeta() {
   try {
-    return db.prepare('SELECT last_synced_at, last_synced_to, rows_synced FROM creditor_sync_meta WHERE id = 1').get() || {};
+    return db.prepare('SELECT last_synced_at, last_synced_to, rows_synced, last_cb_payment_capture, last_ap_payment_date FROM creditor_sync_meta WHERE id = 1').get() || {};
   } catch (err) {
     console.error('[creditor-sync] read meta failed:', err.message);
     return {};
@@ -218,6 +226,109 @@ async function syncApPayments(pool, fromInt, toInt) {
   });
   run();
   return { rows: rows.length, upserted };
+}
+
+// Unposted AP payments — cheques captured in Payment Entry whose batch hasn't
+// been posted (APBTA.POSTSEQNBR = 0, not deleted). Until accounts posts the
+// batch, APOBL still shows the paid invoices as open, so the Creditor Balances
+// page nets these amounts off each vendor's outstanding. FULL refresh every
+// sync: the whole point of this table is "what is unposted RIGHT NOW" — rows
+// must vanish the moment their batch posts (the payment then arrives through
+// the normal posted-payment sync and APOBL reflects it).
+async function syncUnpostedPayments(pool) {
+  const queryText = resolveSageQuery('creditor.ap_unposted_payment');
+  const result = await pool.request().query(queryText);
+  const rows = result.recordset || [];
+
+  const insert = db.prepare(`
+    INSERT INTO creditor_ap_unposted_payment (
+      vendor_code, payment_number, payment_date, amount,
+      batch_number, batch_status, batch_description, synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
+  `);
+
+  let inserted = 0;
+  const run = db.transaction(() => {
+    // The query succeeded by this point, so an empty result is authoritative:
+    // "nothing is unposted" must clear the table (it usually does, right
+    // after accounts catches up on posting).
+    db.prepare('DELETE FROM creditor_ap_unposted_payment').run();
+    for (const r of rows) {
+      if (!r.vendor_code) continue;
+      insert.run(
+        r.vendor_code,
+        r.payment_number || null,
+        intToDateStr(r.payment_date_int),
+        Number(r.amount) || 0,
+        Number(r.batch_number) || null,
+        Number(r.batch_status) || null,
+        r.batch_description || null,
+      );
+      inserted++;
+    }
+  });
+  run();
+  return { rows: rows.length, inserted };
+}
+
+// Unposted AP invoices — the mirror of syncUnpostedPayments: vendor invoices
+// captured in AP Invoice Entry whose batch hasn't posted. APOBL doesn't list
+// them yet, so vendor outstanding is UNDERSTATED until posting (live data at
+// build time: R44.65M across 17 ready-to-post batches). Amounts arrive signed
+// (credit notes negative). Same FULL-refresh lifecycle: rows vanish when the
+// batch posts and the invoice flows through the normal APOBL sync instead.
+// Payment-capture recency — records the newest vendor-payment activity in
+// each capture stage (cashbook + AP) into creditor_sync_meta, so the page can
+// state "payments captured up to DATE". Payments that exist only at the bank
+// are invisible to every Sage table; this line is how the operator knows the
+// figures can't include them yet (live case: capture 42 days behind).
+async function syncCaptureMeta(pool) {
+  const queryText = resolveSageQuery('creditor.payment_capture_meta');
+  const result = await pool.request().query(queryText);
+  const row = (result.recordset || [])[0] || {};
+  db.prepare(`
+    UPDATE creditor_sync_meta SET
+      last_cb_payment_capture = ?,
+      last_ap_payment_date    = ?
+    WHERE id = 1
+  `).run(intToDateStr(row.last_cb_capture_int), intToDateStr(row.last_ap_payment_int));
+  return { last_cb: intToDateStr(row.last_cb_capture_int), last_ap: intToDateStr(row.last_ap_payment_int) };
+}
+
+async function syncUnpostedInvoices(pool) {
+  const queryText = resolveSageQuery('creditor.ap_unposted_invoice');
+  const result = await pool.request().query(queryText);
+  const rows = result.recordset || [];
+
+  const insert = db.prepare(`
+    INSERT INTO creditor_ap_unposted_invoice (
+      vendor_code, invoice_number, doc_type, invoice_date, due_date,
+      amount, batch_number, batch_status, synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, now_local())
+  `);
+
+  let inserted = 0;
+  const run = db.transaction(() => {
+    db.prepare('DELETE FROM creditor_ap_unposted_invoice').run();
+    for (const r of rows) {
+      if (!r.vendor_code) continue;
+      insert.run(
+        r.vendor_code,
+        r.invoice_number || null,
+        Number(r.doc_type) || null,
+        intToDateStr(r.invoice_date_int),
+        intToDateStr(r.due_date_int),
+        Number(r.amount) || 0,
+        Number(r.batch_number) || null,
+        Number(r.batch_status) || null,
+      );
+      inserted++;
+    }
+  });
+  run();
+  return { rows: rows.length, inserted };
 }
 
 async function syncPos(pool, fromInt, toInt) {
@@ -392,10 +503,13 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
   const summary = { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), sources: {} };
 
   for (const [source, fn] of [
-    ['vendors',     () => syncVendors(pool)],
-    ['ap_invoices', () => syncApInvoices(pool)],
-    ['ap_payments', () => syncApPayments(pool, fromInt, toInt)],
-    ['pos',         () => syncPos(pool, fromInt, toInt)],
+    ['vendors',           () => syncVendors(pool)],
+    ['ap_invoices',       () => syncApInvoices(pool)],
+    ['ap_payments',       () => syncApPayments(pool, fromInt, toInt)],
+    ['unposted_payments', () => syncUnpostedPayments(pool)],
+    ['unposted_invoices', () => syncUnpostedInvoices(pool)],
+    ['capture_meta',      () => syncCaptureMeta(pool)],
+    ['pos',               () => syncPos(pool, fromInt, toInt)],
   ]) {
     try {
       summary.sources[source] = await fn();

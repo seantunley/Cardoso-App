@@ -8,6 +8,8 @@ import {
   DEFAULT_VENDOR_SQL,
   DEFAULT_AP_INVOICE_SQL,
   DEFAULT_AP_PAYMENT_SQL,
+  DEFAULT_AP_UNPOSTED_SQL,
+  DEFAULT_AP_UNPOSTED_INVOICE_SQL,
   DEFAULT_PO_HEADER_SQL,
   DEFAULT_PO_LINE_SQL,
 } from '../services/creditorSync.js';
@@ -67,6 +69,8 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           vendor_sql: DEFAULT_VENDOR_SQL,
           ap_invoice_sql: DEFAULT_AP_INVOICE_SQL,
           ap_payment_sql: DEFAULT_AP_PAYMENT_SQL,
+          ap_unposted_sql: DEFAULT_AP_UNPOSTED_SQL,
+          ap_unposted_invoice_sql: DEFAULT_AP_UNPOSTED_INVOICE_SQL,
           po_header_sql: DEFAULT_PO_HEADER_SQL,
           po_line_sql: DEFAULT_PO_LINE_SQL,
         },
@@ -196,8 +200,21 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         params.push(`%${search}%`, `%${search}%`);
       }
       if (activeOnly) where.push('c.is_active = 1');
-      if (!includeZero) where.push('COALESCE(ob.outstanding, 0) <> 0');
+      // Zero filter applies to the FULL net outstanding (unposted invoices
+      // added, unposted payments subtracted) so a vendor whose true position
+      // is settled behaves as settled. Rounded to the cent: an exact `<> 0`
+      // let ~6 vendors whose net is float dust (fractions of a cent) through,
+      // so the vendor COUNT and totals disagreed with the Aged Creditors view.
+      if (!includeZero) where.push('ROUND(COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0), 2) <> 0');
 
+      // outstanding_amount is the TRUE position (operator decision, June
+      // 2026): APOBL open items PLUS invoices captured in unposted AP batches
+      // (APOBL doesn't list them yet — outstanding was UNDERSTATED, R44.65M
+      // at build time) MINUS payments captured but not yet posted (APOBL
+      // still shows their invoices open — outstanding was OVERSTATED).
+      // outstanding_gross + unposted_invoices + unposted_payments are
+      // returned alongside so the UI can mark affected vendors and show the
+      // exact breakdown on hover.
       const rows = db.prepare(`
         SELECT
           c.vendor_code,
@@ -213,7 +230,10 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           COALESCE(po.ytd_po_amount, 0)    AS ytd_po_amount,
           COALESCE(po.ytd_po_count, 0)     AS ytd_po_count,
           COALESCE(rcp.ytd_receipt_count, 0) AS ytd_receipt_count,
-          COALESCE(ob.outstanding, 0)      AS outstanding_amount
+          COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0) AS outstanding_amount,
+          COALESCE(ob.outstanding, 0)      AS outstanding_gross,
+          COALESCE(unp.unposted, 0)        AS unposted_payments,
+          COALESCE(uninv.unposted_inv, 0)  AS unposted_invoices
         FROM creditor c
         LEFT JOIN (
           SELECT vendor_code, SUM(amount) AS ytd_paid
@@ -240,6 +260,16 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           FROM creditor_ap_invoice
           GROUP BY vendor_code
         ) ob ON ob.vendor_code = c.vendor_code
+        LEFT JOIN (
+          SELECT vendor_code, SUM(amount) AS unposted
+          FROM creditor_ap_unposted_payment
+          GROUP BY vendor_code
+        ) unp ON unp.vendor_code = c.vendor_code
+        LEFT JOIN (
+          SELECT vendor_code, SUM(amount) AS unposted_inv
+          FROM creditor_ap_unposted_invoice
+          GROUP BY vendor_code
+        ) uninv ON uninv.vendor_code = c.vendor_code
         WHERE ${where.join(' AND ')}
         ORDER BY COALESCE(pay.ytd_paid, 0) + COALESCE(po.ytd_po_amount, 0) DESC, c.vendor_name ASC
       `).all(year, year, year, ...params);
@@ -307,7 +337,26 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         FROM creditor WHERE vendor_code = ?
       `).get(req.params.code);
       if (!row) return res.status(404).json({ error: 'Vendor not found' });
-      res.json(row);
+      // Money summary for the vendor header — same true-position arithmetic
+      // as the Creditor Balances list (posted APOBL + unposted invoices −
+      // unposted payments), plus the payment-capture cutoff so the header can
+      // warn that recent bank payments may not be captured in Sage yet.
+      const money = db.prepare(`
+        SELECT
+          COALESCE((SELECT SUM(outstanding_amount) FROM creditor_ap_invoice WHERE vendor_code = ?), 0) AS outstanding_gross,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_invoice WHERE vendor_code = ?), 0)    AS unposted_invoices,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_payment WHERE vendor_code = ?), 0)    AS unposted_payments
+      `).get(req.params.code, req.params.code, req.params.code);
+      const meta = db.prepare(`
+        SELECT last_cb_payment_capture, last_ap_payment_date FROM creditor_sync_meta WHERE id = 1
+      `).get() || {};
+      res.json({
+        ...row,
+        ...money,
+        outstanding_net: money.outstanding_gross + money.unposted_invoices - money.unposted_payments,
+        last_cb_payment_capture: meta.last_cb_payment_capture || null,
+        last_ap_payment_date: meta.last_ap_payment_date || null,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

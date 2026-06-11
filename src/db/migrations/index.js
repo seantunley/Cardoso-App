@@ -103,6 +103,9 @@ import m97 from './v097_inventory_sales_cache_description.js';
 import m98 from './v098_hub_inventory_sales_aggregates.js';
 import m99 from './v099_inventory_sales_rollup_cache.js';
 import m100 from './v100_hub_debtor_ar_sync.js';
+import m101 from './v101_creditor_unposted_payments.js';
+import m102 from './v102_creditor_unposted_invoices.js';
+import m103 from './v103_creditor_capture_meta.js';
 
 const migrations = [
   m1,
@@ -205,6 +208,9 @@ const migrations = [
   m98,
   m99,
   m100,
+  m101,
+  m102,
+  m103,
 ];
 
 migrations.sort((a, b) => a.version - b.version);
