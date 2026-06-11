@@ -203,7 +203,13 @@ export default function CreditorSummary() {
     const buckets = Object.fromEntries(keys.map((k) => [k, 0]));
     const bucket_counts = Object.fromEntries(keys.map((k) => [k, 0]));
     let total = 0;
+    // Unposted-payment netting at TOTAL level only (operator decision): the
+    // buckets keep Sage's true aging distribution — a vendor-level cheque
+    // can't honestly say WHICH bucket it pays — but the headline shows the
+    // net figure alongside. Summed over the same filtered rows as the tiles.
+    let unposted = 0;
     for (const r of rows) {
+      unposted += Number(r.unposted_payments) || 0;
       const b = r.aging_buckets;
       if (!b) continue;
       for (const k of keys) {
@@ -213,7 +219,7 @@ export default function CreditorSummary() {
         total += v;
       }
     }
-    return { buckets, bucket_counts, total_outstanding: total };
+    return { buckets, bucket_counts, total_outstanding: total, unposted_total: unposted, net_total: total - unposted };
   }, [rows]);
 
   const toggleSort = (key) => {
@@ -351,6 +357,28 @@ export default function CreditorSummary() {
             Aged Creditors (due date + monthly periods). Already shows Total
             Outstanding, so no separate outstanding tile below. */}
         {rows.length > 0 && <AgingSummaryTiles aging={apAging} tiles={AP_TILES} showCount={false} />}
+        {/* Net-of-unposted line — only while a posting backlog exists. The
+            tiles above keep Sage's true (gross) aging distribution; this line
+            gives the honest net headline (operator decision: net the total,
+            buckets stay pure). Follows the same filters as the tiles. */}
+        {rows.length > 0 && apAging.unposted_total > 0 && (
+          <div className="-mt-3 flex items-center gap-2 text-sm">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+            <span className="text-muted-foreground">
+              Less <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_total)}</span> captured
+              in unposted Sage payment batches →
+            </span>
+            <span className="font-medium tabular-nums text-foreground">
+              net outstanding R {fmtR(apAging.net_total)}
+            </span>
+            <span
+              className="cursor-help text-muted-subtle"
+              title="The aging tiles above show Sage's true aged figures (gross). Cheques captured in AP Payment Entry whose batch hasn't been posted yet can't be assigned to a specific aging bucket, so they're netted off the total here instead. This line disappears once accounts posts the batches."
+            >
+              ⓘ
+            </span>
+          </div>
+        )}
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (
