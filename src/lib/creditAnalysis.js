@@ -258,12 +258,17 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
     // discounts). The old rule — any receipt dated on/after the invoice
     // settles it, amounts never compared — let a token same-day receipt
     // "pay" a R104k invoice and mark the account Approve while the entire
-    // balance was overdue. Reversals (negative receipts) contribute nothing.
+    // balance was overdue.
+    //
+    // Receipt amounts are taken by MAGNITUDE. This site stores AR receipts
+    // NEGATIVE by convention (a payment credits the balance — live data:
+    // PY500316 −612.01), so sign cannot distinguish payments from reversals,
+    // and the slots carry no document type. An earlier draft excluded
+    // negative receipts as "reversals" — that would have zeroed every normal
+    // payment and mass-failed accounts to Hold.
     const pool = recByDate.map((receipt) => ({
       receipt,
-      remaining: config.pairing.excludeReversals
-        ? Math.max(0, receipt.amount)
-        : Math.abs(receipt.amount),
+      remaining: Math.abs(receipt.amount),
     }));
     pairs = invByDate.map((invoice) => {
       if (!invoice.date) return { invoice, receipt: null, lagDays: null };
@@ -307,7 +312,17 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
 
   const paidPairs = pairs.filter((pair) => pair.receipt !== null);
   const unpaidPairs = pairs.filter((pair) => pair.receipt === null);
-  const unpaidAges = unpaidPairs.map((pair) => (pair.invoice.date ? Math.floor((today.getTime() - pair.invoice.date) / 86400000) : null)).filter((days) => days !== null);
+  // Materiality floor (operator decision): only unpaid invoices of at least
+  // minMaterialInvoice can drive the verdict. A R0.30 rounding residue from
+  // January was forcing Hold (153-day "breach") on a healthy R148k account.
+  // Immaterial residues still sit in the balance — they just can't dictate.
+  const materialUnpaid = unpaidPairs.filter((pair) => pair.invoice.amount >= config.thresholds.minMaterialInvoice);
+  const immaterialUnpaid = unpaidPairs.filter((pair) => pair.invoice.amount > 0 && pair.invoice.amount < config.thresholds.minMaterialInvoice);
+  if (immaterialUnpaid.length > 0) {
+    const largest = Math.max(...immaterialUnpaid.map((pair) => pair.invoice.amount));
+    factors.push(makeFactor("good", `Ignored ${immaterialUnpaid.length} unpaid residue${immaterialUnpaid.length === 1 ? "" : "s"} under R ${config.thresholds.minMaterialInvoice.toFixed(2)} (largest R ${largest.toFixed(2)}) — too small to drive the verdict.`));
+  }
+  const unpaidAges = materialUnpaid.map((pair) => (pair.invoice.date ? Math.floor((today.getTime() - pair.invoice.date) / 86400000) : null)).filter((days) => days !== null);
   const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
 
   if (oldestUnpaidAge !== null && oldestUnpaidAge > effBreachDays) {
@@ -316,7 +331,7 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
   } else if (oldestUnpaidAge !== null && oldestUnpaidAge > effApproachDays) {
     factors.push(makeFactor("warn", formatTemplate(config.wording.factors.approachingBreach, { oldestUnpaidAge, breachDays: effBreachDays })));
     deductions += config.scoring.approachingBreachDeduction;
-  } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
+  } else if (materialUnpaid.length > 0 && oldestUnpaidAge !== null) {
     factors.push(makeFactor("warn", formatTemplate(config.wording.factors.awaitingPayment, { oldestUnpaidAge, oldestUnpaidAgePlural: pluralSuffix(oldestUnpaidAge) })));
     deductions += config.scoring.awaitingPaymentDeduction;
   }
@@ -325,7 +340,7 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
     const laggedPairs = paidPairs.filter((pair) => pair.lagDays !== null);
     avgLag = laggedPairs.length > 0 ? Math.round(laggedPairs.reduce((sum, pair) => sum + pair.lagDays, 0) / laggedPairs.length) : null;
     if (avgLag !== null) {
-      if (unpaidPairs.length > 0 && outstandingBalance > 0) {
+      if (materialUnpaid.length > 0 && outstandingBalance > 0) {
         factors.push(makeFactor("bad", formatTemplate(config.wording.factors.avgLagWithUnpaidBalance, { avgLag, avgLagPlural: pluralSuffix(avgLag) })));
         deductions += config.scoring.avgLagWithUnpaidBalanceDeduction;
       } else if (avgLag <= effTermDays) {

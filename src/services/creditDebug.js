@@ -281,9 +281,11 @@ export function debugCreditForCustomer(customerNumber) {
     .map((invoice) => ({ ...invoice, amount: Math.abs(invoice.amount) }))
     .sort((a, b) => (a.date || 0) - (b.date || 0));
   const recByDate = [...receipts].sort((a, b) => (a.date || 0) - (b.date || 0));
+  // Magnitude semantics — this site stores AR receipts negative by
+  // convention, so sign cannot distinguish payments from reversals.
   const pool = recByDate.map((receipt) => ({
     receipt,
-    remaining: cfg.pairing.excludeReversals ? Math.max(0, receipt.amount) : Math.abs(receipt.amount),
+    remaining: Math.abs(receipt.amount),
   }));
   const pairs = invByDate.map((invoice) => {
     if (!invoice.date) return { invoice, receipt: null, lagDays: null, allocated: 0 };
@@ -311,7 +313,6 @@ export function debugCreditForCustomer(customerNumber) {
   const unpaidPairs = pairs.filter(p => p.receipt === null);
   step('Invoice/receipt matching', {
     pairingMode: cfg.pairing.amountAware ? `amount-aware (coverage ≥ ${Math.round(cfg.pairing.coverageRatio * 100)}%)` : 'legacy date-only',
-    reversalsExcluded: cfg.pairing.excludeReversals,
     totalPairs: pairs.length,
     paid: paidPairs.length,
     unpaid: unpaidPairs.length,
@@ -330,14 +331,21 @@ export function debugCreditForCustomer(customerNumber) {
     })),
   });
 
-  // 10. Unpaid invoice age
-  const unpaidAges = unpaidPairs
+  // 10. Unpaid invoice age — materiality floor mirrors the engine: only
+  // unpaid invoices ≥ minMaterialInvoice can drive the verdict (a R0.30
+  // residue was forcing a 153-day "breach" Hold on a R148k account).
+  const materialUnpaid = unpaidPairs.filter(p => p.invoice.amount >= cfg.thresholds.minMaterialInvoice);
+  const immaterialUnpaid = unpaidPairs.filter(p => p.invoice.amount > 0 && p.invoice.amount < cfg.thresholds.minMaterialInvoice);
+  const unpaidAges = materialUnpaid
     .map(p => (p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null))
     .filter(d => d !== null);
   const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
   step('Unpaid invoice age', {
-    unpaidInvoices: unpaidPairs.map(p => ({
+    minMaterialInvoice: cfg.thresholds.minMaterialInvoice,
+    ignoredResidues: immaterialUnpaid.map(p => ({ number: p.invoice.number || '?', amount: p.invoice.amount })),
+    unpaidInvoices: materialUnpaid.map(p => ({
       number: p.invoice.number || '?',
+      amount: p.invoice.amount,
       date: fmtDate(p.invoice.date),
       ageDays: p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null,
     })),
@@ -362,7 +370,7 @@ export function debugCreditForCustomer(customerNumber) {
     addDeduction(cfg.scoring.unpaidBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old > breach limit ${effBreachDays} days`);
   } else if (oldestUnpaidAge !== null && oldestUnpaidAge > effApproachDays) {
     addDeduction(cfg.scoring.approachingBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old — approaching breach limit ${effBreachDays} days`);
-  } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
+  } else if (materialUnpaid.length > 0 && oldestUnpaidAge !== null) {
     addDeduction(cfg.scoring.awaitingPaymentDeduction, `Invoice ${oldestUnpaidAge} days old awaiting payment`);
   }
 
@@ -372,7 +380,7 @@ export function debugCreditForCustomer(customerNumber) {
     const laggedPairs = paidPairs.filter(p => p.lagDays !== null);
     avgLag = laggedPairs.length > 0 ? Math.round(laggedPairs.reduce((sum, p) => sum + p.lagDays, 0) / laggedPairs.length) : null;
     if (avgLag !== null) {
-      if (unpaidPairs.length > 0 && outstandingBalance > 0) {
+      if (materialUnpaid.length > 0 && outstandingBalance > 0) {
         addDeduction(cfg.scoring.avgLagWithUnpaidBalanceDeduction, `Avg payment lag ${avgLag} days + unpaid invoices + outstanding balance — unreliable payer`);
       } else if (avgLag <= effTermDays) {
         // Good — no deduction

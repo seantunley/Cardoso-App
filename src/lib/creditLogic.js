@@ -62,6 +62,11 @@ export const creditLogicConfigSchema = z.object({
     holdScoreBelow: z.number().int().min(0).max(100),
     approachingBreachDays: z.number().int().min(0).max(365),
     longInactiveYears: z.number().int().min(1).max(20),
+    // Materiality floor (operator decision, June 2026): an unpaid invoice
+    // below this amount cannot drive breach/Hold — a R0.30 rounding residue
+    // from January was forcing Hold on a R148k account. Tiny residues still
+    // count toward the balance; they just cannot dictate the verdict.
+    minMaterialInvoice: z.number().min(0).max(100000),
   }),
   scoring: z.object({
     unpaidBreachDeduction: z.number().int().min(0).max(100),
@@ -87,12 +92,13 @@ export const creditLogicConfigSchema = z.object({
   pairing: z.object({
     // Receipts settle invoices by VALUE (oldest invoice first), not by date
     // alone — a token same-day receipt can no longer "pay" a R104k invoice.
+    // Receipt amounts are taken by MAGNITUDE: this site stores AR receipts
+    // negative by convention (payments credit the balance), so sign cannot
+    // distinguish a payment from a reversal — and slots carry no doc type.
     amountAware: z.boolean(),
     // Fraction of the invoice amount that must be covered to count as
     // settled (tolerates small discounts/rounding).
     coverageRatio: z.number().min(0.5).max(1),
-    // Negative receipts are reversals, not payments.
-    excludeReversals: z.boolean(),
   }),
   customerTerms: z.object({
     // Judge each account on ITS OWN Sage terms (7DAYS, 14, 30, COD, PP…)
@@ -127,6 +133,7 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
     holdScoreBelow: 40,
     approachingBreachDays: 14,
     longInactiveYears: 2,
+    minMaterialInvoice: 10,
   },
   scoring: {
     unpaidBreachDeduction: 70,
@@ -149,7 +156,6 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
   pairing: {
     amountAware: true,
     coverageRatio: 0.95,
-    excludeReversals: true,
   },
   customerTerms: {
     enabled: true,

@@ -1,6 +1,7 @@
 import { memo } from "react";
 import FlagDot from "./FlagDot";
-import CreditBadge from "./CreditBadge";
+import CreditBadge, { VerdictHoverContent } from "./CreditBadge";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   parseAmount, formatAmount,
   getVisibleAccountType, getAccountTypePillClasses,
@@ -13,11 +14,17 @@ import {
 //
 // Rows have variable height (invoice/receipt cells render 1-3 lines), so
 // we accept a measureRef from the virtualizer for accurate spacer math.
+//
+// The whole row's hover is the CREDIT VERDICT explanation (operator request):
+// one tooltip for the row, computed lazily on open, instead of separate
+// row-title and badge tooltips overlapping each other.
 const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void }} */ {
   row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
 }) {
   const amount = parseAmount(row.outstanding_balance);
   return (
+    <Tooltip delayDuration={400}>
+      <TooltipTrigger asChild>
     <tr
       ref={measureRef}
       data-index={idx}
@@ -65,7 +72,6 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       <td className="px-2 py-1 text-right">
         <span
           className={`font-semibold tabular-nums ${amount > 10000 ? "text-red-400" : amount > 0 ? "text-orange-400" : "text-muted-foreground"}`}
-          title={amount > 10000 ? "High balance (over R10,000)" : amount > 0 ? "Outstanding balance" : "No balance"}
         >
           R {formatAmount(amount)}
         </span>
@@ -74,6 +80,11 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
         <CreditBadge row={row} creditLogicConfig={creditLogicConfig} />
       </td>
     </tr>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start">
+        <VerdictHoverContent row={row} creditLogicConfig={creditLogicConfig} />
+      </TooltipContent>
+    </Tooltip>
   );
 });
 

@@ -515,13 +515,15 @@ describe('amount-aware pairing (June 2026)', () => {
     expect(r.avgLag).toBe(10); // settled by P2, 30-20 days
   });
 
-  it('negative receipts (reversals) contribute nothing', () => {
+  it('negative-stored receipts are payments by magnitude (site sign convention)', () => {
+    // This site stores AR receipts NEGATIVE (a payment credits the balance —
+    // live data: PY500316 −612.01). Sign must not be read as 'reversal'.
     const r = analyseInvoiceCredit([makeRecord({
-      outstanding_balance: 1000,
+      outstanding_balance: 0.5,
       invoices: [{ number: 'I1', amount: 1000, date: dateNDaysAgo(28) }],
-      receipts: [{ number: 'RV1', amount: -1000, date: dateNDaysAgo(10) }],
+      receipts: [{ number: 'PY1', amount: -1000, date: dateNDaysAgo(10) }],
     })]);
-    expect(r.verdict).toBe('hold'); // still fully unpaid past breach
+    expect(r.verdict).toBe('approve'); // settled by magnitude, lag 18d
   });
 
   it('legacy date-only pairing remains available behind the config switch', () => {
@@ -608,5 +610,43 @@ describe('sentinel dates (Sage 1999-12-31 placeholder)', () => {
     })]);
     // Undated invoice → no age → no breach; falls to awaiting/no-history paths.
     expect(r.verdict).not.toBe('hold');
+  });
+});
+
+describe('materiality floor (minMaterialInvoice, default R10)', () => {
+  it('a tiny unpaid residue cannot force a breach hold (the R0.30 case)', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 148063.95,
+      invoices: [
+        { number: 'IN578912', amount: 0.30, date: dateNDaysAgo(154) }, // January crumb
+        { number: 'IN591625', amount: 50918.59, date: dateNDaysAgo(1) },
+      ],
+      receipts: [],
+    })]);
+    expect(r.verdict).not.toBe('hold');
+    // The WHY explains the ignored residue.
+    expect(r.factors.some((f) => f.text.includes('residue'))).toBe(true);
+  });
+
+  it('a material old unpaid invoice still holds', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 5000,
+      invoices: [{ number: 'I1', amount: 5000, date: dateNDaysAgo(154) }],
+      receipts: [],
+    })]);
+    expect(r.verdict).toBe('hold');
+  });
+
+  it('the floor is configurable', () => {
+    const r = analyseInvoiceCredit(
+      [makeRecord({
+        outstanding_balance: 50,
+        invoices: [{ number: 'I1', amount: 50, date: dateNDaysAgo(154) }],
+        receipts: [],
+      })],
+      [],
+      { thresholds: { minMaterialInvoice: 100 } },
+    );
+    expect(r.verdict).not.toBe('hold'); // R50 < R100 floor
   });
 });
