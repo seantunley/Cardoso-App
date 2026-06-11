@@ -766,7 +766,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     // National-account filter: 'all' | 'national' | 'standard'.
     const accountTypeFilter = String(req.query.accountType || 'all').trim().toLowerCase();
 
-    const balanceAmountGt = CUSTOMER_BALANCES_MIN_AMOUNT;
+    // Minimum balance to show. Operator-controllable (was a hard-coded R3
+    // that silently hid small balances): ?min_balance=0 shows everything with
+    // a positive balance; any positive number raises the floor. Defaults to
+    // CUSTOMER_BALANCES_MIN_AMOUNT so existing links/behaviour are unchanged.
+    const minBalanceRaw = parseFloat(req.query.min_balance);
+    const balanceAmountGt = Number.isFinite(minBalanceRaw) && minBalanceRaw >= 0
+      ? minBalanceRaw
+      : CUSTOMER_BALANCES_MIN_AMOUNT;
     const siteWhere = (siteFilter !== 'all' && isHub) ? `AND COALESCE(s.name, r.site_id) = ?` : '';
     // sales_rep can come from JSON blobs (data / local_fields) so we always
     // filter it in JS after hydrateSalesRepAndAccountType has run.
@@ -1038,7 +1045,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         salesRep: salesRepFilter,
         accountType: accountTypeFilter,
         aging,
-        minBalanceThreshold: CUSTOMER_BALANCES_MIN_AMOUNT,
+        minBalanceThreshold: balanceAmountGt,
       });
     } catch (err) {
       console.error('top-balances error', err);
