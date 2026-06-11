@@ -412,10 +412,12 @@ function TopCustomersCard({ site }) {
     staleTime: 60_000,
   });
   const accent = "hsl(200 80% 55%)";
-  const rows = (data?.rows || []).map((r) => ({
-    key: r.customer_code,
-    label: r.customer_name || r.customer_code,
-    title: `${r.customer_code}${r.customer_name ? " · " + r.customer_name : ""}`,
+  // All-branches hub view prefixes the branch name, mirroring Top Dead Stock
+  // (hub rows arrive grouped per branch+customer, each with site_name).
+  const rows = (data?.rows || []).map((r, i) => ({
+    key: `${r.site_name || ""}-${r.customer_code}-${i}`,
+    label: `${r.site_name && site === "all" ? r.site_name + " · " : ""}${r.customer_name || r.customer_code}`,
+    title: `${r.site_name ? r.site_name + " · " : ""}${r.customer_code}${r.customer_name ? " · " + r.customer_name : ""}`,
     value: r.revenue,
   }));
   return (
