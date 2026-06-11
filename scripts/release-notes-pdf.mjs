@@ -237,6 +237,16 @@ const RELEASES = {
               "Existing sites were never affected — the issue only occurred when the application started against a completely empty database.",
             ],
           },
+          {
+            title: 'Aged Debtors dashboard tile respects the branch filter',
+            body:
+              "The Aged Debtors tile on the Reporting Dashboard now correctly " +
+              "reflects the selected branch, showing only that branch's aging " +
+              "totals rather than all-branch figures.",
+            details: [
+              "Selecting a branch from the dashboard's Branch selector now narrows the Aged Debtors tile, consistent with every other tile on the page.",
+            ],
+          },
         ],
       },
       {
