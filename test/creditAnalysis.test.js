@@ -650,3 +650,26 @@ describe('materiality floor (minMaterialInvoice, default R10)', () => {
     expect(r.verdict).not.toBe('hold'); // R50 < R100 floor
   });
 });
+
+describe('offending invoice is named (operator request)', () => {
+  it('the breach factor names the oldest material unpaid invoice, and result.offendingInvoice carries it', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 113880.02,
+      invoices: [
+        { number: "IN591271", amount: 58160.28, date: dateNDaysAgo(3) },
+        { number: "IN539887", amount: 2693.39, date: dateNDaysAgo(662) },
+      ],
+      receipts: [],
+    })]);
+    expect(r.verdict).toBe('hold');
+    expect(r.offendingInvoice).toBeTruthy();
+    expect(r.offendingInvoice.number).toBe('IN539887');
+    // The block factor mentions the invoice number.
+    expect(r.factors.some((f) => f.type === 'block' && f.text.includes('IN539887'))).toBe(true);
+  });
+
+  it('offendingInvoice is null when nothing material is unpaid', () => {
+    const r = analyseInvoiceCredit([makeRecord({ outstanding_balance: 0 })]);
+    expect(r.offendingInvoice == null).toBe(true);
+  });
+});

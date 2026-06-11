@@ -322,17 +322,40 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
     const largest = Math.max(...immaterialUnpaid.map((pair) => pair.invoice.amount));
     factors.push(makeFactor("good", `Ignored ${immaterialUnpaid.length} unpaid residue${immaterialUnpaid.length === 1 ? "" : "s"} under R ${config.thresholds.minMaterialInvoice.toFixed(2)} (largest R ${largest.toFixed(2)}) — too small to drive the verdict.`));
   }
-  const unpaidAges = materialUnpaid.map((pair) => (pair.invoice.date ? Math.floor((today.getTime() - pair.invoice.date) / 86400000) : null)).filter((days) => days !== null);
-  const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
+  // The OFFENDING invoice — the oldest material unpaid one. We carry its
+  // number/amount/date so the verdict can name it (operator request: "which
+  // invoice is 662 days old?"). It's already in the synced slots; the engine
+  // just used to compute the age and discard which document it came from.
+  const datedMaterial = materialUnpaid.filter((pair) => pair.invoice.date);
+  const offendingPair = datedMaterial.length > 0
+    ? datedMaterial.reduce((oldest, pair) => (pair.invoice.date < oldest.invoice.date ? pair : oldest))
+    : null;
+  const oldestUnpaidAge = offendingPair
+    ? Math.floor((today.getTime() - offendingPair.invoice.date) / 86400000)
+    : null;
+  // Compact reference like "IN539887 · R 2 693,39 · 12 Aug 2024" for the
+  // factor and the returned result, so the card and any caller can show it.
+  const offendingInvoice = offendingPair ? {
+    number: String(offendingPair.invoice.number || "").trim() || null,
+    amount: offendingPair.invoice.amount,
+    date: offendingPair.invoice.date,
+  } : null;
+  const offendingRef = offendingInvoice ? (() => {
+    const parts = [];
+    if (offendingInvoice.number) parts.push(offendingInvoice.number);
+    parts.push(`R ${offendingInvoice.amount.toLocaleString("en-ZA", { minimumFractionDigits: 2 })}`);
+    parts.push(offendingInvoice.date.toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" }));
+    return ` (${parts.join(" · ")})`;
+  })() : "";
 
   if (oldestUnpaidAge !== null && oldestUnpaidAge > effBreachDays) {
-    factors.push(makeFactor("block", formatTemplate(config.wording.factors.unpaidBreach, { oldestUnpaidAge, breachDays: effBreachDays })));
+    factors.push(makeFactor("block", formatTemplate(config.wording.factors.unpaidBreach, { oldestUnpaidAge, breachDays: effBreachDays }) + offendingRef));
     deductions += config.scoring.unpaidBreachDeduction;
   } else if (oldestUnpaidAge !== null && oldestUnpaidAge > effApproachDays) {
-    factors.push(makeFactor("warn", formatTemplate(config.wording.factors.approachingBreach, { oldestUnpaidAge, breachDays: effBreachDays })));
+    factors.push(makeFactor("warn", formatTemplate(config.wording.factors.approachingBreach, { oldestUnpaidAge, breachDays: effBreachDays }) + offendingRef));
     deductions += config.scoring.approachingBreachDeduction;
   } else if (materialUnpaid.length > 0 && oldestUnpaidAge !== null) {
-    factors.push(makeFactor("warn", formatTemplate(config.wording.factors.awaitingPayment, { oldestUnpaidAge, oldestUnpaidAgePlural: pluralSuffix(oldestUnpaidAge) })));
+    factors.push(makeFactor("warn", formatTemplate(config.wording.factors.awaitingPayment, { oldestUnpaidAge, oldestUnpaidAgePlural: pluralSuffix(oldestUnpaidAge) }) + offendingRef));
     deductions += config.scoring.awaitingPaymentDeduction;
   }
 
@@ -427,6 +450,9 @@ export function analyseInvoiceCredit(records, flagHistory = [], configOverride =
     avgLag,
     lagData,
     timelineData,
+    // The oldest material unpaid invoice driving the age/breach, named so
+    // callers can show "which invoice". null when nothing material is unpaid.
+    offendingInvoice,
     isDormantReactivation: inactiveDays !== null && inactiveDays > config.thresholds.dormantThresholdDays,
     dormantMonths: inactiveDays !== null ? Math.floor(inactiveDays / 30) : null,
     logicVersionUsed: null,

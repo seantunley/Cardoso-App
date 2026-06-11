@@ -27,7 +27,7 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
 }) {
   const amount = parseAmount(row.outstanding_balance);
   const [hover, setHover] = useState(false);
-  const tipRef = useRef(null);
+  const tipRef = useRef(/** @type {HTMLDivElement | null} */ (null));
   const posRef = useRef({ x: 0, y: 0 });
 
   // Place the card just off the cursor, flipping to the other side / above
