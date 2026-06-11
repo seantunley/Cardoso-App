@@ -18,7 +18,7 @@ export function VerdictHoverCard({ row, creditLogicConfig }) {
   const meta = CREDIT_BADGE_META[result.verdict] || CREDIT_BADGE_META.caution;
   const factors = (result.factors || []).slice(0, 5);
   return (
-    <div className="w-[340px] overflow-hidden rounded-xl border border-border bg-card shadow-2xl ring-1 ring-black/20">
+    <div className="w-[460px] max-w-[90vw] overflow-hidden rounded-xl border border-border bg-card shadow-2xl ring-1 ring-black/20">
       <div className="flex items-center justify-between gap-2 border-b border-border bg-muted/40 px-3.5 py-2.5">
         <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide ${meta.className}`}>
           {meta.label}
