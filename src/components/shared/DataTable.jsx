@@ -12,6 +12,7 @@
 // `virtualize={false}` renders all rows — for print flows and jsdom tests
 // (jsdom has no layout, so the virtualizer would window everything to zero).
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 const MIN_COL = 60;
@@ -79,10 +80,46 @@ export default function DataTable({
   onRowClick,
   rowClassName,
   rowTitle,
+  // Optional cursor-following hover card (same pattern as Customer Balances):
+  // hoverCard(row) returns JSX (or null) shown in a prominent popup that
+  // tracks the pointer, rendered via a portal so the table's scroll can't clip
+  // it, click-through so it never blocks onRowClick. When omitted there's zero
+  // overhead — no handlers, no portal.
+  hoverCard,
   className = "",
 }) {
   const { widths, startResize, resetCol } = useStoredColWidths(storageKey, defaultWidths);
   const scrollRef = useRef(null);
+
+  // Hover-card state: the row sets which card to show (one state change per row
+  // entered, none per move); position is written straight to the node on
+  // mousemove so the virtualised rows don't re-render as the pointer moves.
+  const [hoverRow, setHoverRow] = useState(null);
+  const tipRef = useRef(/** @type {HTMLDivElement | null} */ (null));
+  const posRef = useRef({ x: 0, y: 0 });
+  const positionTip = useCallback(() => {
+    const el = tipRef.current;
+    if (!el) return;
+    const pad = 16;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    let left = posRef.current.x + pad;
+    let top = posRef.current.y + pad;
+    if (left + w > window.innerWidth - 8) left = posRef.current.x - pad - w;
+    if (left < 8) left = 8;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, posRef.current.y - pad - h);
+    el.style.left = `${left}px`;
+    el.style.top = `${top}px`;
+  }, []);
+  const onRowEnter = useCallback((row) => (e) => {
+    posRef.current = { x: e.clientX, y: e.clientY };
+    setHoverRow(row);
+  }, []);
+  const onRowMove = useCallback((e) => {
+    posRef.current = { x: e.clientX, y: e.clientY };
+    positionTip();
+  }, [positionTip]);
+  const hoverContent = hoverCard && hoverRow ? hoverCard(hoverRow) : null;
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -110,7 +147,12 @@ export default function DataTable({
 
   return (
     <div className={`rounded-xl border border-border bg-card overflow-hidden ${className}`}>
-      <div ref={scrollRef} className="overflow-auto" style={{ maxHeight }}>
+      <div
+        ref={scrollRef}
+        className="overflow-auto"
+        style={{ maxHeight }}
+        onMouseLeave={hoverCard ? () => setHoverRow(null) : undefined}
+      >
         <table className="text-sm" style={{ tableLayout: "fixed", width: "max-content", minWidth: "100%" }}>
           <colgroup>
             {columns.map((c) => (
@@ -159,12 +201,14 @@ export default function DataTable({
                 onKeyDown={onRowClick ? rowKeyDown(row) : undefined}
                 tabIndex={onRowClick ? 0 : undefined}
                 title={rowTitle ? rowTitle(row) : undefined}
+                onMouseEnter={hoverCard ? onRowEnter(row) : undefined}
+                onMouseMove={hoverCard ? onRowMove : undefined}
               >
                 {columns.map((c) => (
                   <td
                     key={c.key}
                     className={`px-3 py-1.5 tabular-nums truncate ${c.align === "right" ? "text-right" : "text-left"} ${c.mono ? "font-mono text-xs" : ""}`}
-                    title={String(row[c.key] ?? "")}
+                    title={hoverCard ? undefined : String(row[c.key] ?? "")}
                   >
                     {c.format ? c.format(row[c.key], row) : row[c.key]}
                   </td>
@@ -177,6 +221,15 @@ export default function DataTable({
           </tbody>
         </table>
       </div>
+      {hoverContent && createPortal(
+        <div
+          ref={(el) => { tipRef.current = el; if (el) positionTip(); }}
+          style={{ position: "fixed", left: posRef.current.x + 16, top: posRef.current.y + 16, zIndex: 70, pointerEvents: "none" }}
+        >
+          {hoverContent}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

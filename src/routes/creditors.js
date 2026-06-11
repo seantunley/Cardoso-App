@@ -8,6 +8,8 @@ import {
   DEFAULT_VENDOR_SQL,
   DEFAULT_AP_INVOICE_SQL,
   DEFAULT_AP_PAYMENT_SQL,
+  DEFAULT_AP_UNPOSTED_SQL,
+  DEFAULT_AP_UNPOSTED_INVOICE_SQL,
   DEFAULT_PO_HEADER_SQL,
   DEFAULT_PO_LINE_SQL,
 } from '../services/creditorSync.js';
@@ -29,7 +31,18 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
   // ===== Sync admin =====
   router.get('/api/creditors/sync-meta', ...guard, (_req, res) => {
     try {
-      if (isHub()) return res.json({ hub: true, message: 'Hub pulls creditor data from sites during ETL.' });
+      if (isHub()) {
+        // Real freshness for the LastSyncedBadge: the newest ETL stamp on the
+        // hub-side creditor data (AP open items first — they update on every
+        // ETL cycle; master as fallback for a hub that hasn't pulled AP yet).
+        const ap = db.prepare('SELECT MAX(synced_at) AS last FROM hub_creditor_ap_invoice').get();
+        const master = db.prepare('SELECT MAX(synced_at) AS last FROM hub_creditor').get();
+        return res.json({
+          hub: true,
+          last_synced_at: ap?.last || master?.last || null,
+          source: 'Pulled from branches by the hub ETL',
+        });
+      }
       res.json(getSyncMeta());
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -56,6 +69,8 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           vendor_sql: DEFAULT_VENDOR_SQL,
           ap_invoice_sql: DEFAULT_AP_INVOICE_SQL,
           ap_payment_sql: DEFAULT_AP_PAYMENT_SQL,
+          ap_unposted_sql: DEFAULT_AP_UNPOSTED_SQL,
+          ap_unposted_invoice_sql: DEFAULT_AP_UNPOSTED_INVOICE_SQL,
           po_header_sql: DEFAULT_PO_HEADER_SQL,
           po_line_sql: DEFAULT_PO_LINE_SQL,
         },
@@ -90,6 +105,94 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
       // passing ?include_zero_balance=true.
       const includeZero = String(req.query.include_zero_balance || 'false') === 'true';
 
+      // Hub: serve the same page from the per-site creditor master + AP open
+      // items the ETL pulls into hub_creditor / hub_creditor_ap_invoice.
+      // Aging runs through the SAME shared engine + AP scheme as site mode
+      // and the Aged Creditors report, so with ?site=<branch> the numbers
+      // mirror that branch's own Creditor Balances page exactly. With
+      // site=all, vendors are aggregated across branches (outstanding
+      // summed; master fields take the freshest non-null value).
+      // YTD paid / PO / receipt figures are site-local Sage data the ETL
+      // does not carry — returned as null so the UI hides those columns.
+      if (isHub()) {
+        const site = String(req.query.site || 'all').trim();
+        const hubWhere = ['1=1'];
+        const hubParams = [];
+        if (search) {
+          hubWhere.push('(c.vendor_code LIKE ? OR c.vendor_name LIKE ?)');
+          hubParams.push(`%${search}%`, `%${search}%`);
+        }
+        if (site !== 'all') {
+          hubWhere.push('COALESCE(hs.name, c.site_id) = ?');
+          hubParams.push(site);
+        }
+        const having = ['1=1'];
+        if (activeOnly) having.push('MAX(c.is_active) = 1');
+        if (!includeZero) having.push('COALESCE(SUM(ob.outstanding), 0) <> 0');
+
+        const rows = db.prepare(`
+          SELECT
+            c.vendor_code,
+            MAX(c.vendor_name)        AS vendor_name,
+            MAX(c.terms)              AS terms,
+            MAX(c.contact)            AS contact,
+            MAX(c.phone)              AS phone,
+            MAX(c.email)              AS email,
+            MAX(c.is_active)          AS is_active,
+            MAX(c.last_receipt_date)  AS last_receipt_date,
+            MAX(c.last_payment_date)  AS last_payment_date,
+            NULL                      AS ytd_paid,
+            NULL                      AS ytd_po_amount,
+            NULL                      AS ytd_po_count,
+            NULL                      AS ytd_receipt_count,
+            COALESCE(SUM(ob.outstanding), 0) AS outstanding_amount
+          FROM hub_creditor c
+          LEFT JOIN hub_sites hs ON hs.id = c.site_id
+          LEFT JOIN (
+            SELECT site_id, vendor_code, SUM(outstanding_amount) AS outstanding
+            FROM hub_creditor_ap_invoice
+            GROUP BY site_id, vendor_code
+          ) ob ON ob.site_id = c.site_id AND ob.vendor_code = c.vendor_code
+          WHERE ${hubWhere.join(' AND ')}
+          GROUP BY c.vendor_code
+          HAVING ${having.join(' AND ')}
+          ORDER BY outstanding_amount DESC, vendor_name ASC
+        `).all(...hubParams);
+
+        const siteDocWhere = site !== 'all' ? 'AND COALESCE(hs.name, i.site_id) = ?' : '';
+        const apDocs = db.prepare(`
+          SELECT i.vendor_code, i.document_date, i.due_date, i.outstanding_amount
+          FROM hub_creditor_ap_invoice i
+          LEFT JOIN hub_sites hs ON hs.id = i.site_id
+          WHERE i.outstanding_amount <> 0 ${siteDocWhere}
+        `).all(...(site !== 'all' ? [site] : [])).map((d) => ({
+          entityCode: String(d.vendor_code || '').trim(),
+          date: d.document_date,
+          dueDate: d.due_date,
+          outstanding: d.outstanding_amount,
+        }));
+        const aged = ageOpenItems(apDocs, { scheme: AP_SCHEME });
+        const bucketsByVendor = new Map(aged.entities.map((e) => [e.entityCode, e.bucket_amounts]));
+        for (const r of rows) {
+          r.aging_buckets = bucketsByVendor.get(String(r.vendor_code || '').trim()) || null;
+        }
+
+        const sites = db.prepare(`
+          SELECT DISTINCT COALESCE(hs.name, c.site_id) AS s
+          FROM hub_creditor c LEFT JOIN hub_sites hs ON hs.id = c.site_id
+          ORDER BY s
+        `).all().map((x) => x.s).filter(Boolean);
+
+        return res.json({
+          year: Number(year),
+          count: rows.length,
+          records: rows,
+          aging: { buckets: aged.buckets, bucket_counts: aged.bucket_counts, total_outstanding: aged.total_outstanding },
+          hub: true,
+          sites,
+        });
+      }
+
       const where = ['1=1'];
       const params = [];
       if (search) {
@@ -97,8 +200,21 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         params.push(`%${search}%`, `%${search}%`);
       }
       if (activeOnly) where.push('c.is_active = 1');
-      if (!includeZero) where.push('COALESCE(ob.outstanding, 0) <> 0');
+      // Zero filter applies to the FULL net outstanding (unposted invoices
+      // added, unposted payments subtracted) so a vendor whose true position
+      // is settled behaves as settled. Rounded to the cent: an exact `<> 0`
+      // let ~6 vendors whose net is float dust (fractions of a cent) through,
+      // so the vendor COUNT and totals disagreed with the Aged Creditors view.
+      if (!includeZero) where.push('ROUND(COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0), 2) <> 0');
 
+      // outstanding_amount is the TRUE position (operator decision, June
+      // 2026): APOBL open items PLUS invoices captured in unposted AP batches
+      // (APOBL doesn't list them yet — outstanding was UNDERSTATED, R44.65M
+      // at build time) MINUS payments captured but not yet posted (APOBL
+      // still shows their invoices open — outstanding was OVERSTATED).
+      // outstanding_gross + unposted_invoices + unposted_payments are
+      // returned alongside so the UI can mark affected vendors and show the
+      // exact breakdown on hover.
       const rows = db.prepare(`
         SELECT
           c.vendor_code,
@@ -114,7 +230,10 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           COALESCE(po.ytd_po_amount, 0)    AS ytd_po_amount,
           COALESCE(po.ytd_po_count, 0)     AS ytd_po_count,
           COALESCE(rcp.ytd_receipt_count, 0) AS ytd_receipt_count,
-          COALESCE(ob.outstanding, 0)      AS outstanding_amount
+          COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0) AS outstanding_amount,
+          COALESCE(ob.outstanding, 0)      AS outstanding_gross,
+          COALESCE(unp.unposted, 0)        AS unposted_payments,
+          COALESCE(uninv.unposted_inv, 0)  AS unposted_invoices
         FROM creditor c
         LEFT JOIN (
           SELECT vendor_code, SUM(amount) AS ytd_paid
@@ -141,6 +260,16 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           FROM creditor_ap_invoice
           GROUP BY vendor_code
         ) ob ON ob.vendor_code = c.vendor_code
+        LEFT JOIN (
+          SELECT vendor_code, SUM(amount) AS unposted
+          FROM creditor_ap_unposted_payment
+          GROUP BY vendor_code
+        ) unp ON unp.vendor_code = c.vendor_code
+        LEFT JOIN (
+          SELECT vendor_code, SUM(amount) AS unposted_inv
+          FROM creditor_ap_unposted_invoice
+          GROUP BY vendor_code
+        ) uninv ON uninv.vendor_code = c.vendor_code
         WHERE ${where.join(' AND ')}
         ORDER BY COALESCE(pay.ytd_paid, 0) + COALESCE(po.ytd_po_amount, 0) DESC, c.vendor_name ASC
       `).all(year, year, year, ...params);
@@ -208,7 +337,26 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         FROM creditor WHERE vendor_code = ?
       `).get(req.params.code);
       if (!row) return res.status(404).json({ error: 'Vendor not found' });
-      res.json(row);
+      // Money summary for the vendor header — same true-position arithmetic
+      // as the Creditor Balances list (posted APOBL + unposted invoices −
+      // unposted payments), plus the payment-capture cutoff so the header can
+      // warn that recent bank payments may not be captured in Sage yet.
+      const money = db.prepare(`
+        SELECT
+          COALESCE((SELECT SUM(outstanding_amount) FROM creditor_ap_invoice WHERE vendor_code = ?), 0) AS outstanding_gross,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_invoice WHERE vendor_code = ?), 0)    AS unposted_invoices,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_payment WHERE vendor_code = ?), 0)    AS unposted_payments
+      `).get(req.params.code, req.params.code, req.params.code);
+      const meta = db.prepare(`
+        SELECT last_cb_payment_capture, last_ap_payment_date FROM creditor_sync_meta WHERE id = 1
+      `).get() || {};
+      res.json({
+        ...row,
+        ...money,
+        outstanding_net: money.outstanding_gross + money.unposted_invoices - money.unposted_payments,
+        last_cb_payment_capture: meta.last_cb_payment_capture || null,
+        last_ap_payment_date: meta.last_ap_payment_date || null,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

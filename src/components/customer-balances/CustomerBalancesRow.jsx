@@ -15,23 +15,33 @@ import {
 // Rows have variable height (invoice/receipt cells render 1-3 lines), so
 // we accept a measureRef from the virtualizer for accurate spacer math.
 //
-// Hovering the row shows the CREDIT VERDICT explanation as a prominent card
-// that FOLLOWS THE CURSOR (operator request: the old Radix tooltip pinned to
-// the row's left margin, far from the pointer). The card renders through a
-// portal to document.body so the table's overflow never clips it, with
-// pointer-events:none so it never blocks the row's click/hover. Position is
-// written straight to the node's style on mousemove — no React state churn
-// per move across all the virtualised rows.
-const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void }} */ {
-  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
+// Two operator behaviours combined here:
+//  • CLICK drills into the customer's full popup IN PLACE (onDrill) so closing
+//    it leaves you on Balances.
+//  • HOVER shows the CREDIT VERDICT explanation as a prominent card that
+//    FOLLOWS THE CURSOR — rendered through a portal to document.body (so the
+//    table's overflow can't clip it) with pointer-events:none (so it never
+//    blocks the click). Position is written straight to the node on mousemove,
+//    no React state churn per move across the virtualised rows.
+const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void, onDrill?: (customerNumber: string) => void }} */ {
+  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef, onDrill,
 }) {
   const amount = parseAmount(row.outstanding_balance);
   const [hover, setHover] = useState(false);
   const tipRef = useRef(/** @type {HTMLDivElement | null} */ (null));
   const posRef = useRef({ x: 0, y: 0 });
 
-  // Place the card just off the cursor, flipping to the other side / above
-  // when it would spill past the viewport edge.
+  // Drill opens the customer lookup popup IN PLACE on this page (operator
+  // request: closing it must leave you on Balances). Guard: clicks on
+  // interactive children keep their own behaviour.
+  const drill = (e) => {
+    if (!onDrill || !row.customer_number) return;
+    if (e.target.closest("button, a, input, select, textarea, [role='button']")) return;
+    onDrill(String(row.customer_number).trim());
+  };
+
+  // Place the verdict card just off the cursor, flipping to the other side /
+  // above when it would spill past the viewport edge.
   const positionTip = useCallback(() => {
     const el = tipRef.current;
     if (!el) return;
@@ -59,10 +69,13 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       <tr
         ref={measureRef}
         data-index={idx}
+        onClick={drill}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(e); } }}
+        tabIndex={onDrill && row.customer_number ? 0 : undefined}
         onMouseEnter={(e) => { posRef.current = { x: e.clientX, y: e.clientY }; setHover(true); }}
         onMouseMove={onMove}
         onMouseLeave={() => setHover(false)}
-        className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
+        className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${onDrill && row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
       >
         <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
         <td className="px-2 py-1 pr-3">

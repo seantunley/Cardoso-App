@@ -6,7 +6,9 @@ import session from 'express-session';
 import dotenv from 'dotenv';
 import path from 'path';
 import { createRequire } from 'module';
-import db from './src/db/index.js';
+import db, { dbPath } from './src/db/index.js';
+import { startMainThreadWatch, checkPreviousRunFreeze } from './src/lib/mainThreadWatch.js';
+import { fireAlert } from './src/lib/alertEngine.js';
 import { initSchema } from './src/db/schema.js';
 import { runMigrations } from './src/db/migrations.js';
 import { buildStatements } from './src/db/statements.js';
@@ -203,6 +205,12 @@ app.use(captureSecuritySignal);
 initBatSchema(db);
 initSchema(db);
 runMigrations(db);
+// Freeze forensics: report a hard main-thread freeze from the PREVIOUS run
+// (the marker file the watchdog worker wrote while the app was wedged), then
+// start this run's heartbeat + watchdog. After migrations so error_log and
+// alerts tables exist; before routes so the first request is covered.
+checkPreviousRunFreeze(dbPath, { fireAlert });
+startMainThreadWatch(dbPath);
 validateEncryptionKey();
 migrateUnencryptedPasswords();
 const stmts = buildStatements(db);
