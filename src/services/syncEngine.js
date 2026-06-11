@@ -7,6 +7,7 @@
 import sql from 'mssql';
 import db from '../db/index.js';
 import { decryptPassword } from './encryption.js';
+import { trackOp } from '../lib/mainThreadWatch.js';
 import { buildSqlServerConfig } from './mssqlSecurity.js';
 import { buildStatements } from '../db/statements.js';
 import { getMappedOrFallbackValue, firstDefined, buildFieldPatch, buildDynamicLocalFieldsPatch } from '../fieldRegistry.js';
@@ -784,4 +785,17 @@ async function runConnectionImport(connectionId, { isShuttingDown } = {}) {
   }
 }
 
-export { runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs };
+// Exported wrapped in trackOp: a connection import does sustained synchronous
+// better-sqlite3 work on the main thread — if the app stalls/freezes during
+// one, the freeze forensics (src/lib/mainThreadWatch.js) name the connection
+// instead of logging a mystery.
+async function runConnectionImportTracked(connectionId, opts) {
+  const doneOp = trackOp(`site-sync:connection-${connectionId}`);
+  try {
+    return await runConnectionImport(connectionId, opts);
+  } finally {
+    doneOp();
+  }
+}
+
+export { runConnectionImportTracked as runConnectionImport, acquireSyncLock, releaseSyncLock, activeSyncs };

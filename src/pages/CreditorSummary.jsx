@@ -16,6 +16,8 @@ import VendorDetailModal from "@/components/creditors/VendorDetailModal";
 import VendorBatchHoverCard from "@/components/creditors/VendorBatchHoverCard";
 import CreditorPrintableTable from "@/components/creditors/CreditorPrintableTable";
 import { CREDITOR_PRINT_STYLE } from "@/components/creditors/creditorPrintStyle";
+import BranchFilter from "@/components/reports/BranchFilter";
+import { useSearchParamState } from "../hooks/useSearchParamState.js";
 
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
 const AP_TILES = [
@@ -94,11 +96,12 @@ function fmtDate(s) {
   return s;
 }
 
-async function fetchCreditors({ search, activeOnly, includeZero }) {
+async function fetchCreditors({ search, activeOnly, includeZero, site }) {
   const qs = new URLSearchParams();
   if (search) qs.set("search", search);
   if (activeOnly) qs.set("active_only", "true");
   if (includeZero) qs.set("include_zero_balance", "true");
+  if (site && site !== "all") qs.set("site", site); // hub-only branch filter
   const r = await fetch(`/api/creditors?${qs.toString()}`, { credentials: "include" });
   if (!r.ok) {
     const d = await r.json().catch(() => ({}));
@@ -147,6 +150,9 @@ const COLUMNS = [
 
 export default function CreditorSummary() {
   const qc = useQueryClient();
+  // Hub branch filter — shared `site` URL param, exactly like the hub
+  // reports. In site mode it stays "all" and BranchFilter renders nothing.
+  const [site] = useSearchParamState("site", "all");
   // Row drill → the full vendor popup, opened IN PLACE on this page
   // (mirrors the customer popup on Customer Balances).
   const [drillVendor, setDrillVendor] = useState("");
@@ -164,8 +170,8 @@ export default function CreditorSummary() {
   const [syncing, setSyncing] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["creditors", activeOnly, includeZero],
-    queryFn: () => fetchCreditors({ search: "", activeOnly, includeZero }),
+    queryKey: ["creditors", activeOnly, includeZero, site],
+    queryFn: () => fetchCreditors({ search: "", activeOnly, includeZero, site }),
     // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
     // keeps the vendor table + AP tiles showing the prior data while the next
     // query loads instead of flashing to empty / R 0.00 on each change (UI-4).
@@ -311,7 +317,8 @@ export default function CreditorSummary() {
               Vendors with outstanding balances, sortable and filterable.
             </p>
           </div>
-          {/* Print / PDF — styled identically to the Customer Balances button. */}
+          {/* Print / PDF — styled identically to the Customer Balances button.
+              Sync / branch filter / last-synced live on the headline row below. */}
           <div className="flex items-center gap-2 cb-no-print">
             <button
               onClick={() => window.print()}
@@ -435,21 +442,32 @@ export default function CreditorSummary() {
                 </span>
               </div>
             ) : <span />}
-            {/* Last-synced + Sync from Sage — right-aligned on the headline row. */}
+            {/* Last-synced + Sync from Sage — right-aligned on the headline row.
+                Hub has no Sage to sync from (data comes via the ETL), so the
+                button becomes the branch selector there. */}
             <div className="flex items-center gap-3 cb-no-print">
               <LastSyncedBadge
                 iso={meta?.last_synced_at}
-                detail="Scheduled nightly at 04:30 (Operations page lists every job)"
+                staleAfterHours={meta?.hub ? 2 : 26}
+                detail={meta?.hub
+                  ? "Pulled from branches by the hub ETL (runs every few minutes)"
+                  : "Scheduled nightly at 04:30 (Operations page lists every job)"}
               />
-              <button
-                onClick={handleSync}
-                disabled={syncing}
-                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-                title="Pull latest vendor, invoice, payment, and PO data from Sage"
-              >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "Syncing…" : "Sync from Sage"}
-              </button>
+              {data?.hub ? (
+                <div className="min-w-[180px]">
+                  <BranchFilter hubMode sites={data?.sites} />
+                </div>
+              ) : (
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                  title="Pull latest vendor, invoice, payment, and PO data from Sage"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                  {syncing ? "Syncing…" : "Sync from Sage"}
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -495,7 +513,7 @@ export default function CreditorSummary() {
         )}
         {!isLoading && !error && rows.length > 0 && (
           <DataTable
-            columns={COLUMNS}
+            columns={data?.hub ? COLUMNS.filter((c) => c.key !== "ytd_receipt_count") : COLUMNS}
             rows={rows}
             rowKey={(r) => r.vendor_code}
             sortKey={sortKey}

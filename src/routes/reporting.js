@@ -1454,17 +1454,24 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
           hubConds.push('c.period >= ?'); hubParams.push(`${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}`);
         }
         const sites = db.prepare(`SELECT DISTINCT COALESCE(hs.name, c.site_id) AS site_name FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id ORDER BY site_name`).all().map((r) => r.site_name).filter(Boolean);
+        // Grouped per (branch, customer) — not per customer across branches —
+        // so each row belongs to one branch and the all-branches dashboard can
+        // prefix the branch name, exactly like the Top Dead Stock card. Every
+        // branch keeps its own customer book, so this matches how operators
+        // read "top customers" anyway.
         const rows = db.prepare(`
           SELECT TRIM(c.customer_code) AS customer_code, MAX(c.customer_name) AS customer_name,
+                 COALESCE(hs.name, c.site_id) AS site_name,
                  SUM(c.revenue) AS revenue, SUM(c.qty) AS qty
           FROM hub_inventory_customer_sales c LEFT JOIN hub_sites hs ON hs.id = c.site_id
           WHERE ${hubConds.join(' AND ')} ${siteWhere}
-          GROUP BY TRIM(c.customer_code)
+          GROUP BY c.site_id, TRIM(c.customer_code)
           ORDER BY revenue DESC
           LIMIT ?
         `).all(...hubParams, ...(siteFilter !== 'all' ? [siteFilter] : []), limit).map((r) => ({
           customer_code: r.customer_code,
           customer_name: r.customer_name || null,
+          site_name: r.site_name || null,
           revenue: Number(r.revenue) || 0,
           qty: Number(r.qty) || 0,
         }));

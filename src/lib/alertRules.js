@@ -170,10 +170,84 @@ async function ruleJobFailureSpike() {
   }
 }
 
+// ── Rule: nightly sync stale ─────────────────────────────────────────────
+//
+// The nightly Sage syncs run once per day (inventory 04:00, creditors 04:30,
+// debtors 04:45), so the job-failure-spike rule (3+ fails per HOUR) can
+// mathematically never catch them — and if the machine is off at 4am the
+// cron never fires at all, leaving NO failed row to alert on. Operator
+// report: data quietly going 29h+ stale with nothing announcing it.
+//
+// This rule alerts on the DATA, not the run: if a nightly job's most recent
+// SUCCESSFUL run is older than 26h (24h cadence + 2h buffer — same threshold
+// as the LastSyncedBadge), fire one deduped warning per job. The message says
+// which failure mode it was: last attempt failed (with the error), or no
+// attempt ran at all (machine off / asleep at the scheduled time).
+//
+// Skips jobs that have never been attempted (fresh install before the first
+// scheduled night) and skips entirely on the hub (these are site-mode jobs).
+const NIGHTLY_SYNC_JOBS = ['inventory-sales-sync', 'creditors-sync', 'debtors-sync'];
+const NIGHTLY_STALE_HOURS = 26;
+
+async function ruleNightlySyncStale() {
+  if (process.env.HUB_MODE === 'true') return;
+  for (const name of NIGHTLY_SYNC_JOBS) {
+    let lastSuccess;
+    let lastRun;
+    try {
+      lastSuccess = _prep('nightlyLastSuccess', `
+        SELECT started_at FROM job_runs
+        WHERE name = ? AND status = 'succeeded'
+        ORDER BY started_at DESC LIMIT 1
+      `).get(name);
+      lastRun = _prep('nightlyLastRun', `
+        SELECT status, error_message, started_at FROM job_runs
+        WHERE name = ? ORDER BY started_at DESC LIMIT 1
+      `).get(name);
+    } catch (err) {
+      if (/no such table/i.test(err.message)) return;
+      throw err;
+    }
+    const dedupKey = `nightly-sync-stale:${name}`;
+    // Never attempted at all → fresh install before its first scheduled
+    // night. The freshness badge covers that state; don't nag.
+    if (!lastRun) continue;
+
+    const ageHours = lastSuccess
+      ? (Date.now() - new Date(lastSuccess.started_at).getTime()) / 3_600_000
+      : Infinity;
+    if (ageHours <= NIGHTLY_STALE_HOURS) {
+      resolveAlerts(dedupKey, 'auto');
+      continue;
+    }
+
+    const ageText = lastSuccess
+      ? `${ageHours.toFixed(1)} hours ago`
+      : 'never';
+    const why = lastRun.status === 'failed'
+      ? `The most recent attempt failed: ${lastRun.error_message || 'unknown error'}.`
+      : `No attempt has run since — if the machine was off or asleep at the scheduled 4am window, the sync never fired.`;
+    fireAlert({
+      ruleName: 'nightly-sync-stale',
+      severity: 'warning',
+      message: `Nightly sync '${name}' last succeeded ${ageText} (threshold ${NIGHTLY_STALE_HOURS}h) — its data is stale and reports reading it may be inconsistent. ${why}`,
+      context: {
+        job: name,
+        last_success_at: lastSuccess?.started_at || null,
+        age_hours: lastSuccess ? Number(ageHours.toFixed(1)) : null,
+        last_run_status: lastRun.status,
+        last_run_error: lastRun.error_message || null,
+      },
+      dedupKey,
+    });
+  }
+}
+
 const RULES = [
   { name: 'sage-down', fn: ruleSageDown },
   { name: 'backup-verify-failed', fn: ruleBackupVerifyFailed },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
+  { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
   // Security signals — brute-force, flood, scanner detection. Rule
   // owner lives next to the metric collection in src/lib/securitySignals.js
   // so adding a new threshold is one file edit.
