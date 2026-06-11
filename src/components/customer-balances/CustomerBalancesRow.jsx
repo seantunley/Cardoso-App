@@ -33,7 +33,6 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       onClick={drill}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(e); } }}
       tabIndex={onDrill && row.customer_number ? 0 : undefined}
-      title={onDrill && row.customer_number ? `Open ${row.customer_name || row.customer_number} — full customer popup` : undefined}
       className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${onDrill && row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
     >
       <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
