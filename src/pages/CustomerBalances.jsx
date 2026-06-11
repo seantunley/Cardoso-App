@@ -339,7 +339,10 @@ export default function CustomerBalances() {
             <AgingSummaryTiles aging={arAging} tiles={AR_TILES} entityWord="cust" />
           )}
 
-          {rows.length > 0 && (
+          {/* Standalone total only when the aging tiles are hidden (hub mode,
+              which has no bucket data) — alongside the tiles it duplicated
+              their Total Outstanding headline (operator request). */}
+          {rows.length > 0 && !arAging && (
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <SummaryTile
                 label={`Total outstanding (${totalRecords} customer${totalRecords !== 1 ? "s" : ""}${siteFilter !== "all" ? ` · ${siteFilter}` : ""}${ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})`}
