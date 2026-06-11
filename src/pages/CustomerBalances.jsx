@@ -73,6 +73,10 @@ export default function CustomerBalances() {
     [setDormantOnlyRaw, dormantOnly],
   );
   const [accountTypeFilter, setAccountTypeFilter] = useSearchParamState("acct", "all"); // all | national | standard
+  // Minimum balance to show. Was a hard-coded R3 server-side floor that
+  // silently hid small balances; now an operator filter (default "3" keeps
+  // the old behaviour, "0" turns it off). URL-backed so it shares + survives.
+  const [minBalance, setMinBalance] = useSearchParamState("min", "3");
   // Controlled <details> open state so the filter panel stays put
   // across React re-renders (refetches, sort clicks, etc.) — without
   // this, native <details> gets unmounted by conditional rendering and
@@ -125,8 +129,8 @@ export default function CustomerBalances() {
   }, []);
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter],
-    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter }),
+    queryKey: ["top-balances", page, PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter, minBalance],
+    queryFn: () => fetchTopBalances({ page, limit: PAGE_SIZE, siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter, minBalance }),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
   });
@@ -149,8 +153,8 @@ export default function CustomerBalances() {
   const totalRecords = data?.total ?? 0;
 
   const { data: printData } = useQuery({
-    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter],
-    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter }),
+    queryKey: ["top-balances-print", siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountTypeFilter, minBalance],
+    queryFn: () => fetchAllTopBalances({ siteFilter, ageBucket, salesRepFilter, hideInvoiceMatchesBalance, lastPurchaseDays, dormantOnly, accountType: accountTypeFilter, minBalance }),
     staleTime: 60_000,
     placeholderData: (prev) => prev,
     enabled: totalRecords > PAGE_SIZE,
@@ -329,6 +333,8 @@ export default function CustomerBalances() {
               setSalesRepFilter={setSalesRepFilter}
               hideInvoiceMatchesBalance={hideInvoiceMatchesBalance}
               setHideInvoiceMatchesBalance={setHideInvoiceMatchesBalance}
+              minBalance={minBalance}
+              setMinBalance={setMinBalance}
               activeAgeBucketLabel={activeAgeBucketLabel}
               sites={sites}
               salesReps={salesReps}

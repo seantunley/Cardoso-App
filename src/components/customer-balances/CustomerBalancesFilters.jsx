@@ -14,11 +14,23 @@ export default function CustomerBalancesFilters({
   siteFilter, setSiteFilter,
   salesRepFilter, setSalesRepFilter,
   hideInvoiceMatchesBalance, setHideInvoiceMatchesBalance,
+  minBalance, setMinBalance,
   activeAgeBucketLabel,
   sites, salesReps,
   colorScheme,
   setPage,
 }) {
+  // Minimum balance options. "0" = show every positive balance (floor off);
+  // "3" is the long-standing default that used to be hard-coded server-side.
+  const MIN_BALANCE_OPTIONS = [
+    { value: "0", label: "Off" },
+    { value: "3", label: "R3+" },
+    { value: "10", label: "R10+" },
+    { value: "100", label: "R100+" },
+    { value: "1000", label: "R1 000+" },
+  ];
+  const minBalanceLabel = (MIN_BALANCE_OPTIONS.find((o) => o.value === String(minBalance))?.label)
+    || `R${minBalance}+`;
   return (
     <CollapsibleFilterBar
       open={filtersOpen}
@@ -32,6 +44,7 @@ export default function CustomerBalancesFilters({
         siteFilter !== "all" && { key: "site", label: siteFilter, onClear: () => setSiteFilter("all") },
         salesRepFilter !== "all" && { key: "rep",  label: `Rep ${salesRepFilter}`, onClear: () => setSalesRepFilter("all") },
         hideInvoiceMatchesBalance && { key: "hide", label: "Hide invoice = balance", onClear: () => setHideInvoiceMatchesBalance(false) },
+        String(minBalance) !== "3" && { key: "min", label: `Min ${minBalanceLabel}`, onClear: () => { setMinBalance("3"); setPage(1); } },
       ].filter(Boolean)}
       onClearAll={() => {
         setAgeBucket("all");
@@ -41,6 +54,7 @@ export default function CustomerBalancesFilters({
         setSiteFilter("all");
         setSalesRepFilter("all");
         setHideInvoiceMatchesBalance(false);
+        setMinBalance("3");
       }}
     >
       {/* All pill-style filters stack as labelled rows so the
@@ -79,6 +93,22 @@ export default function CustomerBalancesFilters({
                 value={opt.value}
                 active={lastPurchaseDays === opt.value}
                 onClick={() => { setLastPurchaseDays(opt.value); setPage(1); }}
+              >
+                {opt.label}
+              </AgeBucketPill>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground">Minimum balance</div>
+          <div className="flex flex-wrap gap-2">
+            {MIN_BALANCE_OPTIONS.map((opt) => (
+              <AgeBucketPill
+                key={opt.value}
+                value={opt.value}
+                active={String(minBalance) === opt.value}
+                onClick={() => { setMinBalance(opt.value); setPage(1); }}
               >
                 {opt.label}
               </AgeBucketPill>
