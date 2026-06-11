@@ -98,8 +98,31 @@ Section "Install" SecInstall
 
   SetOutPath "$INSTDIR"
 
-  ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
+  ; Copy pre-staged app CODE (server.js, dist, src, scripts, vendor, package files).
+  ; node_modules is NOT in this bundle — it ships as a single archive and is
+  ; extracted in one pass below, which is far faster than NSIS writing the
+  ; tens-of-thousands of node_modules files one at a time.
   File /r ".\build\app\*"
+
+  ; --- node_modules: one-pass archive extract ---
+  ; Stored uncompressed inside the installer (it is already gzip'd; SetCompress
+  ; off avoids pointless double-compression), then expanded with the built-in
+  ; Windows tar.exe (System32, present on Win10 1803+ / Server 2019+).
+  SetCompress off
+  File ".\build\nm\node_modules.tar.gz"
+  SetCompress auto
+  DetailPrint "Extracting application libraries (node_modules)..."
+  ExecWait '"$SYSDIR\tar.exe" -xzf "$INSTDIR\node_modules.tar.gz" -C "$INSTDIR"' $0
+  Delete "$INSTDIR\node_modules.tar.gz"
+  DetailPrint "node_modules extract exit code: $0"
+  ; Gate on a sentinel package actually existing rather than the exit code —
+  ; bsdtar can return non-zero on benign warnings (timestamps, etc.) while
+  ; extracting correctly. A genuinely failed extract must stop the install
+  ; loudly instead of leaving a broken node_modules behind.
+  IfFileExists "$INSTDIR\node_modules\better-sqlite3\package.json" nm_ok 0
+    MessageBox MB_OK "Setup could not unpack the application libraries (node_modules; tar exit code $0).$\n$\nThe installation is incomplete. Make sure Windows is up to date — tar.exe ships with Windows 10 (1803+) and Windows Server 2019 or newer — then re-run this installer."
+    Abort
+  nm_ok:
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"
