@@ -389,13 +389,19 @@ export default function Inventory() {
                 })()}
             </p>
           </div>
+          {/* Button styling matches Customer Balances: Print is the phosphor
+              primary; Export CSV and Refresh are muted, turning phosphor on
+              hover. */}
           <div className="flex items-center gap-2 no-print">
             <Tooltip>
               <TooltipTrigger asChild>
                 <button
                   onClick={() => window.print()}
                   disabled={rows.length === 0}
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
+                  className="flex items-center gap-2 border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+                  style={{ borderRadius: "12px", borderColor: "var(--phosphor)", color: "var(--phosphor)", background: "hsla(33, 95%, 55%, 0.08)" }}
+                  onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.08)"; e.currentTarget.style.boxShadow = "none"; }}
                 >
                   <Printer className="h-3.5 w-3.5" />
                   Print
@@ -408,7 +414,10 @@ export default function Inventory() {
                 <button
                   onClick={exportCSV}
                   disabled={rows.length === 0}
-                  className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
+                  className="flex items-center gap-2 border border-border bg-card px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+                  style={{ borderRadius: "12px" }}
+                  onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.borderColor = "var(--phosphor)"; e.currentTarget.style.color = "var(--phosphor)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.borderColor = "hsl(var(--border))"; e.currentTarget.style.color = "hsl(var(--muted-foreground))"; }}
                 >
                   <Download className="h-3.5 w-3.5" />
                   Export CSV
@@ -419,7 +428,10 @@ export default function Inventory() {
             <button
               onClick={() => refetch()}
               disabled={isFetching}
-              className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50 min-h-[44px]"
+              className="flex items-center gap-2 border border-border bg-card px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+              style={{ borderRadius: "12px" }}
+              onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.borderColor = "var(--phosphor)"; e.currentTarget.style.color = "var(--phosphor)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = "hsl(var(--border))"; e.currentTarget.style.color = "hsl(var(--muted-foreground))"; }}
             >
               <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
               Refresh
