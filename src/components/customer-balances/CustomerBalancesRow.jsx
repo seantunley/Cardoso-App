@@ -1,5 +1,4 @@
 import { memo } from "react";
-import { useNavigate } from "react-router-dom";
 import FlagDot from "./FlagDot";
 import CreditBadge from "./CreditBadge";
 import {
@@ -14,19 +13,18 @@ import {
 //
 // Rows have variable height (invoice/receipt cells render 1-3 lines), so
 // we accept a measureRef from the virtualizer for accurate spacer math.
-const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void }} */ {
-  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
+const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void, onDrill?: (customerNumber: string) => void }} */ {
+  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef, onDrill,
 }) {
   const amount = parseAmount(row.outstanding_balance);
-  const navigate = useNavigate();
-  // Drill into the customer lookup popup on Customer Search — the same one
-  // that opens when you type this account into the search box (?lookup= seeds
-  // the trigger there). Guard: clicks on interactive children (flag dot
-  // tooltips, links, buttons) keep their own behaviour.
+  // Drill opens the customer lookup popup IN PLACE on this page (operator
+  // request: closing it must leave you on Balances, not navigated away).
+  // Guard: clicks on interactive children (flag dot tooltips, links,
+  // buttons) keep their own behaviour.
   const drill = (e) => {
-    if (!row.customer_number) return;
+    if (!onDrill || !row.customer_number) return;
     if (e.target.closest("button, a, input, select, textarea, [role='button']")) return;
-    navigate(`/CustomerSearch?lookup=${encodeURIComponent(row.customer_number)}`);
+    onDrill(String(row.customer_number).trim());
   };
   return (
     <tr
@@ -34,9 +32,9 @@ const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: 
       data-index={idx}
       onClick={drill}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(e); } }}
-      tabIndex={row.customer_number ? 0 : undefined}
-      title={row.customer_number ? `Open ${row.customer_name || row.customer_number} in Customer Search` : undefined}
-      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
+      tabIndex={onDrill && row.customer_number ? 0 : undefined}
+      title={onDrill && row.customer_number ? `Open ${row.customer_name || row.customer_number} — full customer popup` : undefined}
+      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${onDrill && row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
     >
       <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
       <td className="px-2 py-1 pr-3">
