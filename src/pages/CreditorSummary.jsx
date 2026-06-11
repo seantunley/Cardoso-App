@@ -221,18 +221,13 @@ export default function CreditorSummary() {
     // Summed over the same filtered rows as the tiles.
     let unpostedPay = 0;
     let unpostedInv = 0;
-    // FULL position over ALL records, ignoring client filters — the
-    // "true outstanding" headline must be the company's whole AP position
-    // (operator rule: one source of truth; the default "historically paid"
-    // filter was silently hiding 126 never-paid vendors carrying R32M, so
-    // the headline disagreed with Creditor Search's True Outstanding tile).
-    const all = data?.records || [];
-    let fullNet = 0, fullInv = 0, fullPay = 0;
-    for (const r of all) {
-      fullNet += Number(r.outstanding_amount) || 0;
-      fullInv += Number(r.unposted_invoices) || 0;
-      fullPay += Number(r.unposted_payments) || 0;
-    }
+    // Everything here is summed over the SAME filtered rows as the tiles, so
+    // the headline always reconciles with what's on screen:
+    //   visible Total Outstanding (posted buckets) + unposted invoices
+    //   − unposted payments = the headline.
+    // (Operator decision: the headline matches the tiles. Creditor Search's
+    // True Outstanding tile is its own, whole-company figure — a different
+    // scope by design, since this page keeps the paid-history filter.)
     for (const r of rows) {
       unpostedPay += Number(r.unposted_payments) || 0;
       unpostedInv += Number(r.unposted_invoices) || 0;
@@ -250,12 +245,8 @@ export default function CreditorSummary() {
       unposted_payments_total: unpostedPay,
       unposted_invoices_total: unpostedInv,
       net_total: total + unpostedInv - unpostedPay,
-      full_net_total: fullNet,
-      full_unposted_invoices_total: fullInv,
-      full_unposted_payments_total: fullPay,
-      filtered_differs: rows.length !== all.length,
     };
-  }, [rows, data]);
+  }, [rows]);
 
   const toggleSort = (key) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -396,30 +387,27 @@ export default function CreditorSummary() {
             tiles above keep Sage's true POSTED aging distribution; this line
             gives the honest net headline (operator decision: adjust the
             total, buckets stay pure). Follows the same filters as the tiles. */}
-        {rows.length > 0 && (apAging.full_unposted_invoices_total !== 0 || apAging.full_unposted_payments_total > 0) && (
+        {rows.length > 0 && (apAging.unposted_invoices_total !== 0 || apAging.unposted_payments_total > 0) && (
           <div className="-mt-3 flex flex-wrap items-center gap-2 text-sm">
             <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
             <span className="text-muted-foreground">
-              {apAging.full_unposted_invoices_total !== 0 && (
-                <>Plus <span className="tabular-nums text-foreground">R {fmtR(apAging.full_unposted_invoices_total)}</span> invoices in unposted batches</>
+              {/* Spelled out as arithmetic so it visibly adds up against the
+                  Total Outstanding tile above. */}
+              Total Outstanding <span className="tabular-nums text-foreground">R {fmtR(apAging.total_outstanding)}</span>
+              {apAging.unposted_invoices_total !== 0 && (
+                <> + <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_invoices_total)}</span> unposted invoices</>
               )}
-              {apAging.full_unposted_invoices_total !== 0 && apAging.full_unposted_payments_total > 0 && ", "}
-              {apAging.full_unposted_payments_total > 0 && (
-                <>less <span className="tabular-nums text-foreground">R {fmtR(apAging.full_unposted_payments_total)}</span> unposted payments</>
+              {apAging.unposted_payments_total > 0 && (
+                <> − <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_payments_total)}</span> unposted payments</>
               )}
-              {" →"}
+              {" ="}
             </span>
             <span className="font-medium tabular-nums text-foreground">
-              true outstanding R {fmtR(apAging.full_net_total)}
+              true outstanding R {fmtR(apAging.net_total)}
             </span>
-            {apAging.filtered_differs && (
-              <span className="text-xs text-muted-foreground">
-                (filtered view below: R {fmtR(apAging.net_total)})
-              </span>
-            )}
             <span
               className="cursor-help text-muted-subtle"
-              title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. This line disappears once the batches post."
+              title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. All three figures cover the same vendors currently shown in the table below. This line disappears once the batches post."
             >
               ⓘ
             </span>

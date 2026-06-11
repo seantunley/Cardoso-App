@@ -179,7 +179,7 @@ export default function CreditorSearch() {
           <StatTile
             label="True Outstanding"
             value={`R ${fmtR(trueOutstanding)}`}
-            sub="Posted + unposted inv − payments"
+            sub="All active vendors · incl. unposted"
             hue="hsl(0 72% 50%)"
             glow="hsla(0,72%,50%,0.3)"
             icon={Wallet}
