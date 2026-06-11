@@ -472,3 +472,129 @@ describe('analyseInvoiceCredit — configOverride', () => {
     expect(r.verdict).toBe('approve');     // red no longer forces hold
   });
 });
+
+// ── June 2026 engine fixes (operator-reported inversion) ─────────────────
+//
+// Live case that exposed the flaws: CENTRAL CAFE — a single unpaid invoice
+// of R104,758.72 (the entire balance, 24+ days old on 7DAYS terms) showed
+// APPROVE because a same-day receipt of any size "settled" it under the old
+// date-only pairing. Meanwhile accounts judged on global 14/21-day
+// thresholds regardless of their own Sage terms, and negative receipts
+// (reversals) counted as payments.
+describe('amount-aware pairing (June 2026)', () => {
+  it("a token same-day receipt no longer 'pays' a large invoice (the CENTRAL CAFE case)", () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 104758.72,
+      invoices: [{ number: 'IN589428', amount: 104758.72, date: dateNDaysAgo(28) }],
+      receipts: [{ number: null, amount: 500, date: dateNDaysAgo(28) }],
+    })]);
+    // 28 days unpaid > global breach (21) → hold, not approve.
+    expect(r.verdict).toBe('hold');
+  });
+
+  it('a receipt that genuinely covers the invoice still settles it (same day)', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 50,
+      invoices: [{ number: 'I1', amount: 1000, date: dateNDaysAgo(28) }],
+      receipts: [{ number: 'P1', amount: 1000, date: dateNDaysAgo(28) }],
+    })]);
+    expect(r.verdict).toBe('approve');
+    expect(r.avgLag).toBe(0);
+  });
+
+  it('split receipts accumulate to settle one invoice; lag dates from the completing receipt', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 10,
+      invoices: [{ number: 'I1', amount: 1000, date: dateNDaysAgo(30) }],
+      receipts: [
+        { number: 'P1', amount: 400, date: dateNDaysAgo(25) },
+        { number: 'P2', amount: 600, date: dateNDaysAgo(20) },
+      ],
+    })]);
+    expect(r.verdict).toBe('approve');
+    expect(r.avgLag).toBe(10); // settled by P2, 30-20 days
+  });
+
+  it('negative receipts (reversals) contribute nothing', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 1000,
+      invoices: [{ number: 'I1', amount: 1000, date: dateNDaysAgo(28) }],
+      receipts: [{ number: 'RV1', amount: -1000, date: dateNDaysAgo(10) }],
+    })]);
+    expect(r.verdict).toBe('hold'); // still fully unpaid past breach
+  });
+
+  it('legacy date-only pairing remains available behind the config switch', () => {
+    const r = analyseInvoiceCredit(
+      [makeRecord({
+        outstanding_balance: 104758.72,
+        invoices: [{ number: 'I1', amount: 104758.72, date: dateNDaysAgo(28) }],
+        receipts: [{ number: 'P1', amount: 500, date: dateNDaysAgo(28) }],
+      })],
+      [],
+      { pairing: { amountAware: false } },
+    );
+    expect(r.verdict).toBe('approve'); // old behaviour, explicitly opted into
+  });
+});
+
+describe('customer-specific terms (June 2026)', () => {
+  const record = (terms, ageDays) => makeRecord({
+    outstanding_balance: 5000,
+    invoices: [{ number: 'I1', amount: 5000, date: dateNDaysAgo(ageDays) }],
+    receipts: [],
+  });
+
+  it('a 7DAYS account breaches at 7 + global grace (14), not the global 21', () => {
+    const rec = record('7DAYS', 16);
+    rec.terms = '7DAYS';
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).toBe('hold'); // 16 > 7+7; under global rules 16 < 21 would NOT hold
+  });
+
+  it('an account with no terms still uses the global thresholds', () => {
+    const rec = record(null, 16);
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).not.toBe('hold'); // 16 < global breach 21
+  });
+
+  it('a 30 DAYS account is NOT held at 20 days', () => {
+    const rec = record('30 DAYS', 20);
+    rec.terms = '30 DAYS';
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).not.toBe('hold'); // 20 < 30+7
+  });
+});
+
+describe('prepaid (PP) policy — any balance holds, period (June 2026)', () => {
+  it('PP with an outstanding balance → hold regardless of history', () => {
+    const rec = makeRecord({
+      outstanding_balance: 1,
+      invoices: [{ number: 'I1', amount: 1, date: dateNDaysAgo(1) }],
+      receipts: [],
+    });
+    rec.terms = 'PP';
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).toBe('hold');
+    expect(r.score).toBe(0);
+    expect(r.title).toContain('Prepaid');
+  });
+
+  it('PP with zero balance → normal approve (zero-balance branch wins)', () => {
+    const rec = makeRecord({ outstanding_balance: 0 });
+    rec.terms = 'PP';
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).toBe('approve');
+  });
+
+  it('dormant logic is untouched: dormant zero-balance PP account still reads dormant', () => {
+    const rec = makeRecord({
+      outstanding_balance: 0,
+      invoices: [{ number: 'I1', amount: 100, date: dateNDaysAgo(200) }],
+      receipts: [{ number: 'P1', amount: 100, date: dateNDaysAgo(195) }],
+    });
+    rec.terms = 'PP';
+    const r = analyseInvoiceCredit([rec]);
+    expect(r.verdict).toBe('dormant');
+  });
+});
