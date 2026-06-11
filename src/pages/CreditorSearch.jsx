@@ -99,20 +99,23 @@ function VendorTypeahead({ onPick }) {
 }
 
 // Stat tile — IDENTICAL markup to the flag tiles on Customer Search
-// (px-5 py-4, 14px radius, font-display 4xl figure, 2px coloured bottom bar,
-// mono label + sub, icon top-right), money facts instead of flag counts.
-function StatTile({ label, value, sub, hue, glow, icon: Icon }) {
+// (px-5 py-4, 14px radius, 2px coloured bottom bar, mono label + sub, icon
+// top-right), money facts instead of flag counts. The figure size is a prop:
+// the flag tiles show single digits at 4xl, but a rand value like
+// "R 95 541 341,12" overflows the tile at that size, so money tiles render
+// smaller (2xl) — same tile, sized to its content.
+function StatTile({ label, value, sub, hue, glow, icon: Icon, big = false }) {
   return (
     <div
       className="relative bg-card px-5 py-4 border border-border overflow-hidden"
       style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}
     >
       <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: hue, boxShadow: `0 0 12px ${glow}` }} />
-      <div className="flex items-start justify-between">
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">{label}</div>
-          <div className="font-display text-4xl leading-none text-foreground tabular-nums">{value}</div>
-          <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2">{sub}</div>
+          <div className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${big ? "text-4xl" : "text-2xl"}`}>{value}</div>
+          <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">{sub}</div>
         </div>
         <Icon className="w-4 h-4 shrink-0 opacity-60" style={{ color: hue }} strokeWidth={1.5} />
       </div>
@@ -171,6 +174,7 @@ export default function CreditorSearch() {
             hue="hsl(33 95% 55%)"
             glow="hsla(33,95%,55%,0.35)"
             icon={Building2}
+            big
           />
           <StatTile
             label="True Outstanding"
