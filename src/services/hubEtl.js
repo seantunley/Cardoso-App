@@ -12,6 +12,7 @@ import { pipeline } from 'stream/promises';
 import path from 'path';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
+import { trackOp } from '../lib/mainThreadWatch.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
@@ -1093,7 +1094,13 @@ async function syncAllSites() {
   const results = [];
   for (let i = 0; i < HUB_SITES.length; i += CONCURRENCY) {
     const batch = HUB_SITES.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.allSettled(batch.map(syncSite));
+    // trackOp: each site's ETL runs large synchronous better-sqlite3
+    // transactions on the main thread — if the app stalls/freezes during
+    // one, the freeze forensics name the site instead of logging a mystery.
+    const batchResults = await Promise.allSettled(batch.map((site) => {
+      const doneOp = trackOp(`hub-etl:${site.slug || site.id}`);
+      return syncSite(site).finally(doneOp);
+    }));
     results.push(...batchResults);
   }
   results.forEach(r => {
