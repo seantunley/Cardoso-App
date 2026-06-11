@@ -124,7 +124,17 @@ const COLUMNS = [
   { key: "last_receipt_date",  label: "Last receipt",  align: "left",  format: fmtDate },
   { key: "last_payment_date",  label: "Last payment",  align: "left",  format: fmtDate },
   { key: "ytd_receipt_count",  label: "YTD receipts",  align: "right", format: (v) => Number(v || 0).toLocaleString() },
-  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v) => `R ${fmtR(v)}` },
+  // Outstanding is NET of captured-but-unposted Sage payment batches
+  // (operator decision: accounts posts batches late, so the raw APOBL figure
+  // overstates what's owed). Affected vendors get an amber dot; hover shows
+  // the gross figure and how much sits in unposted batches.
+  { key: "outstanding_amount", label: "Outstanding",   align: "right", format: (v, r) => (
+    Number(r?.unposted_payments) > 0 ? (
+      <span title={`Net of R ${fmtR(r.unposted_payments)} in payment batches captured but not yet posted in Sage (gross outstanding R ${fmtR(r.outstanding_gross)})`}>
+        R {fmtR(v)} <span className="text-accent" aria-hidden="true">●</span>
+      </span>
+    ) : `R ${fmtR(v)}`
+  ) },
 ];
 
 export default function CreditorSummary() {

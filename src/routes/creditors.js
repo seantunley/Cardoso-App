@@ -8,6 +8,7 @@ import {
   DEFAULT_VENDOR_SQL,
   DEFAULT_AP_INVOICE_SQL,
   DEFAULT_AP_PAYMENT_SQL,
+  DEFAULT_AP_UNPOSTED_SQL,
   DEFAULT_PO_HEADER_SQL,
   DEFAULT_PO_LINE_SQL,
 } from '../services/creditorSync.js';
@@ -56,6 +57,7 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           vendor_sql: DEFAULT_VENDOR_SQL,
           ap_invoice_sql: DEFAULT_AP_INVOICE_SQL,
           ap_payment_sql: DEFAULT_AP_PAYMENT_SQL,
+          ap_unposted_sql: DEFAULT_AP_UNPOSTED_SQL,
           po_header_sql: DEFAULT_PO_HEADER_SQL,
           po_line_sql: DEFAULT_PO_LINE_SQL,
         },
@@ -97,8 +99,16 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         params.push(`%${search}%`, `%${search}%`);
       }
       if (activeOnly) where.push('c.is_active = 1');
-      if (!includeZero) where.push('COALESCE(ob.outstanding, 0) <> 0');
+      // Zero filter applies to the NET outstanding (after unposted payments) —
+      // a vendor fully paid by a captured-but-unposted cheque behaves as paid.
+      if (!includeZero) where.push('(COALESCE(ob.outstanding, 0) - COALESCE(unp.unposted, 0)) <> 0');
 
+      // outstanding_amount is NET of unposted payments (operator decision,
+      // June 2026): accounts captures cheques in AP Payment Entry days or
+      // weeks before posting the batch, and until posting APOBL still shows
+      // the paid invoices as open — the page was overstating what's owed.
+      // outstanding_gross + unposted_payments are returned alongside so the
+      // UI can mark affected vendors and show the breakdown on hover.
       const rows = db.prepare(`
         SELECT
           c.vendor_code,
@@ -114,7 +124,9 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           COALESCE(po.ytd_po_amount, 0)    AS ytd_po_amount,
           COALESCE(po.ytd_po_count, 0)     AS ytd_po_count,
           COALESCE(rcp.ytd_receipt_count, 0) AS ytd_receipt_count,
-          COALESCE(ob.outstanding, 0)      AS outstanding_amount
+          COALESCE(ob.outstanding, 0) - COALESCE(unp.unposted, 0) AS outstanding_amount,
+          COALESCE(ob.outstanding, 0)      AS outstanding_gross,
+          COALESCE(unp.unposted, 0)        AS unposted_payments
         FROM creditor c
         LEFT JOIN (
           SELECT vendor_code, SUM(amount) AS ytd_paid
@@ -141,6 +153,11 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
           FROM creditor_ap_invoice
           GROUP BY vendor_code
         ) ob ON ob.vendor_code = c.vendor_code
+        LEFT JOIN (
+          SELECT vendor_code, SUM(amount) AS unposted
+          FROM creditor_ap_unposted_payment
+          GROUP BY vendor_code
+        ) unp ON unp.vendor_code = c.vendor_code
         WHERE ${where.join(' AND ')}
         ORDER BY COALESCE(pay.ytd_paid, 0) + COALESCE(po.ytd_po_amount, 0) DESC, c.vendor_name ASC
       `).all(year, year, year, ...params);

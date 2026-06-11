@@ -151,6 +151,35 @@ define({
 });
 
 define({
+  key: 'creditor.ap_unposted_payment',
+  label: 'Creditors — UNPOSTED AP payments',
+  purpose: 'Cheques captured in AP Payment Entry whose batch has not been posted yet — APOBL still shows their invoices as open, so vendor outstanding is overstated until posting. The Creditor Balances page nets these off.',
+  pool: 'bat_sage',
+  tables: ['APTCR', 'APBTA'],
+  params: [],
+  requiredColumns: ['vendor_code', 'payment_number', 'payment_date_int', 'amount', 'batch_number'],
+  getOverride: readerSql('SELECT ap_unposted_sql_override AS v FROM creditor_sync_settings WHERE id = 1'),
+  // Join verified against live Sage (CARDAT): payment entries key on
+  // APTCR.BTCHTYPE ('PY') + CNTBTCH ↔ APBTA.PAYMTYPE + CNTBTCH.
+  // "Unposted" = POSTSEQNBR = 0 (no posting sequence assigned yet) AND
+  // BATCHSTAT <> 4 (not a deleted batch) — deliberately NOT a list of
+  // open/ready status codes, so it can't break on a status we never sampled.
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(t.IDVEND))      AS vendor_code,
+    LTRIM(RTRIM(t.IDRMIT))      AS payment_number,
+    t.DATERMIT                  AS payment_date_int,
+    t.AMTRMITHC                 AS amount,
+    t.CNTBTCH                   AS batch_number,
+    b.BATCHSTAT                 AS batch_status,
+    LTRIM(RTRIM(b.BATCHDESC))   AS batch_description
+  FROM APTCR t
+  JOIN APBTA b ON b.PAYMTYPE = t.BTCHTYPE AND b.CNTBTCH = t.CNTBTCH
+  WHERE t.BTCHTYPE = 'PY' AND b.POSTSEQNBR = 0 AND b.BATCHSTAT <> 4 AND t.AMTRMITHC > 0
+`,
+});
+
+define({
   key: 'creditor.ap_payment',
   label: 'Creditors — AP payments',
   purpose: 'Vendor payment (cheque) history within the sync window.',

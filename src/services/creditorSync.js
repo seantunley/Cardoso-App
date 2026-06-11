@@ -10,6 +10,7 @@ import { resolveSageQuery, getSageQuery } from './sage/queryRegistry.js';
 export const DEFAULT_VENDOR_SQL     = getSageQuery('creditor.vendor').defaultSql;
 export const DEFAULT_AP_INVOICE_SQL = getSageQuery('creditor.ap_invoice').defaultSql;
 export const DEFAULT_AP_PAYMENT_SQL = getSageQuery('creditor.ap_payment').defaultSql;
+export const DEFAULT_AP_UNPOSTED_SQL = getSageQuery('creditor.ap_unposted_payment').defaultSql;
 export const DEFAULT_PO_HEADER_SQL  = getSageQuery('creditor.po_header').defaultSql;
 export const DEFAULT_PO_LINE_SQL    = getSageQuery('creditor.po_line').defaultSql;
 
@@ -40,6 +41,7 @@ export function setSyncSettings({
   vendor_sql_override,
   ap_invoice_sql_override,
   ap_payment_sql_override,
+  ap_unposted_sql_override,
   po_header_sql_override,
   po_line_sql_override,
   history_months,
@@ -51,16 +53,18 @@ export function setSyncSettings({
         vendor_sql_override      = COALESCE(?, vendor_sql_override),
         ap_invoice_sql_override  = COALESCE(?, ap_invoice_sql_override),
         ap_payment_sql_override  = COALESCE(?, ap_payment_sql_override),
+        ap_unposted_sql_override = COALESCE(?, ap_unposted_sql_override),
         po_header_sql_override   = COALESCE(?, po_header_sql_override),
         po_line_sql_override     = COALESCE(?, po_line_sql_override),
         history_months           = COALESCE(?, history_months)
       WHERE id = 1
     `).run(
-      vendor_sql_override     ?? null,
-      ap_invoice_sql_override ?? null,
-      ap_payment_sql_override ?? null,
-      po_header_sql_override  ?? null,
-      po_line_sql_override    ?? null,
+      vendor_sql_override      ?? null,
+      ap_invoice_sql_override  ?? null,
+      ap_payment_sql_override  ?? null,
+      ap_unposted_sql_override ?? null,
+      po_header_sql_override   ?? null,
+      po_line_sql_override     ?? null,
       Number.isFinite(history_months) ? history_months : null,
     );
     return getSyncSettings();
@@ -218,6 +222,50 @@ async function syncApPayments(pool, fromInt, toInt) {
   });
   run();
   return { rows: rows.length, upserted };
+}
+
+// Unposted AP payments — cheques captured in Payment Entry whose batch hasn't
+// been posted (APBTA.POSTSEQNBR = 0, not deleted). Until accounts posts the
+// batch, APOBL still shows the paid invoices as open, so the Creditor Balances
+// page nets these amounts off each vendor's outstanding. FULL refresh every
+// sync: the whole point of this table is "what is unposted RIGHT NOW" — rows
+// must vanish the moment their batch posts (the payment then arrives through
+// the normal posted-payment sync and APOBL reflects it).
+async function syncUnpostedPayments(pool) {
+  const queryText = resolveSageQuery('creditor.ap_unposted_payment');
+  const result = await pool.request().query(queryText);
+  const rows = result.recordset || [];
+
+  const insert = db.prepare(`
+    INSERT INTO creditor_ap_unposted_payment (
+      vendor_code, payment_number, payment_date, amount,
+      batch_number, batch_status, batch_description, synced_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, now_local())
+  `);
+
+  let inserted = 0;
+  const run = db.transaction(() => {
+    // The query succeeded by this point, so an empty result is authoritative:
+    // "nothing is unposted" must clear the table (it usually does, right
+    // after accounts catches up on posting).
+    db.prepare('DELETE FROM creditor_ap_unposted_payment').run();
+    for (const r of rows) {
+      if (!r.vendor_code) continue;
+      insert.run(
+        r.vendor_code,
+        r.payment_number || null,
+        intToDateStr(r.payment_date_int),
+        Number(r.amount) || 0,
+        Number(r.batch_number) || null,
+        Number(r.batch_status) || null,
+        r.batch_description || null,
+      );
+      inserted++;
+    }
+  });
+  run();
+  return { rows: rows.length, inserted };
 }
 
 async function syncPos(pool, fromInt, toInt) {
@@ -392,10 +440,11 @@ export async function syncCreditorsFromSage({ fromDate, toDate } = {}) {
   const summary = { from: from.toISOString().slice(0, 10), to: to.toISOString().slice(0, 10), sources: {} };
 
   for (const [source, fn] of [
-    ['vendors',     () => syncVendors(pool)],
-    ['ap_invoices', () => syncApInvoices(pool)],
-    ['ap_payments', () => syncApPayments(pool, fromInt, toInt)],
-    ['pos',         () => syncPos(pool, fromInt, toInt)],
+    ['vendors',           () => syncVendors(pool)],
+    ['ap_invoices',       () => syncApInvoices(pool)],
+    ['ap_payments',       () => syncApPayments(pool, fromInt, toInt)],
+    ['unposted_payments', () => syncUnpostedPayments(pool)],
+    ['pos',               () => syncPos(pool, fromInt, toInt)],
   ]) {
     try {
       summary.sources[source] = await fn();
