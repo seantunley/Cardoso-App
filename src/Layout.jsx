@@ -403,7 +403,12 @@ const navItems = [
   { name: "Trends",              icon: IconTrends,                page: "HubTrends",        permission: "can_access_hub_trends", hubOnly: true,  group: "Reports" },
   { name: "Trends",              icon: IconTrends,                page: "Trends",           permission: "can_access_reports",     siteOnly: true, group: "Reports" },
   { name: "Creditor Search",     icon: IconCreditorSearch,        page: "CreditorSearch",   permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
-  { name: "Creditor Balances",   icon: IconCreditors,             page: "CreditorSummary",  permission: "can_access_creditors", siteOnly: true, group: "Creditors" },
+  // Creditor Balances works on BOTH site and hub: site mode reads the local
+  // creditor_* tables; hub mode reads hub_creditor + hub_creditor_ap_invoice
+  // (populated by the ETL) with a branch selector. Creditor Search stays
+  // siteOnly — its detail drawer needs AP payment/PO data the ETL does not
+  // carry yet.
+  { name: "Creditor Balances",   icon: IconCreditors,             page: "CreditorSummary",  permission: "can_access_creditors", group: "Creditors" },
   { name: "Network Devices",     icon: IconNetworkDevices,        page: "NetworkDevices",   permission: "can_access_network_devices", group: "System" },
   { name: "Credit Debug",        icon: IconCreditDebug,           page: "CreditDebug",      adminOnly: true, siteOnly: true, group: "System" },
   // Operations — admin-only home for background job runs, system errors,
