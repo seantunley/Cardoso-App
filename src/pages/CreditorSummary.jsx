@@ -4,16 +4,17 @@
 //
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
-import { Building2, RefreshCw, Search } from "lucide-react";
+import { Building2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import CollapsibleFilterBar from "@/components/shared/CollapsibleFilterBar";
 import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
 import DataTable from "@/components/shared/DataTable";
 import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
 import VendorDetailModal from "@/components/creditors/VendorDetailModal";
+import CreditorPrintableTable from "@/components/creditors/CreditorPrintableTable";
+import { CREDITOR_PRINT_STYLE } from "@/components/creditors/creditorPrintStyle";
 
 // A/P monthly periods for the aging tiles (matches the Aged Creditors report).
 const AP_TILES = [
@@ -149,10 +150,8 @@ export default function CreditorSummary() {
   // Row drill → the full vendor popup, opened IN PLACE on this page
   // (mirrors the customer popup on Customer Balances).
   const [drillVendor, setDrillVendor] = useState("");
-  const [search, setSearch] = useState("");
-  // Debounced copy drives the query (one request per pause, not per keystroke);
-  // the input stays bound to `search` for responsiveness.
-  const debouncedSearch = useDebouncedValue(search, 250);
+  // Vendor search removed from this page — the dedicated Creditor Search page
+  // owns lookup now (operator request); this page is the balances overview.
   const [activeOnly, setActiveOnly] = useState(true);
   const [includeZero, setIncludeZero] = useState(false);
   const [balanceBucket, setBalanceBucket] = useState("all");
@@ -165,8 +164,8 @@ export default function CreditorSummary() {
   const [syncing, setSyncing] = useState(false);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["creditors", debouncedSearch, activeOnly, includeZero],
-    queryFn: () => fetchCreditors({ search: debouncedSearch, activeOnly, includeZero }),
+    queryKey: ["creditors", activeOnly, includeZero],
+    queryFn: () => fetchCreditors({ search: "", activeOnly, includeZero }),
     // react-query v5 removed keepPreviousData; placeholderData: keepPreviousData
     // keeps the vendor table + AP tiles showing the prior data while the next
     // query loads instead of flashing to empty / R 0.00 on each change (UI-4).
@@ -178,6 +177,22 @@ export default function CreditorSummary() {
     queryKey: ["creditors-sync-meta"],
     queryFn: fetchSyncMeta,
     staleTime: 60_000,
+  });
+
+  // Inject the creditor print stylesheet once (same pattern as Customer
+  // Balances) so the Print / PDF button produces the same letterhead sheet.
+  useEffect(() => {
+    const id = "creditor-print-style";
+    if (!document.getElementById(id)) {
+      const el = document.createElement("style");
+      el.id = id;
+      el.textContent = CREDITOR_PRINT_STYLE;
+      document.head.appendChild(el);
+    }
+  }, []);
+
+  const printDate = new Date().toLocaleString("en-ZA", {
+    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false,
   });
 
   const rows = useMemo(() => {
@@ -271,45 +286,49 @@ export default function CreditorSummary() {
     }
   };
 
+  const printTitle = "Creditor Balances";
+
   return (
     <div className="min-h-screen bg-background px-2 py-4 text-foreground sm:px-3">
+      {/* Print-only block (hidden on screen) — same letterhead/rules as the
+          Customer Balances print, vendor columns. Prints all filtered rows. */}
+      <CreditorPrintableTable
+        printTitle={printTitle}
+        printDate={printDate}
+        rows={rows}
+        aging={apAging}
+        site="all"
+        showSite={false}
+      />
       <div className="space-y-6">
-        <div className="border-b border-border pb-5 flex items-end justify-between gap-6">
+        <div className="border-b border-border pb-5 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
 
             <h1 className="font-display text-4xl lg:text-5xl leading-tight tracking-tight text-foreground">
               Who you <em className="text-phosphor">owe</em>.
             </h1>
             <p className="text-sm text-muted-foreground mt-3">
-              Vendors with outstanding balances, sortable and searchable.
+              Vendors with outstanding balances, sortable and filterable.
             </p>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          {/* Print / PDF — styled identically to the Customer Balances button. */}
+          <div className="flex items-center gap-2 cb-no-print">
             <button
-              onClick={handleSync}
-              disabled={syncing}
-              className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-              title="Pull latest vendor, invoice, payment, and PO data from Sage"
+              onClick={() => window.print()}
+              disabled={rows.length === 0}
+              className="flex items-center gap-2 border px-4 py-2 font-mono text-[10px] uppercase tracking-[0.2em] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[40px]"
+              style={{ borderRadius: "12px", borderColor: "var(--phosphor)", color: "var(--phosphor)", background: "hsla(33, 95%, 55%, 0.08)" }}
+              onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.18)"; e.currentTarget.style.boxShadow = "0 0 12px hsla(33,95%,55%,0.35)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "hsla(33, 95%, 55%, 0.08)"; e.currentTarget.style.boxShadow = "none"; }}
+              title="Print or save as PDF"
             >
-              <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-              {syncing ? "Syncing…" : "Sync from Sage"}
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="6 9 6 2 18 2 18 9" />
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+                <rect x="6" y="14" width="12" height="8" />
+              </svg>
+              Print / PDF
             </button>
-            <LastSyncedBadge
-              iso={meta?.last_synced_at}
-              detail="Scheduled nightly at 04:30 (Operations page lists every job)"
-            />
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative flex-1 min-w-[280px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search vendor code or name…"
-              className="w-full rounded-xl border border-border bg-card pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary"
-            />
           </div>
         </div>
 
@@ -435,6 +454,25 @@ export default function CreditorSummary() {
             </div>
           );
         })()}
+
+        {/* Sync from Sage + last-synced — moved here (just above the table,
+            below the aging tiles) so the page leads with the numbers, not the
+            controls (operator request). */}
+        <div className="flex flex-wrap items-center justify-end gap-3 cb-no-print">
+          <LastSyncedBadge
+            iso={meta?.last_synced_at}
+            detail="Scheduled nightly at 04:30 (Operations page lists every job)"
+          />
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+            title="Pull latest vendor, invoice, payment, and PO data from Sage"
+          >
+            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+            {syncing ? "Syncing…" : "Sync from Sage"}
+          </button>
+        </div>
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (
