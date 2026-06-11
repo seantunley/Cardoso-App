@@ -1,8 +1,18 @@
 import db from '../db/index.js';
 import { expandDataRecord, parseJsonSafely } from '../helpers.js';
 import { getLocalCreditLogicState } from './creditLogic.js';
+import { normaliseCreditLogicConfig } from '../lib/creditLogic.js';
+import { parseCustomerTerms } from '../lib/creditAnalysis.js';
 
 // ─── helpers (mirrors creditAnalysis.js) ───
+//
+// ⚠ This file re-implements the engine step by step so the Credit Debug page
+// can show every intermediate number. Any behavioural change in
+// src/lib/creditAnalysis.js MUST be mirrored here or the debug page lies
+// about what the real engine does (June 2026: its copy of the old date-only
+// pairing reported "paid 2 / unpaid 0" while the page labelled the same
+// lines UNPAID). Follow-up worth doing: make the engine emit a trace and
+// delete this copy.
 
 function parseAmount(value) {
   if (!value || String(value).trim() === '') return 0;
@@ -10,27 +20,37 @@ function parseAmount(value) {
   return Number.isNaN(numeric) ? 0 : numeric;
 }
 
+// Same sentinel floor as the engine: Sage's "no date" placeholder
+// (1999-12-31) must not read as a real 27-year-old document.
+const SENTINEL_DATE_FLOOR = new Date('2000-01-01T00:00:00Z');
+
 function parseDateField(value) {
   if (!value) return null;
   const input = String(value).trim();
-  if (/^\d{8}$/.test(input)) return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
-  const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) return new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
-  const parsed = new Date(input);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  let parsed = null;
+  if (/^\d{8}$/.test(input)) parsed = new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+  if (!parsed) {
+    const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) parsed = new Date(`${dmy[3]}-${dmy[2].padStart(2, '0')}-${dmy[1].padStart(2, '0')}`);
+  }
+  if (!parsed) parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (parsed < SENTINEL_DATE_FLOOR) return null;
+  return parsed;
 }
 
 function extractSlots(record, prefix) {
   const jsonField = prefix === 'last_unpaid_invoice' ? 'unpaid_invoices' : 'receipts';
   const jsonValues = record?.[jsonField] || record?.data?.[jsonField];
 
+  // Signed, like the engine — reversals (negative receipts) must be visible.
   const normalise = (items) => items
     .map((item) => ({
       number: item?.number || item?.num || null,
-      amount: Math.abs(parseAmount(item?.amount)),
+      amount: parseAmount(item?.amount),
       date: parseDateField(item?.date),
     }))
-    .filter((item) => item.number || item.amount > 0 || item.date);
+    .filter((item) => item.number || Math.abs(item.amount) > 0 || item.date);
 
   if (Array.isArray(jsonValues) && jsonValues.length > 0) return normalise(jsonValues);
 
@@ -43,9 +63,9 @@ function extractSlots(record, prefix) {
 
   return [1, 2, 3, 4, 5].map((index) => ({
     number: record?.[`${prefix}_${index}`] || record?.data?.[`${prefix}_${index}`],
-    amount: Math.abs(parseAmount(record?.[`${prefix}_${index}_amount`] || record?.data?.[`${prefix}_${index}_amount`])),
+    amount: parseAmount(record?.[`${prefix}_${index}_amount`] || record?.data?.[`${prefix}_${index}_amount`]),
     date: parseDateField(record?.[`${prefix}_${index}_date`] || record?.data?.[`${prefix}_${index}_date`]),
-  })).filter((item) => item.number || item.amount > 0 || item.date);
+  })).filter((item) => item.number || Math.abs(item.amount) > 0 || item.date);
 }
 
 function dedupeByNumber(items) {
@@ -71,29 +91,16 @@ function fmtR(n) {
 // ─── Default config fallback (matches creditLogic.js DEFAULT_CREDIT_LOGIC_CONFIG thresholds/scoring) ───
 
 function getActiveConfig() {
+  // Always run the result through the engine's own normaliser: the synced
+  // config gains the new pairing/customerTerms defaults, and the debug page
+  // can never drift from the engine's effective config again (its previous
+  // hand-written fallback already had — dormantThresholdDays 180 vs the
+  // engine's 90).
   try {
     const state = getLocalCreditLogicState();
-    if (state?.config) return { version: state.logicVersion, config: state.config };
+    if (state?.config) return { version: state.logicVersion, config: normaliseCreditLogicConfig(state.config) };
   } catch { /* fallback */ }
-  return {
-    version: null,
-    config: {
-      thresholds: {
-        paymentTermDays: 14, breachDays: 21, dormantThresholdDays: 180,
-        dormantThresholdMonths: 6, zeroBalanceCutoff: 1, cautionScoreBelow: 70,
-        holdScoreBelow: 40, approachingBreachDays: 14, longInactiveYears: 2,
-      },
-      scoring: {
-        unpaidBreachDeduction: 70, approachingBreachDeduction: 25, awaitingPaymentDeduction: 10,
-        avgLagWithUnpaidBalanceDeduction: 35, avgLagWithinBreachDeduction: 20, avgLagVerySlowDeduction: 30,
-        historicalRedSingleDeduction: 10, historicalRedRepeatDeduction: 20,
-        historicalOrangeSingleDeduction: 5, historicalOrangeRepeatDeduction: 10,
-        noHistoryWithBalanceScore: 50,
-      },
-      outstandingBalanceCap: { enabled: true, multiplier: 2, deduction: 15 },
-      manualOverrides: { redForcesHold: true, orangeDowngradesApprove: true },
-    },
-  };
+  return { version: null, config: normaliseCreditLogicConfig(null) };
 }
 
 // ─── Main debug function ───
@@ -191,6 +198,25 @@ export function debugCreditForCustomer(customerNumber) {
     balanceTreatedAsZero: outstandingBalance === 0 && rawBalance > 0,
   });
 
+  // 6b. Customer terms (June 2026) — judge the account on its own Sage terms;
+  // global thresholds remain the fallback and supply the grace gap.
+  const termsRaw = record.terms || record.data?.terms || '';
+  const customerTerms = cfg.customerTerms.enabled ? parseCustomerTerms(termsRaw) : null;
+  const termGap = Math.max(0, cfg.thresholds.breachDays - cfg.thresholds.paymentTermDays);
+  const effTermDays = customerTerms ? customerTerms.days : cfg.thresholds.paymentTermDays;
+  const effBreachDays = customerTerms ? customerTerms.days + termGap : cfg.thresholds.breachDays;
+  const effApproachDays = customerTerms ? customerTerms.days : cfg.thresholds.approachingBreachDays;
+  const prepaidHoldApplies = cfg.customerTerms.prepaidHoldOnBalance && customerTerms?.type === 'prepaid' && outstandingBalance > 0;
+  step('Customer terms', {
+    termsRaw: termsRaw || '(none)',
+    parsed: customerTerms ? `${customerTerms.type}${customerTerms.type === 'days' ? ` — ${customerTerms.days} days` : ''}` : 'none — global thresholds apply',
+    effectiveTermDays: effTermDays,
+    effectiveBreachDays: effBreachDays,
+    effectiveApproachingDays: effApproachDays,
+    prepaidHoldApplies,
+    ...(prepaidHoldApplies ? { note: 'PREPAID WITH OUTSTANDING BALANCE — the engine short-circuits to HOLD (score 0). The steps below are shown for reference only.' } : {}),
+  });
+
   // 7. Dormancy check
   const allDates = [...invoices, ...receipts].map(i => i.date).filter(Boolean);
   const mostRecent = allDates.length > 0 ? Math.max(...allDates.map(d => +d)) : null;
@@ -247,23 +273,46 @@ export function debugCreditForCustomer(customerNumber) {
     return { found: true, customerNumber: custNum, customerName: record.customer_name, verdict, score, steps };
   }
 
-  // 9. Match invoices to receipts (payment lag)
-  const invByDate = [...invoices].sort((a, b) => (a.date || 0) - (b.date || 0));
+  // 9. Match invoices to receipts (payment lag) — amount-aware, mirroring
+  // the June 2026 engine: receipts are a pool of money applied oldest-
+  // invoice-first; an invoice settles only when coverageRatio of its amount
+  // actually arrived. Reversals (negative receipts) contribute nothing.
+  const invByDate = [...invoices]
+    .map((invoice) => ({ ...invoice, amount: Math.abs(invoice.amount) }))
+    .sort((a, b) => (a.date || 0) - (b.date || 0));
   const recByDate = [...receipts].sort((a, b) => (a.date || 0) - (b.date || 0));
-  const usedReceipts = new Set();
+  // Magnitude semantics — this site stores AR receipts negative by
+  // convention, so sign cannot distinguish payments from reversals.
+  const pool = recByDate.map((receipt) => ({
+    receipt,
+    remaining: Math.abs(receipt.amount),
+  }));
   const pairs = invByDate.map((invoice) => {
-    const matchIndex = recByDate.findIndex((receipt, index) => !usedReceipts.has(index) && receipt.date && invoice.date && receipt.date >= invoice.date);
-    if (matchIndex !== -1) {
-      usedReceipts.add(matchIndex);
-      const receipt = recByDate[matchIndex];
-      return { invoice, receipt, lagDays: Math.floor((receipt.date - invoice.date) / 86400000) };
+    if (!invoice.date) return { invoice, receipt: null, lagDays: null, allocated: 0 };
+    if (!(invoice.amount > 0)) {
+      const match = pool.find((entry) => entry.receipt.date && entry.receipt.date >= invoice.date);
+      return match
+        ? { invoice, receipt: match.receipt, lagDays: Math.floor((match.receipt.date - invoice.date) / 86400000), allocated: null }
+        : { invoice, receipt: null, lagDays: null, allocated: 0 };
     }
-    return { invoice, receipt: null, lagDays: null };
+    let allocated = 0;
+    let settledBy = null;
+    for (const entry of pool) {
+      if (!entry.receipt.date || entry.receipt.date < invoice.date || entry.remaining <= 0) continue;
+      const take = Math.min(entry.remaining, invoice.amount - allocated);
+      entry.remaining -= take;
+      allocated += take;
+      if (allocated >= invoice.amount * cfg.pairing.coverageRatio) { settledBy = entry.receipt; break; }
+    }
+    return settledBy
+      ? { invoice, receipt: settledBy, lagDays: Math.floor((settledBy.date - invoice.date) / 86400000), allocated }
+      : { invoice, receipt: null, lagDays: null, allocated };
   });
 
   const paidPairs = pairs.filter(p => p.receipt !== null);
   const unpaidPairs = pairs.filter(p => p.receipt === null);
   step('Invoice/receipt matching', {
+    pairingMode: cfg.pairing.amountAware ? `amount-aware (coverage ≥ ${Math.round(cfg.pairing.coverageRatio * 100)}%)` : 'legacy date-only',
     totalPairs: pairs.length,
     paid: paidPairs.length,
     unpaid: unpaidPairs.length,
@@ -271,28 +320,40 @@ export function debugCreditForCustomer(customerNumber) {
       invoice: p.invoice.number || '?',
       invoiceDate: fmtDate(p.invoice.date),
       invoiceAmount: p.invoice.amount,
-      receipt: p.receipt?.number || 'UNPAID',
+      // `paid` drives the UNPAID label — a settled invoice whose completing
+      // receipt has no number previously displayed as "UNPAID" while the
+      // counters said paid (operator-reported contradiction).
+      paid: p.receipt !== null,
+      receipt: p.receipt ? (p.receipt.number || '(receipt without number)') : 'UNPAID',
       receiptDate: p.receipt ? fmtDate(p.receipt.date) : 'N/A',
+      allocated: p.allocated,
       lagDays: p.lagDays,
     })),
   });
 
-  // 10. Unpaid invoice age
-  const unpaidAges = unpaidPairs
+  // 10. Unpaid invoice age — materiality floor mirrors the engine: only
+  // unpaid invoices ≥ minMaterialInvoice can drive the verdict (a R0.30
+  // residue was forcing a 153-day "breach" Hold on a R148k account).
+  const materialUnpaid = unpaidPairs.filter(p => p.invoice.amount >= cfg.thresholds.minMaterialInvoice);
+  const immaterialUnpaid = unpaidPairs.filter(p => p.invoice.amount > 0 && p.invoice.amount < cfg.thresholds.minMaterialInvoice);
+  const unpaidAges = materialUnpaid
     .map(p => (p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null))
     .filter(d => d !== null);
   const oldestUnpaidAge = unpaidAges.length > 0 ? Math.max(...unpaidAges) : null;
   step('Unpaid invoice age', {
-    unpaidInvoices: unpaidPairs.map(p => ({
+    minMaterialInvoice: cfg.thresholds.minMaterialInvoice,
+    ignoredResidues: immaterialUnpaid.map(p => ({ number: p.invoice.number || '?', amount: p.invoice.amount })),
+    unpaidInvoices: materialUnpaid.map(p => ({
       number: p.invoice.number || '?',
+      amount: p.invoice.amount,
       date: fmtDate(p.invoice.date),
       ageDays: p.invoice.date ? Math.floor((today - p.invoice.date) / 86400000) : null,
     })),
     oldestUnpaidAge,
-    breachDays: cfg.thresholds.breachDays,
-    approachingBreachDays: cfg.thresholds.approachingBreachDays,
-    inBreach: oldestUnpaidAge !== null && oldestUnpaidAge > cfg.thresholds.breachDays,
-    approachingBreach: oldestUnpaidAge !== null && oldestUnpaidAge > cfg.thresholds.approachingBreachDays && oldestUnpaidAge <= cfg.thresholds.breachDays,
+    breachDays: effBreachDays,
+    approachingBreachDays: effApproachDays,
+    inBreach: oldestUnpaidAge !== null && oldestUnpaidAge > effBreachDays,
+    approachingBreach: oldestUnpaidAge !== null && oldestUnpaidAge > effApproachDays && oldestUnpaidAge <= effBreachDays,
   });
 
   // 11. Score calculation
@@ -304,27 +365,27 @@ export function debugCreditForCustomer(customerNumber) {
     deductionLog.push({ points, reason, runningTotal: deductions });
   };
 
-  // Unpaid breach
-  if (oldestUnpaidAge !== null && oldestUnpaidAge > cfg.thresholds.breachDays) {
-    addDeduction(cfg.scoring.unpaidBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old > breach limit ${cfg.thresholds.breachDays} days`);
-  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > cfg.thresholds.approachingBreachDays) {
-    addDeduction(cfg.scoring.approachingBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old — approaching breach limit ${cfg.thresholds.breachDays} days`);
-  } else if (unpaidPairs.length > 0 && oldestUnpaidAge !== null) {
+  // Unpaid breach — effective (terms-aware) thresholds
+  if (oldestUnpaidAge !== null && oldestUnpaidAge > effBreachDays) {
+    addDeduction(cfg.scoring.unpaidBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old > breach limit ${effBreachDays} days`);
+  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > effApproachDays) {
+    addDeduction(cfg.scoring.approachingBreachDeduction, `Unpaid invoice ${oldestUnpaidAge} days old — approaching breach limit ${effBreachDays} days`);
+  } else if (materialUnpaid.length > 0 && oldestUnpaidAge !== null) {
     addDeduction(cfg.scoring.awaitingPaymentDeduction, `Invoice ${oldestUnpaidAge} days old awaiting payment`);
   }
 
-  // Payment lag
+  // Payment lag — effective (terms-aware) thresholds
   let avgLag = null;
   if (paidPairs.length > 0) {
     const laggedPairs = paidPairs.filter(p => p.lagDays !== null);
     avgLag = laggedPairs.length > 0 ? Math.round(laggedPairs.reduce((sum, p) => sum + p.lagDays, 0) / laggedPairs.length) : null;
     if (avgLag !== null) {
-      if (unpaidPairs.length > 0 && outstandingBalance > 0) {
+      if (materialUnpaid.length > 0 && outstandingBalance > 0) {
         addDeduction(cfg.scoring.avgLagWithUnpaidBalanceDeduction, `Avg payment lag ${avgLag} days + unpaid invoices + outstanding balance — unreliable payer`);
-      } else if (avgLag <= cfg.thresholds.paymentTermDays) {
+      } else if (avgLag <= effTermDays) {
         // Good — no deduction
-      } else if (avgLag <= cfg.thresholds.breachDays) {
-        addDeduction(cfg.scoring.avgLagWithinBreachDeduction, `Avg payment lag ${avgLag} days — slow (target: ${cfg.thresholds.paymentTermDays} days)`);
+      } else if (avgLag <= effBreachDays) {
+        addDeduction(cfg.scoring.avgLagWithinBreachDeduction, `Avg payment lag ${avgLag} days — slow (target: ${effTermDays} days)`);
       } else {
         addDeduction(cfg.scoring.avgLagVerySlowDeduction, `Avg payment lag ${avgLag} days — very slow payer`);
       }
@@ -332,8 +393,8 @@ export function debugCreditForCustomer(customerNumber) {
   }
   step('Payment lag analysis', {
     avgLag,
-    paymentTermDays: cfg.thresholds.paymentTermDays,
-    lagStatus: avgLag === null ? 'no data' : avgLag <= cfg.thresholds.paymentTermDays ? 'within terms' : avgLag <= cfg.thresholds.breachDays ? 'slow' : 'very slow',
+    paymentTermDays: effTermDays,
+    lagStatus: avgLag === null ? 'no data' : avgLag <= effTermDays ? 'within terms' : avgLag <= effBreachDays ? 'slow' : 'very slow',
   });
 
   // Exposure cap
@@ -400,12 +461,16 @@ export function debugCreditForCustomer(customerNumber) {
     deductions: deductionLog,
   });
 
-  // 13. Verdict
+  // 13. Verdict — prepaid policy first (mirrors the engine's short-circuit),
+  // then the effective (terms-aware) breach threshold.
   let verdict;
   let verdictReason;
-  if (oldestUnpaidAge !== null && oldestUnpaidAge > cfg.thresholds.breachDays) {
+  if (prepaidHoldApplies) {
     verdict = 'hold';
-    verdictReason = `Unpaid invoice ${oldestUnpaidAge} days old exceeds breach threshold (${cfg.thresholds.breachDays} days)`;
+    verdictReason = `Prepaid terms (${termsRaw}) with an outstanding balance — policy hold, no exceptions (engine short-circuits with score 0)`;
+  } else if (oldestUnpaidAge !== null && oldestUnpaidAge > effBreachDays) {
+    verdict = 'hold';
+    verdictReason = `Unpaid invoice ${oldestUnpaidAge} days old exceeds breach threshold (${effBreachDays} days)`;
   } else if (score < cfg.thresholds.cautionScoreBelow) {
     verdict = 'caution';
     verdictReason = `Score ${score} is below caution threshold (${cfg.thresholds.cautionScoreBelow})`;
@@ -429,7 +494,7 @@ export function debugCreditForCustomer(customerNumber) {
 
   step('FINAL VERDICT', {
     verdict,
-    score,
+    score: prepaidHoldApplies ? 0 : score,
     verdictReason,
     overrideApplied,
     avgLag,
@@ -441,7 +506,7 @@ export function debugCreditForCustomer(customerNumber) {
     customerNumber: custNum,
     customerName: record.customer_name,
     verdict,
-    score,
+    score: prepaidHoldApplies ? 0 : score,
     avgLag,
     steps,
   };

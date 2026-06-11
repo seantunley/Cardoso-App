@@ -19,6 +19,9 @@ const wordingSchema = z.object({
     dormantFactor: z.string().min(1),
     dormantInactiveNote: z.string().min(1),
     longInactiveNote: z.string().min(1),
+    prepaidHoldTitle: z.string().min(1),
+    prepaidHoldSummary: z.string().min(1),
+    prepaidHoldFactor: z.string().min(1),
   }),
   manualOverrides: z.object({
     redTitle: z.string().min(1),
@@ -59,6 +62,11 @@ export const creditLogicConfigSchema = z.object({
     holdScoreBelow: z.number().int().min(0).max(100),
     approachingBreachDays: z.number().int().min(0).max(365),
     longInactiveYears: z.number().int().min(1).max(20),
+    // Materiality floor (operator decision, June 2026): an unpaid invoice
+    // below this amount cannot drive breach/Hold — a R0.30 rounding residue
+    // from January was forcing Hold on a R148k account. Tiny residues still
+    // count toward the balance; they just cannot dictate the verdict.
+    minMaterialInvoice: z.number().min(0).max(100000),
   }),
   scoring: z.object({
     unpaidBreachDeduction: z.number().int().min(0).max(100),
@@ -77,6 +85,28 @@ export const creditLogicConfigSchema = z.object({
     enabled: z.boolean(),
     multiplier: z.number().min(0).max(100),
     deduction: z.number().int().min(0).max(100),
+  }),
+  // June 2026 engine fixes (operator-confirmed policy). Additive with
+  // defaults — older synced configs pass through deepMerge(DEFAULTS, …)
+  // before validation, so no schemaVersion bump is needed.
+  pairing: z.object({
+    // Receipts settle invoices by VALUE (oldest invoice first), not by date
+    // alone — a token same-day receipt can no longer "pay" a R104k invoice.
+    // Receipt amounts are taken by MAGNITUDE: this site stores AR receipts
+    // negative by convention (payments credit the balance), so sign cannot
+    // distinguish a payment from a reversal — and slots carry no doc type.
+    amountAware: z.boolean(),
+    // Fraction of the invoice amount that must be covered to count as
+    // settled (tolerates small discounts/rounding).
+    coverageRatio: z.number().min(0.5).max(1),
+  }),
+  customerTerms: z.object({
+    // Judge each account on ITS OWN Sage terms (7DAYS, 14, 30, COD, PP…)
+    // instead of the global paymentTermDays/breachDays. The global gap
+    // (breachDays − paymentTermDays) is kept as the grace period.
+    enabled: z.boolean(),
+    // PP (prepaid) accounts: ANY outstanding balance → hold. Period.
+    prepaidHoldOnBalance: z.boolean(),
   }),
   manualOverrides: z.object({
     redForcesHold: z.boolean(),
@@ -103,6 +133,7 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
     holdScoreBelow: 40,
     approachingBreachDays: 14,
     longInactiveYears: 2,
+    minMaterialInvoice: 10,
   },
   scoring: {
     unpaidBreachDeduction: 70,
@@ -121,6 +152,14 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
     enabled: true,
     multiplier: 2,
     deduction: 15,
+  },
+  pairing: {
+    amountAware: true,
+    coverageRatio: 0.95,
+  },
+  customerTerms: {
+    enabled: true,
+    prepaidHoldOnBalance: true,
   },
   manualOverrides: {
     redForcesHold: true,
@@ -155,6 +194,9 @@ export const DEFAULT_CREDIT_LOGIC_CONFIG = {
       dormantFactor: "Latest invoice is over {{dormantMonths}} months after the previous one — customer was dormant.",
       dormantInactiveNote: "No transactions in over {{inactiveYears}} year{{inactiveYearsPlural}} — customer has been inactive for a long time.",
       longInactiveNote: " Customer has not transacted in over {{inactiveYears}} year{{inactiveYearsPlural}} — treat as a new account.",
+      prepaidHoldTitle: "Hold — Prepaid Account In Arrears",
+      prepaidHoldSummary: "This account is on prepaid terms ({{terms}}) but carries an outstanding balance of R {{outstandingBalance}}. Prepaid customers must be settled in full before any new invoice — no exceptions.",
+      prepaidHoldFactor: "Prepaid terms ({{terms}}) with R {{outstandingBalance}} outstanding — settle before invoicing.",
     },
     manualOverrides: {
       redTitle: "Hold — Manually Flagged",
