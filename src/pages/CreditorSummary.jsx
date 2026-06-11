@@ -13,6 +13,7 @@ import AgingSummaryTiles from "@/components/shared/AgingSummaryTiles";
 import DataTable from "@/components/shared/DataTable";
 import LastSyncedBadge from "@/components/shared/LastSyncedBadge";
 import VendorDetailModal from "@/components/creditors/VendorDetailModal";
+import VendorBatchHoverCard from "@/components/creditors/VendorBatchHoverCard";
 import CreditorPrintableTable from "@/components/creditors/CreditorPrintableTable";
 import { CREDITOR_PRINT_STYLE } from "@/components/creditors/creditorPrintStyle";
 
@@ -134,11 +135,10 @@ const COLUMNS = [
     const inv = Number(r?.unposted_invoices) || 0;
     const pay = Number(r?.unposted_payments) || 0;
     if (!inv && !pay) return `R ${fmtR(v)}`;
-    const parts = [`Posted (Sage APOBL): R ${fmtR(r.outstanding_gross)}`];
-    if (inv) parts.push(`+ R ${fmtR(inv)} invoices in unposted AP batches`);
-    if (pay) parts.push(`− R ${fmtR(pay)} payments captured but not yet posted`);
+    // Amber dot flags an adjusted true position; the full posted/unposted
+    // breakdown is in the row's cursor-following hover card (hoverCard prop).
     return (
-      <span title={parts.join("\n")}>
+      <span>
         R {fmtR(v)} <span className="text-accent" aria-hidden="true">●</span>
       </span>
     );
@@ -504,7 +504,10 @@ export default function CreditorSummary() {
             storageKey={COL_WIDTHS_KEY}
             defaultWidths={COL_DEFAULTS}
             maxHeight="70vh"
-            rowTitle={(r) => `Open ${r.vendor_name || r.vendor_code} — full vendor popup`}
+            // Cursor-following popup with the posted/unposted batch breakdown
+            // (same style as the Customer Balances verdict card). Replaces the
+            // native title tooltip that was on the Outstanding cell.
+            hoverCard={(r) => <VendorBatchHoverCard vendor={r} />}
             // Drill into the vendor detail page (Creditor Search reads ?code=).
             // Site mode only — the vendor drilldown tabs read site-local
             // creditor_* tables the hub does not carry.
