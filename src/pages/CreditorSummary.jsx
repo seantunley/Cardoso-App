@@ -402,34 +402,55 @@ export default function CreditorSummary() {
             Aged Creditors (due date + monthly periods). Already shows Total
             Outstanding, so no separate outstanding tile below. */}
         {rows.length > 0 && <AgingSummaryTiles aging={apAging} tiles={AP_TILES} showCount={false} />}
-        {/* Net-of-unposted line — only while a posting backlog exists. The
-            tiles above keep Sage's true POSTED aging distribution; this line
-            gives the honest net headline (operator decision: adjust the
-            total, buckets stay pure). Follows the same filters as the tiles. */}
-        {rows.length > 0 && (apAging.unposted_invoices_total !== 0 || apAging.unposted_payments_total > 0) && (
-          <div className="-mt-3 flex flex-wrap items-center gap-2 text-sm">
-            <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
-            <span className="text-muted-foreground">
-              {/* Spelled out as arithmetic so it visibly adds up against the
-                  Total Outstanding tile above. */}
-              Total Outstanding <span className="tabular-nums text-foreground">R {fmtR(apAging.total_outstanding)}</span>
-              {apAging.unposted_invoices_total !== 0 && (
-                <> + <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_invoices_total)}</span> unposted invoices</>
-              )}
-              {apAging.unposted_payments_total > 0 && (
-                <> − <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_payments_total)}</span> unposted payments</>
-              )}
-              {" ="}
-            </span>
-            <span className="font-medium tabular-nums text-foreground">
-              true outstanding R {fmtR(apAging.net_total)}
-            </span>
-            <span
-              className="cursor-help text-muted-subtle"
-              title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. All three figures cover the same vendors currently shown in the table below. This line disappears once the batches post."
-            >
-              ⓘ
-            </span>
+        {/* Net-of-unposted headline (left) + Sync controls (right) share one
+            row tucked under the tiles, so the sync badge/button no longer
+            float in dead space above the table (operator request). The
+            headline only renders while a posting backlog exists; the tiles
+            keep Sage's true POSTED aging, this line gives the honest net. */}
+        {rows.length > 0 && (
+          <div className="-mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+            {(apAging.unposted_invoices_total !== 0 || apAging.unposted_payments_total > 0) ? (
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden="true" />
+                <span className="text-muted-foreground">
+                  {/* Spelled out as arithmetic so it visibly adds up against
+                      the Total Outstanding tile above. */}
+                  Total Outstanding <span className="tabular-nums text-foreground">R {fmtR(apAging.total_outstanding)}</span>
+                  {apAging.unposted_invoices_total !== 0 && (
+                    <> + <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_invoices_total)}</span> unposted invoices</>
+                  )}
+                  {apAging.unposted_payments_total > 0 && (
+                    <> − <span className="tabular-nums text-foreground">R {fmtR(apAging.unposted_payments_total)}</span> unposted payments</>
+                  )}
+                  {" ="}
+                </span>
+                <span className="font-medium tabular-nums text-foreground">
+                  true outstanding R {fmtR(apAging.net_total)}
+                </span>
+                <span
+                  className="cursor-help text-muted-subtle"
+                  title="The aging tiles above show Sage's POSTED aged figures only. Invoices and payments captured in batches that accounts hasn't posted yet can't be assigned to a specific aging bucket, so they adjust the total here instead. All three figures cover the same vendors currently shown in the table below. This line disappears once the batches post."
+                >
+                  ⓘ
+                </span>
+              </div>
+            ) : <span />}
+            {/* Last-synced + Sync from Sage — right-aligned on the headline row. */}
+            <div className="flex items-center gap-3 cb-no-print">
+              <LastSyncedBadge
+                iso={meta?.last_synced_at}
+                detail="Scheduled nightly at 04:30 (Operations page lists every job)"
+              />
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
+                title="Pull latest vendor, invoice, payment, and PO data from Sage"
+              >
+                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
+                {syncing ? "Syncing…" : "Sync from Sage"}
+              </button>
+            </div>
           </div>
         )}
         {/* Payment-capture recency — how far behind accounts is on CAPTURING
@@ -454,25 +475,6 @@ export default function CreditorSummary() {
             </div>
           );
         })()}
-
-        {/* Sync from Sage + last-synced — moved here (just above the table,
-            below the aging tiles) so the page leads with the numbers, not the
-            controls (operator request). */}
-        <div className="flex flex-wrap items-center justify-end gap-3 cb-no-print">
-          <LastSyncedBadge
-            iso={meta?.last_synced_at}
-            detail="Scheduled nightly at 04:30 (Operations page lists every job)"
-          />
-          <button
-            onClick={handleSync}
-            disabled={syncing}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2 text-sm font-medium hover:bg-muted disabled:opacity-50"
-            title="Pull latest vendor, invoice, payment, and PO data from Sage"
-          >
-            <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-            {syncing ? "Syncing…" : "Sync from Sage"}
-          </button>
-        </div>
 
         {isLoading && <div className="h-[400px] animate-pulse rounded-xl border border-border bg-card" />}
         {!isLoading && error && (
