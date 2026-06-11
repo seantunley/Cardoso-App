@@ -103,8 +103,10 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
       if (activeOnly) where.push('c.is_active = 1');
       // Zero filter applies to the FULL net outstanding (unposted invoices
       // added, unposted payments subtracted) so a vendor whose true position
-      // is settled behaves as settled.
-      if (!includeZero) where.push('(COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0)) <> 0');
+      // is settled behaves as settled. Rounded to the cent: an exact `<> 0`
+      // let ~6 vendors whose net is float dust (fractions of a cent) through,
+      // so the vendor COUNT and totals disagreed with the Aged Creditors view.
+      if (!includeZero) where.push('ROUND(COALESCE(ob.outstanding, 0) + COALESCE(uninv.unposted_inv, 0) - COALESCE(unp.unposted, 0), 2) <> 0');
 
       // outstanding_amount is the TRUE position (operator decision, June
       // 2026): APOBL open items PLUS invoices captured in unposted AP batches
