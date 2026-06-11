@@ -206,3 +206,57 @@ describe('ruleBackupVerifyFailed', () => {
     expect(memDb.prepare("SELECT COUNT(*) c FROM alerts").get().c).toBe(0);
   });
 });
+
+describe('ruleNightlySyncStale', () => {
+  const HOURS = 3_600_000;
+
+  it('fires when the last success is older than 26h and the latest attempt failed', async () => {
+    seedRun('creditors-sync', 'succeeded', new Date(Date.now() - 29 * HOURS).toISOString());
+    seedRun('creditors-sync', 'failed', new Date(Date.now() - 5 * HOURS).toISOString(), 'Sage pool timeout');
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'nightly-sync-stale:creditors-sync'").get();
+    expect(alert).toBeDefined();
+    expect(alert.severity).toBe('warning');
+    expect(alert.message).toContain('Sage pool timeout');
+    expect(alert.message).toContain('29.0 hours ago');
+  });
+
+  it('fires for the machine-off case — old success, no attempt since', async () => {
+    // Only one row: a success 29h ago. No failed row exists because the
+    // 4am cron never fired (machine off) — the exact case job-failure
+    // rules can never see.
+    seedRun('debtors-sync', 'succeeded', new Date(Date.now() - 29 * HOURS).toISOString());
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'nightly-sync-stale:debtors-sync'").get();
+    expect(alert).toBeDefined();
+    expect(alert.message).toContain('never fired');
+  });
+
+  it('does not fire when the data is fresh, and auto-resolves an active alert', async () => {
+    seedRun('creditors-sync', 'succeeded', new Date(Date.now() - 29 * HOURS).toISOString());
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key = 'nightly-sync-stale:creditors-sync'").get().resolved_at).toBeNull();
+
+    // A retry (or catch-up) succeeds → data fresh → alert resolves.
+    seedRun('creditors-sync', 'succeeded', new Date().toISOString());
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key = 'nightly-sync-stale:creditors-sync'").get().resolved_at).toBeTruthy();
+  });
+
+  it('never-attempted jobs (fresh install) do not alert', async () => {
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'nightly-sync-stale:%'").get().c).toBe(0);
+  });
+
+  it('skips entirely on the hub (site-mode jobs)', async () => {
+    seedRun('creditors-sync', 'succeeded', new Date(Date.now() - 40 * HOURS).toISOString());
+    const prev = process.env.HUB_MODE;
+    process.env.HUB_MODE = 'true';
+    try {
+      await evaluateAllRules();
+      expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'nightly-sync-stale:%'").get().c).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.HUB_MODE; else process.env.HUB_MODE = prev;
+    }
+  });
+});
