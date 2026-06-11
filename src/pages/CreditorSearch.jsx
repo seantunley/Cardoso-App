@@ -6,6 +6,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, Search, Truck, FileText, Wallet, ClipboardList, PackageCheck } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { useSearchParamState } from "../hooks/useSearchParamState.js";
 
 function fmtR(v) {
   const n = Number(v) || 0;
@@ -96,9 +97,22 @@ function VendorTypeahead({ onPick }) {
 }
 
 function VendorHeader({ vendor }) {
+  const inv = Number(vendor.unposted_invoices) || 0;
+  const pay = Number(vendor.unposted_payments) || 0;
+  const hasAdjustments = inv !== 0 || pay > 0;
+  // Payment-capture cutoff — same warning as Creditor Balances: payments made
+  // at the bank after this date are not in Sage yet and cannot reflect here.
+  const lastCapture = (vendor.last_cb_payment_capture || "") > (vendor.last_ap_payment_date || "")
+    ? vendor.last_cb_payment_capture
+    : (vendor.last_ap_payment_date || vendor.last_cb_payment_capture);
+  const captureDays = lastCapture
+    ? Math.floor((Date.now() - new Date(lastCapture).getTime()) / 86_400_000)
+    : null;
+  const captureStale = Number.isFinite(captureDays) && captureDays > 7;
+
   return (
     <div className="rounded-xl border border-border bg-card p-5">
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground">{vendor.vendor_code}</div>
           <h2 className="text-2xl font-semibold mt-1 truncate">{vendor.vendor_name || "—"}</h2>
@@ -108,17 +122,53 @@ function VendorHeader({ vendor }) {
             {vendor.phone ? <span>Phone: <span className="text-foreground">{vendor.phone}</span></span> : null}
             {vendor.email ? <span>Email: <span className="text-foreground">{vendor.email}</span></span> : null}
           </div>
+          {/* Last activity — promoted from tiny corner text (operator request):
+              payment recency is a primary fact for a vendor. */}
+          <div className="mt-4 flex flex-wrap gap-6">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Last payment</div>
+              <div className="text-lg font-semibold tabular-nums">{vendor.last_payment_date || "—"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Last receipt</div>
+              <div className="text-lg font-semibold tabular-nums">{vendor.last_receipt_date || "—"}</div>
+            </div>
+          </div>
         </div>
         <div className="text-right">
           <span className={`inline-block rounded-full px-3 py-1 text-xs font-medium ${vendor.is_active ? "bg-emerald-500/10 text-emerald-300" : "bg-muted text-muted-foreground"}`}>
             {vendor.is_active ? "Active" : "Inactive"}
           </span>
-          <div className="mt-3 text-[10px] uppercase tracking-wider text-muted-foreground space-y-0.5">
-            {vendor.last_receipt_date && <div>Last receipt: <span className="text-foreground">{vendor.last_receipt_date}</span></div>}
-            {vendor.last_payment_date && <div>Last payment: <span className="text-foreground">{vendor.last_payment_date}</span></div>}
+          {/* True outstanding — same arithmetic as Creditor Balances:
+              posted APOBL + unposted invoices − unposted payments. */}
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              Outstanding{hasAdjustments ? " (true position)" : ""}
+            </div>
+            <div className="text-2xl font-semibold tabular-nums">
+              R {fmtR(vendor.outstanding_net)}
+              {hasAdjustments && <span className="ml-1 text-accent" aria-hidden="true">●</span>}
+            </div>
+            {hasAdjustments && (
+              <div className="mt-1 space-y-0.5 text-xs text-muted-foreground tabular-nums">
+                <div>Posted in Sage: R {fmtR(vendor.outstanding_gross)}</div>
+                {inv !== 0 && <div>+ R {fmtR(inv)} invoices in unposted batches</div>}
+                {pay > 0 && <div>− R {fmtR(pay)} unposted payments</div>}
+              </div>
+            )}
           </div>
         </div>
       </div>
+      {captureStale && (
+        <div className="mt-4 flex items-center gap-2 border-t border-border pt-3 text-sm text-red-300">
+          <span className="h-1.5 w-1.5 rounded-full bg-red-500" aria-hidden="true" />
+          <span>
+            Vendor payments captured in the Cashbook up to{" "}
+            <span className="font-medium tabular-nums">{lastCapture}</span>
+            {" "}({captureDays} days ago) — anything paid since is not in Sage yet and cannot reflect here.
+          </span>
+        </div>
+      )}
     </div>
   );
 }
@@ -357,7 +407,9 @@ function PosTab({ code }) {
 }
 
 export default function CreditorSearch() {
-  const [code, setCode] = useState(null);
+  // URL-backed so Creditor Balances can drill straight into a vendor
+  // (/CreditorSearch?code=BAT%2001), links are shareable, and Back works.
+  const [code, setCode] = useSearchParamState("code", "");
   const [tab, setTab] = useState("receipts");
 
   const { data: vendor, isLoading: vLoading, error: vError } = useQuery({

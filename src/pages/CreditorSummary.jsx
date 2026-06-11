@@ -5,6 +5,7 @@
 // "Sync now" button kicks off the Sage pull on demand; otherwise the
 // nightly 04:30 cron keeps the data fresh.
 import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useDebouncedValue } from "../hooks/useDebouncedValue.js";
 import { Building2, RefreshCw, Search } from "lucide-react";
@@ -145,6 +146,7 @@ const COLUMNS = [
 
 export default function CreditorSummary() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   // Debounced copy drives the query (one request per pause, not per keystroke);
   // the input stays bound to `search` for responsiveness.
@@ -451,6 +453,10 @@ export default function CreditorSummary() {
             storageKey={COL_WIDTHS_KEY}
             defaultWidths={COL_DEFAULTS}
             maxHeight="70vh"
+            rowTitle={(r) => `Open ${r.vendor_name || r.vendor_code} in Creditor Search`}
+            // Drill into the vendor detail page (Creditor Search reads ?code=).
+            // Site mode only — Creditor Search doesn't exist on the hub.
+            onRowClick={data?.hub ? undefined : (r) => navigate(`/CreditorSearch?code=${encodeURIComponent(r.vendor_code)}`)}
           />
         )}
       </div>

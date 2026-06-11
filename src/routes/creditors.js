@@ -236,7 +236,26 @@ export function createCreditorRouter({ requireAuth, requireAdmin, requirePermiss
         FROM creditor WHERE vendor_code = ?
       `).get(req.params.code);
       if (!row) return res.status(404).json({ error: 'Vendor not found' });
-      res.json(row);
+      // Money summary for the vendor header — same true-position arithmetic
+      // as the Creditor Balances list (posted APOBL + unposted invoices −
+      // unposted payments), plus the payment-capture cutoff so the header can
+      // warn that recent bank payments may not be captured in Sage yet.
+      const money = db.prepare(`
+        SELECT
+          COALESCE((SELECT SUM(outstanding_amount) FROM creditor_ap_invoice WHERE vendor_code = ?), 0) AS outstanding_gross,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_invoice WHERE vendor_code = ?), 0)    AS unposted_invoices,
+          COALESCE((SELECT SUM(amount) FROM creditor_ap_unposted_payment WHERE vendor_code = ?), 0)    AS unposted_payments
+      `).get(req.params.code, req.params.code, req.params.code);
+      const meta = db.prepare(`
+        SELECT last_cb_payment_capture, last_ap_payment_date FROM creditor_sync_meta WHERE id = 1
+      `).get() || {};
+      res.json({
+        ...row,
+        ...money,
+        outstanding_net: money.outstanding_gross + money.unposted_invoices - money.unposted_payments,
+        last_cb_payment_capture: meta.last_cb_payment_capture || null,
+        last_ap_payment_date: meta.last_ap_payment_date || null,
+      });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
