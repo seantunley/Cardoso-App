@@ -13,15 +13,27 @@ import {
 //
 // Rows have variable height (invoice/receipt cells render 1-3 lines), so
 // we accept a measureRef from the virtualizer for accurate spacer math.
-const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void }} */ {
-  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef,
+const CustomerBalancesRow = memo(function CustomerBalancesRow(/** @type {{ row: any, idx: number, globalIdx: number, isTop: boolean, creditLogicConfig: any, assignment: any, measureRef: (n: Element | null) => void, onDrill?: (customerNumber: string) => void }} */ {
+  row, idx, globalIdx, isTop, creditLogicConfig, assignment, measureRef, onDrill,
 }) {
   const amount = parseAmount(row.outstanding_balance);
+  // Drill opens the customer lookup popup IN PLACE on this page (operator
+  // request: closing it must leave you on Balances, not navigated away).
+  // Guard: clicks on interactive children (flag dot tooltips, links,
+  // buttons) keep their own behaviour.
+  const drill = (e) => {
+    if (!onDrill || !row.customer_number) return;
+    if (e.target.closest("button, a, input, select, textarea, [role='button']")) return;
+    onDrill(String(row.customer_number).trim());
+  };
   return (
     <tr
       ref={measureRef}
       data-index={idx}
-      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${isTop ? "bg-amber-500/5" : ""}`}
+      onClick={drill}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); drill(e); } }}
+      tabIndex={onDrill && row.customer_number ? 0 : undefined}
+      className={`border-b border-border last:border-0 transition-colors hover:bg-muted/30 ${onDrill && row.customer_number ? "cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent" : ""} ${isTop ? "bg-amber-500/5" : ""}`}
     >
       <td className="px-2 py-1 text-xs text-muted-foreground">{globalIdx + 1}</td>
       <td className="px-2 py-1 pr-3">

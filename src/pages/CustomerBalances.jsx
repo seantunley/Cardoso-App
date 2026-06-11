@@ -21,6 +21,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useColumnWidths } from "@/components/customer-balances/useColumnWidths";
 import ResizeHandle from "@/components/customer-balances/ResizeHandle";
 import CustomerBalancesRow from "@/components/customer-balances/CustomerBalancesRow";
+import CustomerLookup from "@/components/customer/CustomerLookup";
 import { AGE_BUCKETS } from "@/components/customer-balances/AgeBucketPill";
 import PrintableTable from "@/components/customer-balances/PrintableTable";
 import CustomerBalancesHeader from "@/components/customer-balances/CustomerBalancesHeader";
@@ -77,6 +78,10 @@ export default function CustomerBalances() {
   // this, native <details> gets unmounted by conditional rendering and
   // snaps back to closed every time the data changes.
   const [filtersOpen, setFiltersOpen] = useState(false);
+  // Row drill → the full customer popup, embedded ON this page (operator
+  // request: closing it stays on Balances). Setting the code triggers the
+  // lookup; onLookupComplete clears it so the same row can be clicked again.
+  const [drillCustomer, setDrillCustomer] = useState("");
   const [hideMatchRaw, setHideMatchRaw] = useSearchParamState("hidematch", "");
   const hideInvoiceMatchesBalance = hideMatchRaw === "1";
   const setHideInvoiceMatchesBalance = useCallback(
@@ -339,7 +344,10 @@ export default function CustomerBalances() {
             <AgingSummaryTiles aging={arAging} tiles={AR_TILES} entityWord="cust" />
           )}
 
-          {rows.length > 0 && (
+          {/* Standalone total only when the aging tiles are hidden (hub mode,
+              which has no bucket data) — alongside the tiles it duplicated
+              their Total Outstanding headline (operator request). */}
+          {rows.length > 0 && !arAging && (
             <div className="mb-4 grid gap-4 md:grid-cols-2">
               <SummaryTile
                 label={`Total outstanding (${totalRecords} customer${totalRecords !== 1 ? "s" : ""}${siteFilter !== "all" ? ` · ${siteFilter}` : ""}${ageBucket !== "all" ? ` · ${activeAgeBucketLabel}` : ""})`}
@@ -451,6 +459,7 @@ export default function CustomerBalances() {
                               creditLogicConfig={creditLogicConfig}
                               assignment={assignment}
                               measureRef={rowVirtualizer.measureElement}
+                              onDrill={setDrillCustomer}
                             />
                           );
                         })}
@@ -469,6 +478,16 @@ export default function CustomerBalances() {
               renders the full result set (capped at PAGE_SIZE=5000). */}
         </div>
       </div>
+      {/* Row drill target — the full customer popup (credit verdict,
+          invoices, flag actions), embedded so closing it stays on this page.
+          hideSearchInput mounts only the modal machinery; triggerLookup
+          drives it, exactly like typing the account on Customer Search. */}
+      <CustomerLookup
+        hideSearchInput
+        triggerLookup={drillCustomer}
+        onLookupComplete={() => setDrillCustomer("")}
+        onFlagChange={() => refetch()}
+      />
     </>
   );
 }
