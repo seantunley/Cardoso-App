@@ -6,16 +6,30 @@ function parseAmount(value) {
   return Number.isNaN(numeric) ? 0 : numeric;
 }
 
+// Sage stores "no date" as a placeholder near its epoch (1999-12-31 shows up
+// verbatim in invoice slots, surfaced via Credit Debug). Anything before this
+// floor is a sentinel, not a real document date — treated as undated so it
+// can neither breach (a "27-year-old unpaid invoice" forcing a permanent
+// hold) nor settle anything.
+const SENTINEL_DATE_FLOOR = new Date("2000-01-01T00:00:00Z");
+
 function parseDateField(value) {
   if (!value) return null;
   const input = String(value).trim();
-  if (/^\d{8}$/.test(input)) return new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
-  const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-  if (dmy) return new Date(`${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`);
-  const mdy = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (mdy) return new Date(`${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`);
-  const parsed = new Date(input);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  let parsed = null;
+  if (/^\d{8}$/.test(input)) parsed = new Date(`${input.slice(0, 4)}-${input.slice(4, 6)}-${input.slice(6, 8)}`);
+  if (!parsed) {
+    const dmy = input.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    if (dmy) parsed = new Date(`${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`);
+  }
+  if (!parsed) {
+    const mdy = input.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mdy) parsed = new Date(`${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`);
+  }
+  if (!parsed) parsed = new Date(input);
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (parsed < SENTINEL_DATE_FLOOR) return null;
+  return parsed;
 }
 
 function formatTemplate(template, variables = {}) {

@@ -71,16 +71,21 @@ function DetailView({ data }) {
     );
   }
 
-  // Special rendering for invoice/receipt matches
+  // Special rendering for invoice/receipt matches. `paid` is the truth (the
+  // new engine emits it explicitly); the old label-text check marked
+  // settled-but-numberless receipts as UNPAID while the counters said paid,
+  // and rendered a green "0d lag" badge on lines it labelled UNPAID
+  // (operator-reported contradiction). Lag badges only render on PAID lines.
   if (data.invoice !== undefined && data.receipt !== undefined && data.lagDays !== undefined) {
+    const isPaid = data.paid !== undefined ? data.paid : data.receipt !== "UNPAID";
     return (
       <div className="flex items-center gap-2 text-xs font-mono">
         <span>{data.invoice}</span>
         <span className="text-muted-foreground">({data.invoiceDate})</span>
         <span className="text-muted-foreground">→</span>
-        <span className={data.receipt === "UNPAID" ? "text-red-400 font-semibold" : ""}>{data.receipt}</span>
-        {data.receipt !== "UNPAID" && <span className="text-muted-foreground">({data.receiptDate})</span>}
-        {data.lagDays !== null && (
+        <span className={!isPaid ? "text-red-400 font-semibold" : ""}>{isPaid ? data.receipt : "UNPAID"}</span>
+        {isPaid && <span className="text-muted-foreground">({data.receiptDate})</span>}
+        {isPaid && data.lagDays !== null && (
           <Badge variant="outline" className={cn(
             "text-xs ml-auto",
             data.lagDays <= 14 ? "text-emerald-400 border-emerald-500/30" :

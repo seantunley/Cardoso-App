@@ -598,3 +598,15 @@ describe('prepaid (PP) policy — any balance holds, period (June 2026)', () => 
     expect(r.verdict).toBe('dormant');
   });
 });
+
+describe('sentinel dates (Sage 1999-12-31 placeholder)', () => {
+  it('a sentinel-dated invoice cannot force a breach hold', () => {
+    const r = analyseInvoiceCredit([makeRecord({
+      outstanding_balance: 500,
+      invoices: [{ number: '?', amount: 500, date: '1999-12-31' }],
+      receipts: [],
+    })]);
+    // Undated invoice → no age → no breach; falls to awaiting/no-history paths.
+    expect(r.verdict).not.toBe('hold');
+  });
+});
