@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ReportFrame, PrintHeader, PrintFooter, downloadCsv } from './lib';
 import SalesFiguresTable from './SalesFiguresTable';
@@ -55,9 +55,12 @@ export default function DailySalesFigures() {
     }
   }, []);
 
-  // Per-day document print. Clicking a row's Print button bumps `printReq`
-  // (with a nonce so the same day can be reprinted); once that day's documents
-  // are fetched we flip into print-day-docs mode and call window.print().
+  // Per-day document print. Clicking a row's Print button invalidates that
+  // day's cached documents (so a reprint always shows freshly posted ones and
+  // a previous fetch error retries instead of re-toasting) and bumps `printReq`
+  // (with a nonce so the same day can be reprinted); once the FRESH documents
+  // land we flip into print-day-docs mode and call window.print().
+  const qc = useQueryClient();
   const [printReq, setPrintReq] = useState(null); // { day, nonce }
   const nonceRef = useRef(0);
   const handledNonceRef = useRef(0);
@@ -71,31 +74,44 @@ export default function DailySalesFigures() {
 
   const handlePrintDay = (day) => {
     nonceRef.current += 1;
+    qc.invalidateQueries({ queryKey: ['daily-sales-documents', day] });
     setPrintReq({ day, nonce: nonceRef.current });
   };
 
   useEffect(() => {
-    if (!printReq || handledNonceRef.current === printReq.nonce) return;
+    if (!printReq || handledNonceRef.current === printReq.nonce) return undefined;
+    // Wait out the refetch triggered by the click — isSuccess/isError stay set
+    // from the previous (stale) result while fetching, and printing that stale
+    // snapshot is exactly the bug being avoided.
+    if (docsQuery.isFetching) return undefined;
 
     if (docsQuery.isError) {
       handledNonceRef.current = printReq.nonce;
       toast.error(`Could not load documents for ${printReq.day}: ${docsQuery.error.message}`);
-      return;
+      return undefined;
     }
     if (docsQuery.isSuccess && docsQuery.data?.date === printReq.day) {
       handledNonceRef.current = printReq.nonce;
       if (!docsQuery.data.documents?.length) {
         toast.message(`No posted documents on ${printReq.day}.`);
-        return;
+        return undefined;
       }
       const onAfter = () => { document.body.classList.remove('print-day-docs'); window.removeEventListener('afterprint', onAfter); };
       window.addEventListener('afterprint', onAfter);
       document.body.classList.add('print-day-docs');
       const t = setTimeout(() => window.print(), 60); // let the printable paint first
-      return () => clearTimeout(t);
+      // If this effect is torn down before the timer fires (another day clicked,
+      // unmount), window.print() never runs and afterprint never fires — undo
+      // the class and listener here or every later print on this page would
+      // silently print the day-docs sheet instead of the report.
+      return () => {
+        clearTimeout(t);
+        document.body.classList.remove('print-day-docs');
+        window.removeEventListener('afterprint', onAfter);
+      };
     }
     return undefined;
-  }, [printReq, docsQuery.isSuccess, docsQuery.isError, docsQuery.data, docsQuery.error]);
+  }, [printReq, docsQuery.isFetching, docsQuery.isSuccess, docsQuery.isError, docsQuery.data, docsQuery.error]);
 
   const exportCsv = () => {
     const header = ['Date', 'Invoices Ex-VAT', 'Invoices VAT', 'Invoices Incl', 'Credit Notes Ex-VAT', 'Credit Notes VAT', 'Credit Notes Incl', 'Debit Notes Ex-VAT', 'Debit Notes VAT', 'Debit Notes Incl', 'Net (Incl)'];

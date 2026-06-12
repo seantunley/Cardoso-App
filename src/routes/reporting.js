@@ -705,10 +705,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
         LEFT JOIN ARCUS cu ON cu.IDCUST = h.IDCUST
         WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC = @day
+          AND h.TEXTTRX IN (1, 2, 3)
         ORDER BY h.TEXTTRX, doc_number`);
 
+      // TEXTTRX is filtered to 1/2/3 above — the daily summary buckets ONLY
+      // those types (its SUM CASEs), so any other type here would inflate the
+      // header count while being absent from the printed groups and Net.
       const documents = rs.recordset.map((r) => {
-        const t = AR_DOC_TYPE[r.trx] || { key: 'other', label: 'Other' };
+        const t = AR_DOC_TYPE[r.trx];
         return {
           type_key: t.key,
           type: t.label,
