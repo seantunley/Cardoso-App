@@ -115,7 +115,8 @@ const RELEASES = {
               "sync misses.",
             details: [
               "A failed nightly sync now retries automatically a short time later.",
-              "If data is more than about a day old — for example because a machine was switched off — the app says so plainly instead of silently showing stale figures.",
+              "A machine that was off overnight catches up on start-up: any missed sync runs as soon as the app comes back, instead of waiting for the next night.",
+              "If data is more than about a day old, the app says so plainly instead of silently showing stale figures.",
             ],
           },
           {
@@ -152,11 +153,14 @@ const RELEASES = {
         heading: 'Fixes',
         items: [
           {
-            title: 'Creditor totals now agree across pages',
+            title: 'Creditor Balances headline now reconciles on the page',
             body:
-              "The 'true outstanding' figure on Creditor Balances now reconciles with " +
-              "the Creditor Search overview — a filter had been quietly excluding part " +
-              "of the total, so the two could disagree.",
+              "The 'true outstanding' figure on Creditor Balances now always equals " +
+              "the tiles shown on screen: Total Outstanding + unposted invoices − " +
+              "unposted payments, for the vendors currently in view. (Creditor Search " +
+              "deliberately keeps the whole-company figure across all active vendors, " +
+              "so the two pages answer different questions and are labelled " +
+              "accordingly.)",
             details: [],
           },
           {
@@ -166,6 +170,14 @@ const RELEASES = {
               "yet posted), the previous view could show an out-of-date 'last payment'. " +
               "The true position and the capture-date warning now make this visible " +
               "rather than misleading.",
+            details: [],
+          },
+          {
+            title: 'Money tiles no longer clip large amounts',
+            body:
+              "Summary tiles across the app now size themselves to the figure they " +
+              "show, so multi-million Rand totals display in full instead of being " +
+              "cut off.",
             details: [],
           },
         ],
