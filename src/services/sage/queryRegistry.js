@@ -519,6 +519,45 @@ define({
 });
 
 define({
+  key: 'inventory.movement_history_item',
+  label: 'Inventory — movement history for ONE item (deep pull)',
+  purpose: 'On-demand full movement history for a single item/location, beyond the recent bulk window. Index-seeked on ITEMNO so it is cheap. Same shape as inventory.movement_history, paged by the composite cursor.',
+  pool: 'bat_sage',
+  tables: ['ICHIST', 'ICUNIT'],
+  params: ['batch', 'item', 'location', 'fromdate', 'ds', 'es', 'ln'],
+  requiredColumns: ['item_number', 'location', 'dayend_seq', 'app', 'transtype', 'quantity', 'stock_qty'],
+  defaultSql: `
+  SELECT TOP (@batch)
+    LTRIM(RTRIM(h.ITEMNO))    AS item_number,
+    LTRIM(RTRIM(h.LOCATION))  AS location,
+    LTRIM(RTRIM(h.ACCTSET))   AS acctset,
+    h.TRANSDATE               AS transaction_date_int,
+    LTRIM(RTRIM(h.FISCYEAR))  AS fiscal_year,
+    h.FISCPERIOD              AS fiscal_period,
+    h.DAYENDSEQ               AS dayend_seq,
+    h.ENTRYSEQ                AS entry_seq,
+    h.[LINENO]                AS line_no,
+    LTRIM(RTRIM(h.APP))       AS app,
+    h.TRANSTYPE               AS transtype,
+    LTRIM(RTRIM(h.DOCNUM))    AS doc_number,
+    h.QUANTITY                AS quantity,
+    LTRIM(RTRIM(h.UNIT))      AS unit,
+    h.QUANTITY * ISNULL(u.CONVERSION, 1) AS stock_qty,
+    h.HOMEEXTCST              AS cost,
+    LTRIM(RTRIM(h.CATEGORY))  AS category
+  FROM ICHIST h
+  LEFT JOIN ICUNIT u ON u.ITEMNO = h.ITEMNO AND u.UNIT = h.UNIT
+  WHERE h.ITEMNO = @item AND h.LOCATION = @location AND h.TRANSDATE >= @fromdate
+    AND (
+      h.DAYENDSEQ > @ds
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ > @es)
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] > @ln)
+    )
+  ORDER BY h.DAYENDSEQ, h.ENTRYSEQ, h.[LINENO]
+`,
+});
+
+define({
   key: 'inventory.movement_seed',
   label: 'Inventory — movement history seed cursor',
   purpose: 'The DAYENDSEQ just before the history window starts, so a fresh sync skips the older (purged-but-still-present) rows instead of scanning them.',

@@ -66,13 +66,16 @@ export default {
       INSERT OR IGNORE INTO inventory_movement_sync_meta (id, last_dayend_seq) VALUES (1, 0);
 
       -- Operator-overridable settings (mirrors the other Sage modules).
+      -- The bulk sync only carries the recent window (default 30 DAYS) so it
+      -- stays fast; deeper history is pulled on demand per item. Everything
+      -- older than the window shows as the opening-balance rollup.
       CREATE TABLE IF NOT EXISTS inventory_movement_sync_settings (
         id                     INTEGER PRIMARY KEY CHECK (id = 1),
-        history_years          INTEGER DEFAULT 3,   -- how many years of ICHIST to keep
+        history_days           INTEGER DEFAULT 30,  -- days of ICHIST the bulk sync keeps
         movement_sql_override  TEXT,
         onhand_sql_override    TEXT
       );
-      INSERT OR IGNORE INTO inventory_movement_sync_settings (id, history_years) VALUES (1, 3);
+      INSERT OR IGNORE INTO inventory_movement_sync_settings (id, history_days) VALUES (1, 30);
     `);
   },
 };

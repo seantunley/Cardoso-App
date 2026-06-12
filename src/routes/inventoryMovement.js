@@ -15,7 +15,9 @@ import {
 } from '../services/inventoryMovement.js';
 import {
   syncInventoryMovement,
+  syncItemMovementHistory,
   getInventoryMovementSyncMeta,
+  getSyncState,
   searchMovementItems,
   getItemLedger,
 } from '../services/inventoryMovementHistory.js';
@@ -352,29 +354,39 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
   router.get('/api/inventory-movement/movement-sync-meta', ...guard, (_req, res) => {
     try {
       if (isHub()) return res.json({ hub: true, message: 'Movement history is per-branch.' });
-      res.json(getInventoryMovementSyncMeta());
+      res.json({ ...getInventoryMovementSyncMeta(), ...getSyncState() });
     } catch (err) {
       logError('inventoryMovement.movement_sync_meta', err);
       res.status(500).json({ error: err.message });
     }
   });
 
-  router.post('/api/inventory-movement/sync-movement', requireAuth, requirePermission('can_access_inventory_movement'), async (req, res) => {
+  // Bulk sync (recent window) runs DETACHED — the pull can take minutes and a
+  // blocking request gets a 502 at the proxy. Return immediately; the client
+  // polls movement-sync-meta for `running`/`inserted`.
+  router.post('/api/inventory-movement/sync-movement', requireAuth, requirePermission('can_access_inventory_movement'), (req, res) => {
     if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly.' });
+    if (getSyncState().running) return res.status(202).json({ ok: true, running: true, message: 'A sync is already running.' });
+    logAudit({ req, action: 'inventoryMovement.sync_movement', resourceType: 'inventory_movement', resourceId: 'sync', resourceName: 'Inventory movement history sync', details: 'Started background movement-history sync' });
+    syncInventoryMovement().catch((err) => {
+      const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      logError('inventoryMovement.sync_movement', err, { sage_down: isSageDown });
+    });
+    res.status(202).json({ ok: true, started: true });
+  });
+
+  // Deep history for ONE item — cheap (index-seeked), so it runs inline.
+  router.post('/api/inventory-movement/sync-item-movement', requireAuth, requirePermission('can_access_inventory_movement'), async (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Movement history is per-branch.' });
+    const { item, location } = req.body || {};
+    if (!item || !location) return res.status(400).json({ error: 'item and location are required' });
     try {
-      const result = await syncInventoryMovement();
-      logAudit({
-        req,
-        action: 'inventoryMovement.sync_movement',
-        resourceType: 'inventory_movement',
-        resourceId: 'sync',
-        resourceName: 'Inventory movement history sync',
-        details: `Pulled ${result.inserted} movements (${result.totalMovements} total), ${result.onhand} on-hand rows from Sage`,
-      });
+      const result = await syncItemMovementHistory({ itemNumber: item, location });
+      logAudit({ req, action: 'inventoryMovement.sync_item_movement', resourceType: 'inventory_movement', resourceId: String(item), resourceName: `Deep movement sync ${item}/${location}`, details: `Pulled ${result.inserted} rows; earliest ${result.earliest || '—'}` });
       res.json({ ok: true, ...result });
     } catch (err) {
       const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
-      logError('inventoryMovement.sync_movement', err, { sage_down: isSageDown });
+      logError('inventoryMovement.sync_item_movement', err, { item, location, sage_down: isSageDown });
       res.status(isSageDown ? 503 : 500).json({ error: err.message });
     }
   });
