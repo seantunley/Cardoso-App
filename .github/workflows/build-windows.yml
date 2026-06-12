@@ -80,6 +80,13 @@ jobs:
           # sharp is a runtime OCR/BAT-rendering dependency; confirm the prune
           # did not remove it (it must be in `dependencies`, not devDependencies).
           if (-not (Test-Path node_modules/sharp)) { throw "sharp missing after prune - OCR / BAT page rendering will fail at runtime. Ensure sharp is in package.json dependencies, not devDependencies." }
+          # sharp's actual native binary lives in the platform package
+          # node_modules/@img/sharp-win32-x64 (an optionalDependency npm prune
+          # has historically mishandled) - the JS dir above existing proves
+          # nothing about the binary, so check for the .node file itself.
+          $sharpBin = Get-ChildItem node_modules/@img -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          $sharpBin | ForEach-Object { Write-Host "SHARP: $($_.FullName)" }
+          if (-not $sharpBin) { throw "sharp native binary missing under node_modules/@img after prune - OCR / BAT page rendering will fail at runtime on every site" }
           $tess = "windows/build/app/vendor/tessdata/eng.traineddata.gz"
           if (-not (Test-Path $tess)) { throw "Tesseract trained data missing at $tess - Tesseract OCR will fail at runtime" }
           Write-Host "tessdata present: $((Get-Item $tess).Length / 1MB) MB"

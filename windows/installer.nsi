@@ -111,6 +111,15 @@ Section "Install" SecInstall
   SetCompress off
   File ".\build\nm\node_modules.tar.gz"
   SetCompress auto
+  ; Remove the previous install's node_modules BEFORE extracting. Two reasons:
+  ; (1) tar overlays — without the wipe, packages removed/downgraded in the new
+  ;     lockfile (and all the pre-prune dev-deps) linger forever on upgraded
+  ;     sites, so upgraded and fresh installs silently diverge;
+  ; (2) the sentinel check below is only meaningful against a clean slate — a
+  ;     leftover tree from the old install would satisfy it even when the
+  ;     extract completely failed, hiding a new-code-on-old-deps half-install.
+  DetailPrint "Removing previous application libraries (node_modules)..."
+  RMDir /r "$INSTDIR\node_modules"
   DetailPrint "Extracting application libraries (node_modules)..."
   ExecWait '"$SYSDIR\tar.exe" -xzf "$INSTDIR\node_modules.tar.gz" -C "$INSTDIR"' $0
   Delete "$INSTDIR\node_modules.tar.gz"
@@ -118,9 +127,11 @@ Section "Install" SecInstall
   ; Gate on a sentinel package actually existing rather than the exit code —
   ; bsdtar can return non-zero on benign warnings (timestamps, etc.) while
   ; extracting correctly. A genuinely failed extract must stop the install
-  ; loudly instead of leaving a broken node_modules behind.
+  ; loudly instead of leaving a broken node_modules behind. /SD IDOK so a
+  ; silent (/S) run fails fast instead of hanging forever on an invisible
+  ; dialog.
   IfFileExists "$INSTDIR\node_modules\better-sqlite3\package.json" nm_ok 0
-    MessageBox MB_OK "Setup could not unpack the application libraries (node_modules; tar exit code $0).$\n$\nThe installation is incomplete. Make sure Windows is up to date — tar.exe ships with Windows 10 (1803+) and Windows Server 2019 or newer — then re-run this installer."
+    MessageBox MB_OK|MB_ICONSTOP "Setup could not unpack the application libraries (node_modules; tar exit code $0).$\n$\nThe installation is incomplete and the Cardoso service is currently STOPPED. Make sure Windows is up to date — tar.exe ships with Windows 10 (1803+) and Windows Server 2019 or newer — then re-run this installer to finish the upgrade." /SD IDOK
     Abort
   nm_ok:
 
