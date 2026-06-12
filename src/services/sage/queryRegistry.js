@@ -512,10 +512,17 @@ define({
     AND (
       h.DAYENDSEQ > @ds
       OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ > @es)
-      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] > @ln)
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] >= @ln)
     )
   ORDER BY h.DAYENDSEQ, h.ENTRYSEQ, h.[LINENO]
 `,
+  /* The last comparison is >= (inclusive), NOT >. The cursor tuple is a proper
+     subset of ICHIST's PK (which also carries ACCTSET/LOCATION/ITEMNO/FISCYEAR/
+     FISCPERIOD/TRANSDATE), so several distinct rows — e.g. the two halves of a
+     transfer — can share one (DAYENDSEQ, ENTRYSEQ, LINENO). With a strict >,
+     a TOP(@batch) boundary falling inside such a tied group would silently
+     drop the group's remaining rows. Inclusive means each page re-fetches the
+     boundary tuple's few tied rows; INSERT OR IGNORE dedups them locally. */
 });
 
 define({
@@ -551,10 +558,12 @@ define({
     AND (
       h.DAYENDSEQ > @ds
       OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ > @es)
-      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] > @ln)
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] >= @ln)
     )
   ORDER BY h.DAYENDSEQ, h.ENTRYSEQ, h.[LINENO]
 `,
+  /* >= on the last column for the same tied-group reason as
+     inventory.movement_history above. */
 });
 
 define({

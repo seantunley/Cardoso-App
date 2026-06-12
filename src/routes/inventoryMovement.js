@@ -343,7 +343,7 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
       const { item, location, from, to } = req.query;
       if (!item || !location) return res.status(400).json({ error: 'item and location are required' });
       const ledger = getItemLedger({ itemNumber: item, location, from: from || undefined, to: to || undefined });
-      if (!ledger) return res.status(404).json({ error: 'No on-hand record for that item/location' });
+      if (!ledger) return res.status(404).json({ error: 'No on-hand record or movement history for that item/location — check the item number and run a movement sync first.' });
       res.json(ledger);
     } catch (err) {
       logError('inventoryMovement.item_ledger', err, { item: req.query?.item, location: req.query?.location });

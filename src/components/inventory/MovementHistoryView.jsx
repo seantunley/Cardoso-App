@@ -34,10 +34,14 @@ const fmtQty = (v) => {
 };
 const fmtR = (v) => (v == null ? "—" : `R ${(Number(v) || 0).toLocaleString("en-ZA", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 
+// LOCAL calendar date, not toISOString() (UTC) — SAST is UTC+2, so between
+// 00:00 and 02:00 the UTC date is still yesterday and the card would silently
+// exclude today's movements from its default window.
+const localIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 const daysAgoIso = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
+  return localIso(d);
 };
 
 // Classify a movement by direction so the stock card scans at a glance.
@@ -57,7 +61,7 @@ export default function MovementHistoryView() {
   const [search, setSearch] = useState("");
   const [picked, setPicked] = useState(/** @type {{item_number:string, location:string, item_description?:string}|null} */ (null));
   const [from, setFrom] = useState(() => daysAgoIso(30));
-  const [to, setTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [to, setTo] = useState(() => localIso(new Date()));
 
   const itemsQuery = useQuery({
     queryKey: ["inv-movement-items", search],
@@ -96,8 +100,11 @@ export default function MovementHistoryView() {
 
   const syncMutation = useMutation({
     mutationFn: () => apiPost(`/api/inventory-movement/sync-movement`),
-    onSuccess: () => {
-      toast.info("Sync started — pulling the last 30 days from Sage in the background…");
+    onSuccess: (d) => {
+      // The route answers 202 both for "started" and "already running" —
+      // don't tell the user a new sync started when one was already going.
+      if (d?.running) toast.info("A movement sync is already running.");
+      else toast.info("Sync started — pulling the last 30 days from Sage in the background…");
       qc.invalidateQueries({ queryKey: ["inv-movement-sync-meta"] });
     },
     onError: (e) => toast.error(`Could not start sync: ${e.message}`),
@@ -131,6 +138,14 @@ export default function MovementHistoryView() {
             <span className="inline-flex items-center gap-2 text-foreground">
               <RefreshCw className="h-3.5 w-3.5 animate-spin" />
               Syncing movement history… <span className="tabular-nums">{Number(meta?.inserted || 0).toLocaleString()}</span> new movements so far
+            </span>
+          ) : meta?.last_error ? (
+            // A failed sync must be visible here, not only in a transition
+            // toast: a sync that dies before the first poll (e.g. Sage down)
+            // never shows `running`, so the toast never fires.
+            <span className="inline-flex items-center gap-2 text-[hsl(0_72%_55%)]">
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Last movement sync failed: {meta.last_error} — fix the Sage connection and run it again.
             </span>
           ) : meta?.last_synced_at ? (
             <>Movement history synced <span className="text-foreground">{meta.last_synced_at}</span> · <span className="tabular-nums">{Number(meta.movement_rows || 0).toLocaleString()}</span> movements · last 30 days from <span className="tabular-nums">{meta.history_from || "—"}</span></>
@@ -217,6 +232,21 @@ export default function MovementHistoryView() {
 
       {picked && ledger && (
         <>
+          {/* Coverage warning: the bulk sync only holds the recent window, so a
+              "From" before history_from means movements exist in Sage that
+              aren't local — they'd be silently folded into the opening balance.
+              Once this item has been deep-synced (item_earliest predates the
+              window), every local date is covered and the warning goes away. */}
+          {ledger.history_from && from < ledger.history_from && (!ledger.item_earliest || ledger.item_earliest >= ledger.history_from) && (
+            <div className="flex items-start gap-2 rounded-xl border border-[hsl(33_95%_55%_/_0.4)] bg-[hsl(33_95%_55%_/_0.08)] px-4 py-2.5 text-xs text-foreground">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[hsl(33_95%_55%)]" />
+              <span>
+                Movements before <span className="font-mono">{ledger.history_from}</span> aren&apos;t synced for this item — the opening balance shown for {from} includes them as a rollup but can&apos;t itemise them.
+                Use <strong>Load full history</strong> to pull this item&apos;s complete record from Sage.
+              </span>
+            </div>
+          )}
+
           {/* Reconciliation summary */}
           <div className="grid gap-3 sm:grid-cols-4">
             <Tile label="Opening balance" value={fmtQty(ledger.opening_balance)} sub={`as at ${from}`} />
@@ -225,7 +255,7 @@ export default function MovementHistoryView() {
             <Tile
               label="Current on hand"
               value={fmtQty(ledger.on_hand)}
-              sub={ledger.reconciles ? "Reconciles ✓" : `Variance ${fmtQty(ledger.reconcile_variance)}`}
+              sub={ledger.reconciles ? "Anchored to on-hand ✓" : `Internal variance ${fmtQty(ledger.reconcile_variance)}`}
               accent={ledger.reconciles ? "hsl(145 60% 42%)" : "hsl(0 72% 55%)"}
               icon={ledger.reconciles ? CheckCircle2 : AlertTriangle}
             />
@@ -285,8 +315,8 @@ export default function MovementHistoryView() {
                   <td className="px-4 py-2 font-semibold" colSpan={5}>
                     Closing balance — as at {to}
                     {ledger.reconciles
-                      ? <span className="ml-1 text-[hsl(145_60%_42%)]">· reconciles to on hand ✓</span>
-                      : <span className="ml-1 text-[hsl(0_72%_55%)]">· variance {fmtQty(ledger.reconcile_variance)}</span>}
+                      ? <span className="ml-1 text-[hsl(145_60%_42%)]">· anchored to on hand ✓</span>
+                      : <span className="ml-1 text-[hsl(0_72%_55%)]">· internal variance {fmtQty(ledger.reconcile_variance)}</span>}
                   </td>
                   <td className="border-l border-border px-4 py-2 text-right font-semibold tabular-nums">{fmtQty(ledger.closing_balance)}</td>
                   <td />
@@ -295,7 +325,7 @@ export default function MovementHistoryView() {
             </table>
           </div>
           <p className="text-[11px] text-muted-subtle">
-            The running balance is anchored to current on-hand and the opening is derived from it, so the card always ties to stock — Sage purges old transaction history, so a balance summed from zero would not. The bulk sync only carries the last 30 days; use “Load full history” to pull everything older for this item.
+            The running balance is anchored to current on-hand: the opening is derived from on-hand minus the movements shown, so the card always ties to stock by construction — Sage purges old transaction history, so a balance summed from zero would not. Anything not yet synced is part of the opening rollup. The bulk sync only carries the last 30 days; use “Load full history” to pull everything older for this item.
           </p>
         </>
       )}

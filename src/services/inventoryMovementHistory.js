@@ -82,12 +82,16 @@ function insertStmt() {
   `));
 }
 
+// Returns the number of rows ACTUALLY inserted — INSERT OR IGNORE drops
+// duplicates (re-fetched cursor-boundary rows, bulk/per-item overlap), and
+// counting fetched rows instead would inflate every "N new movements" figure.
 function insertBatch(rows) {
   const stmt = insertStmt();
+  let inserted = 0;
   db.transaction((batch) => {
     for (const r of batch) {
       const stockQty = Number(r.stock_qty) || 0;
-      stmt.run({
+      const info = stmt.run({
         item_number: String(r.item_number || '').trim(),
         location: String(r.location || '').trim(),
         acctset: String(r.acctset || '').trim(),
@@ -107,8 +111,31 @@ function insertBatch(rows) {
         cost: r.cost != null ? Number(r.cost) : null,
         category: String(r.category || '').trim() || null,
       });
+      inserted += info.changes;
     }
   })(rows);
+  return inserted;
+}
+
+// Advance the paging cursor from a batch's last row, null-safely (`|| prev`
+// would wedge the loop on a legitimate 0). Throws if a FULL batch failed to
+// move the cursor — that means ≥BATCH rows share one (ds, es, ln) tuple and
+// the inclusive >= predicate would refetch the same page forever; surfacing
+// the stall beats spinning silently.
+function advanceCursor(rows, cur) {
+  const last = rows[rows.length - 1];
+  const next = {
+    ds: last.dayend_seq != null ? Number(last.dayend_seq) : cur.ds,
+    es: last.entry_seq != null ? Number(last.entry_seq) : cur.es,
+    ln: last.line_no != null ? Number(last.line_no) : cur.ln,
+  };
+  if (rows.length >= BATCH && next.ds === cur.ds && next.es === cur.es && next.ln === cur.ln) {
+    throw new Error(
+      `Movement sync stalled: a full batch of ${BATCH} ICHIST rows shares cursor (DAYENDSEQ ${cur.ds}, ENTRYSEQ ${cur.es}, LINENO ${cur.ln}). ` +
+      `No rows were lost (everything fetched so far is saved), but the sync cannot page past this point — raise the batch size or investigate ICHIST.`,
+    );
+  }
+  return next;
 }
 
 // Bulk sync: ICHIST forward from the stored cursor (incremental by DAYENDSEQ),
@@ -147,14 +174,10 @@ export async function syncInventoryMovement() {
       const rows = res.recordset || [];
       if (rows.length === 0) break;
 
-      insertBatch(rows);
-      inserted += rows.length;
+      inserted += insertBatch(rows);
       syncState.inserted = inserted;
 
-      const last = rows[rows.length - 1];
-      ds = Number(last.dayend_seq) || ds;
-      es = Number(last.entry_seq) || 0;
-      ln = Number(last.line_no) || 0;
+      ({ ds, es, ln } = advanceCursor(rows, { ds, es, ln }));
       if (ds > maxSeq) maxSeq = ds;
 
       if (++sinceSave >= 5) { persist(); sinceSave = 0; } // durable + pollable
@@ -162,18 +185,23 @@ export async function syncInventoryMovement() {
       await yield_();
     }
 
-    // Refresh on-hand (small — full upsert).
+    // Refresh on-hand: full REPLACE in one transaction, not an upsert. The
+    // ICILOC query omits zero rows, so an item that sold out since the last
+    // sync simply stops appearing — an upsert would leave its old quantity
+    // behind and every ledger for it would anchor to a stale number forever.
+    // A missing row now correctly means on-hand 0.
     const onhandRes = await pool.request().query(resolveSageQuery('inventory.location_onhand'));
     const onhandRows = onhandRes.recordset || [];
-    const upsertOnhand = db.prepare(`
+    const insertOnhand = db.prepare(`
       INSERT INTO inventory_location_onhand (item_number, location, qty_on_hand, total_cost, synced_at)
       VALUES (@item_number, @location, @qty_on_hand, @total_cost, now_local())
       ON CONFLICT(item_number, location) DO UPDATE SET
         qty_on_hand = excluded.qty_on_hand, total_cost = excluded.total_cost, synced_at = excluded.synced_at
     `);
     db.transaction((rows) => {
+      db.prepare('DELETE FROM inventory_location_onhand').run();
       for (const r of rows) {
-        upsertOnhand.run({
+        insertOnhand.run({
           item_number: String(r.item_number || '').trim(),
           location: String(r.location || '').trim(),
           qty_on_hand: r.qty_on_hand != null ? Number(r.qty_on_hand) : null,
@@ -219,12 +247,8 @@ export async function syncItemMovementHistory({ itemNumber, location }) {
       .query(resolveSageQuery('inventory.movement_history_item'));
     const rows = res.recordset || [];
     if (rows.length === 0) break;
-    insertBatch(rows);
-    inserted += rows.length;
-    const last = rows[rows.length - 1];
-    ds = Number(last.dayend_seq) || ds;
-    es = Number(last.entry_seq) || 0;
-    ln = Number(last.line_no) || 0;
+    inserted += insertBatch(rows);
+    ({ ds, es, ln } = advanceCursor(rows, { ds, es, ln }));
     if (rows.length < BATCH) break;
     await yield_();
   }
@@ -239,16 +263,25 @@ export async function syncItemMovementHistory({ itemNumber, location }) {
 
 // ── Read side (local SQLite) ───────────────────────────────────────────────
 
-// Items that have movement history or on-hand, for the picker.
+// Items that have movement history or on-hand, for the picker. The UNION with
+// inventory_movement keeps sold-out items findable: on-hand is a full replace
+// of ICILOC's non-zero rows, so an item at 0 has no on-hand row but its
+// history is still worth viewing (shown as on hand 0).
 export function searchMovementItems({ q = '', limit = 30 } = {}) {
   const term = `%${String(q).trim()}%`;
   return db.prepare(`
-    SELECT o.item_number, o.location, o.qty_on_hand,
-           (SELECT ir.item_description FROM inventoryrecord ir WHERE TRIM(ir.item_number) = o.item_number LIMIT 1) AS item_description
-    FROM inventory_location_onhand o
-    WHERE (? = '%%' OR o.item_number LIKE ?
-           OR EXISTS (SELECT 1 FROM inventoryrecord ir WHERE TRIM(ir.item_number) = o.item_number AND ir.item_description LIKE ?))
-    ORDER BY o.item_number, o.location
+    WITH items AS (
+      SELECT item_number, location FROM inventory_location_onhand
+      UNION
+      SELECT DISTINCT item_number, location FROM inventory_movement
+    )
+    SELECT i.item_number, i.location, COALESCE(o.qty_on_hand, 0) AS qty_on_hand,
+           (SELECT ir.item_description FROM inventoryrecord ir WHERE TRIM(ir.item_number) = i.item_number LIMIT 1) AS item_description
+    FROM items i
+    LEFT JOIN inventory_location_onhand o ON o.item_number = i.item_number AND o.location = i.location
+    WHERE (? = '%%' OR i.item_number LIKE ?
+           OR EXISTS (SELECT 1 FROM inventoryrecord ir WHERE TRIM(ir.item_number) = i.item_number AND ir.item_description LIKE ?))
+    ORDER BY i.item_number, i.location
     LIMIT ?
   `).all(term, term, term, limit);
 }
@@ -262,6 +295,12 @@ export function getItemLedger({ itemNumber, location, from, to }) {
   if (!item || !loc) return null;
 
   const onhandRow = db.prepare('SELECT qty_on_hand FROM inventory_location_onhand WHERE item_number = ? AND location = ?').get(item, loc);
+  // Unknown item/location → null so the route can 404, instead of fabricating
+  // a plausible-looking ledger anchored to 0. A missing on-hand row alone is
+  // NOT unknown — sold-out items have no row (on-hand full replace) but real
+  // history.
+  const hasHistory = db.prepare('SELECT 1 AS x FROM inventory_movement WHERE item_number = ? AND location = ? LIMIT 1').get(item, loc);
+  if (!onhandRow && !hasHistory) return null;
   const onHand = onhandRow ? Number(onhandRow.qty_on_hand) || 0 : 0;
 
   // Closing balance as at `to` = current on-hand minus everything that happened
@@ -285,7 +324,22 @@ export function getItemLedger({ itemNumber, location, from, to }) {
     ORDER BY transaction_date ASC, dayend_seq ASC, entry_seq ASC, line_no ASC
   `).all(...params);
 
-  return { item_number: item, location: loc, ...computeLedger({ onHand, closing, movements }) };
+  // History-coverage facts so the UI can warn when the requested window
+  // reaches back past what's synced: the bulk sync only carries the recent
+  // window (meta.history_from); anything older is only present after a
+  // per-item deep sync (then item_earliest < history_from). Without the
+  // warning, a "From" before coverage silently folds the missing movements
+  // into the opening balance — a wrong number presented as a balance.
+  const metaRow = getInventoryMovementSyncMeta();
+  const earliestRow = db.prepare('SELECT MIN(transaction_date) d FROM inventory_movement WHERE item_number = ? AND location = ?').get(item, loc);
+
+  return {
+    item_number: item,
+    location: loc,
+    history_from: metaRow.history_from || null,
+    item_earliest: earliestRow?.d || null,
+    ...computeLedger({ onHand, closing, movements }),
+  };
 }
 
 // Pure ledger math (extracted so it's unit-testable without DB/Sage state).
@@ -306,8 +360,12 @@ export function computeLedger({ onHand, closing, movements }) {
     opening_balance: round(opening),
     closing_balance: round(closing),
     window_net: round(windowQty),
-    // Closing computed from the ledger must equal the anchor. Any drift is
-    // surfaced, never hidden.
+    // Internal-arithmetic check ONLY: opening is DERIVED from closing, so
+    // running == closing holds by construction and this can only catch float
+    // drift in the summation — it can NOT detect missing movements or a stale
+    // on-hand anchor (those fold silently into the derived opening). The UI
+    // labels this "anchored", not "verified", for that reason; coverage gaps
+    // are surfaced separately via history_from/item_earliest.
     reconciles: Math.abs(running - closing) < 0.005,
     reconcile_variance: round(running - closing),
     movements: rows,
