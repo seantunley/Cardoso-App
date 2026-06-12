@@ -14,6 +14,12 @@ import {
   getItemStats,
 } from '../services/inventoryMovement.js';
 import {
+  syncInventoryMovement,
+  getInventoryMovementSyncMeta,
+  searchMovementItems,
+  getItemLedger,
+} from '../services/inventoryMovementHistory.js';
+import {
   computeAllForecasts,
   getForecastList,
   getForecastConfig,
@@ -310,6 +316,65 @@ export function createInventoryMovementRouter({ requireAuth, requireAdmin, requi
     } catch (err) {
       const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
       logError('inventoryMovement.sync', err, { sage_down: isSageDown });
+      res.status(isSageDown ? 503 : 500).json({ error: err.message });
+    }
+  });
+
+  // ── Movement history (stock card) — per-branch ──────────────────────────
+  // Item picker: items with on-hand or movement history at this site.
+  router.get('/api/inventory-movement/movement-items', ...guard, (req, res) => {
+    try {
+      if (isHub()) return res.json({ hub: true, rows: [] });
+      const rows = searchMovementItems({ q: String(req.query.q || ''), limit: Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 30)) });
+      res.json({ rows });
+    } catch (err) {
+      logError('inventoryMovement.movement_items', err, { q: req.query?.q });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // The stock card for one item/location: opening → movements (running balance)
+  // → closing, anchored to and reconciled against current on-hand.
+  router.get('/api/inventory-movement/item-ledger', ...guard, (req, res) => {
+    try {
+      if (isHub()) return res.status(400).json({ error: 'Movement history is per-branch; open it on a site.' });
+      const { item, location, from, to } = req.query;
+      if (!item || !location) return res.status(400).json({ error: 'item and location are required' });
+      const ledger = getItemLedger({ itemNumber: item, location, from: from || undefined, to: to || undefined });
+      if (!ledger) return res.status(404).json({ error: 'No on-hand record for that item/location' });
+      res.json(ledger);
+    } catch (err) {
+      logError('inventoryMovement.item_ledger', err, { item: req.query?.item, location: req.query?.location });
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.get('/api/inventory-movement/movement-sync-meta', ...guard, (_req, res) => {
+    try {
+      if (isHub()) return res.json({ hub: true, message: 'Movement history is per-branch.' });
+      res.json(getInventoryMovementSyncMeta());
+    } catch (err) {
+      logError('inventoryMovement.movement_sync_meta', err);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  router.post('/api/inventory-movement/sync-movement', requireAuth, requirePermission('can_access_inventory_movement'), async (req, res) => {
+    if (isHub()) return res.status(400).json({ error: 'Hub does not sync from Sage directly.' });
+    try {
+      const result = await syncInventoryMovement();
+      logAudit({
+        req,
+        action: 'inventoryMovement.sync_movement',
+        resourceType: 'inventory_movement',
+        resourceId: 'sync',
+        resourceName: 'Inventory movement history sync',
+        details: `Pulled ${result.inserted} movements (${result.totalMovements} total), ${result.onhand} on-hand rows from Sage`,
+      });
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      const isSageDown = /no sage|not configured|ECONNREFUSED|ETIMEOUT|login failed/i.test(err.message);
+      logError('inventoryMovement.sync_movement', err, { sage_down: isSageDown });
       res.status(isSageDown ? 503 : 500).json({ error: err.message });
     }
   });

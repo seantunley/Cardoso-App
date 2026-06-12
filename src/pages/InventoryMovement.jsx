@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import ItemDetailModal from "@/components/inventory/ItemDetailModal";
 import ForecastSettingsModal from "@/components/inventory/ForecastSettingsModal";
 import ReorderPlanView from "@/components/inventory/ReorderPlanView";
+import MovementHistoryView from "@/components/inventory/MovementHistoryView";
 import EmptyState from "@/components/EmptyState";
 import { Settings } from "lucide-react";
 import { useUrlTab } from "@/lib/useUrlTab";
@@ -411,6 +412,8 @@ export default function InventoryMovement() {
     { id: "topMovers", label: "Top Movers", icon: TrendingUp },
     { id: "deadStock", label: "Dead Stock", icon: AlertTriangle },
     ...(!hubMode ? [{ id: "forecast", label: "Forecast", icon: ShoppingCart }] : []),
+    // Movement history (stock card) is per-branch — site only for now.
+    ...(!hubMode ? [{ id: "movementHistory", label: "Movement History", icon: ArrowUpDown }] : []),
   ];
 
   return (
@@ -475,6 +478,7 @@ export default function InventoryMovement() {
                 topMovers: "Rank items by shipped qty over the selected date range. Sourced from OESHDT shipment history via the sales cache.",
                 deadStock: "Show on-hand items with no sales activity within the cutoff window. Capital tied up = qty_on_hand × ICITEM.LAST_COST.",
                 forecast: "Reorder-point and demand projections per item, computed from the rolling sales cache. Site-only — hubs receive precomputed rows.",
+                movementHistory: "Per-item stock card: every movement (sales, receipts, credits, adjustments, write-offs) with a running balance that reconciles to current on-hand. Sourced from Sage I/C transaction history (ICHIST).",
               };
               return (
                 <button
@@ -1037,6 +1041,8 @@ export default function InventoryMovement() {
           )}
         </>
       )}
+
+      {tab === "movementHistory" && !hubMode && <MovementHistoryView />}
 
       {detailItem && <ItemDetailModal item={detailItem} onClose={() => setDetailItem(null)} />}
       <ForecastSettingsModal
