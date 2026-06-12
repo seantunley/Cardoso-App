@@ -261,16 +261,21 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   // from recon A would otherwise keep firing while the user is on recon B.
   useEffect(() => clearRetryPoll, [reconciliationId, clearRetryPoll]);
 
-  // Inject the BAT tab print stylesheet once (same pattern as the other
-  // print-enabled pages), so the Print button produces the letterhead sheet.
+  // Inject the BAT tab print stylesheet while mounted, and REMOVE it on
+  // unmount: its @page landscape + body{visibility:hidden} rules are page-wide
+  // and would otherwise force landscape on (or blank out) prints made from
+  // other pages after visiting this tab (same lifecycle as usePrintStyles in
+  // the reports lib).
   useEffect(() => {
     const id = 'bat-tab-print-style';
-    if (!document.getElementById(id)) {
-      const el = document.createElement('style');
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('style');
       el.id = id;
       el.textContent = BAT_TAB_PRINT_STYLE;
       document.head.appendChild(el);
     }
+    return () => { el.remove(); };
   }, []);
   const { widths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 

@@ -1,8 +1,11 @@
-/* ── BAT reconciliation tab print styles (injected once) ──
+/* ── BAT reconciliation tab print styles (injected while mounted) ──
  * Same letterhead/branding as the Customer Balances print, retargeted to
  * #bat-tab-printable and set LANDSCAPE because the reconciliation lists carry
  * many columns. Prints the active tab (Paid / Non-Compliant / Exceptions) with
- * a header that states the depot, year, week number and tab name. */
+ * a header that states the depot, year, week number and tab name.
+ * The sheet is REMOVED when InvoiceMatching unmounts: its @page landscape and
+ * body{visibility:hidden} are page-wide, and left in <head> they would force
+ * landscape on (or blank out) prints from other pages. */
 export const BAT_TAB_PRINT_STYLE = `
 @page {
   size: A4 landscape;
@@ -77,17 +80,20 @@ export const BAT_TAB_PRINT_STYLE = `
   }
   .bat-print-summary strong { font-size: 13px; }
 
-  table { width: 100%; border-collapse: collapse; font-size: 9px; page-break-inside: auto; }
-  thead tr { background: #f0f0f0; }
-  th { text-align: left; padding: 2.5px 4px; border-bottom: 1.5px solid #888; font-weight: 600; font-size: 8px; text-transform: uppercase; letter-spacing: 0.03em; }
-  td { padding: 2px 4px; border-bottom: 1px solid #ddd; vertical-align: top; }
-  tfoot td { border-top: 1.5px solid #888; border-bottom: none; font-weight: 700; padding-top: 3px; }
-  tr:last-child td { border-bottom: none; }
-  .td-right { text-align: right; }
-  .td-center { text-align: center; }
-  .td-mono  { font-family: 'Courier New', monospace; }
-  .td-muted { color: #666; }
-  tr { page-break-inside: avoid; }
+  /* All table selectors are scoped to #bat-tab-printable: other print sheets
+     (Customer Balances, Creditors, reports) can share <head> with this one, and
+     bare table/th/td rules would restyle their prints. */
+  #bat-tab-printable table { width: 100%; border-collapse: collapse; font-size: 9px; page-break-inside: auto; }
+  #bat-tab-printable thead tr { background: #f0f0f0; }
+  #bat-tab-printable th { text-align: left; padding: 2.5px 4px; border-bottom: 1.5px solid #888; font-weight: 600; font-size: 8px; text-transform: uppercase; letter-spacing: 0.03em; }
+  #bat-tab-printable td { padding: 2px 4px; border-bottom: 1px solid #ddd; vertical-align: top; }
+  #bat-tab-printable tfoot td { border-top: 1.5px solid #888; border-bottom: none; font-weight: 700; padding-top: 3px; }
+  #bat-tab-printable tr:last-child td { border-bottom: none; }
+  #bat-tab-printable .td-right { text-align: right; }
+  #bat-tab-printable .td-center { text-align: center; }
+  #bat-tab-printable .td-mono  { font-family: 'Courier New', monospace; }
+  #bat-tab-printable .td-muted { color: #666; }
+  #bat-tab-printable tr { page-break-inside: avoid; }
   .bat-no-print { display: none !important; }
 }
 `;

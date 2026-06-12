@@ -37,8 +37,9 @@ export default function BatTabPrintable({ rows = [], tabLabel, tabId, weekNumber
   const n = rows.length;
   const total = rows.reduce((s, e) => s + (Number(e.order_amount) || 0), 0);
   const weekStr = weekNumber != null ? `Week ${String(weekNumber).padStart(2, "0")}` : "Week —";
-  // Column count for the footer colspan (offset by the exception column).
-  const preAmountCols = isExceptions ? 9 : 8;
+  // Columns before Amount: #, Order, Customer No., Customer, Week, Delivery,
+  // POD Uploaded, OCR, Invoice = 9 (+ Exception Reason on the exceptions tab).
+  const preAmountCols = isExceptions ? 10 : 9;
 
   return (
     <div id="bat-tab-printable" style={{ visibility: "hidden", position: "absolute" }}>
@@ -91,7 +92,7 @@ export default function BatTabPrintable({ rows = [], tabLabel, tabId, weekNumber
             </tr>
           ))}
           {n === 0 && (
-            <tr><td colSpan={isExceptions ? 10 : 9} className="td-muted td-center">No invoices in this list.</td></tr>
+            <tr><td colSpan={preAmountCols + 1} className="td-muted td-center">No invoices in this list.</td></tr>
           )}
         </tbody>
         {n > 0 && (
