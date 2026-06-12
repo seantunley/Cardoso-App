@@ -1,4 +1,5 @@
 import { Fragment } from 'react';
+import { Printer } from 'lucide-react';
 import { fmtR } from './lib';
 
 // Shared table for the Sales Figures reports (monthly + daily). Renders posted
@@ -21,7 +22,11 @@ const RandCell = ({ v, strong, borderL }) => (
   </td>
 );
 
-export default function SalesFiguresTable({ rows, totals, labelHeader = 'Month', labelKey = 'month', currentLabel }) {
+// onPrintRow (optional): when provided, each row gets a small Print button next
+// to its label that calls onPrintRow(label). Used by the Daily report to print
+// that day's full document list; the Monthly report omits it, so its rows are
+// unchanged. The button is .report-print-hide so it never appears in any print.
+export default function SalesFiguresTable({ rows, totals, labelHeader = 'Month', labelKey = 'month', currentLabel, onPrintRow }) {
   if (!rows?.length) {
     return <div className="rounded-xl border border-border bg-card px-6 py-8 text-center text-sm text-muted-foreground">No posted documents in this period.</div>;
   }
@@ -53,8 +58,20 @@ export default function SalesFiguresTable({ rows, totals, labelHeader = 'Month',
             return (
               <tr key={label} className={`border-b border-border/50 ${isCurrent ? 'bg-[hsla(33,95%,55%,0.10)]' : 'hover:bg-muted/30'}`}>
                 <td className="px-2 py-1 text-left font-mono text-foreground">
-                  {label}
-                  {isCurrent && <span className="ml-1.5 font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--phosphor)' }}>current</span>}
+                  <span className="inline-flex items-center gap-1.5">
+                    {onPrintRow && (
+                      <button
+                        type="button"
+                        onClick={() => onPrintRow(label)}
+                        title={`Print all invoices, credit notes & debit notes for ${label}`}
+                        className="report-print-hide inline-flex h-5 w-5 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <Printer className="h-3 w-3" />
+                      </button>
+                    )}
+                    {label}
+                    {isCurrent && <span className="font-mono text-[9px] uppercase tracking-wider" style={{ color: 'var(--phosphor)' }}>current</span>}
+                  </span>
                 </td>
                 {TYPES.map((t) => (
                   <Fragment key={`${label}-${t.key}`}>

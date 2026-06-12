@@ -666,6 +666,81 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // Per-document drill-down behind one day of the Daily Sales Figures report:
+  // every posted Invoice / Credit Note / Debit Note dated that day, with the
+  // customer name and the VAT split. Same ARIBH/ARIBC source + filters as the
+  // daily summary (so the per-document lines reconcile to that day's row), plus
+  // a LEFT JOIN to ARCUS for the customer name. Columns verified on live Sage:
+  // IDINVC = document number, IDCUST = customer, ARCUS.NAMECUST = name,
+  // TEXTTRX 1/2/3 = Invoice / Debit Note / Credit Note.
+  const AR_DOC_TYPE = {
+    1: { key: 'invoice', label: 'Invoice' },
+    2: { key: 'debit_note', label: 'Debit Note' },
+    3: { key: 'credit_note', label: 'Credit Note' },
+  };
+
+  // GET /api/reports/daily-sales-documents?date=YYYY-MM-DD — the document list
+  // for the per-day Print button. Site-only (the hub keeps monthly totals, no
+  // per-document detail), gated the same as the daily summary it drills into.
+  router.get('/api/reports/daily-sales-documents', ...monthlyReportsGuard, async (req, res) => {
+    const date = String(req.query.date || '').trim();
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+    if (!m) return res.status(400).json({ error: 'date must be YYYY-MM-DD' });
+    const dayInt = Number(`${m[1]}${m[2]}${m[3]}`);
+
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        return res.json({ hub_mode: true, unavailable: true, date, documents: [], totals: null, net_incl: 0 });
+      }
+
+      const pool = await getSagePool();
+      const rs = await pool.request().input('day', dayInt).query(`
+        SELECT h.TEXTTRX AS trx,
+               LTRIM(RTRIM(h.IDINVC)) AS doc_number,
+               LTRIM(RTRIM(h.IDCUST)) AS customer_code,
+               LTRIM(RTRIM(cu.NAMECUST)) AS customer_name,
+               LTRIM(RTRIM(h.ORDRNBR)) AS order_number,
+               h.BASETAX1 AS excl, h.AMTTAX1 AS vat, h.AMTNETTOT AS incl
+        FROM ARIBC c
+        INNER JOIN ARIBH h ON c.CNTBTCH = h.CNTBTCH
+        LEFT JOIN ARCUS cu ON cu.IDCUST = h.IDCUST
+        WHERE c.BTCHDESC NOT LIKE 'ERROR%' AND h.AMTTAX1 > 0 AND h.DATEINVC = @day
+        ORDER BY h.TEXTTRX, doc_number`);
+
+      const documents = rs.recordset.map((r) => {
+        const t = AR_DOC_TYPE[r.trx] || { key: 'other', label: 'Other' };
+        return {
+          type_key: t.key,
+          type: t.label,
+          doc_number: r.doc_number || '',
+          customer_code: r.customer_code || '',
+          customer_name: r.customer_name || '',
+          order_number: r.order_number || '',
+          excl: Number(r.excl) || 0,
+          vat: Number(r.vat) || 0,
+          incl: Number(r.incl) || 0,
+        };
+      });
+
+      // Per-type subtotals + Net (Invoices + Debit notes − Credit notes), so the
+      // print can show grouped subtotals that tie back to the day's summary row.
+      const totals = { invoice: arMkAmt(0, 0, 0), debit_note: arMkAmt(0, 0, 0), credit_note: arMkAmt(0, 0, 0) };
+      for (const d of documents) {
+        const t = totals[d.type_key];
+        if (!t) continue;
+        t.excl += d.excl; t.vat += d.vat; t.incl += d.incl;
+      }
+      const net_incl = totals.invoice.incl + totals.debit_note.incl - totals.credit_note.incl;
+
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+      res.json({ date, site_name: depotName, documents, totals, net_incl, count: documents.length });
+    } catch (err) {
+      console.error('[daily-sales-documents] failed', err.message);
+      res.status(503).json({ error: 'Could not load the documents for this day. Check the Sage connection and try again.' });
+    }
+  });
+
   // GET /api/reports/debtor-balance-summary — headline debtor exposure for the
   // dashboard tile. Positive open balances only (excludes net-credit customers),
   // so it matches the Customer Balances page total to the cent, plus the AR
