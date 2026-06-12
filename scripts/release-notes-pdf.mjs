@@ -13,6 +13,167 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-11': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '11 June 2026',
+    slug: '11-June-2026',
+    intro:
+      "This update (v2026.5.9.3) extends the Creditors module with a true-position " +
+      "view that accounts for unposted AP invoices, Sage payment batches and cashbook " +
+      "entries, so the vendor outstanding is always accurate — not just what has " +
+      "posted. Creditor Balances is now available at head office, consolidated across " +
+      "branches with a branch filter. On the customer side, a configurable minimum-" +
+      "balance filter and an inline drill-through on the Balances page make it faster " +
+      "to work with large debtor lists, and the credit-assessment verdict now appears " +
+      "as a cursor-following card that names the specific invoice behind a hold. " +
+      "Reliability is improved too: nightly syncs retry automatically, catch up after " +
+      "missed nights, and alert when data goes stale, and the application now detects " +
+      "and recovers from main-thread freezes without needing a manual restart. Every " +
+      "figure continues to be drawn from, and reconcile to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Creditor Balances — true position including unposted amounts',
+            body:
+              "The Creditors page now shows your real position with each supplier: " +
+              "outstanding amounts include unposted AP invoices, Sage payment batches " +
+              "waiting to post, and cashbook entries in progress — not just amounts " +
+              "already in the ledger.",
+            details: [
+              "Unposted AP invoices (at every stage before posting) are included in the vendor outstanding.",
+              "Payment batches captured in the cashbook but not yet posted are netted off the balance.",
+              "A 'how far behind is payment capture' indicator under the aging tiles shows if posted and unposted amounts are diverging.",
+              "A cursor-following popup on the Balances table breaks down the posted versus unposted split for any vendor.",
+            ],
+          },
+          {
+            title: 'Vendor detail opens as a popup',
+            body:
+              "Drilling into a vendor from Creditor Search or from the Creditor " +
+              "Balances table now opens in a popup on the same page, keeping your " +
+              "place in the list rather than navigating away.",
+          },
+          {
+            title: 'Print Creditor Balances',
+            body:
+              "A print button has been added to the Creditors page, matching the " +
+              "Customer Balances print experience. Vendor search has been removed " +
+              "from the header to give more space, and the sync controls have moved " +
+              "below the tiles.",
+          },
+          {
+            title: 'Creditor Balances at head office',
+            body:
+              "The hub now shows Creditor Balances consolidated across all branches, " +
+              "with a branch filter to focus on a single site. Balances are backed " +
+              "by the same ETL pipeline that powers the rest of the hub.",
+          },
+          {
+            title: 'Branch label on Top Customers at head office',
+            body:
+              "When viewing the hub at the all-branches level, the Top Customers " +
+              "card now shows which branch each customer belongs to, making it " +
+              "immediately clear where your biggest accounts trade.",
+          },
+          {
+            title: 'Configurable minimum-balance filter on Customer Balances',
+            body:
+              "The minimum-balance threshold on Customer Balances is now a filter " +
+              "you can set yourself — previously it was fixed at R3. Raise or lower " +
+              "the floor to focus the list on the accounts that matter to you.",
+          },
+          {
+            title: 'Drill into customers from the Balances page',
+            body:
+              "Clicking a customer row on the Balances page now opens the full " +
+              "customer lookup popup in place, without navigating away from the list. " +
+              "Review invoices, receipts and account details, then close to return to " +
+              "exactly where you were.",
+          },
+          {
+            title: 'Credit verdict follows your cursor',
+            body:
+              "The credit assessment result now appears as a prominent card that " +
+              "follows your cursor as you move across the Balances table. The card " +
+              "names the specific invoice behind any credit hold, so you can see " +
+              "exactly what is causing a block without opening the customer record.",
+            details: [
+              "The verdict card replaces the previous row tooltip with a larger, more readable layout.",
+              "The offending invoice reference and amount are shown at the top of the card.",
+            ],
+          },
+          {
+            title: 'Nightly syncs retry, catch up, and alert when stale',
+            body:
+              "Nightly data syncs are now more resilient: they retry automatically " +
+              "if a sync fails, catch up on any nights that were missed, and raise " +
+              "an alert when data goes stale — so sync problems are surfaced " +
+              "promptly rather than discovered during a manual check.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Creditor Balances shows whole-company outstanding',
+            body:
+              "The outstanding headline on Creditor Balances now always reflects " +
+              "the full company position, not just the subset visible in the " +
+              "current filter. Filter the list to a branch or account type and the " +
+              "header total stays honest.",
+          },
+          {
+            title: 'Creditor Search styled to match Customer Search',
+            body:
+              "Creditor Search now uses the same layout, spacing and controls as " +
+              "Customer Search, giving both modules a consistent look and making " +
+              "the app easier to navigate between the two.",
+          },
+          {
+            title: 'Head-office ETL no longer freezes the app',
+            body:
+              "Open-item refreshes at head office now yield control back to the " +
+              "rest of the application during processing, so the app stays " +
+              "responsive while a large ETL run is in progress.",
+          },
+          {
+            title: 'Application recovers from UI freezes automatically',
+            body:
+              "The app now detects when the main thread has stalled, names the " +
+              "hang for diagnosis, and recovers without requiring a manual restart — " +
+              "reducing the impact of any transient freeze on your workflow.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Credit assessment applies payments accurately',
+            body:
+              "The credit engine now applies receipts in order from largest to " +
+              "smallest with a R10 materiality floor, correctly handles prepaid " +
+              "holds, per-customer payment terms and reversals, and produces a " +
+              "verdict that matches the ledger position.",
+          },
+          {
+            title: 'Creditor Balances money tiles fit large amounts',
+            body:
+              "The stat tiles on the Creditor Balances page now render at the " +
+              "correct size for vendors with large rand balances, so long amounts " +
+              "are no longer clipped or overflowed.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-10': {
     product: 'Cardoso App',
     title: 'Product Update',
