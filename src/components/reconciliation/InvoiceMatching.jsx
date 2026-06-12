@@ -1,9 +1,11 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Search, ExternalLink, Save, RotateCcw, RefreshCw } from 'lucide-react';
+import { Search, ExternalLink, Save, RotateCcw, RefreshCw, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { humanizeApiError } from '@/lib/humanizeApiError';
 import ReconResetModal from './ReconResetModal';
+import BatTabPrintable from './BatTabPrintable';
+import { BAT_TAB_PRINT_STYLE } from './batTabPrintStyle';
 
 const COLUMN_TIPS = {
   idx: 'Row number within this filter/tab',
@@ -235,7 +237,7 @@ function ManualInvoiceInput({ extraction, onSaved }) {
   );
 }
 
-export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate, reconLabel, missingPods = [], overviewOrdersStored = 0 }) {
+export default function InvoiceMatching({ extractions, stats, reconciliationId, onReconciliationUpdate, reconLabel, missingPods = [], overviewOrdersStored = 0, weekNumber, year }) {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [retrying, setRetrying] = useState(false);
@@ -258,6 +260,18 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   // Kill the poll on unmount AND whenever the recon changes — a stale poll
   // from recon A would otherwise keep firing while the user is on recon B.
   useEffect(() => clearRetryPoll, [reconciliationId, clearRetryPoll]);
+
+  // Inject the BAT tab print stylesheet once (same pattern as the other
+  // print-enabled pages), so the Print button produces the letterhead sheet.
+  useEffect(() => {
+    const id = 'bat-tab-print-style';
+    if (!document.getElementById(id)) {
+      const el = document.createElement('style');
+      el.id = id;
+      el.textContent = BAT_TAB_PRINT_STYLE;
+      document.head.appendChild(el);
+    }
+  }, []);
   const { widths, startResize, resetColumn } = useColumnWidths(tableContainerRef);
 
   // No more auto-fit useEffect — we now use percentage widths on
@@ -602,7 +616,37 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
           <option value="not_found">OCR failed</option>
           <option value="pending">Pending</option>
         </select>
+        {/* Print the active tab's list (Paid / Non-Compliant / Exceptions) with a
+            letterhead carrying the depot, year, week number and tab name. Prints
+            the full tab list, not the on-screen search filter. */}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              type="button"
+              onClick={() => window.print()}
+              disabled={tabData.length === 0}
+              className="inline-flex items-center gap-1.5 border px-3 py-2 font-mono text-[11px] uppercase tracking-wider transition-colors disabled:opacity-40 disabled:cursor-not-allowed bat-no-print"
+              style={{ borderColor: 'var(--phosphor)', color: 'var(--phosphor)', background: 'hsla(33, 95%, 55%, 0.08)', borderRadius: '12px' }}
+              onMouseEnter={(e) => { if (e.currentTarget.disabled) return; e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.18)'; e.currentTarget.style.boxShadow = '0 0 12px hsla(33,95%,55%,0.35)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'hsla(33, 95%, 55%, 0.08)'; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              <Printer className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Print
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Print this tab's list (depot · {reconLabel} · {(tabs.find((t) => t.id === activeTab) || {}).label})</TooltipContent>
+        </Tooltip>
       </div>
+
+      {/* Print-only block (hidden on screen) — the active tab's full list with
+          a depot/year/week/tab letterhead. */}
+      <BatTabPrintable
+        rows={tabData}
+        tabLabel={(tabs.find((t) => t.id === activeTab) || {}).label || 'Invoices'}
+        tabId={activeTab}
+        weekNumber={weekNumber}
+        year={year}
+      />
 
       {/* Table */}
       <div
