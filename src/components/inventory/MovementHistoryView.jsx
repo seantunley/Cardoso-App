@@ -1,8 +1,9 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight, Download } from "lucide-react";
 import ItemCombobox from "./ItemCombobox";
+import { downloadCsv } from "../reports/lib";
 
 // Inventory movement history ("stock card"): pick an item → see every movement
 // (sales, receipts, credits/returns, adjustments, write-offs, transfers) with a
@@ -63,10 +64,14 @@ export default function MovementHistoryView() {
   const [from, setFrom] = useState(() => daysAgoIso(30));
   const [to, setTo] = useState(() => localIso(new Date()));
 
+  // Guard an inverted range (From after To): the query would otherwise run and
+  // return a confusing empty/odd card. We block the fetch and prompt instead.
+  const invalidRange = !!(from && to && from > to);
+
   const ledgerQuery = useQuery({
     queryKey: ["inv-item-ledger", picked?.item_number, picked?.location, from, to],
     queryFn: () => apiFetch(`/api/inventory-movement/item-ledger?item=${encodeURIComponent(picked.item_number)}&location=${encodeURIComponent(picked.location)}&from=${from}&to=${to}`),
-    enabled: !!picked,
+    enabled: !!picked && !invalidRange,
   });
 
   // Poll the sync meta while a background sync is running so the bar updates live.
@@ -121,6 +126,32 @@ export default function MovementHistoryView() {
     for (const m of rows) { const q = Number(m.stock_qty) || 0; if (q >= 0) inQty += q; else outQty += q; }
     return { inQty, outQty };
   }, [ledger]);
+
+  // Export the stock card exactly as shown — opening line, every movement with
+  // its running balance, then closing — so it ties out in Excel the same way it
+  // does on screen. Matches the CSV/export affordance on the other reports.
+  const exportCsv = () => {
+    if (!ledger || !picked) return;
+    const qty = (v) => (v == null ? "" : (Math.round(Number(v) * 1000) / 1000).toFixed(3).replace(/\.?0+$/, ""));
+    const money = (v) => (v == null ? "" : (Number(v) || 0).toFixed(2));
+    const header = ["Date", "Movement", "App/Type", "Document", "In", "Out", "Balance", "Cost"];
+    const rows = [["", "Opening balance", "", "", "", "", qty(ledger.opening_balance), ""]];
+    for (const m of ledger.movements) {
+      const q = Number(m.stock_qty) || 0;
+      rows.push([
+        m.transaction_date || "",
+        m.movement_type || "",
+        `${m.app || ""}/${m.transtype ?? ""}`,
+        m.doc_number || "",
+        q > 0 ? qty(q) : "",
+        q < 0 ? qty(-q) : "",
+        qty(m.balance),
+        money(m.cost),
+      ]);
+    }
+    rows.push(["", "Closing balance", "", "", "", "", qty(ledger.closing_balance), ""]);
+    downloadCsv(`stock-card-${picked.item_number}-${picked.location}-${from}_${to}.csv`, [header, ...rows]);
+  };
 
   return (
     <div className="space-y-4">
@@ -188,6 +219,16 @@ export default function MovementHistoryView() {
               {itemSyncMutation.isPending ? "Loading…" : "Load full history"}
             </button>
           )}
+          {picked && !invalidRange && ledger && (
+            <button
+              onClick={exportCsv}
+              className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-medium hover:bg-muted"
+              title="Download this stock card (opening, movements, closing) as a CSV"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+          )}
         </div>
       </div>
 
@@ -199,12 +240,19 @@ export default function MovementHistoryView() {
         </div>
       )}
 
-      {picked && ledgerQuery.isLoading && <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />}
-      {picked && ledgerQuery.error && (
+      {picked && invalidRange && (
+        <div className="flex items-center gap-2 rounded-xl border border-[hsl(33_95%_55%_/_0.4)] bg-[hsl(33_95%_55%_/_0.08)] px-4 py-3 text-sm text-foreground">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-[hsl(33_95%_55%)]" />
+          The “From” date (<span className="font-mono">{from}</span>) is after “To” (<span className="font-mono">{to}</span>). Adjust the range to see the stock card.
+        </div>
+      )}
+
+      {picked && !invalidRange && ledgerQuery.isLoading && <div className="h-64 animate-pulse rounded-xl border border-border bg-card" />}
+      {picked && !invalidRange && ledgerQuery.error && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">{ledgerQuery.error.message}</div>
       )}
 
-      {picked && ledger && (
+      {picked && !invalidRange && ledger && (
         <>
           {/* Coverage warning: the bulk sync only holds the recent window, so a
               "From" before history_from means movements exist in Sage that
