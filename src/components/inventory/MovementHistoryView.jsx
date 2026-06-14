@@ -1,8 +1,10 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight, Download } from "lucide-react";
+import { Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight, Download, Printer } from "lucide-react";
 import ItemCombobox from "./ItemCombobox";
+import StockCardPrintable from "./StockCardPrintable";
+import { STOCK_CARD_PRINT_STYLE } from "./stockCardPrintStyle";
 import { downloadCsv } from "../reports/lib";
 
 // Inventory movement history ("stock card"): pick an item → see every movement
@@ -84,6 +86,20 @@ export default function MovementHistoryView() {
   const meta = metaQuery.data;
   const running = !!meta?.running;
 
+  // Inject the stock-card print stylesheet while this tab is mounted; remove it
+  // on unmount so its page-wide @media-print rules never leak to other routes.
+  useEffect(() => {
+    const id = "stock-card-print-style";
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement("style");
+      el.id = id;
+      el.textContent = STOCK_CARD_PRINT_STYLE;
+      document.head.appendChild(el);
+    }
+    return () => { el.remove(); };
+  }, []);
+
   // When a background sync finishes, refresh the ledger + picker so new rows show.
   const wasRunning = useRef(false);
   useEffect(() => {
@@ -153,6 +169,15 @@ export default function MovementHistoryView() {
     downloadCsv(`stock-card-${picked.item_number}-${picked.location}-${from}_${to}.csv`, [header, ...rows]);
   };
 
+  // Print the stock card on its own letterhead sheet. The class gates the print
+  // stylesheet so only this button produces the sheet; afterprint removes it.
+  const printCard = () => {
+    const onAfter = () => { document.body.classList.remove("print-stock-card"); window.removeEventListener("afterprint", onAfter); };
+    window.addEventListener("afterprint", onAfter);
+    document.body.classList.add("print-stock-card");
+    setTimeout(() => window.print(), 50); // let the printable paint first
+  };
+
   return (
     <div className="space-y-4">
       {/* Sync status */}
@@ -220,14 +245,24 @@ export default function MovementHistoryView() {
             </button>
           )}
           {picked && !invalidRange && ledger && (
-            <button
-              onClick={exportCsv}
-              className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-medium hover:bg-muted"
-              title="Download this stock card (opening, movements, closing) as a CSV"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Export CSV
-            </button>
+            <>
+              <button
+                onClick={exportCsv}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-medium hover:bg-muted"
+                title="Download this stock card (opening, movements, closing) as a CSV"
+              >
+                <Download className="h-3.5 w-3.5" />
+                Export CSV
+              </button>
+              <button
+                onClick={printCard}
+                className="inline-flex h-10 items-center gap-2 rounded-xl border border-border bg-card px-3 text-xs font-medium hover:bg-muted"
+                title="Print this stock card on a letterhead sheet"
+              >
+                <Printer className="h-3.5 w-3.5" />
+                Print
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -350,6 +385,12 @@ export default function MovementHistoryView() {
             The running balance is anchored to current on-hand: the opening is derived from on-hand minus the movements shown, so the card always ties to stock by construction — Sage purges old transaction history, so a balance summed from zero would not. Anything not yet synced is part of the opening rollup. The bulk sync only carries the last 30 days; use “Load full history” to pull everything older for this item.
           </p>
         </>
+      )}
+
+      {/* Print-only sheet (hidden on screen) — revealed under body.print-stock-card
+          while the Print button runs window.print(). */}
+      {picked && !invalidRange && ledger && (
+        <StockCardPrintable item={picked} from={from} to={to} ledger={ledger} totals={totals} />
       )}
     </div>
   );
