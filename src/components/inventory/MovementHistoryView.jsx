@@ -97,7 +97,10 @@ export default function MovementHistoryView() {
       el.textContent = STOCK_CARD_PRINT_STYLE;
       document.head.appendChild(el);
     }
-    return () => { el.remove(); };
+    // Also drop the print body-class on unmount — afterprint normally removes
+    // it, but if a browser ever skips that event the class must not leak and
+    // turn a later plain Ctrl+P into the stock-card sheet.
+    return () => { el.remove(); document.body.classList.remove("print-stock-card"); };
   }, []);
 
   // When a background sync finishes, refresh the ledger + picker so new rows show.
@@ -152,7 +155,7 @@ export default function MovementHistoryView() {
     const money = (v) => (v == null ? "" : (Number(v) || 0).toFixed(2));
     const header = ["Date", "Movement", "App/Type", "Document", "In", "Out", "Balance", "Cost"];
     const rows = [["", "Opening balance", "", "", "", "", qty(ledger.opening_balance), ""]];
-    for (const m of ledger.movements) {
+    for (const m of (ledger.movements || [])) {
       const q = Number(m.stock_qty) || 0;
       rows.push([
         m.transaction_date || "",

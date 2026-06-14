@@ -71,7 +71,14 @@ export default function ItemCombobox({ id, value, onChange, fetchItems }) {
           <CommandList>
             {debounced.length < 1 ? (
               <div className="px-3 py-6 text-center text-sm text-muted-foreground">Type an item number or description to search.</div>
-            ) : q.isFetching && rows.length === 0 ? (
+            ) : q.isError ? (
+              // Surface the failure — don't fall through to "No items match",
+              // which would falsely claim the search succeeded with no results.
+              <div className="px-3 py-6 text-center text-sm text-[hsl(0_72%_55%)]">Couldn’t search items: {q.error.message}</div>
+            ) : (q.isFetching && rows.length === 0) || q.isPlaceholderData ? (
+              // isPlaceholderData → the rows on hand are the PREVIOUS term's
+              // results held over while the new query loads; show the spinner
+              // rather than flashing stale rows under the new search.
               <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" /> Searching…
               </div>
