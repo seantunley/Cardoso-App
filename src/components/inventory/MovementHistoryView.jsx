@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Search, Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import { Package, CheckCircle2, AlertTriangle, RefreshCw, History, ArrowDownLeft, ArrowUpRight } from "lucide-react";
+import ItemCombobox from "./ItemCombobox";
 
 // Inventory movement history ("stock card"): pick an item → see every movement
 // (sales, receipts, credits/returns, adjustments, write-offs, transfers) with a
@@ -58,17 +59,9 @@ const DIR_STYLE = {
 
 export default function MovementHistoryView() {
   const qc = useQueryClient();
-  const [search, setSearch] = useState("");
   const [picked, setPicked] = useState(/** @type {{item_number:string, location:string, item_description?:string}|null} */ (null));
   const [from, setFrom] = useState(() => daysAgoIso(30));
   const [to, setTo] = useState(() => localIso(new Date()));
-
-  const itemsQuery = useQuery({
-    queryKey: ["inv-movement-items", search],
-    queryFn: () => apiFetch(`/api/inventory-movement/movement-items?q=${encodeURIComponent(search)}`),
-    enabled: search.trim().length >= 1 && !picked,
-    staleTime: 30_000,
-  });
 
   const ledgerQuery = useQuery({
     queryKey: ["inv-item-ledger", picked?.item_number, picked?.location, from, to],
@@ -167,41 +160,22 @@ export default function MovementHistoryView() {
       {/* Item picker */}
       <div className="rounded-xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-end gap-3">
-          <div className="relative flex-1 min-w-[260px]">
-            <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">Item</label>
-            <Search className="absolute left-3 top-[34px] h-4 w-4 text-muted-foreground pointer-events-none" />
-            <input
-              value={picked ? `${picked.item_number} — ${picked.item_description || ""}` : search}
-              onChange={(e) => { setPicked(null); setSearch(e.target.value); }}
-              placeholder="Search item number or description…"
-              className="h-10 w-full rounded-xl border border-border bg-background pl-9 pr-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+          <div className="flex-1 min-w-[260px]">
+            <label htmlFor="mv-item" className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">Item</label>
+            <ItemCombobox
+              id="mv-item"
+              value={picked}
+              onChange={setPicked}
+              fetchItems={(q) => apiFetch(`/api/inventory-movement/movement-items?q=${encodeURIComponent(q)}`)}
             />
-            {!picked && search.trim() && (itemsQuery.data?.rows?.length > 0) && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-72 overflow-auto rounded-xl border border-border bg-card shadow-lg">
-                {itemsQuery.data.rows.map((r) => (
-                  <button
-                    key={`${r.item_number}/${r.location}`}
-                    type="button"
-                    onClick={() => { setPicked(r); setSearch(""); }}
-                    className="flex w-full items-center justify-between gap-3 border-b border-border/60 px-3 py-2 text-left last:border-0 hover:bg-muted/40"
-                  >
-                    <span className="min-w-0">
-                      <span className="font-mono text-xs text-foreground">{r.item_number}</span>
-                      <span className="ml-2 text-xs text-muted-foreground">{r.item_description || "—"}</span>
-                    </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">{r.location} · on hand {fmtQty(r.qty_on_hand)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
           </div>
           <div>
-            <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">From</label>
-            <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground" />
+            <label htmlFor="mv-from" className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">From</label>
+            <input id="mv-from" type="date" value={from} onChange={(e) => setFrom(e.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground" />
           </div>
           <div>
-            <label className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">To</label>
-            <input type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground" />
+            <label htmlFor="mv-to" className="mb-1 block text-[10px] font-mono uppercase tracking-[0.2em] text-muted-foreground">To</label>
+            <input id="mv-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground" />
           </div>
           {picked && (
             <button
