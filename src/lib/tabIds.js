@@ -10,6 +10,7 @@ export const INVENTORY_MOVEMENT_TABS = {
   TOP_MOVERS: 'topMovers',
   DEAD_STOCK: 'deadStock',
   FORECAST: 'forecast',
+  MOVEMENT_HISTORY: 'movementHistory',
 };
 
 export const TREND_TABS = {

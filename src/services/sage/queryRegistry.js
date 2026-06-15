@@ -480,6 +480,123 @@ define({
 });
 
 define({
+  key: 'inventory.movement_history',
+  label: 'Inventory — movement history (stock card)',
+  purpose: 'Per-movement I/C transaction history (sales, receipts, credits/returns, adjustments, write-offs, transfers) for the item stock card. Paged by the (DAYENDSEQ, ENTRYSEQ, LINENO) composite cursor — DAYENDSEQ is monotonic so it is also the incremental sync key. QUANTITY x ICUNIT.CONVERSION gives the stocking-unit quantity.',
+  pool: 'bat_sage',
+  tables: ['ICHIST', 'ICUNIT'],
+  params: ['batch', 'fromdate', 'ds', 'es', 'ln'],
+  requiredColumns: ['item_number', 'location', 'dayend_seq', 'app', 'transtype', 'quantity', 'stock_qty'],
+  defaultSql: `
+  SELECT TOP (@batch)
+    LTRIM(RTRIM(h.ITEMNO))    AS item_number,
+    LTRIM(RTRIM(h.LOCATION))  AS location,
+    LTRIM(RTRIM(h.ACCTSET))   AS acctset,
+    h.TRANSDATE               AS transaction_date_int,
+    LTRIM(RTRIM(h.FISCYEAR))  AS fiscal_year,
+    h.FISCPERIOD              AS fiscal_period,
+    h.DAYENDSEQ               AS dayend_seq,
+    h.ENTRYSEQ                AS entry_seq,
+    h.[LINENO]                  AS line_no,
+    LTRIM(RTRIM(h.APP))       AS app,
+    h.TRANSTYPE               AS transtype,
+    LTRIM(RTRIM(h.DOCNUM))    AS doc_number,
+    h.QUANTITY                AS quantity,
+    LTRIM(RTRIM(h.UNIT))      AS unit,
+    h.QUANTITY * ISNULL(u.CONVERSION, 1) AS stock_qty,
+    h.HOMEEXTCST              AS cost,
+    LTRIM(RTRIM(h.CATEGORY))  AS category
+  FROM ICHIST h
+  LEFT JOIN ICUNIT u ON u.ITEMNO = h.ITEMNO AND u.UNIT = h.UNIT
+  WHERE h.TRANSDATE >= @fromdate
+    AND (
+      h.DAYENDSEQ > @ds
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ > @es)
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] >= @ln)
+    )
+  ORDER BY h.DAYENDSEQ, h.ENTRYSEQ, h.[LINENO]
+`,
+  /* The last comparison is >= (inclusive), NOT >. The cursor tuple is a proper
+     subset of ICHIST's PK (which also carries ACCTSET/LOCATION/ITEMNO/FISCYEAR/
+     FISCPERIOD/TRANSDATE), so several distinct rows — e.g. the two halves of a
+     transfer — can share one (DAYENDSEQ, ENTRYSEQ, LINENO). With a strict >,
+     a TOP(@batch) boundary falling inside such a tied group would silently
+     drop the group's remaining rows. Inclusive means each page re-fetches the
+     boundary tuple's few tied rows; INSERT OR IGNORE dedups them locally. */
+});
+
+define({
+  key: 'inventory.movement_history_item',
+  label: 'Inventory — movement history for ONE item (deep pull)',
+  purpose: 'On-demand full movement history for a single item/location, beyond the recent bulk window. Index-seeked on ITEMNO so it is cheap. Same shape as inventory.movement_history, paged by the composite cursor.',
+  pool: 'bat_sage',
+  tables: ['ICHIST', 'ICUNIT'],
+  params: ['batch', 'item', 'location', 'fromdate', 'ds', 'es', 'ln'],
+  requiredColumns: ['item_number', 'location', 'dayend_seq', 'app', 'transtype', 'quantity', 'stock_qty'],
+  defaultSql: `
+  SELECT TOP (@batch)
+    LTRIM(RTRIM(h.ITEMNO))    AS item_number,
+    LTRIM(RTRIM(h.LOCATION))  AS location,
+    LTRIM(RTRIM(h.ACCTSET))   AS acctset,
+    h.TRANSDATE               AS transaction_date_int,
+    LTRIM(RTRIM(h.FISCYEAR))  AS fiscal_year,
+    h.FISCPERIOD              AS fiscal_period,
+    h.DAYENDSEQ               AS dayend_seq,
+    h.ENTRYSEQ                AS entry_seq,
+    h.[LINENO]                AS line_no,
+    LTRIM(RTRIM(h.APP))       AS app,
+    h.TRANSTYPE               AS transtype,
+    LTRIM(RTRIM(h.DOCNUM))    AS doc_number,
+    h.QUANTITY                AS quantity,
+    LTRIM(RTRIM(h.UNIT))      AS unit,
+    h.QUANTITY * ISNULL(u.CONVERSION, 1) AS stock_qty,
+    h.HOMEEXTCST              AS cost,
+    LTRIM(RTRIM(h.CATEGORY))  AS category
+  FROM ICHIST h
+  LEFT JOIN ICUNIT u ON u.ITEMNO = h.ITEMNO AND u.UNIT = h.UNIT
+  WHERE h.ITEMNO = @item AND h.LOCATION = @location AND h.TRANSDATE >= @fromdate
+    AND (
+      h.DAYENDSEQ > @ds
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ > @es)
+      OR (h.DAYENDSEQ = @ds AND h.ENTRYSEQ = @es AND h.[LINENO] >= @ln)
+    )
+  ORDER BY h.DAYENDSEQ, h.ENTRYSEQ, h.[LINENO]
+`,
+  /* >= on the last column for the same tied-group reason as
+     inventory.movement_history above. */
+});
+
+define({
+  key: 'inventory.movement_seed',
+  label: 'Inventory — movement history seed cursor',
+  purpose: 'The DAYENDSEQ just before the history window starts, so a fresh sync skips the older (purged-but-still-present) rows instead of scanning them.',
+  pool: 'bat_sage',
+  tables: ['ICHIST'],
+  params: ['fromdate'],
+  requiredColumns: ['seed_seq'],
+  defaultSql: `SELECT ISNULL(MIN(h.DAYENDSEQ), 1) - 1 AS seed_seq FROM ICHIST h WHERE h.TRANSDATE >= @fromdate`,
+});
+
+define({
+  key: 'inventory.location_onhand',
+  label: 'Inventory — on-hand per item/location',
+  purpose: 'Current quantity on hand per item per location (ICILOC) — the authoritative anchor the stock card reconciles to.',
+  pool: 'bat_sage',
+  tables: ['ICILOC'],
+  params: [],
+  requiredColumns: ['item_number', 'location', 'qty_on_hand'],
+  defaultSql: `
+  SELECT
+    LTRIM(RTRIM(ITEMNO))   AS item_number,
+    LTRIM(RTRIM(LOCATION)) AS location,
+    QTYONHAND             AS qty_on_hand,
+    TOTALCOST             AS total_cost
+  FROM ICILOC
+  WHERE QTYONHAND <> 0 OR TOTALCOST <> 0
+`,
+});
+
+define({
   key: 'pricing.price_lists',
   label: 'Pricing — price list enumeration',
   purpose: 'Available Sage price lists and their item counts.',
