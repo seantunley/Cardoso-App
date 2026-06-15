@@ -57,9 +57,6 @@ jobs:
       - name: Stage app files for installer
         run: |
           New-Item -ItemType Directory -Force -Path windows/build/app | Out-Null
-          # Code only — node_modules is shipped as a single archive (next block),
-          # NOT as a raw tree, so the installer extracts it in one fast pass
-          # instead of NSIS writing tens of thousands of files individually.
           Copy-Item server.js windows/build/app/
           Copy-Item package.json windows/build/app/
           Copy-Item package-lock.json windows/build/app/
@@ -70,6 +67,10 @@ jobs:
           # ocrWorker.js loud-fails if vendor/tessdata/eng.traineddata.gz is
           # missing, so the build must include it. Was missing pre-2026.4.24.
           Copy-Item -Recurse vendor windows/build/app/vendor
+          # node_modules ships INSIDE the bundle and the installer copies it with
+          # File /r — the proven, tar-free mechanism. (Pruned to prod-only above,
+          # so it's roughly half-size.)
+          Copy-Item -Recurse node_modules windows/build/app/node_modules
 
           # --- Verify the production node_modules BEFORE archiving it ---
           # Confirm the better-sqlite3 native binary is present (it backs both the
@@ -90,24 +91,11 @@ jobs:
           $tess = "windows/build/app/vendor/tessdata/eng.traineddata.gz"
           if (-not (Test-Path $tess)) { throw "Tesseract trained data missing at $tess - Tesseract OCR will fail at runtime" }
           Write-Host "tessdata present: $((Get-Item $tess).Length / 1MB) MB"
-
-          # --- Archive node_modules into a single gzip'd tar ---
-          # tar.exe (bsdtar) ships in System32 on Win10 1803+ / Server 2019+,
-          # both on this runner and on the target machines, so the installer can
-          # extract it with no bundled tool.
-          # Per-build stamp INSIDE node_modules so the installer can confirm the
-          # NEW libraries actually landed after its swap — an old or partially-
-          # removed tree can't carry this build's uniquely-named stamp. The name
-          # matches the installer's !define INSTALLED_VERSION (both come from
-          # package.json), so the on-machine IfFileExists check lines up exactly.
-          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          Set-Content -Path "node_modules/.cardoso-build-$version" -Value $version -NoNewline -Encoding utf8
-          New-Item -ItemType Directory -Force -Path windows/build/nm | Out-Null
-          tar -czf windows/build/nm/node_modules.tar.gz node_modules
-          if ($LASTEXITCODE -ne 0) { throw "tar failed to archive node_modules (exit $LASTEXITCODE)" }
-          $nmRaw = (Get-ChildItem node_modules -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
-          $nmZip = (Get-Item windows/build/nm/node_modules.tar.gz).Length / 1MB
-          Write-Host "node_modules: $([math]::Round($nmRaw)) MB raw -> $([math]::Round($nmZip)) MB archived"
+          # Confirm node_modules made it into the bundle the installer ships.
+          $bsq3Staged = Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          if (-not $bsq3Staged) { throw "better-sqlite3 native binary missing from staged bundle node_modules" }
+          $nmCount = (Get-ChildItem windows/build/app/node_modules -Recurse -File).Count
+          Write-Host "staged node_modules: $nmCount files"
         shell: powershell
 
       - name: Install NSIS
