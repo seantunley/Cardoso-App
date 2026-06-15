@@ -95,6 +95,13 @@ jobs:
           # tar.exe (bsdtar) ships in System32 on Win10 1803+ / Server 2019+,
           # both on this runner and on the target machines, so the installer can
           # extract it with no bundled tool.
+          # Per-build stamp INSIDE node_modules so the installer can confirm the
+          # NEW libraries actually landed after its swap — an old or partially-
+          # removed tree can't carry this build's uniquely-named stamp. The name
+          # matches the installer's !define INSTALLED_VERSION (both come from
+          # package.json), so the on-machine IfFileExists check lines up exactly.
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Set-Content -Path "node_modules/.cardoso-build-$version" -Value $version -NoNewline -Encoding utf8
           New-Item -ItemType Directory -Force -Path windows/build/nm | Out-Null
           tar -czf windows/build/nm/node_modules.tar.gz node_modules
           if ($LASTEXITCODE -ne 0) { throw "tar failed to archive node_modules (exit $LASTEXITCODE)" }

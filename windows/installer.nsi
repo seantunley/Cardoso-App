@@ -148,6 +148,22 @@ Section "Install" SecInstall
   ; Swap the verified libraries into place: drop the old tree, move staging in.
   RMDir /r "$INSTDIR\node_modules"
   Rename "$INSTDIR\nm_staging\node_modules" "$INSTDIR\node_modules"
+
+  ; Confirm the NEW build's libraries actually landed. The Rename above fails
+  ; SILENTLY (NSIS only sets the error flag) if the old tree couldn't be fully
+  ; removed — a locked native module, AV, or a service still holding handles —
+  ; leaving the old or a partial tree in place. The per-build .cardoso-build-
+  ; <version> stamp (written into node_modules at build time) is unique to this
+  ; release, so an old/partial tree can't satisfy this check. If it's missing,
+  ; STOP here — BEFORE copying the new code or writing version markers — restart
+  ; the service on the still-intact existing install, and abort. That prevents
+  ; finalising a half-upgraded "new code on old libraries" mix.
+  IfFileExists "$INSTDIR\node_modules\.cardoso-build-${INSTALLED_VERSION}" swap_ok 0
+    RMDir /r "$INSTDIR\nm_staging"
+    ExecWait '"$INSTDIR\nssm\nssm.exe" start ${SERVICE_NAME}' $0
+    MessageBox MB_OK|MB_ICONSTOP "Setup could not replace the application libraries — the previous version's files are likely locked by a running process or anti-virus.$\n$\nThe update was NOT applied and nothing was finalised. The Cardoso service has been restarted on the existing version. If it does not come up, reboot the machine and run this installer again." /SD IDOK
+    Abort
+  swap_ok:
   RMDir /r "$INSTDIR\nm_staging"
 
   ; --- App CODE, now that the libraries it needs are verified in place ---
