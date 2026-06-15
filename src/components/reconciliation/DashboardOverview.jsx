@@ -27,8 +27,8 @@ function Tile({ label, value, sub, accent = 'var(--phosphor)', glow = 'hsla(33, 
           <TooltipContent side="top">{tip}</TooltipContent>
         </Tooltip>
       ) : labelEl}
-      <div>
-        <div className="font-display text-4xl leading-none text-foreground tabular-nums">
+      <div style={{ containerType: 'inline-size' }}>
+        <div className="font-display text-[clamp(1.25rem,12cqi,2.25rem)] leading-none text-foreground tabular-nums whitespace-nowrap">
           {value}
         </div>
         {sub && (

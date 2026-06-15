@@ -18,9 +18,12 @@ function Tile({ label, value, sub = null, accent = 'var(--phosphor)', big = fals
       style={{ border: '1px solid hsl(var(--border))', borderRadius: '12px' }}
     >
       <div className="absolute left-0 top-0 bottom-0 w-[2px]" style={{ background: accent, boxShadow: `0 0 10px ${accent}30` }} />
-      <div className="pl-2">
+      {/* containerType lets the amount scale to THIS tile's width (cqi), so a
+          large rand value shrinks to fit instead of overflowing the
+          overflow-hidden box and being clipped. */}
+      <div className="pl-2" style={{ containerType: 'inline-size' }}>
         <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1.5">{label}</div>
-        <div className={`font-display ${big ? 'text-3xl' : 'text-2xl'} leading-none text-foreground tabular-nums`}>{value}</div>
+        <div className={`font-display ${big ? 'text-[clamp(1.05rem,9.5cqi,1.875rem)]' : 'text-[clamp(1rem,9cqi,1.5rem)]'} leading-none text-foreground tabular-nums whitespace-nowrap`}>{value}</div>
         {sub != null && <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-1.5">{sub}</div>}
       </div>
     </div>

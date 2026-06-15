@@ -112,9 +112,9 @@ function StatTile({ label, value, sub, hue, glow, icon: Icon, big = false }) {
     >
       <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: hue, boxShadow: `0 0 12px ${glow}` }} />
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
+        <div className="min-w-0" style={{ containerType: 'inline-size' }}>
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">{label}</div>
-          <div className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${big ? "text-4xl" : "text-2xl"}`}>{value}</div>
+          <div className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${big ? "text-[clamp(1.1rem,11cqi,2.25rem)]" : "text-[clamp(1rem,9cqi,1.5rem)]"}`}>{value}</div>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">{sub}</div>
         </div>
         <Icon className="w-4 h-4 shrink-0 opacity-60" style={{ color: hue }} strokeWidth={1.5} />
