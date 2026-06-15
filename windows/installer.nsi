@@ -54,6 +54,7 @@ Var PortValue
 Var SiteNameLabel
 Var SiteNameField
 Var SiteNameValue
+Var TarExe
 
 Function ConfigPage
   !insertmacro MUI_HEADER_TEXT "Service Configuration" "Set the port and site name for this installation."
@@ -98,42 +99,61 @@ Section "Install" SecInstall
 
   SetOutPath "$INSTDIR"
 
-  ; Copy pre-staged app CODE (server.js, dist, src, scripts, vendor, package files).
-  ; node_modules is NOT in this bundle — it ships as a single archive and is
-  ; extracted in one pass below, which is far faster than NSIS writing the
-  ; tens-of-thousands of node_modules files one at a time.
-  File /r ".\build\app\*"
+  ; --- Application libraries (node_modules) FIRST, before touching app code ---
+  ; node_modules ships as one gzip'd tar and is unpacked in a single pass (far
+  ; faster than NSIS writing tens of thousands of files). We extract to a STAGING
+  ; folder and verify it BEFORE removing the live tree or copying the new code,
+  ; so a failed extract leaves the existing install completely intact and the
+  ; service recoverable — never the "new code, no libraries" brick the earlier
+  ; remove-then-extract flow could produce.
 
-  ; --- node_modules: one-pass archive extract ---
-  ; Stored uncompressed inside the installer (it is already gzip'd; SetCompress
-  ; off avoids pointless double-compression), then expanded with the built-in
-  ; Windows tar.exe (System32, present on Win10 1803+ / Server 2019+).
+  ; Resolve tar.exe. This installer is 32-bit, so $SYSDIR (System32) is WOW64-
+  ; redirected to SysWOW64 — which on many machines has NO tar.exe, so the old
+  ; "$SYSDIR\tar.exe" never launched and ExecWait left $0 at the previous
+  ; command's value (a misleading "exit code 0"). Prefer $WINDIR\Sysnative (the
+  ; un-redirected real System32, where Windows actually ships tar.exe on
+  ; 1803+/Server 2019+), then $SYSDIR, then PATH.
+  StrCpy $TarExe "tar.exe"
+  IfFileExists "$SYSDIR\tar.exe" 0 +2
+    StrCpy $TarExe "$SYSDIR\tar.exe"
+  IfFileExists "$WINDIR\Sysnative\tar.exe" 0 +2
+    StrCpy $TarExe "$WINDIR\Sysnative\tar.exe"
+  DetailPrint "Using tar: $TarExe"
+
+  ; Stored uncompressed inside the installer (already gzip'd; SetCompress off
+  ; avoids pointless double-compression).
   SetCompress off
   File ".\build\nm\node_modules.tar.gz"
   SetCompress auto
-  ; Remove the previous install's node_modules BEFORE extracting. Two reasons:
-  ; (1) tar overlays — without the wipe, packages removed/downgraded in the new
-  ;     lockfile (and all the pre-prune dev-deps) linger forever on upgraded
-  ;     sites, so upgraded and fresh installs silently diverge;
-  ; (2) the sentinel check below is only meaningful against a clean slate — a
-  ;     leftover tree from the old install would satisfy it even when the
-  ;     extract completely failed, hiding a new-code-on-old-deps half-install.
-  DetailPrint "Removing previous application libraries (node_modules)..."
-  RMDir /r "$INSTDIR\node_modules"
+
+  RMDir /r "$INSTDIR\nm_staging"
+  CreateDirectory "$INSTDIR\nm_staging"
   DetailPrint "Extracting application libraries (node_modules)..."
-  ExecWait '"$SYSDIR\tar.exe" -xzf "$INSTDIR\node_modules.tar.gz" -C "$INSTDIR"' $0
+  ExecWait '"$TarExe" -xzf "$INSTDIR\node_modules.tar.gz" -C "$INSTDIR\nm_staging"' $0
   Delete "$INSTDIR\node_modules.tar.gz"
   DetailPrint "node_modules extract exit code: $0"
-  ; Gate on a sentinel package actually existing rather than the exit code —
-  ; bsdtar can return non-zero on benign warnings (timestamps, etc.) while
-  ; extracting correctly. A genuinely failed extract must stop the install
-  ; loudly instead of leaving a broken node_modules behind. /SD IDOK so a
-  ; silent (/S) run fails fast instead of hanging forever on an invisible
-  ; dialog.
-  IfFileExists "$INSTDIR\node_modules\better-sqlite3\package.json" nm_ok 0
-    MessageBox MB_OK|MB_ICONSTOP "Setup could not unpack the application libraries (node_modules; tar exit code $0).$\n$\nThe installation is incomplete and the Cardoso service is currently STOPPED. Make sure Windows is up to date — tar.exe ships with Windows 10 (1803+) and Windows Server 2019 or newer — then re-run this installer to finish the upgrade." /SD IDOK
+
+  ; Verify against the STAGED tree (a clean slate, so the sentinel is meaningful
+  ; — a leftover old tree could never satisfy it falsely).
+  IfFileExists "$INSTDIR\nm_staging\node_modules\better-sqlite3\package.json" nm_ok 0
+    ; FAILED — nothing destructive has happened. Clean up, bring the existing
+    ; service back up on the untouched install, and stop loudly. /SD IDOK so a
+    ; silent (/S) auto-update fails fast instead of hanging on an unseen dialog.
+    RMDir /r "$INSTDIR\nm_staging"
+    ExecWait '"$INSTDIR\nssm\nssm.exe" start ${SERVICE_NAME}' $0
+    MessageBox MB_OK|MB_ICONSTOP "Setup could not unpack the application libraries (node_modules; tar '$TarExe', exit code $0).$\n$\nNothing was changed: your existing installation is intact and the Cardoso service has been restarted on the current version. Please report this message to support rather than re-running the installer." /SD IDOK
     Abort
   nm_ok:
+
+  ; Swap the verified libraries into place: drop the old tree, move staging in.
+  RMDir /r "$INSTDIR\node_modules"
+  Rename "$INSTDIR\nm_staging\node_modules" "$INSTDIR\node_modules"
+  RMDir /r "$INSTDIR\nm_staging"
+
+  ; --- App CODE, now that the libraries it needs are verified in place ---
+  ; (server.js, dist, src, scripts, vendor, package files). node_modules is NOT
+  ; in this bundle — it was the archive handled above.
+  File /r ".\build\app\*"
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"
