@@ -1997,6 +1997,8 @@ export default function Reconciliation() {
               stats={selected.extractionStats}
               reconciliationId={selected.id}
               reconLabel={`Week ${selected.week_number}/${selected.year}`}
+              weekNumber={selected.week_number}
+              year={selected.year}
               missingPods={selected.missingPods || []}
               overviewOrdersStored={selected.overviewOrdersStored || 0}
               onReconciliationUpdate={(recon) => setSelected(recon)}
