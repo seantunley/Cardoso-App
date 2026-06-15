@@ -19,11 +19,11 @@ const RELEASES = {
     date: '15 June 2026',
     slug: '15-June-2026',
     intro:
-      "This update (v2026.5.9.4) is about seeing — and printing — the detail " +
+      "This update (v2026.5.9.5) is about seeing — and printing — the detail " +
       "behind your numbers. A new Inventory Movement History gives every item a " +
       "'stock card': every sale, receipt, credit, adjustment, write-off and " +
-      "transfer, with a running balance that ties back to the stock you actually " +
-      "have on hand. The Daily Sales report can now print every invoice, credit " +
+      "transfer, with a running balance that reconciles to your on-hand stock " +
+      "figure. The Daily Sales report can now print every invoice, credit " +
       "note and debit note for a chosen day, and the BAT reconciliation lists " +
       "print on a letterhead sheet. Installing and updating a branch is also " +
       "faster. Every figure continues to be drawn from, and reconcile to, Sage.",
@@ -38,14 +38,14 @@ const RELEASES = {
               "A new Movement History tab on the Inventory page shows, for any " +
               "item, a dated list of every movement — sales, purchase receipts, " +
               "customer credits and returns, adjustments, write-offs and transfers " +
-              "— with a running balance that reconciles to the stock you currently " +
-              "have on hand.",
+              "— with a running balance that reconciles to your on-hand stock " +
+              "figure.",
             details: [
               "Search for an item, choose a date range, and read its movements oldest-to-newest with In / Out / running Balance / cost columns and colour-coded movement types.",
-              "The running balance is anchored to the live on-hand quantity from Sage and worked backwards, so the card always ties out to current stock — even though Sage purges old transaction history (a balance summed from zero would not).",
+              "The running balance is anchored to the on-hand quantity from your last sync and worked backwards, so the card always ties out to that on-hand figure — even though Sage purges old transaction history (a balance summed from zero would not).",
               "Opening and closing balances for the period, total in/out, and current on-hand are shown as tiles, with an 'anchored to on-hand' check.",
               "For speed it loads the last 30 days by default — synced in the background with live progress — and a 'Load full history' button pulls a single item's complete record from Sage on demand. A clear notice appears if you look back further than what's been synced, so a partial view is never mistaken for the whole.",
-              "Export the stock card to CSV, or print it on the depot letterhead. Runs live against each branch's Sage (per branch).",
+              "The figures reflect your most recent sync from the branch's Sage — run a sync for the latest movements and on-hand. Export the stock card to CSV, or print it on the depot letterhead (per branch).",
             ],
           },
           {
