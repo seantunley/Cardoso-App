@@ -13,6 +13,84 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-15': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '15 June 2026',
+    slug: '15-June-2026',
+    intro:
+      "This update (v2026.5.9.5) is about seeing — and printing — the detail " +
+      "behind your numbers. A new Inventory Movement History gives every item a " +
+      "'stock card': every sale, receipt, credit, adjustment, write-off and " +
+      "transfer, with a running balance that reconciles to your on-hand stock " +
+      "figure. The Daily Sales report can now print every invoice, credit " +
+      "note and debit note for a chosen day, and the BAT reconciliation lists " +
+      "print on a letterhead sheet. Installing and updating a branch is also " +
+      "faster. Every figure continues to be drawn from, and reconcile to, Sage.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Inventory Movement History — a stock card for every item',
+            body:
+              "A new Movement History tab on the Inventory page shows, for any " +
+              "item, a dated list of every movement — sales, purchase receipts, " +
+              "customer credits and returns, adjustments, write-offs and transfers " +
+              "— with a running balance that reconciles to your on-hand stock " +
+              "figure.",
+            details: [
+              "Search for an item, choose a date range, and read its movements oldest-to-newest with In / Out / running Balance / cost columns and colour-coded movement types.",
+              "The running balance is anchored to the on-hand quantity from your last sync and worked backwards, so the card always ties out to that on-hand figure — even though Sage purges old transaction history (a balance summed from zero would not).",
+              "Opening and closing balances for the period, total in/out, and current on-hand are shown as tiles, with an 'anchored to on-hand' check.",
+              "For speed it loads the last 30 days by default — synced in the background with live progress — and a 'Load full history' button pulls a single item's complete record from Sage on demand. A clear notice appears if you look back further than what's been synced, so a partial view is never mistaken for the whole.",
+              "The figures reflect your most recent sync from the branch's Sage — run a sync for the latest movements and on-hand. Export the stock card to CSV, or print it on the depot letterhead (per branch).",
+            ],
+          },
+          {
+            title: 'Print a day’s documents from Daily Sales Figures',
+            body:
+              "On the Daily Sales Figures report, each day now has a Print button " +
+              "that lists every invoice, credit note and debit note posted that " +
+              "day on a letterhead sheet.",
+            details: [
+              "Documents are grouped by type — Invoices, Credit Notes, Debit Notes — with per-type subtotals and a net total; each line shows the document number, customer, order and the VAT split.",
+              "It uses the same source and filters as the day's summary row, so the printed list always reconciles to the figure on the report.",
+              "Printed on the depot letterhead with the date, ready to file or hand over.",
+            ],
+          },
+          {
+            title: 'Print the BAT reconciliation lists',
+            body:
+              "The Paid, Non-Compliant and Exceptions lists in BAT reconciliation " +
+              "each gain a Print button that produces a letterhead sheet of that " +
+              "list.",
+            details: [
+              "The header states the depot, the year and week number, and which list was printed.",
+              "Each invoice row carries its order number, customer, delivery and POD-upload dates, OCR status, invoice number and amount, with the list total at the foot (and the exception reason on the Exceptions list).",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Faster, more robust branch installation',
+            body:
+              "Installing or updating the app on a branch machine is now " +
+              "noticeably quicker, and an interrupted update is safer.",
+            details: [
+              "The application's libraries ship as a single compressed archive and are unpacked in one pass, instead of copying tens of thousands of small files individually.",
+              "An interrupted update can no longer leave a half-updated install running quietly: the installer clears the old libraries first, verifies the new ones unpacked, and stops with a clear message if anything went wrong.",
+            ],
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-11': {
     product: 'Cardoso App',
     title: 'Product Update',
