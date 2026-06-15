@@ -538,9 +538,13 @@ export function SummaryTile({ label, value, sub, accent = 'var(--phosphor)', big
         className="absolute left-0 top-0 bottom-0 w-[2px]"
         style={{ background: accent, boxShadow: `0 0 10px ${accent}30` }}
       />
-      <div className="pl-2">
+      {/* Fluid font (cqi) so large rand values shrink to fit instead of being
+          clipped by overflow-hidden. The `value` class is still targeted by the
+          print stylesheet (higher specificity), so paper stays at its fixed
+          size. */}
+      <div className="pl-2" style={{ containerType: 'inline-size' }}>
         <div className="label font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1.5">{label}</div>
-        <div className={`value font-display ${big ? 'text-3xl' : 'text-2xl'} leading-none text-foreground tabular-nums`}>{value}</div>
+        <div className={`value font-display ${big ? 'text-[clamp(1.05rem,9.5cqi,1.875rem)]' : 'text-[clamp(1rem,9cqi,1.5rem)]'} leading-none text-foreground tabular-nums whitespace-nowrap`}>{value}</div>
         {sub && <div className="sub font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-1.5">{sub}</div>}
       </div>
     </div>

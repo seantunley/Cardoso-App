@@ -14,9 +14,9 @@ function Tile({ label, value, sub, accent = 'var(--phosphor)', glow = 'hsla(33, 
       <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
         {label}
       </div>
-      <div>
+      <div style={{ containerType: 'inline-size' }}>
         <div
-          className={`font-display leading-none text-foreground tabular-nums ${large ? 'text-5xl lg:text-6xl' : 'text-4xl'}`}
+          className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${large ? 'text-[clamp(1.5rem,14cqi,3.75rem)]' : 'text-[clamp(1.25rem,12cqi,2.25rem)]'}`}
         >
           {value}
         </div>
