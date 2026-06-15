@@ -98,8 +98,42 @@ Section "Install" SecInstall
 
   SetOutPath "$INSTDIR"
 
-  ; Copy pre-staged app bundle (node_modules with native binaries pre-compiled on CI)
+  ; Copy pre-staged app CODE (server.js, dist, src, scripts, vendor, package files).
+  ; node_modules is NOT in this bundle — it ships as a single archive and is
+  ; extracted in one pass below, which is far faster than NSIS writing the
+  ; tens-of-thousands of node_modules files one at a time.
   File /r ".\build\app\*"
+
+  ; --- node_modules: one-pass archive extract ---
+  ; Stored uncompressed inside the installer (it is already gzip'd; SetCompress
+  ; off avoids pointless double-compression), then expanded with the built-in
+  ; Windows tar.exe (System32, present on Win10 1803+ / Server 2019+).
+  SetCompress off
+  File ".\build\nm\node_modules.tar.gz"
+  SetCompress auto
+  ; Remove the previous install's node_modules BEFORE extracting. Two reasons:
+  ; (1) tar overlays — without the wipe, packages removed/downgraded in the new
+  ;     lockfile (and all the pre-prune dev-deps) linger forever on upgraded
+  ;     sites, so upgraded and fresh installs silently diverge;
+  ; (2) the sentinel check below is only meaningful against a clean slate — a
+  ;     leftover tree from the old install would satisfy it even when the
+  ;     extract completely failed, hiding a new-code-on-old-deps half-install.
+  DetailPrint "Removing previous application libraries (node_modules)..."
+  RMDir /r "$INSTDIR\node_modules"
+  DetailPrint "Extracting application libraries (node_modules)..."
+  ExecWait '"$SYSDIR\tar.exe" -xzf "$INSTDIR\node_modules.tar.gz" -C "$INSTDIR"' $0
+  Delete "$INSTDIR\node_modules.tar.gz"
+  DetailPrint "node_modules extract exit code: $0"
+  ; Gate on a sentinel package actually existing rather than the exit code —
+  ; bsdtar can return non-zero on benign warnings (timestamps, etc.) while
+  ; extracting correctly. A genuinely failed extract must stop the install
+  ; loudly instead of leaving a broken node_modules behind. /SD IDOK so a
+  ; silent (/S) run fails fast instead of hanging forever on an invisible
+  ; dialog.
+  IfFileExists "$INSTDIR\node_modules\better-sqlite3\package.json" nm_ok 0
+    MessageBox MB_OK|MB_ICONSTOP "Setup could not unpack the application libraries (node_modules; tar exit code $0).$\n$\nThe installation is incomplete and the Cardoso service is currently STOPPED. Make sure Windows is up to date — tar.exe ships with Windows 10 (1803+) and Windows Server 2019 or newer — then re-run this installer to finish the upgrade." /SD IDOK
+    Abort
+  nm_ok:
 
   ; Copy bundled Node.js runtime
   SetOutPath "$INSTDIR\node"

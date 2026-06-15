@@ -17,6 +17,7 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '22'
+          cache: 'npm'   # cache the npm download cache so `npm ci` doesn't re-fetch the registry every build
 
       - name: Install dependencies (native binaries compiled for win32/x64/node22)
         run: npm ci
@@ -42,10 +43,23 @@ jobs:
         run: npm run build
         shell: powershell
 
+      - name: Prune dev dependencies
+        # The installed Windows service only needs PRODUCTION dependencies. The
+        # build above (vite, etc.) is done, so dropping devDependencies here
+        # roughly halves node_modules' size and file count — which is what makes
+        # the installer smaller and the on-machine extract dramatically faster.
+        # `sharp` is a RUNTIME dependency (OCR / BAT page rendering) and lives in
+        # `dependencies`, so it survives the prune; the staging step below
+        # asserts it (and better-sqlite3's native binary) are still present.
+        run: npm prune --omit=dev
+        shell: powershell
+
       - name: Stage app files for installer
         run: |
           New-Item -ItemType Directory -Force -Path windows/build/app | Out-Null
-          # Copy app files
+          # Code only — node_modules is shipped as a single archive (next block),
+          # NOT as a raw tree, so the installer extracts it in one fast pass
+          # instead of NSIS writing tens of thousands of files individually.
           Copy-Item server.js windows/build/app/
           Copy-Item package.json windows/build/app/
           Copy-Item package-lock.json windows/build/app/
@@ -56,22 +70,37 @@ jobs:
           # ocrWorker.js loud-fails if vendor/tessdata/eng.traineddata.gz is
           # missing, so the build must include it. Was missing pre-2026.4.24.
           Copy-Item -Recurse vendor windows/build/app/vendor
-          # Copy node_modules WITH pre-compiled native binaries (built on this windows runner)
-          Copy-Item -Recurse node_modules windows/build/app/node_modules
-          Write-Host "Staged app. node_modules size: $((Get-ChildItem windows/build/app/node_modules -Recurse | Measure-Object -Property Length -Sum).Sum / 1MB) MB"
-          # Confirm the better-sqlite3 native binary is present - fail build
-          # if missing. As of v2026.4.18 better-sqlite3 backs both the app DB
-          # AND the session store (via better-sqlite3-session-store), so the
-          # old separate `sqlite3` package check has been removed.
-          $bsq3 = Get-ChildItem windows/build/app/node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+
+          # --- Verify the production node_modules BEFORE archiving it ---
+          # Confirm the better-sqlite3 native binary is present (it backs both the
+          # app DB and the session store) - fail the build if missing.
+          $bsq3 = Get-ChildItem node_modules/better-sqlite3 -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
           $bsq3 | ForEach-Object { Write-Host "BSQ3: $($_.FullName)" }
           if (-not $bsq3) { throw "better-sqlite3 native binary missing - build will not work" }
-          # Same loud-fail pattern for tessdata. ocrWorker.js requires this
-          # file at runtime; before 2026.4.24 the staging step omitted vendor/
-          # and every install silently lost Tesseract OCR.
+          # sharp is a runtime OCR/BAT-rendering dependency; confirm the prune
+          # did not remove it (it must be in `dependencies`, not devDependencies).
+          if (-not (Test-Path node_modules/sharp)) { throw "sharp missing after prune - OCR / BAT page rendering will fail at runtime. Ensure sharp is in package.json dependencies, not devDependencies." }
+          # sharp's actual native binary lives in the platform package
+          # node_modules/@img/sharp-win32-x64 (an optionalDependency npm prune
+          # has historically mishandled) - the JS dir above existing proves
+          # nothing about the binary, so check for the .node file itself.
+          $sharpBin = Get-ChildItem node_modules/@img -Recurse -Filter "*.node" -ErrorAction SilentlyContinue
+          $sharpBin | ForEach-Object { Write-Host "SHARP: $($_.FullName)" }
+          if (-not $sharpBin) { throw "sharp native binary missing under node_modules/@img after prune - OCR / BAT page rendering will fail at runtime on every site" }
           $tess = "windows/build/app/vendor/tessdata/eng.traineddata.gz"
           if (-not (Test-Path $tess)) { throw "Tesseract trained data missing at $tess - Tesseract OCR will fail at runtime" }
           Write-Host "tessdata present: $((Get-Item $tess).Length / 1MB) MB"
+
+          # --- Archive node_modules into a single gzip'd tar ---
+          # tar.exe (bsdtar) ships in System32 on Win10 1803+ / Server 2019+,
+          # both on this runner and on the target machines, so the installer can
+          # extract it with no bundled tool.
+          New-Item -ItemType Directory -Force -Path windows/build/nm | Out-Null
+          tar -czf windows/build/nm/node_modules.tar.gz node_modules
+          if ($LASTEXITCODE -ne 0) { throw "tar failed to archive node_modules (exit $LASTEXITCODE)" }
+          $nmRaw = (Get-ChildItem node_modules -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB
+          $nmZip = (Get-Item windows/build/nm/node_modules.tar.gz).Length / 1MB
+          Write-Host "node_modules: $([math]::Round($nmRaw)) MB raw -> $([math]::Round($nmZip)) MB archived"
         shell: powershell
 
       - name: Install NSIS
