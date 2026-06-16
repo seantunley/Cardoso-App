@@ -262,7 +262,7 @@ export default function Login() {
 
         {/* Bottom meta */}
         <div className="relative z-10 space-y-8">
-          <div className="max-w-md rounded-2xl border border-accent/25 bg-card/85 backdrop-blur-md p-5">
+          <div className="max-w-md rounded-2xl border border-white/10 bg-card/55 backdrop-blur-2xl p-5" style={{ boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.08)" }}>
             <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-accent mb-3">
               Quote of the day
             </div>
@@ -303,8 +303,8 @@ export default function Login() {
         </div>
 
         <div
-          className="max-w-sm w-full rounded-3xl border border-border/70 bg-card/60 backdrop-blur-sm p-8 lg:p-9"
-          style={{ boxShadow: "0 0 60px hsla(33, 95%, 55%, 0.07), 0 18px 40px rgba(0,0,0,0.25)" }}
+          className="max-w-sm w-full rounded-3xl border border-white/10 bg-card/50 backdrop-blur-2xl p-8 lg:p-9"
+          style={{ boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.10), 0 0 60px hsla(33,95%,55%,0.10), 0 24px 50px -12px rgba(0,0,0,0.5)" }}
         >
           <div className="font-mono text-[10px] uppercase tracking-[0.3em] text-muted-foreground mb-3">
             Sign in
@@ -316,7 +316,7 @@ export default function Login() {
             Identify yourself.
           </h2>
 
-          <div className="lg:hidden mb-8 rounded-2xl border border-accent/25 bg-card/40 p-5">
+          <div className="lg:hidden mb-8 rounded-2xl border border-white/10 bg-card/45 backdrop-blur-2xl p-5" style={{ boxShadow: "inset 0 1px 0 0 rgba(255,255,255,0.08)" }}>
             <div className="font-mono text-[10px] uppercase tracking-[0.25em] text-accent mb-2">
               Quote of the day
             </div>
