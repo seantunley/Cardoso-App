@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 import { useHubMode } from "@/lib/useAppInfo";
@@ -12,6 +12,9 @@ import { useAuth } from "@/lib/AuthContext";
 import { hasPermission } from "@/lib/permissions";
 import UserNotRegisteredError from "@/components/UserNotRegisteredError";
 import Login from "@/pages/Login";
+// POC: glassmorphism + scrollytelling welcome experience. Lazy so framer-motion
+// stays out of the login chunk; standalone public route, doesn't touch sign-in.
+const Welcome = lazy(() => import("@/pages/Welcome"));
 import ForcePasswordChangeModal from "@/components/auth/ForcePasswordChangeModal";
 import SessionExpiryWatcher from "@/components/SessionExpiryWatcher";
 import ProtectedRoute from "@/components/auth/ProtectedAuth";
@@ -162,6 +165,9 @@ const AuthenticatedApp = () => {
         path="/login"
         element={isAuthenticated ? <Navigate to="/" replace /> : <Login />}
       />
+
+      {/* POC welcome experience — public, standalone (does not replace /login) */}
+      <Route path="/welcome" element={<Welcome />} />
 
       <Route element={<ProtectedLayoutRoute hubMode={hubMode} />}>
         <Route
