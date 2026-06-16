@@ -19,14 +19,14 @@ const RELEASES = {
     date: '15 June 2026',
     slug: '15-June-2026',
     intro:
-      "This update (v2026.5.9.5) is about seeing — and printing — the detail " +
+      "This update (v2026.5.9.6) is about seeing — and printing — the detail " +
       "behind your numbers. A new Inventory Movement History gives every item a " +
       "'stock card': every sale, receipt, credit, adjustment, write-off and " +
       "transfer, with a running balance that reconciles to your on-hand stock " +
       "figure. The Daily Sales report can now print every invoice, credit " +
       "note and debit note for a chosen day, and the BAT reconciliation lists " +
-      "print on a letterhead sheet. Installing and updating a branch is also " +
-      "faster. Every figure continues to be drawn from, and reconcile to, Sage.",
+      "print on a letterhead sheet. Branch updates are also leaner and more " +
+      "reliable. Every figure continues to be drawn from, and reconcile to, Sage.",
     sections: [
       {
         label: 'NEW',
@@ -83,8 +83,8 @@ const RELEASES = {
               "Installing or updating the app on a branch machine is now " +
               "noticeably quicker, and an interrupted update is safer.",
             details: [
-              "The application's libraries ship as a single compressed archive and are unpacked in one pass, instead of copying tens of thousands of small files individually.",
-              "An interrupted update can no longer leave a half-updated install running quietly: the installer clears the old libraries first, verifies the new ones unpacked, and stops with a clear message if anything went wrong.",
+              "Update packages are leaner: development-only code is stripped during the build, so less is downloaded and installed on the branch machine.",
+              "An interrupted update can no longer leave a half-updated install running quietly: the installer now verifies the new files landed correctly and stops with a clear message if anything went wrong.",
             ],
           },
         ],
