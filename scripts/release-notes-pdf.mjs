@@ -23,9 +23,10 @@ const RELEASES = {
       "behind your numbers. A new Inventory Movement History gives every item a " +
       "'stock card': every sale, receipt, credit, adjustment, write-off and " +
       "transfer, with a running balance that reconciles to your on-hand stock " +
-      "figure. The Daily Sales report can now print every invoice, credit " +
-      "note and debit note for a chosen day, and the BAT reconciliation lists " +
-      "print on a letterhead sheet. Installing and updating a branch is also " +
+      "figure. The Daily Sales report can now print the VAT-bearing invoices, " +
+      "credit notes and debit notes behind a chosen day's figure, and the BAT " +
+      "reconciliation lists print on a letterhead sheet. Installing and " +
+      "updating a branch is also " +
       "faster. Every figure continues to be drawn from, and reconcile to, Sage.",
     sections: [
       {
@@ -52,11 +53,11 @@ const RELEASES = {
             title: 'Print a day’s documents from Daily Sales Figures',
             body:
               "On the Daily Sales Figures report, each day now has a Print button " +
-              "that lists every invoice, credit note and debit note posted that " +
-              "day on a letterhead sheet.",
+              "that lists the VAT-bearing invoices, credit notes and debit notes " +
+              "behind that day's figure on a letterhead sheet.",
             details: [
               "Documents are grouped by type — Invoices, Credit Notes, Debit Notes — with per-type subtotals and a net total; each line shows the document number, customer, order and the VAT split.",
-              "It uses the same source and filters as the day's summary row, so the printed list always reconciles to the figure on the report.",
+              "It uses the same source and filters as the day's summary row (VAT-bearing documents), so the printed list always reconciles to that figure on the report — note zero-rated/exempt documents, which the figure also excludes, are not listed.",
               "Printed on the depot letterhead with the date, ready to file or hand over.",
             ],
           },
