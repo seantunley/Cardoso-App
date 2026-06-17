@@ -22,7 +22,7 @@ import {
 } from './services/commission/commissionScheduler.js';
 import { pushPendingCommissionArchives } from './services/commission/commissionHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
-import { syncSalesFromSage } from './services/inventoryMovement.js';
+import { syncSalesFromSage, syncItemVendors } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
 import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
 import { syncCreditorsFromSage } from './services/creditorSync.js';
@@ -569,6 +569,27 @@ export function startSchedulers() {
       }, 90_000);
       if (typeof t.unref === 'function') t.unref();
       registerJob({ name: 'nightly-catch-up', type: 'one-shot', delayMs: 90_000, mode: 'site', description: 'Boot catch-up — immediately run any nightly Sage sync whose last success is >24h old (covers the machine-off-at-4am case)' });
+    }
+
+    // item->vendor boot self-heal. v106 creates item_vendor EMPTY and only the
+    // sales sync fills it (via syncItemVendors). The >24h catch-up above won't
+    // re-run a recently-synced site, so a fresh upgrade leaves Sales-by-Vendor
+    // showing "(No vendor)" until 4am. If the map is empty, fill it now — cheap
+    // (~2.4k rows, one Sage query). Runs after the catch-up so we don't double up.
+    {
+      const t = setTimeout(async () => {
+        try {
+          const n = db.prepare('SELECT COUNT(*) AS c FROM item_vendor').get().c;
+          if (n > 0) return;
+          console.warn('[item-vendor-boot-fill] item_vendor is empty — populating the item->vendor map now so Sales-by-Vendor is not blank.');
+          const r = await syncItemVendors();
+          console.log(`[item-vendor-boot-fill] populated ${r.synced} item->vendor rows.`);
+        } catch (err) {
+          console.error('[item-vendor-boot-fill] failed:', err.message);
+        }
+      }, 110_000);
+      if (typeof t.unref === 'function') t.unref();
+      registerJob({ name: 'item-vendor-boot-fill', type: 'one-shot', delayMs: 110_000, mode: 'site', description: 'On boot, populate the item->vendor map (Sage ICITMV) if empty — fresh-upgrade self-heal so Sales-by-Vendor is not blank' });
     }
   }
 
