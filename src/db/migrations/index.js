@@ -107,6 +107,7 @@ import m101 from './v101_creditor_unposted_payments.js';
 import m102 from './v102_creditor_unposted_invoices.js';
 import m103 from './v103_creditor_capture_meta.js';
 import m104 from './v104_inventory_movement_history.js';
+import m105 from './v105_hub_bat_exceptions.js';
 
 const migrations = [
   m1,
@@ -213,6 +214,7 @@ const migrations = [
   m102,
   m103,
   m104,
+  m105,
 ];
 
 migrations.sort((a, b) => a.version - b.version);

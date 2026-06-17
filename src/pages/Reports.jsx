@@ -1,7 +1,7 @@
 import { lazy, Suspense, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { hasPermission } from '@/lib/permissions';
 import SavedViews from '@/components/reports/SavedViews';
@@ -15,6 +15,7 @@ const SalesRepExposure = lazy(() => import('@/components/reports/SalesRepExposur
 const BatWeekly        = lazy(() => import('@/components/reports/BatWeekly'));
 const BatYtd           = lazy(() => import('@/components/reports/BatYtd'));
 const BatExceptions    = lazy(() => import('@/components/reports/BatExceptions'));
+const BatExceptionsWeekly = lazy(() => import('@/components/reports/BatExceptionsWeekly'));
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
 const DailySalesFigures = lazy(() => import('@/components/reports/DailySalesFigures'));
 
@@ -42,6 +43,7 @@ const REPORTS = [
       { id: 'bat-weekly',     name: 'Weekly Reconciliation', icon: BarChart3,     accent: 'hsl(33 95% 55%)',  component: BatWeekly,     ready: true },
       { id: 'bat-ytd',        name: 'YTD Fee Breakdown',     icon: PieChart,      accent: 'hsl(280 70% 65%)', component: BatYtd,        ready: true },
       { id: 'bat-exceptions', name: 'Exceptions Summary',    icon: AlertTriangle, accent: 'hsl(0 72% 50%)',   component: BatExceptions, ready: true },
+      { id: 'bat-exceptions-weekly', name: 'Exceptions by Week', icon: FileWarning, accent: 'hsl(0 72% 50%)', component: BatExceptionsWeekly, ready: true },
     ],
   },
   {

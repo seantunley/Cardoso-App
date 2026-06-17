@@ -988,6 +988,60 @@ async function syncSite(site) {
       recordStageFailure('BAT summary', batErr);
     }
 
+    // BAT exceptions (per-week detail) — pulled into hub_bat_exceptions for the
+    // hub "Exceptions by Week" report (grouped site -> week). Cleared and
+    // re-inserted per site each sync. Best-effort: a failure here is logged and
+    // never fails the whole run (records ETL is the primary purpose).
+    try {
+      const ctrlExc = new AbortController();
+      const tExc = setTimeout(() => ctrlExc.abort(), 30_000);
+      let excRes;
+      try {
+        excRes = await fetch(`${site.url}/api/reporting/bat-exceptions-detail?year=all`, { headers, signal: ctrlExc.signal });
+      } finally { clearTimeout(tExc); }
+      if (excRes.ok) {
+        const payload = await excRes.json();
+        const rows = Array.isArray(payload.rows) ? payload.rows : [];
+        const now = new Date().toISOString();
+        const ins = db.prepare(`
+          INSERT INTO hub_bat_exceptions
+            (site_id, year, week_number, order_number, branch_code, customer,
+             delivery_date, pod_uploaded_date, ocr, invoice, exception_reason,
+             amount, is_missing_pod, synced_at)
+          VALUES (@site_id, @year, @week_number, @order_number, @branch_code, @customer,
+             @delivery_date, @pod_uploaded_date, @ocr, @invoice, @exception_reason,
+             @amount, @is_missing_pod, @synced_at)
+        `);
+        db.transaction(() => {
+          db.prepare('DELETE FROM hub_bat_exceptions WHERE site_id = ?').run(site.id);
+          for (const r of rows) {
+            ins.run({
+              site_id: site.id,
+              year: r.year ?? null,
+              week_number: r.week_number ?? null,
+              order_number: r.order_number ?? null,
+              branch_code: r.branch_code ?? null,
+              customer: r.customer ?? null,
+              delivery_date: r.delivery_date ?? null,
+              pod_uploaded_date: r.pod_uploaded_date ?? null,
+              ocr: r.ocr ?? null,
+              invoice: r.invoice ?? null,
+              exception_reason: r.exception_reason ?? null,
+              // Preserve "unknown" (null) — a blank BAT amount is not a real R0.00.
+              amount: (r.amount === null || r.amount === undefined) ? null
+                : (Number.isFinite(Number(r.amount)) ? Number(r.amount) : null),
+              is_missing_pod: r.is_missing_pod ? 1 : 0,
+              synced_at: now,
+            });
+          }
+        })();
+      } else {
+        recordStageFailure('BAT exceptions', new Error(`bat-exceptions-detail returned HTTP ${excRes.status} from ${site.url}/api/reporting/bat-exceptions-detail`));
+      }
+    } catch (excErr) {
+      recordStageFailure('BAT exceptions', excErr);
+    }
+
     // Update hub_sites
     // Promote the site→Accpac freshness/status/error fields from the
     // kpis JSON blob to dedicated columns so the dashboard tile can

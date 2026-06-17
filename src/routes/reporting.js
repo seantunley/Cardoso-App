@@ -2391,6 +2391,164 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // OCR status as a ready-to-display label (the hub stores this string; the
+  // site report derives it the same way so both render identically).
+  const batOcrLabel = (status, isMissing) => {
+    if (isMissing) return 'No POD';
+    switch (status) {
+      case 'found': return 'Found';
+      case 'not_found': return 'Not found';
+      case 'failed': return 'Failed';
+      case 'pending': return 'Pending';
+      default: return '—';
+    }
+  };
+
+  // bat_overview_orders.order_amount is intentionally nullable: a blank /
+  // non-numeric amount means the exposure is UNKNOWN, not a real R0.00. Preserve
+  // null all the way through (so the UI can render "unknown" and the subtotals
+  // can exclude it) instead of coercing it to 0 and understating exposure.
+  const batExcAmount = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  // SHARED exception-row builder — the single source of truth used by BOTH the
+  // site report and the site detail endpoint the hub ETL pulls, so the hub can
+  // never drift from the site. Combines captured exception extractions
+  // (is_exception=1) with missing-POD exceptions (Overview orders flagged
+  // is_exception with no extraction) — exactly the two sets each week's
+  // Exceptions tab merges. Standardised display shape: ocr/invoice/amount.
+  const batExceptionRows = (year) => {
+    const yearWhere = year ? 'AND r.year = ?' : '';
+    const params = year ? [year] : [];
+    const ext = prep(
+      `SELECT r.year, r.week_number,
+              LTRIM(RTRIM(e.order_number)) AS order_number, e.validate AS branch_code,
+              e.store_name AS customer, e.delivery_date, e.pod_uploaded_date,
+              e.extraction_status, e.extracted_invoice AS invoice, e.exception_reason,
+              e.order_amount AS amount, 0 AS is_missing_pod
+       FROM bat_invoice_extractions e
+       JOIN bat_reconciliations r ON r.id = e.reconciliation_id
+       WHERE e.is_exception = 1 ${yearWhere}`
+    ).all(...params);
+    const miss = prep(
+      `SELECT r.year, r.week_number,
+              LTRIM(RTRIM(o.order_number)) AS order_number, NULL AS branch_code,
+              NULL AS customer, NULL AS delivery_date, NULL AS pod_uploaded_date,
+              NULL AS extraction_status, NULL AS invoice,
+              '(POD missing from upload)' AS exception_reason,
+              o.order_amount AS amount, 1 AS is_missing_pod
+       FROM bat_overview_orders o
+       JOIN bat_reconciliations r ON r.id = o.reconciliation_id
+       WHERE o.is_exception = 1 ${yearWhere}
+         AND NOT EXISTS (
+           SELECT 1 FROM bat_invoice_extractions e
+           WHERE e.reconciliation_id = o.reconciliation_id AND e.order_number = o.order_number
+         )`
+    ).all(...params);
+    return [...ext, ...miss].map((r) => ({
+      year: r.year, week_number: r.week_number, order_number: r.order_number,
+      branch_code: r.branch_code, customer: r.customer, delivery_date: r.delivery_date,
+      pod_uploaded_date: r.pod_uploaded_date, ocr: batOcrLabel(r.extraction_status, r.is_missing_pod),
+      invoice: r.invoice, exception_reason: r.exception_reason,
+      amount: batExcAmount(r.amount), is_missing_pod: r.is_missing_pod,
+    }));
+  };
+
+  // Group flat exception rows by week (newest first) with subtotals.
+  const groupExceptionWeeks = (rows) => {
+    const m = new Map();
+    for (const row of rows) {
+      const key = `${row.year}-${row.week_number}`;
+      let g = m.get(key);
+      if (!g) { g = { year: row.year, week_number: row.week_number, rows: [], subtotal_count: 0, subtotal_amount: 0, subtotal_unknown_count: 0 }; m.set(key, g); }
+      g.rows.push(row); g.subtotal_count += 1;
+      // Unknown amounts (null) are NOT added into the subtotal — they're counted
+      // separately so the figure isn't silently understated.
+      if (row.amount == null) g.subtotal_unknown_count += 1; else g.subtotal_amount += row.amount;
+    }
+    const weeks = Array.from(m.values()).sort((a, b) => (b.year - a.year) || (b.week_number - a.week_number));
+    for (const w of weeks) w.rows.sort((a, b) => String(a.order_number || '').localeCompare(String(b.order_number || '')));
+    return weeks;
+  };
+
+  // GET /api/reports/bat-exceptions-weekly?year=YYYY — every BAT exception LINE
+  // grouped by week (site) or by site -> week (hub), so the operator can print
+  // all weeks' exceptions at once instead of opening each reconciliation.
+  // Year defaults to the CURRENT year; pass ?year=all for everything.
+  router.get('/api/reports/bat-exceptions-weekly', ...reportsGuard, (req, res) => {
+    const yp = req.query.year;
+    const year = yp === 'all' ? null : (yp ? parseInt(yp, 10) : new Date().getFullYear());
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        // Hub: per-site exception rows pulled by the ETL into hub_bat_exceptions,
+        // grouped site -> week. Optional ?site= filter (matches hub_sites name).
+        const siteFilter = String(req.query.site || 'all').trim();
+        const yearWhere = year ? 'AND x.year = ?' : '';
+        const baseParams = year ? [year] : [];
+        const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, x.site_id) = ?' : '';
+        const rows = prep(
+          `SELECT x.site_id, COALESCE(hs.name, x.site_id) AS site_name,
+                  x.year, x.week_number, x.order_number, x.branch_code, x.customer,
+                  x.delivery_date, x.pod_uploaded_date, x.ocr, x.invoice,
+                  x.exception_reason, x.amount, x.is_missing_pod
+           FROM hub_bat_exceptions x
+           LEFT JOIN hub_sites hs ON hs.id = x.site_id
+           WHERE 1=1 ${yearWhere} ${siteWhere}`
+        ).all(...baseParams, ...(siteFilter !== 'all' ? [siteFilter] : []));
+
+        const siteMap = new Map();
+        for (const r of rows) {
+          if (!siteMap.has(r.site_id)) siteMap.set(r.site_id, { site_id: r.site_id, site_name: r.site_name, rows: [] });
+          siteMap.get(r.site_id).rows.push(r);
+        }
+        const sites = Array.from(siteMap.values())
+          .map((s) => ({
+            site_id: s.site_id, site_name: s.site_name,
+            weeks: groupExceptionWeeks(s.rows),
+            total_count: s.rows.length,
+            total_amount: s.rows.reduce((sum, r) => sum + (r.amount == null ? 0 : Number(r.amount)), 0),
+            total_unknown_count: s.rows.filter((r) => r.amount == null).length,
+          }))
+          .sort((a, b) => String(a.site_name).localeCompare(String(b.site_name)));
+
+        const siteList = prep('SELECT DISTINCT COALESCE(hs.name, x.site_id) AS name FROM hub_bat_exceptions x LEFT JOIN hub_sites hs ON hs.id = x.site_id ORDER BY name').all().map((r) => r.name).filter(Boolean);
+        const yearsRow = prep('SELECT DISTINCT year FROM hub_bat_exceptions WHERE year IS NOT NULL ORDER BY year DESC').all();
+        return res.json({
+          hub: true, year, site: siteFilter, sites,
+          total_count: rows.length,
+          total_amount: rows.reduce((s, r) => s + (r.amount == null ? 0 : Number(r.amount)), 0),
+          total_unknown_count: rows.filter((r) => r.amount == null).length,
+          filters: { sites: siteList },
+          available_years: yearsRow.map((r) => r.year).filter(Boolean),
+          generated_at: new Date().toISOString(),
+        });
+      }
+
+      const rows = batExceptionRows(year);
+      const weeks = groupExceptionWeeks(rows);
+      const yearsRow = prep('SELECT DISTINCT year FROM bat_reconciliations WHERE year IS NOT NULL ORDER BY year DESC').all();
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+
+      res.json({
+        year,
+        site_name: depotName,
+        weeks,
+        total_count: rows.length,
+        total_amount: rows.reduce((s, r) => s + (r.amount == null ? 0 : r.amount), 0),
+        total_unknown_count: rows.filter((r) => r.amount == null).length,
+        available_years: yearsRow.map((r) => r.year).filter(Boolean),
+        generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] bat-exceptions-weekly error:', err);
+      res.status(500).json({ error: 'Failed to fetch the weekly BAT exceptions report' });
+    }
+  });
+
   // GET /api/reports/inventory-value — total value, by-commodity breakdown,
   // top-N items by value, slow-mover alerts.
   router.get('/api/reports/inventory-value', requireAuth, (req, res) => {
@@ -2914,6 +3072,21 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting/bat-summary] error:', err);
       res.status(500).json({ error: 'Failed to build BAT summary' });
+    }
+  });
+
+  // GET /api/reporting/bat-exceptions-detail?year=YYYY — flat exception rows the
+  // hub ETL pulls into hub_bat_exceptions. Uses the SAME batExceptionRows builder
+  // as the on-screen site report, so the hub can never drift from the site.
+  // Year defaults to the current year; pass ?year=all for everything.
+  router.get('/api/reporting/bat-exceptions-detail', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const yp = req.query.year;
+      const year = yp === 'all' ? null : (yp ? parseInt(yp, 10) : new Date().getFullYear());
+      res.json({ year, rows: batExceptionRows(year), generated_at: new Date().toISOString() });
+    } catch (err) {
+      console.error('[reporting/bat-exceptions-detail] error:', err);
+      res.status(500).json({ error: 'Failed to build BAT exceptions detail' });
     }
   });
 
