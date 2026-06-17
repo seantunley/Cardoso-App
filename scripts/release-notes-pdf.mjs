@@ -92,6 +92,59 @@ const RELEASES = {
       },
     ],
   },
+  '2026-06-14': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '14 June 2026',
+    slug: '14-June-2026',
+    intro:
+      "This update focuses on the Inventory Stock Card. You can now search for " +
+      "items using a fast, searchable picker instead of scrolling through a full " +
+      "list, print any stock card on a branded letterhead sheet, and export a " +
+      "stock card to CSV for use in a spreadsheet. A fix ensures that search " +
+      "errors in the item picker are surfaced clearly and that stale results no " +
+      "longer flash on screen while a new search loads.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Searchable item picker on the Stock Card',
+            body:
+              "The item selector on the Stock Card is now a fast, searchable " +
+              "combobox — type a few characters to jump straight to the item you " +
+              "need instead of scrolling through the full list.",
+          },
+          {
+            title: 'Print the stock card on your letterhead',
+            body:
+              "Any stock card can now be sent to the printer as a formatted, " +
+              "letterhead-branded sheet, ready to file or hand to a supplier.",
+          },
+          {
+            title: 'Export a stock card to CSV',
+            body:
+              "Download the stock card for any item as a CSV file, ready to open " +
+              "in a spreadsheet or share with a colleague.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Item picker shows search errors clearly; no stale-result flash',
+            body:
+              "If the item search encounters a problem, the error is now shown on " +
+              "screen rather than failing silently. The picker also no longer " +
+              "briefly shows old results while a new search is loading.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-11': {
     product: 'Cardoso App',
     title: 'Product Update',

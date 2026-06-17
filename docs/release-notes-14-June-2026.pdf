@@ -1,0 +1,420 @@
+%PDF-1.3
+%ºß¬à
+3 0 obj
+<</Type /Page
+/Parent 1 0 R
+/Resources 2 0 R
+/MediaBox [0 0 595.2799999999999727 841.8899999999999864]
+/Contents 4 0 R
+>>
+endobj
+4 0 obj
+<<
+/Length 5637
+>>
+stream
+0.5670000000000001 w
+0 G
+0.11 0.15 0.23 rg
+0. 841.8899999999999864 595.2799999999999727 -90.708661417322844 re
+f
+BT
+/F2 18 Tf
+20.6999999999999993 TL
+1. g
+51.0236220472441033 796.5356692913385359 Td
+(Cardoso App) Tj
+ET
+BT
+/F1 11 Tf
+12.6499999999999986 TL
+0.804 0.831 0.871 rg
+51.0236220472441033 773.8585039370078675 Td
+(Product Update) Tj
+ET
+BT
+/F1 10 Tf
+11.5 TL
+0.804 0.831 0.871 rg
+484.156377952755804 773.8585039370078675 Td
+(14 June 2026) Tj
+ET
+BT
+/F1 10.5 Tf
+12.0749999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 717.1655905511811397 Td
+(This update focuses on the Inventory Stock Card. You can now search for items using a fast, searchable) Tj
+T* (picker instead of scrolling through a full list, print any stock card on a branded letterhead sheet, and export) Tj
+T* (a stock card to CSV for use in a spreadsheet. A fix ensures that search errors in the item picker are) Tj
+T* (surfaced clearly and that stale results no longer flash on screen while a new search loads.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 641.1970866141732586 Td
+(New Features) Tj
+ET
+0.09 0.48 0.31 rg
+513.2500787401573916 653.6695275590551546 m
+540.8548031496062549 653.6695275590551546 l
+542.7334410387944672 653.6695275590551546 544.2563779527558836 652.1465906450937382 544.2563779527558836 650.2679527559055259 c
+544.2563779527558836 640.0632283464566399 l
+544.2563779527558836 638.1845904572684276 542.3777400635676713 636.6616535433071249 540.8548031496062549 636.6616535433071249 c
+513.2500787401573916 636.6616535433071249 l
+511.3714408509691793 636.6616535433071249 509.8485039370078198 638.5402914324952235 509.8485039370078198 640.0632283464566399 c
+509.8485039370078198 650.2679527559055259 l
+509.8485039370078198 652.1465906450937382 511.7271418261960321 653.6695275590551546 513.2500787401573916 653.6695275590551546 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+518.3524409448818915 641.1970866141732586 Td
+(NEW) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 632.69314960629913 m
+544.2563779527558836 632.69314960629913 l
+S
+0.09 0.48 0.31 rg
+51.0236220472441033 624.1892125984251152 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 615.6852755905511003 Td
+(Searchable item picker on the Stock Card) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 601.5120472440944468 Td
+(The item selector on the Stock Card is now a fast, searchable combobox — type a few) Tj
+T* (characters to jump straight to the item you need instead of scrolling through the full list.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 570.0474803149606942 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 561.5435433070865656 Td
+(Print the stock card on your letterhead) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 547.3703149606299121 Td
+(Any stock card can now be sent to the printer as a formatted, letterhead-branded sheet, ready to) Tj
+T* (file or hand to a supplier.) Tj
+ET
+0.09 0.48 0.31 rg
+51.0236220472441033 515.9057480314960458 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 507.4018110236220309 Td
+(Export a stock card to CSV) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 493.2285826771653205 Td
+(Download the stock card for any item as a CSV file, ready to open in a spreadsheet or share with) Tj
+T* (a colleague.) Tj
+ET
+BT
+/F2 13 Tf
+14.9499999999999993 TL
+0.129 0.145 0.161 rg
+51.0236220472441033 441.9214960629921052 Td
+(Fixes) Tj
+ET
+0.69 0.49 0.09 rg
+508.6750787401573461 454.3939370078740012 m
+540.8548031496061412 454.3939370078740012 l
+542.7334410387943535 454.3939370078740012 544.2563779527557699 452.8710000939126417 544.2563779527557699 450.9923622047244294 c
+544.2563779527557699 440.7876377952756002 l
+544.2563779527557699 438.9089999060873879 542.3777400635675576 437.3860629921260283 540.8548031496061412 437.3860629921260283 c
+508.6750787401573461 437.3860629921260283 l
+506.7964408509691339 437.3860629921260283 505.2735039370077743 439.2647008813142406 505.2735039370077743 440.7876377952756002 c
+505.2735039370077743 450.9923622047244294 l
+505.2735039370077743 452.8710000939126417 507.1521418261959866 454.3939370078740012 508.6750787401573461 454.3939370078740012 c
+h
+f
+BT
+/F2 7.5 Tf
+8.625 TL
+1. g
+513.7774409448817323 441.9214960629921052 Td
+(FIXED) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 433.4175590551180335 m
+544.2563779527558836 433.4175590551180335 l
+S
+0.69 0.49 0.09 rg
+51.0236220472441033 424.9136220472440186 3.9685039370078741 -3.9685039370078741 re
+f
+BT
+/F2 10.5 Tf
+12.0749999999999993 TL
+0.129 0.145 0.161 rg
+62.3622047244094517 416.4096850393700606 Td
+(Item picker shows search errors clearly; no stale-result flash) Tj
+ET
+BT
+/F1 9.5 Tf
+10.9249999999999989 TL
+0.353 0.392 0.451 rg
+62.3622047244094517 402.2364566929133503 Td
+(If the item search encounters a problem, the error is now shown on screen rather than failing) Tj
+T* (silently. The picker also no longer briefly shows old results while a new search is loading.) Tj
+ET
+0.87 0.89 0.91 RG
+0.8503937007874016 w
+51.0236220472441033 34.0157480314960665 m
+544.2563779527558836 34.0157480314960665 l
+S
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+51.0236220472441033 19.8425196850394059 Td
+(Cardoso App · 14 June 2026) Tj
+ET
+BT
+/F1 8 Tf
+9.1999999999999993 TL
+0.353 0.392 0.451 rg
+503.6163779527558404 19.8425196850394059 Td
+(Page 1 of 1) Tj
+ET
+endstream
+endobj
+1 0 obj
+<</Type /Pages
+/Kids [3 0 R ]
+/Count 1
+>>
+endobj
+5 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+6 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+7 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+8 0 obj
+<<
+/Type /Font
+/BaseFont /Helvetica-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+9 0 obj
+<<
+/Type /Font
+/BaseFont /Courier
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+10 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+11 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-Oblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+12 0 obj
+<<
+/Type /Font
+/BaseFont /Courier-BoldOblique
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+13 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Roman
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+14 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Bold
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+15 0 obj
+<<
+/Type /Font
+/BaseFont /Times-Italic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+16 0 obj
+<<
+/Type /Font
+/BaseFont /Times-BoldItalic
+/Subtype /Type1
+/Encoding /WinAnsiEncoding
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+17 0 obj
+<<
+/Type /Font
+/BaseFont /ZapfDingbats
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+18 0 obj
+<<
+/Type /Font
+/BaseFont /Symbol
+/Subtype /Type1
+/FirstChar 32
+/LastChar 255
+>>
+endobj
+2 0 obj
+<<
+/ProcSet [/PDF /Text /ImageB /ImageC /ImageI]
+/Font <<
+/F1 5 0 R
+/F2 6 0 R
+/F3 7 0 R
+/F4 8 0 R
+/F5 9 0 R
+/F6 10 0 R
+/F7 11 0 R
+/F8 12 0 R
+/F9 13 0 R
+/F10 14 0 R
+/F11 15 0 R
+/F12 16 0 R
+/F13 17 0 R
+/F14 18 0 R
+>>
+/XObject <<
+>>
+>>
+endobj
+19 0 obj
+<<
+/Producer (jsPDF 4.2.1)
+/CreationDate (D:20260615060542-00'00')
+>>
+endobj
+20 0 obj
+<<
+/Type /Catalog
+/Pages 1 0 R
+/OpenAction [3 0 R /FitH null]
+/PageLayout /OneColumn
+>>
+endobj
+xref
+0 21
+0000000000 65535 f 
+0000005841 00000 n 
+0000007658 00000 n 
+0000000015 00000 n 
+0000000152 00000 n 
+0000005898 00000 n 
+0000006023 00000 n 
+0000006153 00000 n 
+0000006286 00000 n 
+0000006423 00000 n 
+0000006546 00000 n 
+0000006675 00000 n 
+0000006807 00000 n 
+0000006943 00000 n 
+0000007071 00000 n 
+0000007198 00000 n 
+0000007327 00000 n 
+0000007460 00000 n 
+0000007562 00000 n 
+0000007906 00000 n 
+0000007992 00000 n 
+trailer
+<<
+/Size 21
+/Root 20 0 R
+/Info 19 0 R
+/ID [ <7C40BEE4B872BE738A16BFEDE1CED1F5> <7C40BEE4B872BE738A16BFEDE1CED1F5> ]
+>>
+startxref
+8096
+%%EOF
