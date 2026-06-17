@@ -216,6 +216,19 @@ function buildPrintStyle(id, orientation) {
   }
   #${id}-printable * { visibility: visible; }
 
+  /* On screen, tables sit in overflow-x-auto cards so wide tables scroll. In
+     print an overflow scroll container is laid out as a single un-paginated
+     fragment: a tall table then overruns the page content area and draws over
+     the fixed footer (and the next page) instead of breaking row-by-row.
+     Force every scroll container back to visible so the table paginates
+     normally and clears the footer band. */
+  #${id}-printable .overflow-x-auto,
+  #${id}-printable .overflow-y-auto,
+  #${id}-printable .overflow-auto,
+  #${id}-printable .overflow-hidden,
+  #${id}-printable .overflow-x-scroll,
+  #${id}-printable .overflow-y-scroll { overflow: visible !important; }
+
   .report-print-header {
     display: flex !important;
     align-items: flex-end;
