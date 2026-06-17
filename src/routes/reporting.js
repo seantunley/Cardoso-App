@@ -2404,6 +2404,16 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   };
 
+  // bat_overview_orders.order_amount is intentionally nullable: a blank /
+  // non-numeric amount means the exposure is UNKNOWN, not a real R0.00. Preserve
+  // null all the way through (so the UI can render "unknown" and the subtotals
+  // can exclude it) instead of coercing it to 0 and understating exposure.
+  const batExcAmount = (v) => {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   // SHARED exception-row builder — the single source of truth used by BOTH the
   // site report and the site detail endpoint the hub ETL pulls, so the hub can
   // never drift from the site. Combines captured exception extractions
@@ -2443,7 +2453,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       customer_no: r.customer_no, customer: r.customer, delivery_date: r.delivery_date,
       pod_uploaded_date: r.pod_uploaded_date, ocr: batOcrLabel(r.extraction_status, r.is_missing_pod),
       invoice: r.invoice, exception_reason: r.exception_reason,
-      amount: Number(r.amount) || 0, is_missing_pod: r.is_missing_pod,
+      amount: batExcAmount(r.amount), is_missing_pod: r.is_missing_pod,
     }));
   };
 
@@ -2453,8 +2463,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     for (const row of rows) {
       const key = `${row.year}-${row.week_number}`;
       let g = m.get(key);
-      if (!g) { g = { year: row.year, week_number: row.week_number, rows: [], subtotal_count: 0, subtotal_amount: 0 }; m.set(key, g); }
-      g.rows.push(row); g.subtotal_count += 1; g.subtotal_amount += row.amount;
+      if (!g) { g = { year: row.year, week_number: row.week_number, rows: [], subtotal_count: 0, subtotal_amount: 0, subtotal_unknown_count: 0 }; m.set(key, g); }
+      g.rows.push(row); g.subtotal_count += 1;
+      // Unknown amounts (null) are NOT added into the subtotal — they're counted
+      // separately so the figure isn't silently understated.
+      if (row.amount == null) g.subtotal_unknown_count += 1; else g.subtotal_amount += row.amount;
     }
     const weeks = Array.from(m.values()).sort((a, b) => (b.year - a.year) || (b.week_number - a.week_number));
     for (const w of weeks) w.rows.sort((a, b) => String(a.order_number || '').localeCompare(String(b.order_number || '')));
@@ -2496,7 +2509,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
             site_id: s.site_id, site_name: s.site_name,
             weeks: groupExceptionWeeks(s.rows),
             total_count: s.rows.length,
-            total_amount: s.rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0),
+            total_amount: s.rows.reduce((sum, r) => sum + (r.amount == null ? 0 : Number(r.amount)), 0),
+            total_unknown_count: s.rows.filter((r) => r.amount == null).length,
           }))
           .sort((a, b) => String(a.site_name).localeCompare(String(b.site_name)));
 
@@ -2505,7 +2519,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         return res.json({
           hub: true, year, site: siteFilter, sites,
           total_count: rows.length,
-          total_amount: rows.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+          total_amount: rows.reduce((s, r) => s + (r.amount == null ? 0 : Number(r.amount)), 0),
+          total_unknown_count: rows.filter((r) => r.amount == null).length,
           filters: { sites: siteList },
           available_years: yearsRow.map((r) => r.year).filter(Boolean),
           generated_at: new Date().toISOString(),
@@ -2523,7 +2538,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         site_name: depotName,
         weeks,
         total_count: rows.length,
-        total_amount: rows.reduce((s, r) => s + r.amount, 0),
+        total_amount: rows.reduce((s, r) => s + (r.amount == null ? 0 : r.amount), 0),
+        total_unknown_count: rows.filter((r) => r.amount == null).length,
         available_years: yearsRow.map((r) => r.year).filter(Boolean),
         generated_at: new Date().toISOString(),
       });

@@ -21,12 +21,14 @@ function fetchData(year, site) {
 const COLS = ['Order', 'Customer No.', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason'];
 
 function WeekBlock({ week }) {
+  const unknown = week.subtotal_unknown_count || 0;
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
       <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5">
         <div className="font-display text-lg">Week {String(week.week_number).padStart(2, '0')} <span className="text-muted-foreground">· {week.year}</span></div>
         <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
           {week.subtotal_count} {week.subtotal_count === 1 ? 'exception' : 'exceptions'} · <span className="tabular-nums text-foreground">R {fmtR(week.subtotal_amount)}</span>
+          {unknown > 0 && <span className="text-amber-500/80"> · {unknown} unknown</span>}
         </div>
       </div>
       <table className="w-full text-sm report-doc-table" style={{ minWidth: 900 }}>
@@ -47,13 +49,17 @@ function WeekBlock({ week }) {
               <td className="px-3 py-1.5 text-xs">{r.ocr || '—'}</td>
               <td className="px-3 py-1.5 font-mono text-xs text-foreground">{r.invoice || '—'}</td>
               <td className="px-3 py-1.5 text-xs">{r.exception_reason || '—'}</td>
-              <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/40"><span className="text-muted-subtle">R </span>{fmtR(r.amount)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/40">
+                {r.amount == null
+                  ? <span className="italic text-muted-subtle" title="Amount blank in BAT — exposure unknown, excluded from totals">unknown</span>
+                  : <><span className="text-muted-subtle">R </span>{fmtR(r.amount)}</>}
+              </td>
             </tr>
           ))}
         </tbody>
         <tfoot>
           <tr className="border-t-2 border-border bg-muted/40">
-            <td className="px-3 py-1.5 font-semibold" colSpan={COLS.length}>Week {String(week.week_number).padStart(2, '0')} subtotal · {week.subtotal_count} {week.subtotal_count === 1 ? 'exception' : 'exceptions'}</td>
+            <td className="px-3 py-1.5 font-semibold" colSpan={COLS.length}>Week {String(week.week_number).padStart(2, '0')} subtotal · {week.subtotal_count} {week.subtotal_count === 1 ? 'exception' : 'exceptions'}{unknown > 0 && <span className="font-normal text-muted-foreground"> ({unknown} amount unknown, excluded)</span>}</td>
             <td className="px-3 py-1.5 text-right font-semibold tabular-nums border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(week.subtotal_amount)}</td>
           </tr>
         </tfoot>
@@ -77,6 +83,7 @@ export default function BatExceptionsWeekly() {
   const sites = data?.sites || [];          // hub mode
   const totalCount = data?.total_count || 0;
   const totalAmount = data?.total_amount || 0;
+  const totalUnknown = data?.total_unknown_count || 0;
   const hasData = isHub ? sites.length > 0 : weeks.length > 0;
 
   const yearOptions = useMemo(() => {
@@ -88,21 +95,23 @@ export default function BatExceptionsWeekly() {
   const exportCsv = () => {
     const header = [...(isHub ? ['Site'] : []), 'Week', 'Year', 'Order', 'Customer No.', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason', 'Amount'];
     const rows = [];
+    const unknownNote = (n) => (n > 0 ? `, ${n} amount unknown` : '');
     const pushWeek = (w, siteName) => {
       for (const r of w.rows) {
-        rows.push([...(isHub ? [siteName] : []), w.week_number, w.year, r.order_number || '', r.customer_no || '', r.customer || '', r.delivery_date || '', r.pod_uploaded_date || '', r.ocr || '', r.invoice || '', r.exception_reason || '', (Number(r.amount) || 0).toFixed(2)]);
+        // Blank amount stays 'unknown' (not 0.00) so it isn't read as a real value or summed.
+        rows.push([...(isHub ? [siteName] : []), w.week_number, w.year, r.order_number || '', r.customer_no || '', r.customer || '', r.delivery_date || '', r.pod_uploaded_date || '', r.ocr || '', r.invoice || '', r.exception_reason || '', r.amount == null ? 'unknown' : Number(r.amount).toFixed(2)]);
       }
-      rows.push([...(isHub ? [siteName] : []), `Week ${w.week_number} subtotal`, '', '', '', '', '', '', '', '', `${w.subtotal_count} exceptions`, (Number(w.subtotal_amount) || 0).toFixed(2)]);
+      rows.push([...(isHub ? [siteName] : []), `Week ${w.week_number} subtotal`, '', '', '', '', '', '', '', '', `${w.subtotal_count} exceptions${unknownNote(w.subtotal_unknown_count)}`, (Number(w.subtotal_amount) || 0).toFixed(2)]);
     };
     if (isHub) {
       for (const s of sites) {
         for (const w of s.weeks) pushWeek(w, s.site_name);
-        rows.push([s.site_name, 'SITE TOTAL', '', '', '', '', '', '', '', '', `${s.total_count} exceptions`, (Number(s.total_amount) || 0).toFixed(2)]);
+        rows.push([s.site_name, 'SITE TOTAL', '', '', '', '', '', '', '', '', `${s.total_count} exceptions${unknownNote(s.total_unknown_count)}`, (Number(s.total_amount) || 0).toFixed(2)]);
       }
     } else {
       for (const w of weeks) pushWeek(w);
     }
-    rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', '', '', '', '', '', '', `${totalCount} exceptions`, (Number(totalAmount) || 0).toFixed(2)]);
+    rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', '', '', '', '', '', '', `${totalCount} exceptions${unknownNote(totalUnknown)}`, (Number(totalAmount) || 0).toFixed(2)]);
     downloadCsv(`bat-exceptions-${year}${isHub && site !== 'all' ? `-${site}` : ''}.csv`, [header, ...rows]);
   };
 
@@ -119,7 +128,7 @@ export default function BatExceptionsWeekly() {
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error?.message}
-      printHeader={<PrintHeader title="BAT Exceptions by Week" filters={[`Year: ${year === 'all' ? 'All' : year}`, ...(isHub ? [`Site: ${site === 'all' ? 'All sites' : site}`] : []), `${totalCount} exceptions`, 'Amounts in Rand (R)']} generatedAt={generatedAtFmt} />}
+      printHeader={<PrintHeader title="BAT Exceptions by Week" filters={[`Year: ${year === 'all' ? 'All' : year}`, ...(isHub ? [`Site: ${site === 'all' ? 'All sites' : site}`] : []), `${totalCount} exceptions${totalUnknown > 0 ? ` (${totalUnknown} amount unknown, excluded from totals)` : ''}`, 'Amounts in Rand (R)']} generatedAt={generatedAtFmt} />}
       printFooter={<PrintFooter note="BAT Exceptions by Week · Cardoso" />}
     >
       {/* Filters */}
@@ -153,7 +162,7 @@ export default function BatExceptionsWeekly() {
               <Fragment key={s.site_id}>
                 <div className="flex items-baseline justify-between rounded-xl border-l-2 border-l-[var(--phosphor)] border border-border bg-card px-4 py-2.5">
                   <div className="font-display text-xl">{s.site_name}</div>
-                  <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">site total · {s.total_count} exceptions · <span className="tabular-nums text-foreground">R {fmtR(s.total_amount)}</span></div>
+                  <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">site total · {s.total_count} exceptions · <span className="tabular-nums text-foreground">R {fmtR(s.total_amount)}</span>{s.total_unknown_count > 0 && <span className="text-amber-500/80"> · {s.total_unknown_count} unknown</span>}</div>
                 </div>
                 <div className="space-y-4 pl-1">
                   {s.weeks.map((w) => <WeekBlock key={`${s.site_id}-${w.year}-${w.week_number}`} week={w} />)}
@@ -166,7 +175,7 @@ export default function BatExceptionsWeekly() {
 
           {/* Grand total */}
           <div className="flex items-baseline justify-between rounded-xl border-2 border-accent/40 bg-card px-5 py-3">
-            <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-accent">Grand total · {yearLabel}{isHub ? ' · all sites shown' : ''}</div>
+            <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-accent">Grand total · {yearLabel}{isHub ? ' · all sites shown' : ''}{totalUnknown > 0 && ` · ${totalUnknown} amount unknown (excluded)`}</div>
             <div className="font-display text-xl tabular-nums">{totalCount} exceptions · R {fmtR(totalAmount)}</div>
           </div>
         </div>

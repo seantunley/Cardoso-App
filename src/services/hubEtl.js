@@ -1027,7 +1027,9 @@ async function syncSite(site) {
               ocr: r.ocr ?? null,
               invoice: r.invoice ?? null,
               exception_reason: r.exception_reason ?? null,
-              amount: Number(r.amount) || 0,
+              // Preserve "unknown" (null) — a blank BAT amount is not a real R0.00.
+              amount: (r.amount === null || r.amount === undefined) ? null
+                : (Number.isFinite(Number(r.amount)) ? Number(r.amount) : null),
               is_missing_pod: r.is_missing_pod ? 1 : 0,
               synced_at: now,
             });
