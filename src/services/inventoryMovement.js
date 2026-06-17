@@ -130,7 +130,34 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   // hub's health/KPIs fetches, flip-flopping the site tile Offline.
   try { rebuildInventorySalesRollups(); }
   catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
-  return { synced: aggRows.length, transactions: txnRows.length };
+  // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
+  // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
+  // — a vendor-map hiccup must not fail the sales sync.
+  let itemVendors = 0;
+  try { itemVendors = (await syncItemVendors()).synced; }
+  catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+  return { synced: aggRows.length, transactions: txnRows.length, itemVendors };
+}
+
+// Sync the item -> primary-vendor map from Sage ICITMV (the item/vendor table).
+// One row per item (lowest VENDTYPE = preferred vendor), keyed to the AP vendor
+// code so vendor identity matches creditors. Full refresh (~2.4k rows): clear
+// and re-insert so retired item/vendor links drop out. This is the single source
+// of truth for an item's vendor, replacing the old "latest stock receipt" guess.
+export async function syncItemVendors() {
+  const pool = await getSagePool();
+  const result = await pool.request().query(resolveSageQuery('inventory.item_vendor'));
+  const rows = result.recordset || [];
+  const insert = db.prepare('INSERT OR REPLACE INTO item_vendor (item_number, vendor_code, vendor_name, synced_at) VALUES (?, ?, ?, now_local())');
+  db.transaction(() => {
+    db.prepare('DELETE FROM item_vendor').run();
+    for (const r of rows) {
+      const item = String(r.item_number || '').trim();
+      if (!item) continue;
+      insert.run(item, String(r.vendor_code || '').trim() || null, String(r.vendor_name || '').trim() || null);
+    }
+  })();
+  return { synced: rows.length };
 }
 
 // EXCL_INTER_BRANCH mirrors the fragment in routes/reporting.js — exclude
@@ -358,34 +385,27 @@ export function getCommodities() {
   ).all().map(r => r.commodity);
 }
 
-// Distinct supplier names sourced from Sage PO receipts. Used to populate
-// the supplier filter dropdown on Top Movers and Dead Stock. Only suppliers
-// that have actually shipped at least one item (qty > 0) are returned, so
-// dropdowns don't fill up with stale or test vendor rows.
+// Distinct vendor names from the item/vendor master (Sage ICITMV). Populates the
+// supplier filter dropdown on Top Movers and Dead Stock — the same source as
+// Sales by Vendor, so vendor attribution is consistent across reports.
 export function getSuppliers() {
   return db.prepare(`
-    SELECT DISTINCT TRIM(sr.supplier_name) AS supplier_name
-    FROM stock_receipt sr
-    JOIN stock_receipt_line srl ON srl.receipt_id = sr.id
-    WHERE sr.supplier_name IS NOT NULL
-      AND TRIM(sr.supplier_name) != ''
+    SELECT DISTINCT TRIM(vendor_name) AS supplier_name
+    FROM item_vendor
+    WHERE TRIM(COALESCE(vendor_name, '')) != ''
     ORDER BY 1
   `).all().map(r => r.supplier_name);
 }
 
-// Latest supplier per item, derived from the most recent receipt date.
-// Pulled into its own helper because both Top Movers and Dead Stock need
-// the same definition; if we ever switch to "preferred supplier" from
-// Sage ICITEM directly, this is the one place to change.
+// Item -> vendor, from the ICITMV-backed item/vendor master (synced by
+// syncItemVendors). Aliased to supplier_name so the Top Movers / Dead Stock
+// joins below are unchanged. Replaces the old "latest stock receipt" inference,
+// which missed items never received and could name a transient distributor
+// instead of the actual vendor.
 const LATEST_SUPPLIER_SQL = `
-  SELECT item_number, supplier_name FROM (
-    SELECT TRIM(srl.item_number) AS item_number,
-           TRIM(sr.supplier_name) AS supplier_name,
-           ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
-    FROM stock_receipt_line srl
-    JOIN stock_receipt sr ON sr.id = srl.receipt_id
-    WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
-  ) WHERE rn = 1
+  SELECT item_number, vendor_name AS supplier_name
+  FROM item_vendor
+  WHERE TRIM(COALESCE(vendor_name, '')) != ''
 `;
 
 export function getItemTransactions({ itemNumber, from, to, limit = 500 }) {

@@ -2558,26 +2558,59 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // range; hub mode reads the monthly sales rollups (so the range snaps to whole
   // months) and can be one site or all sites combined.
   const SALES_VAT_RATE = 0.15; // SA standard rate; OE sales are net, so incl = ex * (1 + rate)
+  // Build vendor groups from union rows carrying current (qty/ex_vat) and, when
+  // the prior-year toggle is on, prior-year (py_qty/py_ex) figures.
   const groupSalesByVendor = (rows) => {
     const m = new Map();
     for (const r of rows) {
-      const ex = Number(r.ex_vat) || 0;
-      const incl = ex * (1 + SALES_VAT_RATE);
-      const qty = Number(r.qty) || 0;
+      const ex = Number(r.ex_vat) || 0, qty = Number(r.qty) || 0;
+      const pyEx = Number(r.py_ex) || 0, pyQty = Number(r.py_qty) || 0;
       let g = m.get(r.vendor);
-      if (!g) { g = { vendor: r.vendor, items: [], subtotal_qty: 0, subtotal_ex: 0, subtotal_incl: 0 }; m.set(r.vendor, g); }
-      g.items.push({ item_number: r.item_number, item_description: r.item_description || null, qty, ex_vat: ex, incl_vat: incl });
-      g.subtotal_qty += qty; g.subtotal_ex += ex; g.subtotal_incl += incl;
+      if (!g) {
+        g = { vendor: r.vendor, items: [],
+              subtotal_qty: 0, subtotal_ex: 0, subtotal_incl: 0,
+              py_subtotal_qty: 0, py_subtotal_ex: 0, py_subtotal_incl: 0 };
+        m.set(r.vendor, g);
+      }
+      g.items.push({
+        item_number: r.item_number, item_description: r.item_description || null,
+        qty, ex_vat: ex, incl_vat: ex * (1 + SALES_VAT_RATE),
+        py_qty: pyQty, py_ex_vat: pyEx, py_incl_vat: pyEx * (1 + SALES_VAT_RATE),
+      });
+      g.subtotal_qty += qty; g.subtotal_ex += ex; g.subtotal_incl += ex * (1 + SALES_VAT_RATE);
+      g.py_subtotal_qty += pyQty; g.py_subtotal_ex += pyEx; g.py_subtotal_incl += pyEx * (1 + SALES_VAT_RATE);
     }
-    const vendors = Array.from(m.values()).sort((a, b) => b.subtotal_ex - a.subtotal_ex);
-    for (const v of vendors) v.items.sort((a, b) => b.ex_vat - a.ex_vat);
+    // Sort by current value, but keep prior-year-only vendors (current 0) in view at the end.
+    const vendors = Array.from(m.values()).sort((a, b) => (b.subtotal_ex - a.subtotal_ex) || (b.py_subtotal_ex - a.py_subtotal_ex));
+    for (const v of vendors) v.items.sort((a, b) => (b.ex_vat - a.ex_vat) || (b.py_ex_vat - a.py_ex_vat));
     return vendors;
   };
   const salesGrand = (vendors) => ({
     qty: vendors.reduce((s, v) => s + v.subtotal_qty, 0),
     ex: vendors.reduce((s, v) => s + v.subtotal_ex, 0),
     incl: vendors.reduce((s, v) => s + v.subtotal_incl, 0),
+    py_qty: vendors.reduce((s, v) => s + v.py_subtotal_qty, 0),
+    py_ex: vendors.reduce((s, v) => s + v.py_subtotal_ex, 0),
+    py_incl: vendors.reduce((s, v) => s + v.py_subtotal_incl, 0),
   });
+  // Union current + prior-year aggregate rows, keyed by vendor+item (vendor is the
+  // item's latest supplier, stable across periods). Either side may be missing.
+  const mergeSalesPeriods = (cur, prior) => {
+    const m = new Map();
+    const keyOf = (r) => `${r.vendor}||${r.item_number}`;
+    for (const r of cur) {
+      m.set(keyOf(r), { item_number: r.item_number, vendor: r.vendor, item_description: r.item_description || null, qty: Number(r.qty) || 0, ex_vat: Number(r.ex_vat) || 0, py_qty: 0, py_ex: 0 });
+    }
+    for (const r of prior) {
+      const k = keyOf(r);
+      let g = m.get(k);
+      if (!g) { g = { item_number: r.item_number, vendor: r.vendor, item_description: r.item_description || null, qty: 0, ex_vat: 0, py_qty: 0, py_ex: 0 }; m.set(k, g); }
+      g.py_qty += Number(r.qty) || 0; g.py_ex += Number(r.ex_vat) || 0;
+      if (!g.item_description && r.item_description) g.item_description = r.item_description;
+    }
+    return Array.from(m.values());
+  };
+  const priorYear = (s) => `${parseInt(s.slice(0, 4), 10) - 1}${s.slice(4)}`; // 'YYYY-...' -> '(YYYY-1)-...'
 
   router.get('/api/reports/sales-by-vendor', ...reportsGuard, (req, res) => {
     const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2585,6 +2618,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const now = new Date();
     const from = validDate(req.query.from) ? req.query.from : isoDate(new Date(now.getFullYear(), now.getMonth(), 1));
     const to = validDate(req.query.to) ? req.query.to : isoDate(now);
+    const compare = ['1', 'true', 'yes', 'on'].includes(String(req.query.compare || '').toLowerCase());
     try {
       if (process.env.HUB_MODE === 'true') {
         // Hub: monthly rollups only — snap the range to the months it touches.
@@ -2592,63 +2626,54 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         const periodTo = to.slice(0, 7);
         const siteFilter = String(req.query.site || 'all').trim();
         const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
-        const params = siteFilter !== 'all' ? [periodFrom, periodTo, siteFilter] : [periodFrom, periodTo];
-        const rows = prep(
-          `WITH latest_supplier AS (
-             SELECT site_id, item_number, supplier_name FROM (
-               SELECT site_id, TRIM(item_number) AS item_number, TRIM(supplier_name) AS supplier_name,
-                      ROW_NUMBER() OVER (PARTITION BY site_id, TRIM(item_number) ORDER BY receipt_date DESC) AS rn
-               FROM hub_stock_receipt_expiry
-               WHERE TRIM(COALESCE(supplier_name, '')) != ''
-             ) WHERE rn = 1
-           )
-           SELECT TRIM(s.item_number) AS item_number,
-                  COALESCE(ls.supplier_name, '(No vendor)') AS vendor,
+        const hubAgg = (pf, pt) => prep(
+          `SELECT TRIM(s.item_number) AS item_number,
+                  COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
                   MAX(s.item_description) AS item_description,
                   SUM(s.qty_sold) AS qty, SUM(s.revenue) AS ex_vat
            FROM hub_inventory_item_sales s
-           LEFT JOIN latest_supplier ls ON ls.site_id = s.site_id AND ls.item_number = TRIM(s.item_number)
+           LEFT JOIN hub_item_vendor iv ON iv.site_id = s.site_id AND iv.item_number = TRIM(s.item_number)
            WHERE s.period >= ? AND s.period <= ? ${siteWhere}
-           GROUP BY TRIM(s.item_number), COALESCE(ls.supplier_name, '(No vendor)')`
-        ).all(...params);
-        const vendors = groupSalesByVendor(rows);
+           GROUP BY TRIM(s.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
+        ).all(...(siteFilter !== 'all' ? [pf, pt, siteFilter] : [pf, pt]));
+        const cur = hubAgg(periodFrom, periodTo);
+        const pyFrom = priorYear(periodFrom), pyTo = priorYear(periodTo);
+        const prior = compare ? hubAgg(pyFrom, pyTo) : [];
+        const vendors = groupSalesByVendor(compare ? mergeSalesPeriods(cur, prior) : cur);
         const sites = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
         return res.json({
-          hub: true, from, to, period_from: periodFrom, period_to: periodTo,
+          hub: true, compare, from, to, period_from: periodFrom, period_to: periodTo,
+          ...(compare ? { py_period_from: pyFrom, py_period_to: pyTo } : {}),
           site: siteFilter, vendors, grand: salesGrand(vendors),
           filters: { sites }, vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
         });
       }
 
-      // Site: exact day range from the per-transaction cache.
-      const rows = prep(
-        `WITH latest_supplier AS (
-           SELECT item_number, supplier_name FROM (
-             SELECT TRIM(srl.item_number) AS item_number, TRIM(sr.supplier_name) AS supplier_name,
-                    ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
-             FROM stock_receipt_line srl
-             JOIN stock_receipt sr ON sr.id = srl.receipt_id
-             WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
-           ) WHERE rn = 1
-         )
-         SELECT TRIM(t.item_number) AS item_number,
-                COALESCE(ls.supplier_name, '(No vendor)') AS vendor,
+      // Site: exact day range from the per-transaction cache, vendor from the
+      // item/vendor master (Sage ICITMV), not stock receipts.
+      const siteAgg = (f, t) => prep(
+        `SELECT TRIM(t.item_number) AS item_number,
+                COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
                 SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS ex_vat
          FROM inventory_sales_transactions t
-         LEFT JOIN latest_supplier ls ON ls.item_number = TRIM(t.item_number)
+         LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
          WHERE t.transaction_date >= ? AND t.transaction_date <= ?
-         GROUP BY TRIM(t.item_number), COALESCE(ls.supplier_name, '(No vendor)')`
-      ).all(from, to);
+         GROUP BY TRIM(t.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
+      ).all(f, t);
+      const cur = siteAgg(from, to);
+      const prior = compare ? siteAgg(priorYear(from), priorYear(to)) : [];
+      const merged = compare ? mergeSalesPeriods(cur, prior) : cur;
       // Descriptions from the item master, deduped to one row per item so the
       // JOIN can't fan out and double the sales sums.
       const descMap = new Map(
         prep("SELECT TRIM(item_number) AS item_number, MAX(item_description) AS d FROM inventoryrecord WHERE TRIM(COALESCE(item_description, '')) != '' GROUP BY TRIM(item_number)")
           .all().map((r) => [r.item_number, r.d])
       );
-      const vendors = groupSalesByVendor(rows.map((r) => ({ ...r, item_description: descMap.get(r.item_number) || null })));
+      const vendors = groupSalesByVendor(merged.map((r) => ({ ...r, item_description: r.item_description || descMap.get(r.item_number) || null })));
       const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
       res.json({
-        hub: false, from, to,
+        hub: false, compare, from, to,
+        ...(compare ? { py_from: priorYear(from), py_to: priorYear(to) } : {}),
         site_name: (depotRow?.name || '').trim() || SITE_NAME,
         vendors, grand: salesGrand(vendors),
         vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
@@ -3197,6 +3222,18 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting/bat-exceptions-detail] error:', err);
       res.status(500).json({ error: 'Failed to build BAT exceptions detail' });
+    }
+  });
+
+  // GET /api/reporting/item-vendors — the item -> vendor master (Sage ICITMV),
+  // pulled by the hub ETL into hub_item_vendor for the hub Sales-by-Vendor report.
+  router.get('/api/reporting/item-vendors', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const rows = prep('SELECT item_number, vendor_code, vendor_name FROM item_vendor').all();
+      res.json({ rows, generated_at: new Date().toISOString() });
+    } catch (err) {
+      console.error('[reporting/item-vendors] error:', err);
+      res.status(500).json({ error: 'Failed to build item-vendor map' });
     }
   });
 

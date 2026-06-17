@@ -480,6 +480,26 @@ define({
 });
 
 define({
+  key: 'inventory.item_vendor',
+  label: 'Inventory — item/vendor master',
+  purpose: 'Primary vendor per item from Sage ICITMV (item/vendor table), keyed to the AP vendor code. Drives vendor attribution in Sales by Vendor and the inventory supplier filters.',
+  pool: 'bat_sage',
+  tables: ['ICITMV'],
+  params: [],
+  requiredColumns: ['item_number', 'vendor_code', 'vendor_name'],
+  defaultSql: `
+  SELECT item_number, vendor_code, vendor_name FROM (
+    SELECT LTRIM(RTRIM(ITEMNO))   AS item_number,
+           LTRIM(RTRIM(VENDNUM))  AS vendor_code,
+           LTRIM(RTRIM(VENDNAME)) AS vendor_name,
+           ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(ITEMNO)) ORDER BY VENDTYPE ASC) AS rn
+    FROM ICITMV
+    WHERE LTRIM(RTRIM(COALESCE(VENDNUM, ''))) <> ''
+  ) x WHERE rn = 1
+`,
+});
+
+define({
   key: 'inventory.movement_history',
   label: 'Inventory — movement history (stock card)',
   purpose: 'Per-movement I/C transaction history (sales, receipts, credits/returns, adjustments, write-offs, transfers) for the item stock card. Paged by the (DAYENDSEQ, ENTRYSEQ, LINENO) composite cursor — DAYENDSEQ is monotonic so it is also the incremental sync key. QUANTITY x ICUNIT.CONVERSION gives the stocking-unit quantity.',
