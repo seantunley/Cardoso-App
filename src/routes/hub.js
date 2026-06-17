@@ -1286,6 +1286,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         try { counts.sync_log = db.prepare(`DELETE FROM hub_sync_log WHERE site_id = ?`).run(siteId).changes; } catch { counts.sync_log = 0; }
         try { counts.backup_integrity = db.prepare(`DELETE FROM hub_backup_integrity WHERE site_id = ?`).run(siteId).changes; } catch { counts.backup_integrity = 0; }
         try { counts.bat_summary = db.prepare(`DELETE FROM hub_bat_summary WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_summary = 0; }
+        // hub_bat_exceptions is keyed by site_id and the weekly report falls back
+        // to x.site_id when the hub_sites row is gone, so leftover rows would
+        // resurface as stale site-id data after the site is forgotten.
+        try { counts.bat_exceptions = db.prepare(`DELETE FROM hub_bat_exceptions WHERE site_id = ?`).run(siteId).changes; } catch { counts.bat_exceptions = 0; }
         counts.site = db.prepare(`DELETE FROM hub_sites WHERE id = ?`).run(siteId).changes;
       });
       tx();
@@ -1293,7 +1297,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       logAudit({
         req, action: 'hub_forget_orphan_site', resourceType: 'system',
         resourceId: siteId, resourceName: row.name || row.slug || siteId,
-        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary`,
+        details: `Forgot orphan site — removed ${counts.site} hub_sites row, ${counts.records} hub_records, ${counts.inventory} hub_inventory, ${counts.sync_log} hub_sync_log, ${counts.backup_integrity} hub_backup_integrity, ${counts.bat_summary} hub_bat_summary, ${counts.bat_exceptions} hub_bat_exceptions`,
         changes: { counts },
       });
 
@@ -1314,6 +1318,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       db.prepare('DELETE FROM hub_records WHERE site_id = ?').run(siteId);
       db.prepare('DELETE FROM hub_inventory WHERE site_id = ?').run(siteId);
       db.prepare('DELETE FROM hub_sync_log WHERE site_id = ?').run(siteId);
+      // Keyed by site_id; the weekly report falls back to x.site_id when the
+      // hub_sites row is gone, so leftover rows would resurface as stale data.
+      try { db.prepare('DELETE FROM hub_bat_exceptions WHERE site_id = ?').run(siteId); } catch { /* table may pre-date the v105 migration */ }
       db.prepare('DELETE FROM hub_sites WHERE id = ?').run(siteId);
 
       logAudit({
