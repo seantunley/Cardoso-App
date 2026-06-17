@@ -112,7 +112,12 @@ function StatTile({ label, value, sub, hue, glow, icon: Icon, big = false }) {
     >
       <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: hue, boxShadow: `0 0 12px ${glow}` }} />
       <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0" style={{ containerType: 'inline-size' }}>
+        {/* flex-1 gives this column a definite width from the row (not its
+            content) BEFORE it becomes an inline-size query container — without
+            it, a `flex: 0 1 auto` + containerType item loses its intrinsic
+            width and collapses, so cqi resolves to ~0 and the value sticks at
+            the clamp minimum. */}
+        <div className="min-w-0 flex-1" style={{ containerType: 'inline-size' }}>
           <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-2">{label}</div>
           <div className={`font-display leading-none text-foreground tabular-nums whitespace-nowrap ${big ? "text-[clamp(1.1rem,11cqi,2.25rem)]" : "text-[clamp(1rem,9cqi,1.5rem)]"}`}>{value}</div>
           <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground mt-2 truncate">{sub}</div>

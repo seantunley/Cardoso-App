@@ -23,9 +23,10 @@ const RELEASES = {
       "behind your numbers. A new Inventory Movement History gives every item a " +
       "'stock card': every sale, receipt, credit, adjustment, write-off and " +
       "transfer, with a running balance that reconciles to your on-hand stock " +
-      "figure. The Daily Sales report can now print every invoice, credit " +
-      "note and debit note for a chosen day, and the BAT reconciliation lists " +
-      "print on a letterhead sheet. Installing and updating a branch is also " +
+      "figure. The Daily Sales report can now print the VAT-bearing invoices, " +
+      "credit notes and debit notes behind a chosen day's figure, and the BAT " +
+      "reconciliation lists print on a letterhead sheet. Installing and " +
+      "updating a branch is also " +
       "faster. Every figure continues to be drawn from, and reconcile to, Sage.",
     sections: [
       {
@@ -52,11 +53,11 @@ const RELEASES = {
             title: 'Print a day’s documents from Daily Sales Figures',
             body:
               "On the Daily Sales Figures report, each day now has a Print button " +
-              "that lists every invoice, credit note and debit note posted that " +
-              "day on a letterhead sheet.",
+              "that lists the VAT-bearing invoices, credit notes and debit notes " +
+              "behind that day's figure on a letterhead sheet.",
             details: [
               "Documents are grouped by type — Invoices, Credit Notes, Debit Notes — with per-type subtotals and a net total; each line shows the document number, customer, order and the VAT split.",
-              "It uses the same source and filters as the day's summary row, so the printed list always reconciles to the figure on the report.",
+              "It uses the same source and filters as the day's summary row (VAT-bearing documents), so the printed list always reconciles to that figure on the report — note zero-rated/exempt documents, which the figure also excludes, are not listed.",
               "Printed on the depot letterhead with the date, ready to file or hand over.",
             ],
           },
@@ -86,6 +87,59 @@ const RELEASES = {
               "The application's libraries ship as a single compressed archive and are unpacked in one pass, instead of copying tens of thousands of small files individually.",
               "An interrupted update can no longer leave a half-updated install running quietly: the installer clears the old libraries first, verifies the new ones unpacked, and stops with a clear message if anything went wrong.",
             ],
+          },
+        ],
+      },
+    ],
+  },
+  '2026-06-14': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '14 June 2026',
+    slug: '14-June-2026',
+    intro:
+      "This update focuses on the Inventory Stock Card. You can now search for " +
+      "items using a fast, searchable picker instead of scrolling through a full " +
+      "list, print any stock card on a branded letterhead sheet, and export a " +
+      "stock card to CSV for use in a spreadsheet. A fix ensures that search " +
+      "errors in the item picker are surfaced clearly and that stale results no " +
+      "longer flash on screen while a new search loads.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Searchable item picker on the Stock Card',
+            body:
+              "The item selector on the Stock Card is now a fast, searchable " +
+              "combobox — type a few characters to jump straight to the item you " +
+              "need instead of scrolling through the full list.",
+          },
+          {
+            title: 'Print the stock card on your letterhead',
+            body:
+              "Any stock card can now be sent to the printer as a formatted, " +
+              "letterhead-branded sheet, ready to file or hand to a supplier.",
+          },
+          {
+            title: 'Export a stock card to CSV',
+            body:
+              "Download the stock card for any item as a CSV file, ready to open " +
+              "in a spreadsheet or share with a colleague.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Item picker shows search errors clearly; no stale-result flash',
+            body:
+              "If the item search encounters a problem, the error is now shown on " +
+              "screen rather than failing silently. The picker also no longer " +
+              "briefly shows old results while a new search is loading.",
           },
         ],
       },

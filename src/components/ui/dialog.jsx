@@ -19,7 +19,10 @@ const DialogOverlay = ({
   className,
   ref,
   ...props
-}) => <DialogPrimitive.Overlay ref={ref} className={cn("fixed inset-0 z-50 bg-black/80  data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0", className)} {...props} />
+  // Glassmorphism: frost the page BEHIND the modal (backdrop-blur) rather than
+  // just dimming it, so the dialog reads as glass floating over a soft-focus
+  // app. The content card itself stays solid for legibility.
+}) => <DialogPrimitive.Overlay ref={ref} className={cn("fixed inset-0 z-50 bg-black/55 backdrop-blur-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0", className)} {...props} />
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 /** @param {{ className?: string, children?: any, ref?: any, [x: string]: any }} props */
@@ -35,7 +38,9 @@ const DialogContent = ({
   // border-left strip and a soft amber-tinted shadow. Sharp 2px corners
   // matching the rest of the app (no shadcn rounded-lg).
   "fixed left-[50%] top-[50%] z-50 grid w-full max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 border border-l-2 border-l-[var(--phosphor)] bg-card p-6 rounded-[2px] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%]", className)} style={{
-    boxShadow: '0 0 30px hsla(33, 95%, 55%, 0.15), 0 24px 60px rgba(0,0,0,0.55)'
+    // Inset top highlight gives the solid card a glassy lit edge over the
+    // blurred backdrop, without making the content itself transparent.
+    boxShadow: 'inset 0 1px 0 0 rgba(255,255,255,0.06), 0 0 30px hsla(33, 95%, 55%, 0.15), 0 24px 60px rgba(0,0,0,0.55)'
   }} {...props}>
       {children}
       <DialogPrimitive.Close className="absolute right-3 top-3 rounded-[2px] p-1 text-muted-foreground transition-colors hover:text-[var(--phosphor)] hover:bg-[hsla(33,95%,55%,0.10)] focus:outline-none focus:ring-1 focus:ring-[var(--phosphor)] disabled:pointer-events-none">
