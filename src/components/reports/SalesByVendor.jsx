@@ -103,7 +103,6 @@ function VendorBlock({ v, compare }) {
 
 // ── By-month matrix: one vendor table, months as columns (PY beside if compare) ─
 function MonthVendorBlock({ v, months, compare }) {
-  const colCount = 2 + months.length * (compare ? 2 : 1) + (compare ? 2 : 1);
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
       <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5 print:break-after-avoid">
@@ -113,7 +112,7 @@ function MonthVendorBlock({ v, months, compare }) {
           {compare && <span> · vs <span className="tabular-nums">R {fmtR(v.subtotal_py_total_ex)}</span> PY</span>}
         </div>
       </div>
-      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 150 : 90) }}>
+      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 150 : 90) + (compare ? 90 : 0) }}>
         <thead>
           <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-1.5 text-left font-medium">Item</th>
@@ -126,6 +125,7 @@ function MonthVendorBlock({ v, months, compare }) {
             ))}
             <th className="px-3 py-1.5 text-right font-medium border-l border-border">Total</th>
             {compare && <th className="px-3 py-1.5 text-right font-medium text-muted-subtle">PY</th>}
+            {compare && <th className="px-3 py-1.5 text-right font-medium">YoY</th>}
           </tr>
         </thead>
         <tbody>
@@ -141,6 +141,7 @@ function MonthVendorBlock({ v, months, compare }) {
               ))}
               <td className="px-3 py-1.5 text-right tabular-nums border-l border-border font-medium"><span className="text-muted-subtle">R </span>{fmtR(it.total_ex)}</td>
               {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(it.py_total_ex)}</td>}
+              {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.total_ex} py={it.py_total_ex} /></td>}
             </tr>
           ))}
         </tbody>
@@ -155,6 +156,7 @@ function MonthVendorBlock({ v, months, compare }) {
             ))}
             <td className="px-3 py-1.5 text-right tabular-nums border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(v.subtotal_total_ex)}</td>
             {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(v.subtotal_py_total_ex)}</td>}
+            {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_total_ex} py={v.subtotal_py_total_ex} /></td>}
           </tr>
         </tfoot>
       </table>
@@ -222,16 +224,17 @@ export default function SalesByVendor() {
   const exportCsv = () => {
     if (bm) {
       const monthCols = months.flatMap((m) => (cmp ? [m, pyMonth(m)] : [m]));
-      const header = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description', ...monthCols, 'Total', ...(cmp ? ['PY Total'] : [])];
+      const header = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description', ...monthCols, 'Total', ...(cmp ? ['PY Total', 'YoY %'] : [])];
       const vals = (cells, py) => months.flatMap((m) => (cmp ? [(cells[m] || 0).toFixed(2), (py[m] || 0).toFixed(2)] : [(cells[m] || 0).toFixed(2)]));
+      const totCols = (tot, pyTot) => [(tot || 0).toFixed(2), ...(cmp ? [(pyTot || 0).toFixed(2), yoyText(tot, pyTot)] : [])];
       const rows = [];
       for (const g of fGroups) {
         for (const v of g.vendors) {
-          for (const it of v.items) rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, it.item_number, it.item_description || '', ...vals(it.cells, it.py_cells), (it.total_ex || 0).toFixed(2), ...(cmp ? [(it.py_total_ex || 0).toFixed(2)] : [])]);
-          rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, `${v.vendor} subtotal`, '', ...vals(v.subtotal_cells, v.subtotal_py_cells), (v.subtotal_total_ex || 0).toFixed(2), ...(cmp ? [(v.subtotal_py_total_ex || 0).toFixed(2)] : [])]);
+          for (const it of v.items) rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, it.item_number, it.item_description || '', ...vals(it.cells, it.py_cells), ...totCols(it.total_ex, it.py_total_ex)]);
+          rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, `${v.vendor} subtotal`, '', ...vals(v.subtotal_cells, v.subtotal_py_cells), ...totCols(v.subtotal_total_ex, v.subtotal_py_total_ex)]);
         }
       }
-      rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', ...vals(bmGrand.cells, bmGrand.py_cells), (bmGrand.total || 0).toFixed(2), ...(cmp ? [(bmGrand.py_total || 0).toFixed(2)] : [])]);
+      rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', ...vals(bmGrand.cells, bmGrand.py_cells), ...totCols(bmGrand.total, bmGrand.py_total)]);
       downloadCsv(`sales-by-vendor-bymonth-${from}_to_${to}${cmp ? '-yoy' : ''}${isHub && site !== 'all' ? `-${site}` : ''}.csv`, [header, ...rows]);
       return;
     }
