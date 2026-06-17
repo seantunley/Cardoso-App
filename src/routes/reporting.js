@@ -2549,6 +2549,116 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // GET /api/reports/sales-by-vendor?from=YYYY-MM-DD&to=YYYY-MM-DD[&site=<id|all>]
+  // All item sales grouped by the item's vendor for a date range. The vendor is
+  // the supplier of the item's MOST RECENT stock receipt (same definition as the
+  // inventory movement report). Sales value is shown ex-VAT (Sage OE net,
+  // OESHDT.FAMTSALES) and VAT-inclusive (derived at the standard rate — tobacco
+  // is standard-rated). Site mode reads day-level transactions for an exact
+  // range; hub mode reads the monthly sales rollups (so the range snaps to whole
+  // months) and can be one site or all sites combined.
+  const SALES_VAT_RATE = 0.15; // SA standard rate; OE sales are net, so incl = ex * (1 + rate)
+  const groupSalesByVendor = (rows) => {
+    const m = new Map();
+    for (const r of rows) {
+      const ex = Number(r.ex_vat) || 0;
+      const incl = ex * (1 + SALES_VAT_RATE);
+      const qty = Number(r.qty) || 0;
+      let g = m.get(r.vendor);
+      if (!g) { g = { vendor: r.vendor, items: [], subtotal_qty: 0, subtotal_ex: 0, subtotal_incl: 0 }; m.set(r.vendor, g); }
+      g.items.push({ item_number: r.item_number, item_description: r.item_description || null, qty, ex_vat: ex, incl_vat: incl });
+      g.subtotal_qty += qty; g.subtotal_ex += ex; g.subtotal_incl += incl;
+    }
+    const vendors = Array.from(m.values()).sort((a, b) => b.subtotal_ex - a.subtotal_ex);
+    for (const v of vendors) v.items.sort((a, b) => b.ex_vat - a.ex_vat);
+    return vendors;
+  };
+  const salesGrand = (vendors) => ({
+    qty: vendors.reduce((s, v) => s + v.subtotal_qty, 0),
+    ex: vendors.reduce((s, v) => s + v.subtotal_ex, 0),
+    incl: vendors.reduce((s, v) => s + v.subtotal_incl, 0),
+  });
+
+  router.get('/api/reports/sales-by-vendor', ...reportsGuard, (req, res) => {
+    const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const validDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const now = new Date();
+    const from = validDate(req.query.from) ? req.query.from : isoDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const to = validDate(req.query.to) ? req.query.to : isoDate(now);
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        // Hub: monthly rollups only — snap the range to the months it touches.
+        const periodFrom = from.slice(0, 7);
+        const periodTo = to.slice(0, 7);
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
+        const params = siteFilter !== 'all' ? [periodFrom, periodTo, siteFilter] : [periodFrom, periodTo];
+        const rows = prep(
+          `WITH latest_supplier AS (
+             SELECT site_id, item_number, supplier_name FROM (
+               SELECT site_id, TRIM(item_number) AS item_number, TRIM(supplier_name) AS supplier_name,
+                      ROW_NUMBER() OVER (PARTITION BY site_id, TRIM(item_number) ORDER BY receipt_date DESC) AS rn
+               FROM hub_stock_receipt_expiry
+               WHERE TRIM(COALESCE(supplier_name, '')) != ''
+             ) WHERE rn = 1
+           )
+           SELECT TRIM(s.item_number) AS item_number,
+                  COALESCE(ls.supplier_name, '(No vendor)') AS vendor,
+                  MAX(s.item_description) AS item_description,
+                  SUM(s.qty_sold) AS qty, SUM(s.revenue) AS ex_vat
+           FROM hub_inventory_item_sales s
+           LEFT JOIN latest_supplier ls ON ls.site_id = s.site_id AND ls.item_number = TRIM(s.item_number)
+           WHERE s.period >= ? AND s.period <= ? ${siteWhere}
+           GROUP BY TRIM(s.item_number), COALESCE(ls.supplier_name, '(No vendor)')`
+        ).all(...params);
+        const vendors = groupSalesByVendor(rows);
+        const sites = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
+        return res.json({
+          hub: true, from, to, period_from: periodFrom, period_to: periodTo,
+          site: siteFilter, vendors, grand: salesGrand(vendors),
+          filters: { sites }, vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
+        });
+      }
+
+      // Site: exact day range from the per-transaction cache.
+      const rows = prep(
+        `WITH latest_supplier AS (
+           SELECT item_number, supplier_name FROM (
+             SELECT TRIM(srl.item_number) AS item_number, TRIM(sr.supplier_name) AS supplier_name,
+                    ROW_NUMBER() OVER (PARTITION BY TRIM(srl.item_number) ORDER BY sr.receipt_date DESC) AS rn
+             FROM stock_receipt_line srl
+             JOIN stock_receipt sr ON sr.id = srl.receipt_id
+             WHERE TRIM(COALESCE(sr.supplier_name, '')) != ''
+           ) WHERE rn = 1
+         )
+         SELECT TRIM(t.item_number) AS item_number,
+                COALESCE(ls.supplier_name, '(No vendor)') AS vendor,
+                SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS ex_vat
+         FROM inventory_sales_transactions t
+         LEFT JOIN latest_supplier ls ON ls.item_number = TRIM(t.item_number)
+         WHERE t.transaction_date >= ? AND t.transaction_date <= ?
+         GROUP BY TRIM(t.item_number), COALESCE(ls.supplier_name, '(No vendor)')`
+      ).all(from, to);
+      // Descriptions from the item master, deduped to one row per item so the
+      // JOIN can't fan out and double the sales sums.
+      const descMap = new Map(
+        prep("SELECT TRIM(item_number) AS item_number, MAX(item_description) AS d FROM inventoryrecord WHERE TRIM(COALESCE(item_description, '')) != '' GROUP BY TRIM(item_number)")
+          .all().map((r) => [r.item_number, r.d])
+      );
+      const vendors = groupSalesByVendor(rows.map((r) => ({ ...r, item_description: descMap.get(r.item_number) || null })));
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      res.json({
+        hub: false, from, to,
+        site_name: (depotRow?.name || '').trim() || SITE_NAME,
+        vendors, grand: salesGrand(vendors),
+        vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] sales-by-vendor error:', err);
+      res.status(500).json({ error: 'Failed to fetch the sales-by-vendor report' });
+    }
+  });
+
   // GET /api/reports/inventory-value — total value, by-commodity breakdown,
   // top-N items by value, slow-mover alerts.
   router.get('/api/reports/inventory-value', requireAuth, (req, res) => {
