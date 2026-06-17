@@ -23,7 +23,7 @@ const COLS = ['Order', 'Branch code', 'Customer', 'Delivery', 'POD uploaded', 'O
 function WeekBlock({ week }) {
   const unknown = week.subtotal_unknown_count || 0;
   return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+    <div className="report-keep-together overflow-x-auto rounded-xl border border-border bg-card">
       <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5">
         <div className="font-display text-lg">Week {String(week.week_number).padStart(2, '0')} <span className="text-muted-foreground">· {week.year}</span></div>
         <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -174,7 +174,7 @@ export default function BatExceptionsWeekly() {
           )}
 
           {/* Grand total */}
-          <div className="flex items-baseline justify-between rounded-xl border-2 border-accent/40 bg-card px-5 py-3">
+          <div className="report-keep-together flex items-baseline justify-between rounded-xl border-2 border-accent/40 bg-card px-5 py-3">
             <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-accent">Grand total · {yearLabel}{isHub ? ' · all sites shown' : ''}{totalUnknown > 0 && ` · ${totalUnknown} amount unknown (excluded)`}</div>
             <div className="font-display text-xl tabular-nums">{totalCount} exceptions · R {fmtR(totalAmount)}</div>
           </div>

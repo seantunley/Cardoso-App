@@ -191,7 +191,7 @@ export function usePrintStyles({ id, orientation = 'landscape' }) {
 
 function buildPrintStyle(id, orientation) {
   return `
-@page { size: A4 ${orientation}; margin: 10mm 8mm 12mm 8mm; }
+@page { size: A4 ${orientation}; margin: 10mm 8mm 16mm 8mm; }
 @media print {
   html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
   body { visibility: hidden; background: #fff; }
@@ -228,6 +228,16 @@ function buildPrintStyle(id, orientation) {
   #${id}-printable .overflow-hidden,
   #${id}-printable .overflow-x-scroll,
   #${id}-printable .overflow-y-scroll { overflow: visible !important; }
+
+  /* Keep a grouped block (e.g. one week's table) intact across a page break:
+     if it doesn't fit on the current page, move the whole block to the next
+     page rather than orphaning its header at the bottom (in the footer zone)
+     with the rows spilling over. Blocks taller than a page still break — the
+     thead repeats on continuation pages. */
+  #${id}-printable .report-keep-together {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
 
   .report-print-header {
     display: flex !important;
@@ -381,11 +391,15 @@ function buildPrintStyle(id, orientation) {
   .td-mono  { font-family: 'Courier New', monospace; }
   .td-muted { color: #666; }
 
+  /* Footer flows at the END of the document, NOT position:fixed. A fixed footer
+     doesn't reserve space, so content flowed UNDER it and the bottom of every
+     page was unreadable (the @page bottom margin can't save it because the
+     printable is position:absolute). Static = it sits cleanly after the last
+     content; the browser's own print footer covers per-page numbering. Verified
+     by rendering the report to PDF — see daily-docs, which prints this way. */
   .report-print-footer {
-    position: fixed;
-    bottom: 4mm;
-    left: 8mm;
-    right: 8mm;
+    position: static;
+    margin-top: 6mm;
     font-size: 8px;
     color: #999;
     border-top: 0.25pt solid #ccc;
