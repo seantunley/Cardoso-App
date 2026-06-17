@@ -92,6 +92,24 @@ export default function BatExceptionsWeekly() {
   }, [data]);
   const siteOptions = data?.filters?.sites || [];
 
+  // Totals per exception reason across the whole report (respects the year/site
+  // filter, since `sites`/`weeks` already reflect it). Unknown amounts are
+  // excluded from the amount sum and counted separately, same as the subtotals.
+  const reasonTotals = useMemo(() => {
+    const allWeeks = isHub ? sites.flatMap((s) => s.weeks) : weeks;
+    const m = new Map();
+    for (const w of allWeeks) {
+      for (const r of w.rows) {
+        const key = r.exception_reason || '(no reason given)';
+        let g = m.get(key);
+        if (!g) { g = { reason: key, count: 0, amount: 0, unknown: 0 }; m.set(key, g); }
+        g.count += 1;
+        if (r.amount == null) g.unknown += 1; else g.amount += r.amount;
+      }
+    }
+    return Array.from(m.values()).sort((a, b) => b.amount - a.amount || b.count - a.count);
+  }, [isHub, sites, weeks]);
+
   const exportCsv = () => {
     const header = [...(isHub ? ['Site'] : []), 'Week', 'Year', 'Order', 'Branch code', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason', 'Amount'];
     const rows = [];
@@ -112,6 +130,12 @@ export default function BatExceptionsWeekly() {
       for (const w of weeks) pushWeek(w);
     }
     rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', '', '', '', '', '', '', `${totalCount} exceptions${unknownNote(totalUnknown)}`, (Number(totalAmount) || 0).toFixed(2)]);
+    // Totals by exception reason
+    rows.push([]);
+    rows.push([...(isHub ? [''] : []), 'TOTALS BY EXCEPTION REASON', '', '', '', '', '', '', '', '', 'Exceptions', 'Amount']);
+    for (const g of reasonTotals) {
+      rows.push([...(isHub ? [''] : []), g.reason, '', '', '', '', '', '', '', '', `${g.count}${unknownNote(g.unknown)}`, (Number(g.amount) || 0).toFixed(2)]);
+    }
     downloadCsv(`bat-exceptions-${year}${isHub && site !== 'all' ? `-${site}` : ''}.csv`, [header, ...rows]);
   };
 
@@ -178,6 +202,38 @@ export default function BatExceptionsWeekly() {
             <div className="font-mono text-[11px] uppercase tracking-[0.2em] text-accent">Grand total · {yearLabel}{isHub ? ' · all sites shown' : ''}{totalUnknown > 0 && ` · ${totalUnknown} amount unknown (excluded)`}</div>
             <div className="font-display text-xl tabular-nums">{totalCount} exceptions · R {fmtR(totalAmount)}</div>
           </div>
+
+          {/* Totals by exception reason */}
+          {reasonTotals.length > 0 && (
+            <div className="report-keep-together overflow-x-auto rounded-xl border border-border bg-card">
+              <div className="border-b border-border px-4 py-2.5 font-display text-lg">Totals by exception reason</div>
+              <table className="w-full text-sm report-doc-table">
+                <thead>
+                  <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-1.5 text-left font-medium">Exception reason</th>
+                    <th className="px-3 py-1.5 text-right font-medium">Exceptions</th>
+                    <th className="px-3 py-1.5 text-right font-medium border-l border-border">Amount (R)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reasonTotals.map((g, i) => (
+                    <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
+                      <td className="px-3 py-1.5">{g.reason}{g.unknown > 0 && <span className="text-amber-500/80"> · {g.unknown} unknown</span>}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">{g.count}</td>
+                      <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/40"><span className="text-muted-subtle">R </span>{fmtR(g.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t-2 border-border bg-muted/40">
+                    <td className="px-3 py-1.5 font-semibold">All reasons{totalUnknown > 0 && <span className="font-normal text-muted-foreground"> ({totalUnknown} amount unknown, excluded)</span>}</td>
+                    <td className="px-3 py-1.5 text-right font-semibold tabular-nums">{totalCount}</td>
+                    <td className="px-3 py-1.5 text-right font-semibold tabular-nums border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(totalAmount)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       ) : null}
     </ReportFrame>
