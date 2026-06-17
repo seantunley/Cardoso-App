@@ -484,17 +484,21 @@ define({
   label: 'Inventory — item/vendor master',
   purpose: 'Primary vendor per item from Sage ICITMV (item/vendor table), keyed to the AP vendor code. Drives vendor attribution in Sales by Vendor and the inventory supplier filters.',
   pool: 'bat_sage',
-  tables: ['ICITMV'],
+  tables: ['ICITMV', 'APVEN'],
   params: [],
   requiredColumns: ['item_number', 'vendor_code', 'vendor_name'],
+  // Name comes from the APVEN vendor master first — ICITMV.VENDNAME is blank for
+  // some vendors (e.g. BAT / EBAT 01), which would drop those items to "(No
+  // vendor)". Fall back to ICITMV.VENDNAME only if the vendor isn't in APVEN.
   defaultSql: `
   SELECT item_number, vendor_code, vendor_name FROM (
-    SELECT LTRIM(RTRIM(ITEMNO))   AS item_number,
-           LTRIM(RTRIM(VENDNUM))  AS vendor_code,
-           LTRIM(RTRIM(VENDNAME)) AS vendor_name,
-           ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(ITEMNO)) ORDER BY VENDTYPE ASC) AS rn
-    FROM ICITMV
-    WHERE LTRIM(RTRIM(COALESCE(VENDNUM, ''))) <> ''
+    SELECT LTRIM(RTRIM(iv.ITEMNO))  AS item_number,
+           LTRIM(RTRIM(iv.VENDNUM)) AS vendor_code,
+           COALESCE(NULLIF(LTRIM(RTRIM(v.VENDNAME)), ''), NULLIF(LTRIM(RTRIM(iv.VENDNAME)), '')) AS vendor_name,
+           ROW_NUMBER() OVER (PARTITION BY LTRIM(RTRIM(iv.ITEMNO)) ORDER BY iv.VENDTYPE ASC) AS rn
+    FROM ICITMV iv
+    LEFT JOIN APVEN v ON LTRIM(RTRIM(v.VENDORID)) = LTRIM(RTRIM(iv.VENDNUM))
+    WHERE LTRIM(RTRIM(COALESCE(iv.VENDNUM, ''))) <> ''
   ) x WHERE rn = 1
 `,
 });
