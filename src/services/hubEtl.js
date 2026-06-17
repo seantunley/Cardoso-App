@@ -609,6 +609,33 @@ async function syncSite(site) {
       recordStageFailure('Inventory item-sales', itemErr);
     }
 
+    // Item -> vendor master (ICITMV-backed) → vendor attribution for the hub
+    // Sales-by-Vendor report. Small (~2.4k rows): single fetch, clear + insert.
+    try {
+      const ctrlIv = new AbortController();
+      const tIv = setTimeout(() => ctrlIv.abort(), 15000);
+      let ivRes;
+      try { ivRes = await fetch(`${site.url}/api/reporting/item-vendors`, { headers, signal: ctrlIv.signal }); }
+      finally { clearTimeout(tIv); }
+      if (ivRes.ok) {
+        const data = await ivRes.json();
+        const rows = Array.isArray(data.rows) ? data.rows : [];
+        const insIv = db.prepare('INSERT OR REPLACE INTO hub_item_vendor (site_id, item_number, vendor_code, vendor_name, synced_at) VALUES (?, ?, ?, ?, now_local())');
+        db.transaction(() => {
+          db.prepare('DELETE FROM hub_item_vendor WHERE site_id = ?').run(site.id);
+          for (const r of rows) {
+            const item = String(r.item_number || '').trim();
+            if (!item) continue;
+            insIv.run(site.id, item, r.vendor_code || null, r.vendor_name || null);
+          }
+        })();
+      } else {
+        recordStageFailure('Item vendors', new Error(`item-vendors returned HTTP ${ivRes.status} from ${site.url}/api/reporting/item-vendors`));
+      }
+    } catch (ivErr) {
+      recordStageFailure('Item vendors', ivErr);
+    }
+
     // Inventory customer sales (inter-branch transfers excluded) → for the
     // dashboard Top Customers tile (summed over the selected timeline).
     try {

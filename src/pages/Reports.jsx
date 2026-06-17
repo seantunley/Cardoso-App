@@ -1,7 +1,7 @@
 import { lazy, Suspense, Fragment, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning } from 'lucide-react';
+import { Wallet, Users, BarChart3, PieChart, AlertTriangle, Boxes, Receipt, CalendarDays, FileWarning, Truck } from 'lucide-react';
 import { api } from '@/api/apiClient';
 import { hasPermission } from '@/lib/permissions';
 import SavedViews from '@/components/reports/SavedViews';
@@ -18,6 +18,7 @@ const BatExceptions    = lazy(() => import('@/components/reports/BatExceptions')
 const BatExceptionsWeekly = lazy(() => import('@/components/reports/BatExceptionsWeekly'));
 const InventoryValue   = lazy(() => import('@/components/reports/InventoryValue'));
 const DailySalesFigures = lazy(() => import('@/components/reports/DailySalesFigures'));
+const SalesByVendor    = lazy(() => import('@/components/reports/SalesByVendor'));
 
 const REPORTS = [
   {
@@ -44,6 +45,13 @@ const REPORTS = [
       { id: 'bat-ytd',        name: 'YTD Fee Breakdown',     icon: PieChart,      accent: 'hsl(280 70% 65%)', component: BatYtd,        ready: true },
       { id: 'bat-exceptions', name: 'Exceptions Summary',    icon: AlertTriangle, accent: 'hsl(0 72% 50%)',   component: BatExceptions, ready: true },
       { id: 'bat-exceptions-weekly', name: 'Exceptions by Week', icon: FileWarning, accent: 'hsl(0 72% 50%)', component: BatExceptionsWeekly, ready: true },
+    ],
+  },
+  {
+    group: 'Sales',
+    accent: 'hsl(145 55% 45%)',
+    items: [
+      { id: 'sales-by-vendor', name: 'Sales by Vendor', icon: Truck, accent: 'hsl(145 55% 45%)', component: SalesByVendor, ready: true },
     ],
   },
   {

@@ -2549,6 +2549,276 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // GET /api/reports/sales-by-vendor?from=YYYY-MM-DD&to=YYYY-MM-DD[&site=<id|all>]
+  // All item sales grouped by the item's vendor for a date range. The vendor is
+  // the supplier of the item's MOST RECENT stock receipt (same definition as the
+  // inventory movement report). Sales value is shown ex-VAT (Sage OE net,
+  // OESHDT.FAMTSALES) and VAT-inclusive (derived at the standard rate — tobacco
+  // is standard-rated). Site mode reads day-level transactions for an exact
+  // range; hub mode reads the monthly sales rollups (so the range snaps to whole
+  // months) and can be one site or all sites combined.
+  const SALES_VAT_RATE = 0.15; // SA standard rate; OE sales are net, so incl = ex * (1 + rate)
+  // Build vendor groups from union rows carrying current (qty/ex_vat) and, when
+  // the prior-year toggle is on, prior-year (py_qty/py_ex) figures.
+  const groupSalesByVendor = (rows) => {
+    const m = new Map();
+    for (const r of rows) {
+      const ex = Number(r.ex_vat) || 0, qty = Number(r.qty) || 0;
+      const pyEx = Number(r.py_ex) || 0, pyQty = Number(r.py_qty) || 0;
+      let g = m.get(r.vendor);
+      if (!g) {
+        g = { vendor: r.vendor, items: [],
+              subtotal_qty: 0, subtotal_ex: 0, subtotal_incl: 0,
+              py_subtotal_qty: 0, py_subtotal_ex: 0, py_subtotal_incl: 0 };
+        m.set(r.vendor, g);
+      }
+      g.items.push({
+        item_number: r.item_number, item_description: r.item_description || null,
+        qty, ex_vat: ex, incl_vat: ex * (1 + SALES_VAT_RATE),
+        py_qty: pyQty, py_ex_vat: pyEx, py_incl_vat: pyEx * (1 + SALES_VAT_RATE),
+      });
+      g.subtotal_qty += qty; g.subtotal_ex += ex; g.subtotal_incl += ex * (1 + SALES_VAT_RATE);
+      g.py_subtotal_qty += pyQty; g.py_subtotal_ex += pyEx; g.py_subtotal_incl += pyEx * (1 + SALES_VAT_RATE);
+    }
+    // Sort by current value, but keep prior-year-only vendors (current 0) in view at the end.
+    const vendors = Array.from(m.values()).sort((a, b) => (b.subtotal_ex - a.subtotal_ex) || (b.py_subtotal_ex - a.py_subtotal_ex));
+    for (const v of vendors) v.items.sort((a, b) => (b.ex_vat - a.ex_vat) || (b.py_ex_vat - a.py_ex_vat));
+    return vendors;
+  };
+  const salesGrand = (vendors) => ({
+    qty: vendors.reduce((s, v) => s + v.subtotal_qty, 0),
+    ex: vendors.reduce((s, v) => s + v.subtotal_ex, 0),
+    incl: vendors.reduce((s, v) => s + v.subtotal_incl, 0),
+    py_qty: vendors.reduce((s, v) => s + v.py_subtotal_qty, 0),
+    py_ex: vendors.reduce((s, v) => s + v.py_subtotal_ex, 0),
+    py_incl: vendors.reduce((s, v) => s + v.py_subtotal_incl, 0),
+  });
+  // Union current + prior-year aggregate rows, keyed by vendor+item (vendor is the
+  // item's latest supplier, stable across periods). Either side may be missing.
+  const mergeSalesPeriods = (cur, prior) => {
+    const m = new Map();
+    const keyOf = (r) => `${r.vendor}||${r.item_number}`;
+    for (const r of cur) {
+      m.set(keyOf(r), { item_number: r.item_number, vendor: r.vendor, item_description: r.item_description || null, qty: Number(r.qty) || 0, ex_vat: Number(r.ex_vat) || 0, py_qty: 0, py_ex: 0 });
+    }
+    for (const r of prior) {
+      const k = keyOf(r);
+      let g = m.get(k);
+      if (!g) { g = { item_number: r.item_number, vendor: r.vendor, item_description: r.item_description || null, qty: 0, ex_vat: 0, py_qty: 0, py_ex: 0 }; m.set(k, g); }
+      g.py_qty += Number(r.qty) || 0; g.py_ex += Number(r.ex_vat) || 0;
+      if (!g.item_description && r.item_description) g.item_description = r.item_description;
+    }
+    return Array.from(m.values());
+  };
+  const priorYear = (s) => `${parseInt(s.slice(0, 4), 10) - 1}${s.slice(4)}`; // 'YYYY-...' -> '(YYYY-1)-...'
+
+  // Inter-branch transfer exclusion (matches the rollups) — used by both the
+  // aggregate and by-month site queries so site totals tie to the hub.
+  const SBV_EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
+
+  // Ordered 'YYYY-MM' list from fromP to toP inclusive.
+  const monthsInRange = (fromP, toP) => {
+    const out = [];
+    let y = parseInt(fromP.slice(0, 4), 10), mo = parseInt(fromP.slice(5, 7), 10);
+    const ty = parseInt(toP.slice(0, 4), 10), tm = parseInt(toP.slice(5, 7), 10);
+    while ((y < ty || (y === ty && mo <= tm)) && out.length < 120) {
+      out.push(`${y}-${String(mo).padStart(2, '0')}`);
+      mo += 1; if (mo > 12) { mo = 1; y += 1; }
+    }
+    return out;
+  };
+
+  // Nest flat {site_id, site_name, vendor, item_number, item_description, period, ex}
+  // rows into Site -> Vendor -> Item with per-month ex-VAT cells. PY rows fill
+  // py_cells, keyed by the matching CURRENT-year month so they sit beside it.
+  const buildMonthMatrix = (curRows, pyRows, months) => {
+    const monthSet = new Set(months);
+    const pyToCur = new Map(months.map((p) => [priorYear(p), p]));
+    const groups = new Map();
+    const getItem = (siteId, siteName, vendor, itemNo, desc) => {
+      let g = groups.get(siteId);
+      if (!g) { g = { site_id: siteId, site_name: siteName, vendors: new Map() }; groups.set(siteId, g); }
+      let v = g.vendors.get(vendor);
+      if (!v) { v = { vendor, items: new Map() }; g.vendors.set(vendor, v); }
+      let it = v.items.get(itemNo);
+      if (!it) { it = { item_number: itemNo, item_description: desc || null, cells: {}, py_cells: {} }; v.items.set(itemNo, it); }
+      if (desc && !it.item_description) it.item_description = desc;
+      return it;
+    };
+    for (const r of curRows) {
+      if (!monthSet.has(r.period)) continue;
+      const it = getItem(r.site_id ?? null, r.site_name ?? null, r.vendor, r.item_number, r.item_description);
+      it.cells[r.period] = (it.cells[r.period] || 0) + (Number(r.ex) || 0);
+    }
+    for (const r of pyRows) {
+      const curP = pyToCur.get(r.period);
+      if (!curP) continue;
+      const it = getItem(r.site_id ?? null, r.site_name ?? null, r.vendor, r.item_number, r.item_description);
+      it.py_cells[curP] = (it.py_cells[curP] || 0) + (Number(r.ex) || 0);
+    }
+    const out = [];
+    for (const g of groups.values()) {
+      const vendors = [];
+      for (const v of g.vendors.values()) {
+        const items = Array.from(v.items.values()).map((it) => ({
+          ...it,
+          total_ex: months.reduce((s, p) => s + (it.cells[p] || 0), 0),
+          py_total_ex: months.reduce((s, p) => s + (it.py_cells[p] || 0), 0),
+        })).sort((a, b) => (b.total_ex - a.total_ex) || (b.py_total_ex - a.py_total_ex));
+        const subtotal_cells = {}, subtotal_py_cells = {};
+        for (const p of months) {
+          subtotal_cells[p] = items.reduce((s, it) => s + (it.cells[p] || 0), 0);
+          subtotal_py_cells[p] = items.reduce((s, it) => s + (it.py_cells[p] || 0), 0);
+        }
+        vendors.push({
+          vendor: v.vendor, items, subtotal_cells, subtotal_py_cells,
+          subtotal_total_ex: items.reduce((s, it) => s + it.total_ex, 0),
+          subtotal_py_total_ex: items.reduce((s, it) => s + it.py_total_ex, 0),
+        });
+      }
+      vendors.sort((a, b) => (b.subtotal_total_ex - a.subtotal_total_ex) || (b.subtotal_py_total_ex - a.subtotal_py_total_ex));
+      out.push({ site_id: g.site_id, site_name: g.site_name, vendors });
+    }
+    out.sort((a, b) => String(a.site_name || '').localeCompare(String(b.site_name || '')));
+    return out;
+  };
+
+  router.get('/api/reports/sales-by-vendor', ...reportsGuard, (req, res) => {
+    const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const validDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
+    const now = new Date();
+    const from = validDate(req.query.from) ? req.query.from : isoDate(new Date(now.getFullYear(), now.getMonth(), 1));
+    const to = validDate(req.query.to) ? req.query.to : isoDate(now);
+    const compare = ['1', 'true', 'yes', 'on'].includes(String(req.query.compare || '').toLowerCase());
+    const bymonth = ['1', 'true', 'yes', 'on'].includes(String(req.query.bymonth || '').toLowerCase());
+    try {
+      // ── By-month matrix mode: Site -> Vendor -> Item with one ex-VAT column per
+      // month; with compare, each month carries a PY value beside it. ──────────
+      if (bymonth) {
+        const periodFrom = from.slice(0, 7), periodTo = to.slice(0, 7);
+        const months = monthsInRange(periodFrom, periodTo);
+        const isHub = process.env.HUB_MODE === 'true';
+        const siteFilter = isHub ? String(req.query.site || 'all').trim() : 'all';
+        let curRows, pyRows = [], dataFrom = null, sitesList = [];
+        if (isHub) {
+          const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
+          const monthAgg = (pf, pt) => prep(
+            `SELECT s.site_id AS site_id, COALESCE(hs.name, s.site_id) AS site_name,
+                    COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                    TRIM(s.item_number) AS item_number, MAX(s.item_description) AS item_description,
+                    s.period AS period, SUM(s.revenue) AS ex
+             FROM hub_inventory_item_sales s
+             LEFT JOIN hub_item_vendor iv ON iv.site_id = s.site_id AND iv.item_number = TRIM(s.item_number)
+             LEFT JOIN hub_sites hs ON hs.id = s.site_id
+             WHERE s.period >= ? AND s.period <= ? ${siteWhere}
+             GROUP BY s.site_id, COALESCE(hs.name, s.site_id), COALESCE(iv.vendor_name, '(No vendor)'), TRIM(s.item_number), s.period`
+          ).all(...(siteFilter !== 'all' ? [pf, pt, siteFilter] : [pf, pt]));
+          curRows = monthAgg(periodFrom, periodTo);
+          if (compare) pyRows = monthAgg(priorYear(periodFrom), priorYear(periodTo));
+          sitesList = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
+          dataFrom = prep('SELECT MIN(period) AS p FROM hub_inventory_item_sales').get()?.p || null;
+        } else {
+          const monthAgg = (f, t) => prep(
+            `SELECT NULL AS site_id, NULL AS site_name,
+                    COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                    TRIM(t.item_number) AS item_number, SUBSTR(t.transaction_date, 1, 7) AS period,
+                    SUM(t.line_amount) AS ex
+             FROM inventory_sales_transactions t
+             LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
+             WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND NOT ${SBV_EXCL_INTER_BRANCH}
+             GROUP BY COALESCE(iv.vendor_name, '(No vendor)'), TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)`
+          ).all(f, t);
+          curRows = monthAgg(from, to);
+          if (compare) pyRows = monthAgg(priorYear(from), priorYear(to));
+          const descMap = new Map(
+            prep("SELECT TRIM(item_number) AS item_number, MAX(item_description) AS d FROM inventoryrecord WHERE TRIM(COALESCE(item_description, '')) != '' GROUP BY TRIM(item_number)")
+              .all().map((r) => [r.item_number, r.d])
+          );
+          const withDesc = (r) => ({ ...r, item_description: descMap.get(r.item_number) || null });
+          curRows = curRows.map(withDesc); pyRows = pyRows.map(withDesc);
+          dataFrom = prep('SELECT MIN(SUBSTR(transaction_date, 1, 7)) AS p FROM inventory_sales_transactions').get()?.p || null;
+        }
+        const groups = buildMonthMatrix(curRows, pyRows, months);
+        const earliestNeeded = compare ? priorYear(periodFrom) : periodFrom;
+        const partial = !!(dataFrom && earliestNeeded < dataFrom);
+        return res.json({
+          hub: isHub, compare, bymonth: true, from, to, months,
+          data_from: dataFrom, partial,
+          partial_note: partial ? `Stored sales data starts ${dataFrom} — earlier months show blank and totals exclude them.` : null,
+          site: siteFilter, groups, vat_rate: SALES_VAT_RATE,
+          ...(isHub ? { filters: { sites: sitesList } } : {}),
+          generated_at: new Date().toISOString(),
+        });
+      }
+
+      if (process.env.HUB_MODE === 'true') {
+        // Hub: monthly rollups only — snap the range to the months it touches.
+        const periodFrom = from.slice(0, 7);
+        const periodTo = to.slice(0, 7);
+        const siteFilter = String(req.query.site || 'all').trim();
+        const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
+        const hubAgg = (pf, pt) => prep(
+          `SELECT TRIM(s.item_number) AS item_number,
+                  COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                  MAX(s.item_description) AS item_description,
+                  SUM(s.qty_sold) AS qty, SUM(s.revenue) AS ex_vat
+           FROM hub_inventory_item_sales s
+           LEFT JOIN hub_item_vendor iv ON iv.site_id = s.site_id AND iv.item_number = TRIM(s.item_number)
+           WHERE s.period >= ? AND s.period <= ? ${siteWhere}
+           GROUP BY TRIM(s.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
+        ).all(...(siteFilter !== 'all' ? [pf, pt, siteFilter] : [pf, pt]));
+        const cur = hubAgg(periodFrom, periodTo);
+        const pyFrom = priorYear(periodFrom), pyTo = priorYear(periodTo);
+        const prior = compare ? hubAgg(pyFrom, pyTo) : [];
+        const vendors = groupSalesByVendor(compare ? mergeSalesPeriods(cur, prior) : cur);
+        const sites = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
+        return res.json({
+          hub: true, compare, from, to, period_from: periodFrom, period_to: periodTo,
+          ...(compare ? { py_period_from: pyFrom, py_period_to: pyTo } : {}),
+          site: siteFilter, vendors, grand: salesGrand(vendors),
+          filters: { sites }, vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
+        });
+      }
+
+      // Site: exact day range from the per-transaction cache, vendor from the
+      // item/vendor master (Sage ICITMV), not stock receipts. Exclude inter-branch
+      // transfer "customers" — the hub path reads the rollup-backed
+      // hub_inventory_item_sales which already excludes them, so without this the
+      // site totals would be inflated and disagree with the hub.
+      const siteAgg = (f, t) => prep(
+        `SELECT TRIM(t.item_number) AS item_number,
+                COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                SUM(t.qty_sold) AS qty, SUM(t.line_amount) AS ex_vat
+         FROM inventory_sales_transactions t
+         LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
+         WHERE t.transaction_date >= ? AND t.transaction_date <= ?
+           AND NOT ${SBV_EXCL_INTER_BRANCH}
+         GROUP BY TRIM(t.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
+      ).all(f, t);
+      const cur = siteAgg(from, to);
+      const prior = compare ? siteAgg(priorYear(from), priorYear(to)) : [];
+      const merged = compare ? mergeSalesPeriods(cur, prior) : cur;
+      // Descriptions from the item master, deduped to one row per item so the
+      // JOIN can't fan out and double the sales sums.
+      const descMap = new Map(
+        prep("SELECT TRIM(item_number) AS item_number, MAX(item_description) AS d FROM inventoryrecord WHERE TRIM(COALESCE(item_description, '')) != '' GROUP BY TRIM(item_number)")
+          .all().map((r) => [r.item_number, r.d])
+      );
+      const vendors = groupSalesByVendor(merged.map((r) => ({ ...r, item_description: r.item_description || descMap.get(r.item_number) || null })));
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      res.json({
+        hub: false, compare, from, to,
+        ...(compare ? { py_from: priorYear(from), py_to: priorYear(to) } : {}),
+        site_name: (depotRow?.name || '').trim() || SITE_NAME,
+        vendors, grand: salesGrand(vendors),
+        vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] sales-by-vendor error:', err);
+      res.status(500).json({ error: 'Failed to fetch the sales-by-vendor report' });
+    }
+  });
+
   // GET /api/reports/inventory-value — total value, by-commodity breakdown,
   // top-N items by value, slow-mover alerts.
   router.get('/api/reports/inventory-value', requireAuth, (req, res) => {
@@ -3087,6 +3357,18 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     } catch (err) {
       console.error('[reporting/bat-exceptions-detail] error:', err);
       res.status(500).json({ error: 'Failed to build BAT exceptions detail' });
+    }
+  });
+
+  // GET /api/reporting/item-vendors — the item -> vendor master (Sage ICITMV),
+  // pulled by the hub ETL into hub_item_vendor for the hub Sales-by-Vendor report.
+  router.get('/api/reporting/item-vendors', reportingRateLimiter, requireReportingToken, (req, res) => {
+    try {
+      const rows = prep('SELECT item_number, vendor_code, vendor_name FROM item_vendor').all();
+      res.json({ rows, generated_at: new Date().toISOString() });
+    } catch (err) {
+      console.error('[reporting/item-vendors] error:', err);
+      res.status(500).json({ error: 'Failed to build item-vendor map' });
     }
   });
 
