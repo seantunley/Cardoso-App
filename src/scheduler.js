@@ -544,7 +544,12 @@ export function startSchedulers() {
         ['creditors-sync', creditorsRunner],
         ['debtors-sync', debtorsRunner],
       ];
-      const t = setTimeout(() => {
+      // Re-run any nightly Sage sync whose last SUCCESS is older than 24h, through
+      // the same retry ladder. Driven from BOTH the boot one-shot (machine off at
+      // 4am) AND the hourly daytime cron below — a sync that failed its 4am window
+      // keeps retrying through the day until it succeeds, instead of staying stale
+      // until the next night or a reboot. No-op once today's run has succeeded.
+      const runNightlyCatchUp = (trigger) => {
         for (const [name, runner] of NIGHTLY_CATCH_UP) {
           try {
             const last = db.prepare(`
@@ -560,15 +565,25 @@ export function startSchedulers() {
             }
             const ageHours = last ? (Date.now() - new Date(last.started_at).getTime()) / 3_600_000 : null;
             if (last && ageHours <= 24) continue;
-            console.warn(`[nightly-catch-up] ${name} last succeeded ${last ? `${ageHours.toFixed(1)}h ago` : 'never'} — running it now instead of waiting for tonight's 4am window.`);
+            console.warn(`[${trigger}] ${name} last succeeded ${last ? `${ageHours.toFixed(1)}h ago` : 'never'} — running it now instead of waiting for tonight's 4am window.`);
             runner();
           } catch (err) {
-            console.error(`[nightly-catch-up] ${name} staleness check failed: ${err.message} — leaving it to tonight's scheduled run.`);
+            console.error(`[${trigger}] ${name} staleness check failed: ${err.message} — leaving it to the next attempt.`);
           }
         }
-      }, 90_000);
+      };
+      // Boot catch-up — covers the machine-off-at-4am case. 90s delay so boot-time
+      // Sage pool init + the BAT cache refresh (15s one-shot) aren't competing.
+      const t = setTimeout(() => runNightlyCatchUp('nightly-catch-up'), 90_000);
       if (typeof t.unref === 'function') t.unref();
       registerJob({ name: 'nightly-catch-up', type: 'one-shot', delayMs: 90_000, mode: 'site', description: 'Boot catch-up — immediately run any nightly Sage sync whose last success is >24h old (covers the machine-off-at-4am case)' });
+      // Daytime catch-up — hourly 05:00–23:00. A nightly sync that FAILED its 4am
+      // window (Sage briefly down, network glitch) used to stay stale until the
+      // next night; now it's re-attempted every hour through the day until it
+      // succeeds. No-op once today's run has succeeded (last success <= 24h).
+      const dc = cron.schedule('0 5-23 * * *', () => runNightlyCatchUp('daytime-catch-up'));
+      cronTasks.push(dc);
+      registerJob({ name: 'daytime-catch-up', type: 'cron', cronExpression: '0 5-23 * * *', taskRef: dc, mode: 'site', description: 'Hourly (05:00–23:00) retry of any nightly Sage sync whose last success is >24h old — recovers a failed 4am window without waiting for the next night' });
     }
 
     // item->vendor boot self-heal. v106 creates item_vendor EMPTY and only the
