@@ -2391,6 +2391,90 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // GET /api/reports/bat-exceptions-weekly?year=YYYY — every BAT exception LINE
+  // grouped by week, so the operator can print all weeks' exceptions at once
+  // instead of opening each reconciliation. Ties out to each week's Exceptions
+  // tab: it combines the captured exception extractions (is_exception=1) with
+  // the missing-POD exception rows (Overview orders flagged is_exception that
+  // have no extraction in that recon) — exactly the two sets the tab merges.
+  // Year defaults to the CURRENT year; pass ?year=all for everything.
+  router.get('/api/reports/bat-exceptions-weekly', ...reportsGuard, (req, res) => {
+    const yp = req.query.year;
+    const year = yp === 'all' ? null : (yp ? parseInt(yp, 10) : new Date().getFullYear());
+    try {
+      if (process.env.HUB_MODE === 'true') {
+        // The hub only receives a BAT summary, not per-exception detail — the
+        // per-site/per-week version needs its own ETL (tracked separately).
+        return res.json({ hub_unavailable: true, year, weeks: [], total_count: 0, total_amount: 0, available_years: [], generated_at: new Date().toISOString() });
+      }
+      const yearWhere = year ? 'AND r.year = ?' : '';
+      const params = year ? [year] : [];
+
+      // 1) Captured exception extractions.
+      const extRows = prep(
+        `SELECT r.year, r.week_number,
+                LTRIM(RTRIM(e.order_number)) AS order_number, e.validate AS customer_no,
+                e.store_name AS customer, e.delivery_date, e.pod_uploaded_date,
+                e.extraction_status, e.extracted_invoice, e.exception_reason,
+                e.order_amount, 0 AS is_missing_pod
+         FROM bat_invoice_extractions e
+         JOIN bat_reconciliations r ON r.id = e.reconciliation_id
+         WHERE e.is_exception = 1 ${yearWhere}`
+      ).all(...params);
+
+      // 2) Missing-POD exceptions — Overview exception orders with no extraction.
+      const missRows = prep(
+        `SELECT r.year, r.week_number,
+                LTRIM(RTRIM(o.order_number)) AS order_number, NULL AS customer_no,
+                NULL AS customer, NULL AS delivery_date, NULL AS pod_uploaded_date,
+                NULL AS extraction_status, NULL AS extracted_invoice,
+                '(POD missing from upload)' AS exception_reason,
+                o.order_amount, 1 AS is_missing_pod
+         FROM bat_overview_orders o
+         JOIN bat_reconciliations r ON r.id = o.reconciliation_id
+         WHERE o.is_exception = 1 ${yearWhere}
+           AND NOT EXISTS (
+             SELECT 1 FROM bat_invoice_extractions e
+             WHERE e.reconciliation_id = o.reconciliation_id AND e.order_number = o.order_number
+           )`
+      ).all(...params);
+
+      const all = [...extRows, ...missRows];
+      const weekMap = new Map();
+      for (const row of all) {
+        const key = `${row.year}-${row.week_number}`;
+        let g = weekMap.get(key);
+        if (!g) { g = { year: row.year, week_number: row.week_number, rows: [], subtotal_count: 0, subtotal_amount: 0 }; weekMap.set(key, g); }
+        g.rows.push(row);
+        g.subtotal_count += 1;
+        g.subtotal_amount += Number(row.order_amount) || 0;
+      }
+      const weeks = Array.from(weekMap.values()).sort(
+        (a, b) => (b.year - a.year) || (b.week_number - a.week_number)
+      );
+      for (const w of weeks) {
+        w.rows.sort((a, b) => String(a.order_number || '').localeCompare(String(b.order_number || '')));
+      }
+
+      const yearsRow = prep('SELECT DISTINCT year FROM bat_reconciliations WHERE year IS NOT NULL ORDER BY year DESC').all();
+      const depotRow = prep('SELECT name FROM depot_profile WHERE id = 1').get();
+      const depotName = (depotRow?.name || '').trim() || SITE_NAME;
+
+      res.json({
+        year,
+        site_name: depotName,
+        weeks,
+        total_count: all.length,
+        total_amount: all.reduce((s, r) => s + (Number(r.order_amount) || 0), 0),
+        available_years: yearsRow.map((r) => r.year).filter(Boolean),
+        generated_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error('[reporting] bat-exceptions-weekly error:', err);
+      res.status(500).json({ error: 'Failed to fetch the weekly BAT exceptions report' });
+    }
+  });
+
   // GET /api/reports/inventory-value — total value, by-commodity breakdown,
   // top-N items by value, slow-mover alerts.
   router.get('/api/reports/inventory-value', requireAuth, (req, res) => {
