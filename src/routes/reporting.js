@@ -2650,7 +2650,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       }
 
       // Site: exact day range from the per-transaction cache, vendor from the
-      // item/vendor master (Sage ICITMV), not stock receipts.
+      // item/vendor master (Sage ICITMV), not stock receipts. Exclude inter-branch
+      // transfer "customers" — the hub path reads the rollup-backed
+      // hub_inventory_item_sales which already excludes them, so without this the
+      // site totals would be inflated and disagree with the hub.
+      const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
       const siteAgg = (f, t) => prep(
         `SELECT TRIM(t.item_number) AS item_number,
                 COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
@@ -2658,6 +2662,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
          FROM inventory_sales_transactions t
          LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
          WHERE t.transaction_date >= ? AND t.transaction_date <= ?
+           AND NOT ${EXCL_INTER_BRANCH}
          GROUP BY TRIM(t.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
       ).all(f, t);
       const cur = siteAgg(from, to);

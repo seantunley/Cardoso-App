@@ -38,8 +38,8 @@ function YoY({ cur, py }) {
 
 function VendorBlock({ v, compare }) {
   return (
-    <div className="report-keep-together overflow-x-auto rounded-xl border border-border bg-card">
-      <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5">
+    <div className="overflow-x-auto rounded-xl border border-border bg-card">
+      <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5 print:break-after-avoid">
         <div className="font-display text-lg">{v.vendor}</div>
         <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
           {v.items.length} {v.items.length === 1 ? 'item' : 'items'} · {fmtCount(v.subtotal_qty)} units · <span className="tabular-nums text-foreground">R {fmtR(v.subtotal_ex)}</span> ex
