@@ -391,11 +391,15 @@ function buildPrintStyle(id, orientation) {
   .td-mono  { font-family: 'Courier New', monospace; }
   .td-muted { color: #666; }
 
+  /* Footer flows at the END of the document, NOT position:fixed. A fixed footer
+     doesn't reserve space, so content flowed UNDER it and the bottom of every
+     page was unreadable (the @page bottom margin can't save it because the
+     printable is position:absolute). Static = it sits cleanly after the last
+     content; the browser's own print footer covers per-page numbering. Verified
+     by rendering the report to PDF — see daily-docs, which prints this way. */
   .report-print-footer {
-    position: fixed;
-    bottom: 6mm;
-    left: 8mm;
-    right: 8mm;
+    position: static;
+    margin-top: 6mm;
     font-size: 8px;
     color: #999;
     border-top: 0.25pt solid #ccc;
