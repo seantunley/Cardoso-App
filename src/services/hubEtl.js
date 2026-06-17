@@ -1005,10 +1005,10 @@ async function syncSite(site) {
         const now = new Date().toISOString();
         const ins = db.prepare(`
           INSERT INTO hub_bat_exceptions
-            (site_id, year, week_number, order_number, customer_no, customer,
+            (site_id, year, week_number, order_number, branch_code, customer,
              delivery_date, pod_uploaded_date, ocr, invoice, exception_reason,
              amount, is_missing_pod, synced_at)
-          VALUES (@site_id, @year, @week_number, @order_number, @customer_no, @customer,
+          VALUES (@site_id, @year, @week_number, @order_number, @branch_code, @customer,
              @delivery_date, @pod_uploaded_date, @ocr, @invoice, @exception_reason,
              @amount, @is_missing_pod, @synced_at)
         `);
@@ -1020,7 +1020,7 @@ async function syncSite(site) {
               year: r.year ?? null,
               week_number: r.week_number ?? null,
               order_number: r.order_number ?? null,
-              customer_no: r.customer_no ?? null,
+              branch_code: r.branch_code ?? null,
               customer: r.customer ?? null,
               delivery_date: r.delivery_date ?? null,
               pod_uploaded_date: r.pod_uploaded_date ?? null,

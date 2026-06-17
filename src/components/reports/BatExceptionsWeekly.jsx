@@ -18,7 +18,7 @@ function fetchData(year, site) {
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
 
-const COLS = ['Order', 'Customer No.', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason'];
+const COLS = ['Order', 'Branch code', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason'];
 
 function WeekBlock({ week }) {
   const unknown = week.subtotal_unknown_count || 0;
@@ -42,7 +42,7 @@ function WeekBlock({ week }) {
           {week.rows.map((r, i) => (
             <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
               <td className="px-3 py-1.5 font-mono text-xs text-foreground">{r.order_number || '—'}</td>
-              <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.customer_no || '—'}</td>
+              <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.branch_code || '—'}</td>
               <td className="px-3 py-1.5">{r.customer || (r.is_missing_pod ? <span className="text-muted-subtle">— (missing POD)</span> : '—')}</td>
               <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.delivery_date || '—'}</td>
               <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.pod_uploaded_date || '—'}</td>
@@ -93,13 +93,13 @@ export default function BatExceptionsWeekly() {
   const siteOptions = data?.filters?.sites || [];
 
   const exportCsv = () => {
-    const header = [...(isHub ? ['Site'] : []), 'Week', 'Year', 'Order', 'Customer No.', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason', 'Amount'];
+    const header = [...(isHub ? ['Site'] : []), 'Week', 'Year', 'Order', 'Branch code', 'Customer', 'Delivery', 'POD uploaded', 'OCR', 'Invoice', 'Exception reason', 'Amount'];
     const rows = [];
     const unknownNote = (n) => (n > 0 ? `, ${n} amount unknown` : '');
     const pushWeek = (w, siteName) => {
       for (const r of w.rows) {
         // Blank amount stays 'unknown' (not 0.00) so it isn't read as a real value or summed.
-        rows.push([...(isHub ? [siteName] : []), w.week_number, w.year, r.order_number || '', r.customer_no || '', r.customer || '', r.delivery_date || '', r.pod_uploaded_date || '', r.ocr || '', r.invoice || '', r.exception_reason || '', r.amount == null ? 'unknown' : Number(r.amount).toFixed(2)]);
+        rows.push([...(isHub ? [siteName] : []), w.week_number, w.year, r.order_number || '', r.branch_code || '', r.customer || '', r.delivery_date || '', r.pod_uploaded_date || '', r.ocr || '', r.invoice || '', r.exception_reason || '', r.amount == null ? 'unknown' : Number(r.amount).toFixed(2)]);
       }
       rows.push([...(isHub ? [siteName] : []), `Week ${w.week_number} subtotal`, '', '', '', '', '', '', '', '', `${w.subtotal_count} exceptions${unknownNote(w.subtotal_unknown_count)}`, (Number(w.subtotal_amount) || 0).toFixed(2)]);
     };

@@ -14,7 +14,7 @@ export default {
         year              INTEGER,
         week_number       INTEGER,
         order_number      TEXT,
-        customer_no       TEXT,
+        branch_code       TEXT,
         customer          TEXT,
         delivery_date     TEXT,
         pod_uploaded_date TEXT,

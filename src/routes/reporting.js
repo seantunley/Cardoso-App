@@ -2425,7 +2425,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const params = year ? [year] : [];
     const ext = prep(
       `SELECT r.year, r.week_number,
-              LTRIM(RTRIM(e.order_number)) AS order_number, e.validate AS customer_no,
+              LTRIM(RTRIM(e.order_number)) AS order_number, e.validate AS branch_code,
               e.store_name AS customer, e.delivery_date, e.pod_uploaded_date,
               e.extraction_status, e.extracted_invoice AS invoice, e.exception_reason,
               e.order_amount AS amount, 0 AS is_missing_pod
@@ -2435,7 +2435,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     ).all(...params);
     const miss = prep(
       `SELECT r.year, r.week_number,
-              LTRIM(RTRIM(o.order_number)) AS order_number, NULL AS customer_no,
+              LTRIM(RTRIM(o.order_number)) AS order_number, NULL AS branch_code,
               NULL AS customer, NULL AS delivery_date, NULL AS pod_uploaded_date,
               NULL AS extraction_status, NULL AS invoice,
               '(POD missing from upload)' AS exception_reason,
@@ -2450,7 +2450,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     ).all(...params);
     return [...ext, ...miss].map((r) => ({
       year: r.year, week_number: r.week_number, order_number: r.order_number,
-      customer_no: r.customer_no, customer: r.customer, delivery_date: r.delivery_date,
+      branch_code: r.branch_code, customer: r.customer, delivery_date: r.delivery_date,
       pod_uploaded_date: r.pod_uploaded_date, ocr: batOcrLabel(r.extraction_status, r.is_missing_pod),
       invoice: r.invoice, exception_reason: r.exception_reason,
       amount: batExcAmount(r.amount), is_missing_pod: r.is_missing_pod,
@@ -2491,7 +2491,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         const siteWhere = siteFilter !== 'all' ? 'AND COALESCE(hs.name, x.site_id) = ?' : '';
         const rows = prep(
           `SELECT x.site_id, COALESCE(hs.name, x.site_id) AS site_name,
-                  x.year, x.week_number, x.order_number, x.customer_no, x.customer,
+                  x.year, x.week_number, x.order_number, x.branch_code, x.customer,
                   x.delivery_date, x.pod_uploaded_date, x.ocr, x.invoice,
                   x.exception_reason, x.amount, x.is_missing_pod
            FROM hub_bat_exceptions x
