@@ -2612,6 +2612,77 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   };
   const priorYear = (s) => `${parseInt(s.slice(0, 4), 10) - 1}${s.slice(4)}`; // 'YYYY-...' -> '(YYYY-1)-...'
 
+  // Inter-branch transfer exclusion (matches the rollups) — used by both the
+  // aggregate and by-month site queries so site totals tie to the hub.
+  const SBV_EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
+
+  // Ordered 'YYYY-MM' list from fromP to toP inclusive.
+  const monthsInRange = (fromP, toP) => {
+    const out = [];
+    let y = parseInt(fromP.slice(0, 4), 10), mo = parseInt(fromP.slice(5, 7), 10);
+    const ty = parseInt(toP.slice(0, 4), 10), tm = parseInt(toP.slice(5, 7), 10);
+    while ((y < ty || (y === ty && mo <= tm)) && out.length < 120) {
+      out.push(`${y}-${String(mo).padStart(2, '0')}`);
+      mo += 1; if (mo > 12) { mo = 1; y += 1; }
+    }
+    return out;
+  };
+
+  // Nest flat {site_id, site_name, vendor, item_number, item_description, period, ex}
+  // rows into Site -> Vendor -> Item with per-month ex-VAT cells. PY rows fill
+  // py_cells, keyed by the matching CURRENT-year month so they sit beside it.
+  const buildMonthMatrix = (curRows, pyRows, months) => {
+    const monthSet = new Set(months);
+    const pyToCur = new Map(months.map((p) => [priorYear(p), p]));
+    const groups = new Map();
+    const getItem = (siteId, siteName, vendor, itemNo, desc) => {
+      let g = groups.get(siteId);
+      if (!g) { g = { site_id: siteId, site_name: siteName, vendors: new Map() }; groups.set(siteId, g); }
+      let v = g.vendors.get(vendor);
+      if (!v) { v = { vendor, items: new Map() }; g.vendors.set(vendor, v); }
+      let it = v.items.get(itemNo);
+      if (!it) { it = { item_number: itemNo, item_description: desc || null, cells: {}, py_cells: {} }; v.items.set(itemNo, it); }
+      if (desc && !it.item_description) it.item_description = desc;
+      return it;
+    };
+    for (const r of curRows) {
+      if (!monthSet.has(r.period)) continue;
+      const it = getItem(r.site_id ?? null, r.site_name ?? null, r.vendor, r.item_number, r.item_description);
+      it.cells[r.period] = (it.cells[r.period] || 0) + (Number(r.ex) || 0);
+    }
+    for (const r of pyRows) {
+      const curP = pyToCur.get(r.period);
+      if (!curP) continue;
+      const it = getItem(r.site_id ?? null, r.site_name ?? null, r.vendor, r.item_number, r.item_description);
+      it.py_cells[curP] = (it.py_cells[curP] || 0) + (Number(r.ex) || 0);
+    }
+    const out = [];
+    for (const g of groups.values()) {
+      const vendors = [];
+      for (const v of g.vendors.values()) {
+        const items = Array.from(v.items.values()).map((it) => ({
+          ...it,
+          total_ex: months.reduce((s, p) => s + (it.cells[p] || 0), 0),
+          py_total_ex: months.reduce((s, p) => s + (it.py_cells[p] || 0), 0),
+        })).sort((a, b) => (b.total_ex - a.total_ex) || (b.py_total_ex - a.py_total_ex));
+        const subtotal_cells = {}, subtotal_py_cells = {};
+        for (const p of months) {
+          subtotal_cells[p] = items.reduce((s, it) => s + (it.cells[p] || 0), 0);
+          subtotal_py_cells[p] = items.reduce((s, it) => s + (it.py_cells[p] || 0), 0);
+        }
+        vendors.push({
+          vendor: v.vendor, items, subtotal_cells, subtotal_py_cells,
+          subtotal_total_ex: items.reduce((s, it) => s + it.total_ex, 0),
+          subtotal_py_total_ex: items.reduce((s, it) => s + it.py_total_ex, 0),
+        });
+      }
+      vendors.sort((a, b) => (b.subtotal_total_ex - a.subtotal_total_ex) || (b.subtotal_py_total_ex - a.subtotal_py_total_ex));
+      out.push({ site_id: g.site_id, site_name: g.site_name, vendors });
+    }
+    out.sort((a, b) => String(a.site_name || '').localeCompare(String(b.site_name || '')));
+    return out;
+  };
+
   router.get('/api/reports/sales-by-vendor', ...reportsGuard, (req, res) => {
     const isoDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const validDate = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
@@ -2619,7 +2690,67 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const from = validDate(req.query.from) ? req.query.from : isoDate(new Date(now.getFullYear(), now.getMonth(), 1));
     const to = validDate(req.query.to) ? req.query.to : isoDate(now);
     const compare = ['1', 'true', 'yes', 'on'].includes(String(req.query.compare || '').toLowerCase());
+    const bymonth = ['1', 'true', 'yes', 'on'].includes(String(req.query.bymonth || '').toLowerCase());
     try {
+      // ── By-month matrix mode: Site -> Vendor -> Item with one ex-VAT column per
+      // month; with compare, each month carries a PY value beside it. ──────────
+      if (bymonth) {
+        const periodFrom = from.slice(0, 7), periodTo = to.slice(0, 7);
+        const months = monthsInRange(periodFrom, periodTo);
+        const isHub = process.env.HUB_MODE === 'true';
+        const siteFilter = isHub ? String(req.query.site || 'all').trim() : 'all';
+        let curRows, pyRows = [], dataFrom = null, sitesList = [];
+        if (isHub) {
+          const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
+          const monthAgg = (pf, pt) => prep(
+            `SELECT s.site_id AS site_id, COALESCE(hs.name, s.site_id) AS site_name,
+                    COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                    TRIM(s.item_number) AS item_number, MAX(s.item_description) AS item_description,
+                    s.period AS period, SUM(s.revenue) AS ex
+             FROM hub_inventory_item_sales s
+             LEFT JOIN hub_item_vendor iv ON iv.site_id = s.site_id AND iv.item_number = TRIM(s.item_number)
+             LEFT JOIN hub_sites hs ON hs.id = s.site_id
+             WHERE s.period >= ? AND s.period <= ? ${siteWhere}
+             GROUP BY s.site_id, COALESCE(hs.name, s.site_id), COALESCE(iv.vendor_name, '(No vendor)'), TRIM(s.item_number), s.period`
+          ).all(...(siteFilter !== 'all' ? [pf, pt, siteFilter] : [pf, pt]));
+          curRows = monthAgg(periodFrom, periodTo);
+          if (compare) pyRows = monthAgg(priorYear(periodFrom), priorYear(periodTo));
+          sitesList = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
+          dataFrom = prep('SELECT MIN(period) AS p FROM hub_inventory_item_sales').get()?.p || null;
+        } else {
+          const monthAgg = (f, t) => prep(
+            `SELECT NULL AS site_id, NULL AS site_name,
+                    COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
+                    TRIM(t.item_number) AS item_number, SUBSTR(t.transaction_date, 1, 7) AS period,
+                    SUM(t.line_amount) AS ex
+             FROM inventory_sales_transactions t
+             LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
+             WHERE t.transaction_date >= ? AND t.transaction_date <= ? AND NOT ${SBV_EXCL_INTER_BRANCH}
+             GROUP BY COALESCE(iv.vendor_name, '(No vendor)'), TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)`
+          ).all(f, t);
+          curRows = monthAgg(from, to);
+          if (compare) pyRows = monthAgg(priorYear(from), priorYear(to));
+          const descMap = new Map(
+            prep("SELECT TRIM(item_number) AS item_number, MAX(item_description) AS d FROM inventoryrecord WHERE TRIM(COALESCE(item_description, '')) != '' GROUP BY TRIM(item_number)")
+              .all().map((r) => [r.item_number, r.d])
+          );
+          const withDesc = (r) => ({ ...r, item_description: descMap.get(r.item_number) || null });
+          curRows = curRows.map(withDesc); pyRows = pyRows.map(withDesc);
+          dataFrom = prep('SELECT MIN(SUBSTR(transaction_date, 1, 7)) AS p FROM inventory_sales_transactions').get()?.p || null;
+        }
+        const groups = buildMonthMatrix(curRows, pyRows, months);
+        const earliestNeeded = compare ? priorYear(periodFrom) : periodFrom;
+        const partial = !!(dataFrom && earliestNeeded < dataFrom);
+        return res.json({
+          hub: isHub, compare, bymonth: true, from, to, months,
+          data_from: dataFrom, partial,
+          partial_note: partial ? `Stored sales data starts ${dataFrom} — earlier months show blank and totals exclude them.` : null,
+          site: siteFilter, groups, vat_rate: SALES_VAT_RATE,
+          ...(isHub ? { filters: { sites: sitesList } } : {}),
+          generated_at: new Date().toISOString(),
+        });
+      }
+
       if (process.env.HUB_MODE === 'true') {
         // Hub: monthly rollups only — snap the range to the months it touches.
         const periodFrom = from.slice(0, 7);
@@ -2654,7 +2785,6 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // transfer "customers" — the hub path reads the rollup-backed
       // hub_inventory_item_sales which already excludes them, so without this the
       // site totals would be inflated and disagree with the hub.
-      const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
       const siteAgg = (f, t) => prep(
         `SELECT TRIM(t.item_number) AS item_number,
                 COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
@@ -2662,7 +2792,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
          FROM inventory_sales_transactions t
          LEFT JOIN item_vendor iv ON iv.item_number = TRIM(t.item_number)
          WHERE t.transaction_date >= ? AND t.transaction_date <= ?
-           AND NOT ${EXCL_INTER_BRANCH}
+           AND NOT ${SBV_EXCL_INTER_BRANCH}
          GROUP BY TRIM(t.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
       ).all(f, t);
       const cur = siteAgg(from, to);

@@ -164,13 +164,19 @@ export async function syncItemVendors() {
 // inter-branch transfer "customers" (matched by name) from sales figures.
 const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%inter-branch%' OR LOWER(COALESCE(customer_name,'')) LIKE '%interbranch%')";
 
-// Rebuild the precomputed monthly sales rollups (trailing 24 months) the hub
-// pulls. Runs once per inventory-sales sync — NOT per hub request — so the
-// reporting endpoints stay cheap indexed SELECTs and never freeze the site's
-// event loop. Single source of the aggregation; see migration v099.
+// Rebuild the precomputed monthly sales rollups the hub pulls. Runs once per
+// inventory-sales sync — NOT per hub request — so the reporting endpoints stay
+// cheap indexed SELECTs and never freeze the site's event loop. Single source of
+// the aggregation; see migration v099.
+//
+// Window matches the sales-transaction sync (3 prior calendar years + YTD), NOT
+// a trailing 24 months: the hub Sales-by-Vendor report takes arbitrary date
+// ranges and a prior-year comparison that shifts back another year, so a shorter
+// rollup would make historical hub totals silently under-report vs the
+// transaction-backed site report.
 export function rebuildInventorySalesRollups() {
   const d = new Date();
-  const ft = new Date(d.getFullYear(), d.getMonth() - 23, 1);
+  const ft = new Date(d.getFullYear() - 3, 0, 1);
   const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
   const rebuild = db.transaction(() => {
     db.prepare('DELETE FROM inventory_item_sales_rollup').run();
