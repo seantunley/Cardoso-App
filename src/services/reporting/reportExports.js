@@ -322,9 +322,12 @@ function sbvStyle(ws, leadCols) {
   header.eachCell((cell, col) => {
     const h = String(cell.value || '').toLowerCase();
     const column = ws.getColumn(col);
-    if (h.includes('qty')) column.numFmt = '#,##0';
-    else if (h.includes('yoy')) column.numFmt = '0.0"%"';
-    else if (h.includes('ex') || h.includes('py') || h.includes('incl') || h.includes('vat')) column.numFmt = '#,##0.00';
+    // The [$-409] (en-US) locale token forces a PERIOD decimal + comma thousands
+    // regardless of the viewer's Excel locale (en-ZA would otherwise render a
+    // comma decimal). Money is ZAR ("R " prefix); qty is a plain integer.
+    if (h.includes('qty')) column.numFmt = '[$-409]#,##0';
+    else if (h.includes('yoy')) column.numFmt = '[$-409]0.0"%"';
+    else if (h.includes('ex') || h.includes('py') || h.includes('incl') || h.includes('vat')) column.numFmt = '[$-409]"R "#,##0.00';
     if (h === 'description') column.width = 34;
     else if (h === 'vendor' || h === 'site') column.width = 22;
     else if (h === 'item') column.width = 14;
@@ -332,87 +335,173 @@ function sbvStyle(ws, leadCols) {
   });
 }
 
+// Flatten the report to per-item rows with current/prior-year ex-VAT, for the
+// YoY dashboard. Works for by-month (totals), hub site_groups, or flat vendors.
+function sbvFlattenItems(report) {
+  const rows = [];
+  const add = (siteName, vendor, it, cy, py) => rows.push({
+    site: String(siteName || ''), vendor, item: it.item_number,
+    desc: (it.item_description || '').trim(), cy: Number(cy) || 0, py: Number(py) || 0,
+  });
+  if (report?.bymonth) {
+    for (const g of report.groups || []) for (const v of g.vendors || []) for (const it of v.items || [])
+      add(g.site_name || g.site_id, v.vendor, it, it.total_ex, it.py_total_ex);
+  } else if (Array.isArray(report?.site_groups)) {
+    for (const g of report.site_groups) for (const v of g.vendors || []) for (const it of v.items || [])
+      add(g.site_name || g.site_id, v.vendor, it, it.ex_vat, it.py_ex_vat);
+  } else {
+    for (const v of report?.vendors || []) for (const it of v.items || [])
+      add('', v.vendor, it, it.ex_vat, it.py_ex_vat);
+  }
+  return rows.map((r) => ({ ...r, change: r.cy - r.py }));
+}
+
+// Dashboard sheet: precomputed Top-10 YoY movers + steps to build a PivotChart.
+// ExcelJS can't emit pivot tables/charts/slicers, so we compute the insight and
+// leave the Data sheet pivot-ready for a 3-click PivotChart + vendor slicer.
+function sbvBuildDashboard(wb, report, isHub) {
+  const dash = wb.addWorksheet('Dashboard');
+  dash.getColumn(1).width = 14; dash.getColumn(2).width = 36; dash.getColumn(3).width = 22;
+  if (isHub) dash.getColumn(4).width = 18;
+  dash.addRow(['Sales by Vendor — Dashboard']).font = { bold: true, size: 14 };
+  dash.addRow([`Ex-VAT · ZAR · ${report?.compare ? 'YoY vs prior year' : 'no prior-year comparison'}`]).font = { italic: true };
+  dash.addRow([]);
+
+  if (report?.compare) {
+    const lead = ['Item', 'Description', 'Vendor', ...(isHub ? ['Site'] : [])];
+    const head = [...lead, 'This year', 'Last year', 'Change', 'YoY %'];
+    const moneyStart = lead.length + 1;
+    const flat = sbvFlattenItems(report);
+    const ups = flat.filter((r) => r.change > 0).sort((a, b) => b.change - a.change).slice(0, 10);
+    const downs = flat.filter((r) => r.change < 0).sort((a, b) => a.change - b.change).slice(0, 10);
+    const section = (label, list) => {
+      dash.addRow([label]).font = { bold: true, size: 12 };
+      dash.addRow(head).font = { bold: true };
+      for (const r of list) dash.addRow([r.item, r.desc, r.vendor, ...(isHub ? [r.site] : []), num2(r.cy), num2(r.py), num2(r.change), sbvYoy(r.cy, r.py)]);
+      dash.addRow([]);
+    };
+    section('Top 10 biggest YoY increases (by item)', ups);
+    section('Top 10 biggest YoY drops (by item)', downs);
+    for (let c = moneyStart; c <= moneyStart + 2; c++) dash.getColumn(c).numFmt = '[$-409]"R "#,##0.00';
+    dash.getColumn(moneyStart + 3).numFmt = '[$-409]0.0"%"';
+  } else {
+    dash.addRow(['Turn on “Compare prior year” before exporting to populate the YoY movers.']);
+  }
+
+  dash.addRow([]);
+  dash.addRow(['Build a PivotChart + vendor slicer (the Data sheet is ready):']).font = { bold: true, size: 12 };
+  [
+    '1. Open the “Data” sheet and click any cell inside the table.',
+    '2. Insert ▸ PivotChart — Excel picks the “SalesData” table automatically.',
+    '3. Axis = Month; Legend/Rows = Vendor then Item; Values = Sum of Ex-VAT (add PY Ex-VAT / Qty as needed).',
+    '4. Insert ▸ Slicer ▸ tick Vendor — that is your selectable-by-vendor control.',
+  ].forEach((s) => dash.addRow([s]));
+}
+
 export async function buildSalesByVendorXlsx(report) {
   const wb = new ExcelJS.Workbook();
   const compare = !!report?.compare;
+  // Empty tables aren't valid in Excel — keep at least one (blank) row.
+  const tableRows = (rows, width) => (rows.length ? rows : [Array(width).fill(null)]);
 
   if (report?.bymonth) {
     const isHub = !!report.hub;
     const months = report.months || [];
-    const ws = wb.addWorksheet('Sales by Vendor (by month)');
     const lead = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description'];
-    const monthHead = [];
-    for (const m of months) {
-      monthHead.push(`${sbvMonthLabel(m)} ex`);
-      monthHead.push(`${sbvMonthLabel(m)} qty`);
-      if (compare) monthHead.push(`${sbvMonthLabel(sbvPriorYear(m))} ex`);
-    }
-    const tail = ['Total ex-VAT', 'Total qty', ...(compare ? ['PY ex-VAT', 'YoY %'] : [])];
-    ws.addRow([...lead, ...monthHead, ...tail]);
+    sbvBuildDashboard(wb, report, isHub);
 
-    let gEx = 0, gQty = 0, gPy = 0;
+    // Data — tidy/long, one row per item per month. Excel Table → pivot-ready.
+    const data = wb.addWorksheet('Data');
+    const dataCols = [...lead, 'Month', 'Ex-VAT', 'Qty', ...(compare ? ['PY Ex-VAT', 'PY Qty'] : [])];
+    const dataRows = [];
     for (const g of report.groups || []) {
       for (const v of g.vendors || []) {
         for (const it of v.items || []) {
-          const vals = [];
           for (const m of months) {
-            vals.push(num2(it.cells?.[m] || 0));
-            vals.push(Number(it.qty_cells?.[m] || 0));
-            if (compare) vals.push(num2(it.py_cells?.[m] || 0));
+            const ex = num2(it.cells?.[m] || 0), qty = Number(it.qty_cells?.[m] || 0);
+            const pyEx = num2(it.py_cells?.[m] || 0), pyQty = Number(it.py_qty_cells?.[m] || 0);
+            if (!ex && !qty && !pyEx && !pyQty) continue; // don't pad the pivot source with empty months
+            dataRows.push([
+              ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
+              v.vendor, it.item_number, (it.item_description || '').trim(),
+              m, ex, qty, ...(compare ? [pyEx, pyQty] : []),
+            ]);
           }
-          ws.addRow([
-            ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
-            v.vendor, it.item_number, it.item_description || '',
-            ...vals,
-            num2(it.total_ex), Number(it.total_qty || 0),
-            ...(compare ? [num2(it.py_total_ex), sbvYoy(it.total_ex, it.py_total_ex)] : []),
-          ]);
-          gEx += Number(it.total_ex) || 0; gQty += Number(it.total_qty) || 0; gPy += Number(it.py_total_ex) || 0;
         }
       }
     }
-    const grandRow = ws.addRow([
+    data.addTable({
+      name: 'SalesData', ref: 'A1', headerRow: true,
+      style: { theme: 'TableStyleMedium2', showRowStripes: true },
+      columns: dataCols.map((c) => ({ name: c, filterButton: true })),
+      rows: tableRows(dataRows, dataCols.length),
+    });
+    sbvStyle(data, lead.length);
+
+    // Totals — per-item period totals + grand, kept off the Data sheet.
+    const totals = wb.addWorksheet('Totals');
+    totals.addRow([...lead, 'Total ex-VAT', 'Total qty', ...(compare ? ['PY ex-VAT', 'PY qty', 'YoY %'] : [])]);
+    let gEx = 0, gQty = 0, gPy = 0, gPyQty = 0;
+    for (const g of report.groups || []) {
+      for (const v of g.vendors || []) {
+        for (const it of v.items || []) {
+          totals.addRow([
+            ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
+            v.vendor, it.item_number, (it.item_description || '').trim(),
+            num2(it.total_ex), Number(it.total_qty || 0),
+            ...(compare ? [num2(it.py_total_ex), Number(it.py_total_qty || 0), sbvYoy(it.total_ex, it.py_total_ex)] : []),
+          ]);
+          gEx += Number(it.total_ex) || 0; gQty += Number(it.total_qty) || 0; gPy += Number(it.py_total_ex) || 0; gPyQty += Number(it.py_total_qty) || 0;
+        }
+      }
+    }
+    totals.addRow([
       ...(isHub ? [''] : []), 'GRAND TOTAL', '', '',
-      ...monthHead.map(() => ''),
-      num2(gEx), gQty, ...(compare ? [num2(gPy), sbvYoy(gEx, gPy)] : []),
-    ]);
-    grandRow.font = { bold: true };
-    sbvStyle(ws, lead.length);
+      num2(gEx), gQty, ...(compare ? [num2(gPy), gPyQty, sbvYoy(gEx, gPy)] : []),
+    ]).font = { bold: true };
+    sbvStyle(totals, lead.length);
     return await wb.xlsx.writeBuffer();
   }
 
-  // Aggregate: period totals per item. At the hub, site_groups carries a
-  // per-branch breakdown → emit a Site column with each vendor/item split by
-  // branch; otherwise a flat vendor/item list.
+  // ── Aggregate (no month dimension) — Dashboard + Data table + Totals. ──
   const isHub = Array.isArray(report?.site_groups);
-  const ws = wb.addWorksheet('Sales by Vendor');
   const lead = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description'];
-  ws.addRow([...lead, 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])]);
+  sbvBuildDashboard(wb, report, isHub);
+
+  const data = wb.addWorksheet('Data');
+  const dataCols = [...lead, 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])];
+  const dataRows = [];
   let gQty = 0, gPyQty = 0, gEx = 0, gPyEx = 0, gIncl = 0;
-  const emit = (vendors, siteName) => {
-    for (const v of vendors || []) {
-      for (const it of v.items || []) {
-        ws.addRow([
-          ...(isHub ? [String(siteName || '')] : []),
-          v.vendor, it.item_number, it.item_description || '',
-          Number(it.qty || 0), ...(compare ? [Number(it.py_qty || 0)] : []),
-          num2(it.ex_vat), ...(compare ? [num2(it.py_ex_vat)] : []),
-          num2(it.incl_vat), ...(compare ? [sbvYoy(it.ex_vat, it.py_ex_vat)] : []),
-        ]);
-        gQty += Number(it.qty) || 0; gPyQty += Number(it.py_qty) || 0;
-        gEx += Number(it.ex_vat) || 0; gPyEx += Number(it.py_ex_vat) || 0; gIncl += Number(it.incl_vat) || 0;
-      }
+  const collect = (vendors, siteName) => {
+    for (const v of vendors || []) for (const it of v.items || []) {
+      dataRows.push([
+        ...(isHub ? [String(siteName || '')] : []),
+        v.vendor, it.item_number, (it.item_description || '').trim(),
+        Number(it.qty || 0), ...(compare ? [Number(it.py_qty || 0)] : []),
+        num2(it.ex_vat), ...(compare ? [num2(it.py_ex_vat)] : []),
+        num2(it.incl_vat), ...(compare ? [sbvYoy(it.ex_vat, it.py_ex_vat)] : []),
+      ]);
+      gQty += Number(it.qty) || 0; gPyQty += Number(it.py_qty) || 0;
+      gEx += Number(it.ex_vat) || 0; gPyEx += Number(it.py_ex_vat) || 0; gIncl += Number(it.incl_vat) || 0;
     }
   };
-  if (isHub) for (const g of report.site_groups) emit(g.vendors, g.site_name || g.site_id);
-  else emit(report.vendors);
-  const grandRow = ws.addRow([
-    ...(isHub ? [''] : []), 'GRAND TOTAL', '', '',
-    gQty, ...(compare ? [gPyQty] : []),
+  if (isHub) for (const g of report.site_groups) collect(g.vendors, g.site_name || g.site_id);
+  else collect(report.vendors);
+  data.addTable({
+    name: 'SalesData', ref: 'A1', headerRow: true,
+    style: { theme: 'TableStyleMedium2', showRowStripes: true },
+    columns: dataCols.map((c) => ({ name: c, filterButton: true })),
+    rows: tableRows(dataRows, dataCols.length),
+  });
+  sbvStyle(data, lead.length);
+
+  const totals = wb.addWorksheet('Totals');
+  totals.addRow(['Metric', 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])]);
+  totals.addRow([
+    'GRAND TOTAL', gQty, ...(compare ? [gPyQty] : []),
     num2(gEx), ...(compare ? [num2(gPyEx)] : []),
     num2(gIncl), ...(compare ? [sbvYoy(gEx, gPyEx)] : []),
-  ]);
-  grandRow.font = { bold: true };
-  sbvStyle(ws, lead.length);
+  ]).font = { bold: true };
+  sbvStyle(totals, 1);
   return await wb.xlsx.writeBuffer();
 }
