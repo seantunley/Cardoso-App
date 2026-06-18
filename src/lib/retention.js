@@ -175,23 +175,22 @@ export function vacuumDb() {
   // near-empty while many B-tree pages sit only partially filled — bloat a
   // VACUUM would repack but the freelist gate alone would skip forever. So also
   // force an unconditional VACUUM when a real one hasn't run in
-  // VACUUM_MAX_SKIP_DAYS (default 90). "Real" excludes prior skips, which are
-  // ALSO recorded status='succeeded' (their context carries "skipped") — so we
-  // must filter those out or the timer would never elapse.
+  // VACUUM_MAX_SKIP_DAYS (default 90). The last-real-VACUUM timestamp is kept in
+  // db_maintenance_meta (written only on an actual VACUUM below), NOT job_runs:
+  // job_runs is pruned to 30 days, so it could never evidence a >30-day skip
+  // window and the timer would fire monthly anyway (Codex follow-up on #480).
   const maxSkipDaysRaw = parseInt(process.env.VACUUM_MAX_SKIP_DAYS ?? '', 10);
   const maxSkipDays = Number.isFinite(maxSkipDaysRaw) && maxSkipDaysRaw >= 0 ? maxSkipDaysRaw : 90;
   let daysSinceLastVacuum = Infinity;
   try {
-    const row = /** @type {{ last: string | null } | undefined} */ (db.prepare(`
-      SELECT MAX(ended_at) AS last FROM job_runs
-      WHERE name = 'vacuum-db' AND status = 'succeeded'
-        AND (context IS NULL OR context NOT LIKE '%"skipped"%')
-    `).get());
-    if (row?.last) {
-      const ms = Date.now() - Date.parse(row.last);
+    const row = /** @type {{ last_vacuum_at: string | null } | undefined} */ (
+      db.prepare('SELECT last_vacuum_at FROM db_maintenance_meta WHERE id = 1').get()
+    );
+    if (row?.last_vacuum_at) {
+      const ms = Date.now() - Date.parse(row.last_vacuum_at);
       if (Number.isFinite(ms) && ms >= 0) daysSinceLastVacuum = ms / (1000 * 60 * 60 * 24);
     }
-  } catch { /* job_runs unavailable → leave Infinity → treat as overdue → VACUUM */ }
+  } catch { /* table missing (pre-initSchema) → leave Infinity → treat as overdue → VACUUM */ }
   const overdue = daysSinceLastVacuum >= maxSkipDays;
   const daysSinceForReport = Number.isFinite(daysSinceLastVacuum) ? Math.round(daysSinceLastVacuum) : null;
 
@@ -208,6 +207,16 @@ export function vacuumDb() {
 
   const t0 = Date.now();
   db.exec('VACUUM');
+  // Record the real VACUUM so the skip-window timer above is durable across the
+  // 30-day job_runs prune. Best-effort: a write failure must not fail the job.
+  try {
+    db.prepare(`
+      INSERT INTO db_maintenance_meta (id, last_vacuum_at) VALUES (1, ?)
+      ON CONFLICT(id) DO UPDATE SET last_vacuum_at = excluded.last_vacuum_at
+    `).run(new Date().toISOString());
+  } catch (e) {
+    console.warn('[vacuum-db] could not record last_vacuum_at:', e instanceof Error ? e.message : String(e));
+  }
   return {
     elapsed_ms: Date.now() - t0,
     trigger: overdue ? 'overdue_fragmentation_guard' : 'freelist',
