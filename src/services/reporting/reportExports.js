@@ -381,29 +381,38 @@ export async function buildSalesByVendorXlsx(report) {
     return await wb.xlsx.writeBuffer();
   }
 
-  // Aggregate: period totals per item.
+  // Aggregate: period totals per item. At the hub, site_groups carries a
+  // per-branch breakdown → emit a Site column with each vendor/item split by
+  // branch; otherwise a flat vendor/item list.
+  const isHub = Array.isArray(report?.site_groups);
   const ws = wb.addWorksheet('Sales by Vendor');
-  ws.addRow(['Vendor', 'Item', 'Description', 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])]);
+  const lead = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description'];
+  ws.addRow([...lead, 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])]);
   let gQty = 0, gPyQty = 0, gEx = 0, gPyEx = 0, gIncl = 0;
-  for (const v of report.vendors || []) {
-    for (const it of v.items || []) {
-      ws.addRow([
-        v.vendor, it.item_number, it.item_description || '',
-        Number(it.qty || 0), ...(compare ? [Number(it.py_qty || 0)] : []),
-        num2(it.ex_vat), ...(compare ? [num2(it.py_ex_vat)] : []),
-        num2(it.incl_vat), ...(compare ? [sbvYoy(it.ex_vat, it.py_ex_vat)] : []),
-      ]);
-      gQty += Number(it.qty) || 0; gPyQty += Number(it.py_qty) || 0;
-      gEx += Number(it.ex_vat) || 0; gPyEx += Number(it.py_ex_vat) || 0; gIncl += Number(it.incl_vat) || 0;
+  const emit = (vendors, siteName) => {
+    for (const v of vendors || []) {
+      for (const it of v.items || []) {
+        ws.addRow([
+          ...(isHub ? [String(siteName || '')] : []),
+          v.vendor, it.item_number, it.item_description || '',
+          Number(it.qty || 0), ...(compare ? [Number(it.py_qty || 0)] : []),
+          num2(it.ex_vat), ...(compare ? [num2(it.py_ex_vat)] : []),
+          num2(it.incl_vat), ...(compare ? [sbvYoy(it.ex_vat, it.py_ex_vat)] : []),
+        ]);
+        gQty += Number(it.qty) || 0; gPyQty += Number(it.py_qty) || 0;
+        gEx += Number(it.ex_vat) || 0; gPyEx += Number(it.py_ex_vat) || 0; gIncl += Number(it.incl_vat) || 0;
+      }
     }
-  }
+  };
+  if (isHub) for (const g of report.site_groups) emit(g.vendors, g.site_name || g.site_id);
+  else emit(report.vendors);
   const grandRow = ws.addRow([
-    'GRAND TOTAL', '', '',
+    ...(isHub ? [''] : []), 'GRAND TOTAL', '', '',
     gQty, ...(compare ? [gPyQty] : []),
     num2(gEx), ...(compare ? [num2(gPyEx)] : []),
     num2(gIncl), ...(compare ? [sbvYoy(gEx, gPyEx)] : []),
   ]);
   grandRow.font = { bold: true };
-  sbvStyle(ws, 3);
+  sbvStyle(ws, lead.length);
   return await wb.xlsx.writeBuffer();
 }

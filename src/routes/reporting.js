@@ -2770,29 +2770,57 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
     if (process.env.HUB_MODE === 'true') {
       // Hub: monthly rollups only — snap the range to the months it touches.
+      // Query per-site so the Excel export can break the aggregate down by branch
+      // (site_groups); the on-screen view still shows combined across-site totals.
       const periodFrom = from.slice(0, 7);
       const periodTo = to.slice(0, 7);
       const siteFilter = String(query.site || 'all').trim();
       const siteWhere = siteFilter !== 'all' ? 'AND s.site_id = ?' : '';
       const hubAgg = (pf, pt) => prep(
-        `SELECT TRIM(s.item_number) AS item_number,
+        `SELECT s.site_id AS site_id, COALESCE(hs.name, s.site_id) AS site_name,
+                TRIM(s.item_number) AS item_number,
                 COALESCE(iv.vendor_name, '(No vendor)') AS vendor,
                 MAX(s.item_description) AS item_description,
                 SUM(s.qty_sold) AS qty, SUM(s.revenue) AS ex_vat
          FROM hub_inventory_item_sales s
          LEFT JOIN hub_item_vendor iv ON iv.site_id = s.site_id AND iv.item_number = TRIM(s.item_number)
+         LEFT JOIN hub_sites hs ON hs.id = s.site_id
          WHERE s.period >= ? AND s.period <= ? ${siteWhere}
-         GROUP BY TRIM(s.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
+         GROUP BY s.site_id, COALESCE(hs.name, s.site_id), TRIM(s.item_number), COALESCE(iv.vendor_name, '(No vendor)')`
       ).all(...(siteFilter !== 'all' ? [pf, pt, siteFilter] : [pf, pt]));
-      const cur = hubAgg(periodFrom, periodTo);
       const pyFrom = priorYear(periodFrom), pyTo = priorYear(periodTo);
-      const prior = compare ? hubAgg(pyFrom, pyTo) : [];
-      const vendors = groupSalesByVendor(compare ? mergeSalesPeriods(cur, prior) : cur);
+      const curBySite = hubAgg(periodFrom, periodTo);
+      const priorBySite = compare ? hubAgg(pyFrom, pyTo) : [];
+      // Combined across sites for the on-screen view — sum each vendor+item.
+      const combine = (rows) => {
+        const m = new Map();
+        for (const r of rows) {
+          const k = `${r.vendor}||${r.item_number}`;
+          let g = m.get(k);
+          if (!g) { g = { item_number: r.item_number, vendor: r.vendor, item_description: r.item_description || null, qty: 0, ex_vat: 0 }; m.set(k, g); }
+          g.qty += Number(r.qty) || 0; g.ex_vat += Number(r.ex_vat) || 0;
+          if (!g.item_description && r.item_description) g.item_description = r.item_description;
+        }
+        return Array.from(m.values());
+      };
+      const vendors = groupSalesByVendor(compare ? mergeSalesPeriods(combine(curBySite), combine(priorBySite)) : combine(curBySite));
+      // Per-branch breakdown for the Excel export — group each site's own rows.
+      const bySite = new Map();
+      const slot = (r) => {
+        let s = bySite.get(r.site_id);
+        if (!s) { s = { site_id: r.site_id, site_name: r.site_name, cur: [], prior: [] }; bySite.set(r.site_id, s); }
+        return s;
+      };
+      for (const r of curBySite) slot(r).cur.push(r);
+      for (const r of priorBySite) slot(r).prior.push(r);
+      const site_groups = Array.from(bySite.values())
+        .map((s) => ({ site_id: s.site_id, site_name: s.site_name, vendors: groupSalesByVendor(compare ? mergeSalesPeriods(s.cur, s.prior) : s.cur) }))
+        .sort((a, b) => String(a.site_name || '').localeCompare(String(b.site_name || '')));
       const sites = prep('SELECT id, name FROM hub_sites ORDER BY name').all().map((r) => ({ id: r.id, name: r.name || r.id }));
       return {
         hub: true, compare, from, to, period_from: periodFrom, period_to: periodTo,
         ...(compare ? { py_period_from: pyFrom, py_period_to: pyTo } : {}),
-        site: siteFilter, vendors, grand: salesGrand(vendors), vendor_map_rows: vendorMapRows,
+        site: siteFilter, vendors, grand: salesGrand(vendors), site_groups, vendor_map_rows: vendorMapRows,
         filters: { sites }, vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
       };
     }
@@ -2849,11 +2877,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       const report = buildSalesByVendorData(req.query);
       const wanted = new Set([].concat(req.query.vendors || []).filter(Boolean));
       if (wanted.size) {
-        if (Array.isArray(report.groups)) {
-          report.groups = report.groups
-            .map((g) => ({ ...g, vendors: g.vendors.filter((v) => wanted.has(v.vendor)) }))
-            .filter((g) => g.vendors.length);
-        }
+        const filterGroups = (gs) => gs
+          .map((g) => ({ ...g, vendors: g.vendors.filter((v) => wanted.has(v.vendor)) }))
+          .filter((g) => g.vendors.length);
+        if (Array.isArray(report.groups)) report.groups = filterGroups(report.groups);
+        if (Array.isArray(report.site_groups)) report.site_groups = filterGroups(report.site_groups);
         if (Array.isArray(report.vendors)) report.vendors = report.vendors.filter((v) => wanted.has(v.vendor));
       }
       const { buildSalesByVendorXlsx } = await import('../services/reporting/reportExports.js');
