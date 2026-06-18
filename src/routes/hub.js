@@ -2137,6 +2137,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     }
     const row = getHubJtiArchive({ db, id });
     if (!row) return res.status(404).json({ error: `Hub JTI archive #${id} not found` });
+    // Enforce the site allow-list — a restricted user must not download another
+    // site's archive by guessing its id. 404 (not 403) so we don't leak that
+    // the archive exists for a site they can't see. (Mirrors the commission
+    // download guard; JTI had been missing it.)
+    const allowedIds = getAllowedSiteIds(req, res);
+    if (allowedIds !== null && !(allowedIds.has(row.site_id) || allowedIds.has(Number(row.site_id)) || allowedIds.has(String(row.site_id)))) {
+      return res.status(404).json({ error: `Hub JTI archive #${id} not found` });
+    }
     if (!fs.existsSync(row.file_path)) {
       console.error(`[hub-jti] archive #${id} (${row.filename}) missing on disk at ${row.file_path}`);
       logAudit({
@@ -2191,9 +2199,15 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!Number.isInteger(year) || !Number.isInteger(month)) {
       return res.status(400).json({ error: 'Invalid year/month — must be integers' });
     }
+    // Restrict the bundle to the sites this user is allowed to see, so a
+    // restricted user can't pull every branch's archive for the period in one
+    // ZIP. (Mirrors the commission bundle; JTI had been streaming HUB_SITES.)
+    const allowedIds = getAllowedSiteIds(req, res);
+    const siteAllowed = (sid) => allowedIds === null || allowedIds.has(sid) || allowedIds.has(Number(sid)) || allowedIds.has(String(sid));
+    const sites = (HUB_SITES || []).filter((s) => siteAllowed(s.id));
 
     const outcome = streamArchiveBundle({
-      db, sites: HUB_SITES,
+      db, sites,
       periodYear: year, periodMonth: month,
       res,
       onError: (err) => {
