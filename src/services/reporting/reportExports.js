@@ -371,7 +371,10 @@ function sbvBuildDashboard(wb, report, isHub) {
     const lead = ['Item', 'Description', 'Vendor', ...(isHub ? ['Site'] : [])];
     const head = [...lead, 'This year', 'Last year', 'Change', 'YoY %'];
     const moneyStart = lead.length + 1;
-    const flat = sbvFlattenItems(report);
+    // Only items that were around last year — an item with no prior-year sales
+    // ("new") isn't a year-over-year change and would otherwise swamp the
+    // increases. Genuine YoY needs a prior-year baseline (py > 0).
+    const flat = sbvFlattenItems(report).filter((r) => r.py > 0);
     const ups = flat.filter((r) => r.change > 0).sort((a, b) => b.change - a.change).slice(0, 10);
     const downs = flat.filter((r) => r.change < 0).sort((a, b) => a.change - b.change).slice(0, 10);
     const section = (label, list) => {
