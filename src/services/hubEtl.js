@@ -223,15 +223,22 @@ export async function chunkedStageLoad(database, { ddl, clearSql, insertSql, row
 //     token exist and are equal — so a missing endpoint (old site version), an
 //     errored/absent token, or a first-ever pull all refresh.
 //   • Killable with HUB_ETL_CHANGE_GATE=0 (or off/false/no) → always refresh.
-const ETL_GATE_ENABLED = !['0', 'off', 'false', 'no'].includes(
-  String(process.env.HUB_ETL_CHANGE_GATE ?? '').trim().toLowerCase(),
-);
+// Evaluated at CALL time, not module load: some entrypoints (node server.js via
+// npm run server / install-service.bat) import this module before server.js
+// runs dotenv.config(), so a module-level constant would miss a .env kill-switch
+// (Codex review on PR #481). Reading process.env per call also lets the switch
+// take effect without a restart.
+function etlGateEnabled() {
+  return !['0', 'off', 'false', 'no'].includes(
+    String(process.env.HUB_ETL_CHANGE_GATE ?? '').trim().toLowerCase(),
+  );
+}
 
 // Fetch a site's per-dataset freshness tokens. Returns {} on ANY failure
 // (timeout, old-site 404, bad JSON) so the caller refreshes everything — the
 // gate must never skip on uncertainty.
 async function fetchEtlFreshness(site, headers) {
-  if (!ETL_GATE_ENABLED) return {};
+  if (!etlGateEnabled()) return {};
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), 10000);
   try {
@@ -267,7 +274,7 @@ function makeEtlGate(database, siteId, freshTokens) {
 
   return {
     shouldRun(storageKey, tokenName) {
-      if (!ETL_GATE_ENABLED) return true;
+      if (!etlGateEnabled()) return true;
       const fresh = freshTokens[tokenName];
       if (fresh == null || fresh === '') return true;     // token unknown → refresh
       const prev = stored[storageKey];
