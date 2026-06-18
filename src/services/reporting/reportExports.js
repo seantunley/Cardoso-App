@@ -412,7 +412,7 @@ export async function buildSalesByVendorXlsx(report) {
 
     // Data — tidy/long, one row per item per month. Excel Table → pivot-ready.
     const data = wb.addWorksheet('Data');
-    const dataCols = [...lead, 'Month', 'Ex-VAT', 'Qty', ...(compare ? ['PY Ex-VAT', 'PY Qty'] : [])];
+    const dataCols = [...lead, 'Year', 'Month', 'Ex-VAT', 'Qty', ...(compare ? ['PY Ex-VAT', 'PY Qty'] : [])];
     const dataRows = [];
     for (const g of report.groups || []) {
       for (const v of g.vendors || []) {
@@ -424,7 +424,7 @@ export async function buildSalesByVendorXlsx(report) {
             dataRows.push([
               ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
               v.vendor, it.item_number, (it.item_description || '').trim(),
-              m, ex, qty, ...(compare ? [pyEx, pyQty] : []),
+              Number(m.slice(0, 4)), SBV_MON[parseInt(m.slice(5, 7), 10) - 1], ex, qty, ...(compare ? [pyEx, pyQty] : []),
             ]);
           }
         }
