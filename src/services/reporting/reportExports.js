@@ -393,8 +393,8 @@ function sbvBuildDashboard(wb, report, isHub) {
   [
     '1. Open the “Data” sheet and click any cell inside the table.',
     '2. Insert ▸ PivotChart — Excel picks the “SalesData” table automatically.',
-    '3. Axis = Month; Legend/Rows = Vendor then Item; Values = Sum of Ex-VAT (add PY Ex-VAT / Qty as needed).',
-    '4. Insert ▸ Slicer ▸ tick Vendor — that is your selectable-by-vendor control.',
+    '3. Axis = Month; Legend = Year (this plots 2025 against 2026); Values = Sum of Ex-VAT (or Qty).',
+    '4. Add Vendor and Item to Filters (or Rows), and Insert ▸ Slicer ▸ Vendor for a selectable-by-vendor control.',
   ].forEach((s) => dash.addRow([s]));
 }
 
@@ -412,20 +412,26 @@ export async function buildSalesByVendorXlsx(report) {
 
     // Data — tidy/long, one row per item per month. Excel Table → pivot-ready.
     const data = wb.addWorksheet('Data');
-    const dataCols = [...lead, 'Year', 'Month', 'Ex-VAT', 'Qty', ...(compare ? ['PY Ex-VAT', 'PY Qty'] : [])];
+    // Fully long/tidy: Year is a real dimension, so the current year and the
+    // prior year are SEPARATE rows (same Month) — that's what lets a pivot chart
+    // put Year on the legend and plot 2025 against 2026. No PY side-columns.
+    const dataCols = [...lead, 'Year', 'Month', 'Ex-VAT', 'Qty'];
     const dataRows = [];
     for (const g of report.groups || []) {
       for (const v of g.vendors || []) {
         for (const it of v.items || []) {
+          const site = isHub ? [String(g.site_name || g.site_id || '')] : [];
+          const desc = (it.item_description || '').trim();
           for (const m of months) {
+            const yr = Number(m.slice(0, 4));
+            const mon = SBV_MON[parseInt(m.slice(5, 7), 10) - 1];
             const ex = num2(it.cells?.[m] || 0), qty = Number(it.qty_cells?.[m] || 0);
-            const pyEx = num2(it.py_cells?.[m] || 0), pyQty = Number(it.py_qty_cells?.[m] || 0);
-            if (!ex && !qty && !pyEx && !pyQty) continue; // don't pad the pivot source with empty months
-            dataRows.push([
-              ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
-              v.vendor, it.item_number, (it.item_description || '').trim(),
-              Number(m.slice(0, 4)), SBV_MON[parseInt(m.slice(5, 7), 10) - 1], ex, qty, ...(compare ? [pyEx, pyQty] : []),
-            ]);
+            if (ex || qty) dataRows.push([...site, v.vendor, it.item_number, desc, yr, mon, ex, qty]);
+            if (compare) {
+              const pyEx = num2(it.py_cells?.[m] || 0), pyQty = Number(it.py_qty_cells?.[m] || 0);
+              // Prior-year row: actual calendar year (yr - 1), same month.
+              if (pyEx || pyQty) dataRows.push([...site, v.vendor, it.item_number, desc, yr - 1, mon, pyEx, pyQty]);
+            }
           }
         }
       }
