@@ -22,6 +22,7 @@ import {
 } from './services/commission/commissionScheduler.js';
 import { pushPendingCommissionArchives } from './services/commission/commissionHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
+import { trackOp } from './lib/mainThreadWatch.js';
 import { syncSalesFromSage, syncItemVendors } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
 import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
@@ -382,8 +383,33 @@ async function runBatIntegritySweep() {
 // `opts` is forwarded to recordJob — most importantly `successCheck`,
 // for jobs (like verifyLatestBackup) that signal failure by returning
 // `{ ok: false }` rather than throwing.
+// Wrap a scheduled job's function so the main-thread freeze watchdog can name
+// it. Until this wiring existed, the scheduler — which runs the heaviest
+// synchronous main-thread work in the app (local-backup, backup-verify's
+// PRAGMA integrity_check, the monthly VACUUM, the Sage syncs) — never called
+// trackOp(), so EVERY hard-freeze marker recorded its active operations as
+// "(none registered — blocker not yet instrumented with trackOp)". The
+// forensics could see the loop froze for 20-30s but never which job did it.
+//
+// trackOp keeps the name active across the whole run, awaits included. For an
+// async job that means the name is "active" while it's merely waiting on Sage
+// I/O too — that's fine: active_operations is a best-effort list of SUSPECTS
+// shown next to a freeze, and an idle await cannot itself block the loop. The
+// value is that a freeze during a job's synchronous section (the DB write, the
+// integrity_check, the VACUUM) now names that job instead of "(none)".
+function withFreezeTracking(name, fn) {
+  return async (...args) => {
+    const done = trackOp(`scheduled:${name}`);
+    try {
+      return await fn(...args);
+    } finally {
+      done();
+    }
+  };
+}
+
 function track(name, fn, contextFn, opts) {
-  return () => recordJob(name, fn, contextFn, opts).catch((err) => {
+  return () => recordJob(name, withFreezeTracking(name, fn), contextFn, opts).catch((err) => {
     // Hard failures (thrown errors) already land in job_runs.error_message
     // via recordJob. Mirror them to error_log so they also show up in
     // System Log — without this, the operator had to flip between
@@ -441,7 +467,7 @@ function nightlyWithRetry(name, fn) {
       const t = setTimeout(() => attempt(n + 1), NIGHTLY_RETRY_DELAY_MS);
       if (typeof t.unref === 'function') t.unref();
     };
-    recordJob(name, fn, null, { successCheck: nightlySummaryOk })
+    recordJob(name, withFreezeTracking(name, fn), null, { successCheck: nightlySummaryOk })
       .then((result) => {
         if (nightlySummaryOk(result)) {
           activeNightlyLadders.delete(name);
