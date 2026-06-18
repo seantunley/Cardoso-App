@@ -139,42 +139,42 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   const fromPeriod = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
   const toPeriod = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}`;
 
-  // Ingest into the staging tables in yielding batches — the slow part, kept off
-  // the live tables and out of a single blocking transaction. A NOT NULL
-  // violation from an odd Sage row, or a crash here, fails BEFORE the swap and
-  // leaves the live window untouched.
-  await writeRowsBatched('inventory-sales-sync:stage-agg', aggRows, (r) => {
-    stageAgg.run(
-      r.item_number,
-      r.period,
-      r.qty_sold || 0,
-      Math.round((r.revenue || 0) * 100) / 100,
-      r.order_count || 0,
-      intToDate(r.last_sale_int),
-      r.item_description || null,
-    );
-  });
-  await writeRowsBatched('inventory-sales-sync:stage-txn', txnRows, (r) => {
-    stageTxn.run(
-      r.item_number,
-      intToDate(r.transaction_date_int),
-      r.order_number || null,
-      r.customer_code || null,
-      r.customer_name || null,
-      r.qty_sold || 0,
-      r.unit_price != null ? Math.round(r.unit_price * 100) / 100 : null,
-      r.line_amount != null ? Math.round(r.line_amount * 100) / 100 : null,
-    );
-  });
+  try {
+    // Ingest into the staging tables in yielding batches — the slow part, kept off
+    // the live tables and out of a single blocking transaction. A NOT NULL
+    // violation from an odd Sage row, or a crash here, fails BEFORE the swap and
+    // leaves the live window untouched.
+    await writeRowsBatched('inventory-sales-sync:stage-agg', aggRows, (r) => {
+      stageAgg.run(
+        r.item_number,
+        r.period,
+        r.qty_sold || 0,
+        Math.round((r.revenue || 0) * 100) / 100,
+        r.order_count || 0,
+        intToDate(r.last_sale_int),
+        r.item_description || null,
+      );
+    });
+    await writeRowsBatched('inventory-sales-sync:stage-txn', txnRows, (r) => {
+      stageTxn.run(
+        r.item_number,
+        intToDate(r.transaction_date_int),
+        r.order_number || null,
+        r.customer_code || null,
+        r.customer_name || null,
+        r.qty_sold || 0,
+        r.unit_price != null ? Math.round(r.unit_price * 100) / 100 : null,
+        r.line_amount != null ? Math.round(r.line_amount * 100) / 100 : null,
+      );
+    });
 
-  // Atomic swap: clear each window and copy the fully-staged rows into the live
-  // tables in ONE transaction (a C-level INSERT...SELECT, far cheaper than the
-  // per-row JS loop). Both tables swap together so cache and transaction detail
-  // can never be read inconsistently, and the replace is all-or-nothing — if
-  // anything above failed, the live window was never touched. Reconcile
-  // deletions: item-months/days that dropped out of the staged set are removed
-  // by the window clear; rows outside the window are untouched.
-  {
+    // Atomic swap: clear each window and copy the fully-staged rows into the live
+    // tables in ONE transaction (a C-level INSERT...SELECT, far cheaper than the
+    // per-row JS loop). Both tables swap together so cache and transaction detail
+    // can never be read inconsistently, and the replace is all-or-nothing — if
+    // anything above failed, the live window was never touched. Reconcile
+    // deletions: item-months/days that dropped out of the staged set are removed
+    // by the window clear; rows outside the window are untouched.
     const doneSwap = trackOp('inventory-sales-sync:swap');
     try {
       db.transaction(() => {
@@ -186,8 +186,14 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
                     SELECT item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount FROM stage_sales_txn`).run();
       })();
     } finally { doneSwap(); }
+  } finally {
+    // Always drop the file-backed scratch tables — even if staging or the swap
+    // threw (e.g. an unexpected null item/date from Sage) — so a full multi-year
+    // duplicate of the sales window can't linger in the live DB (and its backups)
+    // until the next sync. The up-front DROP also clears anything a hard crash
+    // left behind that bypassed this finally.
+    db.exec('DROP TABLE IF EXISTS stage_sales_agg; DROP TABLE IF EXISTS stage_sales_txn;');
   }
-  db.exec('DROP TABLE IF EXISTS stage_sales_agg; DROP TABLE IF EXISTS stage_sales_txn;');
 
   updateMeta(aggRows.length);
   // Precompute the monthly item/customer sales rollups the hub pulls, so the
