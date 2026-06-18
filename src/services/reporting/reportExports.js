@@ -297,3 +297,122 @@ export async function buildRepExposureXlsx(report) {
 
   return await wb.xlsx.writeBuffer();
 }
+
+// ── Sales by Vendor ──────────────────────────────────────────────────────────
+// One wide sheet (Excel has no space premium, and it pivots well). By-month
+// carries every month's ex-VAT + quantity (+ PY ex-VAT when comparing) — the
+// detail the on-screen report omits; aggregate carries qty/ex/incl. Fed by the
+// same buildSalesByVendorData object as the screen, so the download can't drift.
+const SBV_MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const sbvMonthLabel = (p) => `${SBV_MON[parseInt(String(p).slice(5, 7), 10) - 1]} '${String(p).slice(2, 4)}`;
+const sbvPriorYear = (p) => `${parseInt(String(p).slice(0, 4), 10) - 1}${String(p).slice(4)}`;
+const sbvYoy = (cur, py) => {
+  const c = Number(cur) || 0, p = Number(py) || 0;
+  if (!p) return c > 0 ? 'new' : '';
+  return Number((((c - p) / p) * 100).toFixed(1));
+};
+
+// House styling: bold frozen header (+ frozen lead columns), per-column number
+// formats inferred from the header text, sensible widths.
+function sbvStyle(ws, leadCols) {
+  const header = ws.getRow(1);
+  header.font = { bold: true };
+  header.eachCell((c) => { c.border = { bottom: { style: 'thin' } }; });
+  ws.views = [{ state: 'frozen', xSplit: leadCols, ySplit: 1 }];
+  header.eachCell((cell, col) => {
+    const h = String(cell.value || '').toLowerCase();
+    const column = ws.getColumn(col);
+    if (h.includes('qty')) column.numFmt = '#,##0';
+    else if (h.includes('yoy')) column.numFmt = '0.0"%"';
+    else if (h.includes('ex') || h.includes('py') || h.includes('incl') || h.includes('vat')) column.numFmt = '#,##0.00';
+    if (h === 'description') column.width = 34;
+    else if (h === 'vendor' || h === 'site') column.width = 22;
+    else if (h === 'item') column.width = 14;
+    else column.width = Math.max(12, h.length + 2);
+  });
+}
+
+export async function buildSalesByVendorXlsx(report) {
+  const wb = new ExcelJS.Workbook();
+  const compare = !!report?.compare;
+
+  if (report?.bymonth) {
+    const isHub = !!report.hub;
+    const months = report.months || [];
+    const ws = wb.addWorksheet('Sales by Vendor (by month)');
+    const lead = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description'];
+    const monthHead = [];
+    for (const m of months) {
+      monthHead.push(`${sbvMonthLabel(m)} ex`);
+      monthHead.push(`${sbvMonthLabel(m)} qty`);
+      if (compare) monthHead.push(`${sbvMonthLabel(sbvPriorYear(m))} ex`);
+    }
+    const tail = ['Total ex-VAT', 'Total qty', ...(compare ? ['PY ex-VAT', 'YoY %'] : [])];
+    ws.addRow([...lead, ...monthHead, ...tail]);
+
+    let gEx = 0, gQty = 0, gPy = 0;
+    for (const g of report.groups || []) {
+      for (const v of g.vendors || []) {
+        for (const it of v.items || []) {
+          const vals = [];
+          for (const m of months) {
+            vals.push(num2(it.cells?.[m] || 0));
+            vals.push(Number(it.qty_cells?.[m] || 0));
+            if (compare) vals.push(num2(it.py_cells?.[m] || 0));
+          }
+          ws.addRow([
+            ...(isHub ? [String(g.site_name || g.site_id || '')] : []),
+            v.vendor, it.item_number, it.item_description || '',
+            ...vals,
+            num2(it.total_ex), Number(it.total_qty || 0),
+            ...(compare ? [num2(it.py_total_ex), sbvYoy(it.total_ex, it.py_total_ex)] : []),
+          ]);
+          gEx += Number(it.total_ex) || 0; gQty += Number(it.total_qty) || 0; gPy += Number(it.py_total_ex) || 0;
+        }
+      }
+    }
+    const grandRow = ws.addRow([
+      ...(isHub ? [''] : []), 'GRAND TOTAL', '', '',
+      ...monthHead.map(() => ''),
+      num2(gEx), gQty, ...(compare ? [num2(gPy), sbvYoy(gEx, gPy)] : []),
+    ]);
+    grandRow.font = { bold: true };
+    sbvStyle(ws, lead.length);
+    return await wb.xlsx.writeBuffer();
+  }
+
+  // Aggregate: period totals per item. At the hub, site_groups carries a
+  // per-branch breakdown → emit a Site column with each vendor/item split by
+  // branch; otherwise a flat vendor/item list.
+  const isHub = Array.isArray(report?.site_groups);
+  const ws = wb.addWorksheet('Sales by Vendor');
+  const lead = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description'];
+  ws.addRow([...lead, 'Qty', ...(compare ? ['PY Qty'] : []), 'Ex-VAT', ...(compare ? ['PY Ex-VAT'] : []), 'Incl-VAT', ...(compare ? ['YoY %'] : [])]);
+  let gQty = 0, gPyQty = 0, gEx = 0, gPyEx = 0, gIncl = 0;
+  const emit = (vendors, siteName) => {
+    for (const v of vendors || []) {
+      for (const it of v.items || []) {
+        ws.addRow([
+          ...(isHub ? [String(siteName || '')] : []),
+          v.vendor, it.item_number, it.item_description || '',
+          Number(it.qty || 0), ...(compare ? [Number(it.py_qty || 0)] : []),
+          num2(it.ex_vat), ...(compare ? [num2(it.py_ex_vat)] : []),
+          num2(it.incl_vat), ...(compare ? [sbvYoy(it.ex_vat, it.py_ex_vat)] : []),
+        ]);
+        gQty += Number(it.qty) || 0; gPyQty += Number(it.py_qty) || 0;
+        gEx += Number(it.ex_vat) || 0; gPyEx += Number(it.py_ex_vat) || 0; gIncl += Number(it.incl_vat) || 0;
+      }
+    }
+  };
+  if (isHub) for (const g of report.site_groups) emit(g.vendors, g.site_name || g.site_id);
+  else emit(report.vendors);
+  const grandRow = ws.addRow([
+    ...(isHub ? [''] : []), 'GRAND TOTAL', '', '',
+    gQty, ...(compare ? [gPyQty] : []),
+    num2(gEx), ...(compare ? [num2(gPyEx)] : []),
+    num2(gIncl), ...(compare ? [sbvYoy(gEx, gPyEx)] : []),
+  ]);
+  grandRow.font = { bold: true };
+  sbvStyle(ws, lead.length);
+  return await wb.xlsx.writeBuffer();
+}

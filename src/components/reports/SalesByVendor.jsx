@@ -1,8 +1,9 @@
 import { useState, useMemo, Fragment } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ReportFrame, PrintHeader, PrintFooter, fmtR, fmtCount, downloadCsv } from './lib';
+import { ReportFrame, PrintHeader, PrintFooter, fmtR, fmtCount, downloadReport } from './lib';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { Checkbox } from '@/components/ui/checkbox';
+import { toast } from 'sonner';
 
 // Sales by Vendor — every item's sales grouped by the item's vendor (Sage ICITMV
 // master) for a date range. Ex-VAT is Sage OE net sales; incl-VAT derived at the
@@ -17,9 +18,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 const pad = (n) => String(n).padStart(2, '0');
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const monthStartISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-01`; };
-const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const mlabel = (p) => `${MON[parseInt(p.slice(5, 7), 10) - 1]} '${p.slice(2, 4)}`;
-const pyMonth = (p) => `${parseInt(p.slice(0, 4), 10) - 1}${p.slice(4)}`;
 
 function fetchData(from, to, site, compare, bymonth) {
   const qs = new URLSearchParams({ from, to });
@@ -30,11 +28,6 @@ function fetchData(from, to, site, compare, bymonth) {
     .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); });
 }
 
-const yoyText = (cur, py) => {
-  if (!py) return cur > 0 ? 'new' : '—';
-  const p = ((cur - py) / py) * 100;
-  return `${p > 0 ? '+' : ''}${p.toFixed(1)}%`;
-};
 function YoY({ cur, py }) {
   if (!py) return cur > 0 ? <span className="text-emerald-500">new</span> : <span className="text-muted-subtle">—</span>;
   const p = ((cur - py) / py) * 100;
@@ -101,30 +94,24 @@ function VendorBlock({ v, compare }) {
   );
 }
 
-// ── By-month matrix: one vendor table, months as columns (PY beside if compare) ─
-function MonthVendorBlock({ v, months, compare }) {
+// ── By-month view (on screen): period total + YoY per item. The full month-by-
+// month breakdown and quantities live in the Excel export, not on screen (space).
+function MonthVendorBlock({ v, compare }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card">
       <div className="flex items-baseline justify-between border-b border-border px-4 py-2.5 print:break-after-avoid">
         <div className="font-display text-lg">{v.vendor}</div>
         <div className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
           {v.items.length} {v.items.length === 1 ? 'item' : 'items'} · <span className="tabular-nums text-foreground">R {fmtR(v.subtotal_total_ex)}</span> ex
-          {compare && <span> · vs <span className="tabular-nums">R {fmtR(v.subtotal_py_total_ex)}</span> PY</span>}
+          {compare && <span> · vs <span className="tabular-nums">R {fmtR(v.subtotal_py_total_ex)}</span> PY · <YoY cur={v.subtotal_total_ex} py={v.subtotal_py_total_ex} /></span>}
         </div>
       </div>
-      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 260 : 100) + (compare ? 110 : 0) }}>
+      <table className="w-full text-sm report-doc-table" style={{ minWidth: compare ? 680 : 480 }}>
         <thead>
           <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-1.5 text-left font-medium">Item</th>
             <th className="px-3 py-1.5 text-left font-medium">Description</th>
-            {months.map((m) => (
-              <Fragment key={m}>
-                <th className="px-3 py-1.5 text-right font-medium border-l border-border">{mlabel(m)}</th>
-                {compare && <th className="px-3 py-1.5 text-right font-medium text-muted-subtle">{mlabel(pyMonth(m))}</th>}
-                {compare && <th className="px-3 py-1.5 text-right font-medium">Δ</th>}
-              </Fragment>
-            ))}
-            <th className="px-3 py-1.5 text-right font-medium border-l border-border">Total</th>
+            <th className="px-3 py-1.5 text-right font-medium border-l border-border">Total ex-VAT</th>
             {compare && <th className="px-3 py-1.5 text-right font-medium text-muted-subtle">PY</th>}
             {compare && <th className="px-3 py-1.5 text-right font-medium">YoY</th>}
           </tr>
@@ -134,15 +121,8 @@ function MonthVendorBlock({ v, months, compare }) {
             <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
               <td className="px-3 py-1.5 font-mono text-xs text-foreground">{it.item_number}</td>
               <td className="px-3 py-1.5">{it.item_description || '—'}</td>
-              {months.map((m) => (
-                <Fragment key={m}>
-                  <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/40">{cell(it.cells[m])}</td>
-                  {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(it.py_cells[m])}</td>}
-                  {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.cells[m] || 0} py={it.py_cells[m] || 0} /></td>}
-                </Fragment>
-              ))}
               <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap border-l border-border font-medium"><span className="text-muted-subtle">R </span>{fmtR(it.total_ex)}</td>
-              {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(it.py_total_ex)}</td>}
+              {compare && <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-muted-foreground">{cell(it.py_total_ex)}</td>}
               {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.total_ex} py={it.py_total_ex} /></td>}
             </tr>
           ))}
@@ -150,15 +130,8 @@ function MonthVendorBlock({ v, months, compare }) {
         <tfoot>
           <tr className="border-t-2 border-border bg-muted/40 font-semibold">
             <td className="px-3 py-1.5" colSpan={2}>{v.vendor} subtotal</td>
-            {months.map((m) => (
-              <Fragment key={m}>
-                <td className="px-3 py-1.5 text-right tabular-nums border-l border-border">{cell(v.subtotal_cells[m])}</td>
-                {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(v.subtotal_py_cells[m])}</td>}
-                {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_cells[m] || 0} py={v.subtotal_py_cells[m] || 0} /></td>}
-              </Fragment>
-            ))}
             <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(v.subtotal_total_ex)}</td>
-            {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(v.subtotal_py_total_ex)}</td>}
+            {compare && <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap text-muted-foreground">{cell(v.subtotal_py_total_ex)}</td>}
             {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_total_ex} py={v.subtotal_py_total_ex} /></td>}
           </tr>
         </tfoot>
@@ -224,35 +197,18 @@ export default function SalesByVendor() {
 
   const hasData = bm ? fGroups.length > 0 : vendors.length > 0;
 
-  const exportCsv = () => {
-    if (bm) {
-      const monthCols = months.flatMap((m) => (cmp ? [m, pyMonth(m), `${m} YoY%`] : [m]));
-      const header = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description', ...monthCols, 'Total', ...(cmp ? ['PY Total', 'YoY %'] : [])];
-      const vals = (cells, py) => months.flatMap((m) => (cmp ? [(cells[m] || 0).toFixed(2), (py[m] || 0).toFixed(2), yoyText(cells[m] || 0, py[m] || 0)] : [(cells[m] || 0).toFixed(2)]));
-      const totCols = (tot, pyTot) => [(tot || 0).toFixed(2), ...(cmp ? [(pyTot || 0).toFixed(2), yoyText(tot, pyTot)] : [])];
-      const rows = [];
-      for (const g of fGroups) {
-        for (const v of g.vendors) {
-          for (const it of v.items) rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, it.item_number, it.item_description || '', ...vals(it.cells, it.py_cells), ...totCols(it.total_ex, it.py_total_ex)]);
-          rows.push([...(isHub ? [g.site_name || ''] : []), v.vendor, `${v.vendor} subtotal`, '', ...vals(v.subtotal_cells, v.subtotal_py_cells), ...totCols(v.subtotal_total_ex, v.subtotal_py_total_ex)]);
-        }
-      }
-      rows.push([...(isHub ? [''] : []), 'GRAND TOTAL', '', '', ...vals(bmGrand.cells, bmGrand.py_cells), ...totCols(bmGrand.total, bmGrand.py_total)]);
-      downloadCsv(`sales-by-vendor-bymonth-${from}_to_${to}${cmp ? '-yoy' : ''}${isHub && site !== 'all' ? `-${site}` : ''}.csv`, [header, ...rows]);
-      return;
-    }
-    const header = ['Vendor', 'Item', 'Description', 'Qty', ...(cmp ? ['PY Qty', 'Qty %'] : []), 'Ex-VAT', ...(cmp ? ['PY Ex-VAT', 'Value %'] : []), 'Incl-VAT'];
-    const rows = [];
-    const line = (vendor, item, desc, it) => [vendor, item, desc,
-      it.qty, ...(cmp ? [it.py_qty, yoyText(it.qty, it.py_qty)] : []),
-      (Number(it.ex_vat) || 0).toFixed(2), ...(cmp ? [(Number(it.py_ex_vat) || 0).toFixed(2), yoyText(it.ex_vat, it.py_ex_vat)] : []),
-      (Number(it.incl_vat) || 0).toFixed(2)];
-    for (const v of vendors) {
-      for (const it of v.items) rows.push(line(v.vendor, it.item_number, it.item_description || '', it));
-      rows.push(line(v.vendor, `${v.vendor} subtotal`, '', { qty: v.subtotal_qty, py_qty: v.py_subtotal_qty, ex_vat: v.subtotal_ex, py_ex_vat: v.py_subtotal_ex, incl_vat: v.subtotal_incl }));
-    }
-    rows.push(line('GRAND TOTAL', '', '', { qty: grand.qty, py_qty: grand.py_qty, ex_vat: grand.ex, py_ex_vat: grand.py_ex, incl_vat: grand.incl }));
-    downloadCsv(`sales-by-vendor-${from}_to_${to}${cmp ? '-yoy' : ''}${isHub && site !== 'all' ? `-${site}` : ''}.csv`, [header, ...rows]);
+  // Server-side Excel export — by-month gives the full per-month breakdown +
+  // quantities (the detail the screen omits); aggregate gives qty/ex/incl. Mirrors
+  // the on-screen filters, including the vendor multi-select. Errors surface.
+  const exportExcel = () => {
+    const qs = new URLSearchParams({ from, to, format: 'xlsx' });
+    if (isHub && site !== 'all') qs.set('site', site);
+    if (cmp) qs.set('compare', '1');
+    if (bm) qs.set('bymonth', '1');
+    vendorSel.forEach((vname) => qs.append('vendors', vname));
+    const name = `sales-by-vendor${bm ? '-bymonth' : ''}-${from}_to_${to}${cmp ? '-yoy' : ''}${isHub && site !== 'all' ? `-${site}` : ''}.xlsx`;
+    return downloadReport(`/api/reports/sales-by-vendor/export?${qs.toString()}`, name)
+      .catch((e) => toast.error('Excel export failed', { description: e.message }));
   };
 
   const generatedAtFmt = new Date().toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -264,7 +220,7 @@ export default function SalesByVendor() {
       subtitle={`Item sales by vendor (Sage item/vendor master) for ${rangeLabel}${cmp ? `, vs ${pyLabel}` : ''}${bm ? ', by month' : ''}${isHub && site === 'all' ? ', all sites' : ''}. Ex-VAT is Sage net sales.`}
       printId="sales-by-vendor"
       orientation="landscape"
-      onExportCsv={hasData ? exportCsv : undefined}
+      onExportExcel={hasData ? exportExcel : undefined}
       onPrint={() => window.print()}
       isLoading={isLoading}
       error={error?.message}
@@ -353,7 +309,7 @@ export default function SalesByVendor() {
                     </div>
                   )}
                   <div className={isHub ? 'space-y-4 pl-1' : 'space-y-4'}>
-                    {g.vendors.map((v) => <MonthVendorBlock key={`${g.site_id || ''}-${v.vendor}`} v={v} months={months} compare={cmp} />)}
+                    {g.vendors.map((v) => <MonthVendorBlock key={`${g.site_id || ''}-${v.vendor}`} v={v} compare={cmp} />)}
                   </div>
                 </Fragment>
               ))}
