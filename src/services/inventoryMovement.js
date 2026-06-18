@@ -40,7 +40,25 @@ async function writeRowsBatched(label, rows, applyRow, batchSize = 2000) {
   }
 }
 
-export async function syncSalesFromSage({ fromDate, toDate } = {}) {
+// Per-process guard for the sales sync. The sync clears a date window and then
+// refills it in yielding batches (writeRowsBatched yields the event loop between
+// batches). Without this guard a second invocation could interleave — e.g. the
+// manual /api/inventory-movement/sync route firing while the nightly/boot
+// catch-up runner is mid-flight: one run clears the window, then BOTH append
+// transaction batches, and inventory_sales_transactions has no uniqueness
+// constraint to collapse the duplicates, so rollups/forecasts double-count until
+// the next clean sync. Coalesce concurrent callers onto the single in-flight run
+// instead. (Every caller uses the default window; a future custom-window caller
+// must not run concurrently with another sync — it would receive this run's
+// result.)
+let inFlightSalesSync = null;
+export function syncSalesFromSage(opts = {}) {
+  if (inFlightSalesSync) return inFlightSalesSync;
+  inFlightSalesSync = _syncSalesFromSage(opts).finally(() => { inFlightSalesSync = null; });
+  return inFlightSalesSync;
+}
+
+async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   const pool = await getSagePool();
   const now = new Date();
   const to = toDate || now;
