@@ -13,6 +13,61 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-17': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '17 June 2026',
+    slug: '17-June-2026',
+    intro:
+      "This update (v2026.5.9.8) adds a new Sales by Vendor report and a " +
+      "breakdown of BAT exceptions by reason. Report printing has also been " +
+      "tightened: the page footer no longer bleeds into table content, and " +
+      "week blocks in the BAT Exceptions report stay together across page breaks.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Sales by Vendor report',
+            body:
+              "A new report shows all item sales per vendor for any date range " +
+              "you choose. Filter by vendor, toggle a year-over-year comparison " +
+              "to see how each vendor's sales track against the same period last " +
+              "year, and switch to a month-by-month matrix for a detailed " +
+              "breakdown. Vendor names are sourced directly from the Sage vendor " +
+              "master so they are always accurate.",
+          },
+          {
+            title: 'BAT Exceptions by Week — totals by exception reason',
+            body:
+              "The BAT Exceptions by Week report now shows the total value of " +
+              "exceptions broken down by reason, so you can see at a glance " +
+              "which exception types are driving the most variance each week.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Report footers no longer overlap table content when printing',
+            body:
+              "The footer on printed reports now flows naturally at the bottom " +
+              "of the page and no longer bleeds into the last rows of a table.",
+          },
+          {
+            title: 'BAT Exceptions week blocks stay together across page breaks',
+            body:
+              "When printing the BAT Exceptions report, each week's block is " +
+              "now kept whole — entries for a week are no longer split across " +
+              "two pages.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
