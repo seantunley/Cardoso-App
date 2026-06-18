@@ -2691,6 +2691,14 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     const to = validDate(req.query.to) ? req.query.to : isoDate(now);
     const compare = ['1', 'true', 'yes', 'on'].includes(String(req.query.compare || '').toLowerCase());
     const bymonth = ['1', 'true', 'yes', 'on'].includes(String(req.query.bymonth || '').toLowerCase());
+    // Rows in the item->vendor map. 0 means vendor attribution is unavailable
+    // (sync hasn't populated it / Sage has no ICITMV links / hub couldn't pull
+    // from sites) — surfaced so the report can SAY why, not just show "(No vendor)".
+    const vendorMapRows = (() => {
+      try {
+        return prep(`SELECT COUNT(*) AS c FROM ${process.env.HUB_MODE === 'true' ? 'hub_item_vendor' : 'item_vendor'}`).get().c;
+      } catch { return 0; }
+    })();
     try {
       // ── By-month matrix mode: Site -> Vendor -> Item with one ex-VAT column per
       // month; with compare, each month carries a PY value beside it. ──────────
@@ -2743,7 +2751,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         const partial = !!(dataFrom && earliestNeeded < dataFrom);
         return res.json({
           hub: isHub, compare, bymonth: true, from, to, months,
-          data_from: dataFrom, partial,
+          data_from: dataFrom, partial, vendor_map_rows: vendorMapRows,
           partial_note: partial ? `Stored sales data starts ${dataFrom} — earlier months show blank and totals exclude them.` : null,
           site: siteFilter, groups, vat_rate: SALES_VAT_RATE,
           ...(isHub ? { filters: { sites: sitesList } } : {}),
@@ -2775,7 +2783,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         return res.json({
           hub: true, compare, from, to, period_from: periodFrom, period_to: periodTo,
           ...(compare ? { py_period_from: pyFrom, py_period_to: pyTo } : {}),
-          site: siteFilter, vendors, grand: salesGrand(vendors),
+          site: siteFilter, vendors, grand: salesGrand(vendors), vendor_map_rows: vendorMapRows,
           filters: { sites }, vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
         });
       }
@@ -2810,7 +2818,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
         hub: false, compare, from, to,
         ...(compare ? { py_from: priorYear(from), py_to: priorYear(to) } : {}),
         site_name: (depotRow?.name || '').trim() || SITE_NAME,
-        vendors, grand: salesGrand(vendors),
+        vendors, grand: salesGrand(vendors), vendor_map_rows: vendorMapRows,
         vat_rate: SALES_VAT_RATE, generated_at: new Date().toISOString(),
       });
     } catch (err) {

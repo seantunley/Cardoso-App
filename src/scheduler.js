@@ -22,7 +22,7 @@ import {
 } from './services/commission/commissionScheduler.js';
 import { pushPendingCommissionArchives } from './services/commission/commissionHubPush.js';
 import { registerJob } from './lib/scheduledJobs.js';
-import { syncSalesFromSage } from './services/inventoryMovement.js';
+import { syncSalesFromSage, syncItemVendors } from './services/inventoryMovement.js';
 import { computeAllForecasts } from './services/inventoryForecast.js';
 import { refreshInsights, invalidateInsightsCache } from './services/insights.js';
 import { syncCreditorsFromSage } from './services/creditorSync.js';
@@ -420,10 +420,20 @@ function nightlySummaryOk(result) {
   return !Object.values(result.sources).some((s) => s && s.error);
 }
 
+// Nightly Sage syncs whose retry ladder is currently in flight — RUNNING or
+// WAITING between retries. A pending retry is just a setTimeout with no job_runs
+// row, so the daytime/boot catch-up (runNightlyCatchUp) can't detect it from
+// job_runs; it consults this set instead so it never starts a SECOND ladder for
+// a job whose 4am ladder is still active (which would overlap Sage pulls and
+// duplicate the delete/refresh passes). An entry lives from the first attempt
+// until the ladder terminates — success or retries exhausted.
+const activeNightlyLadders = new Set();
+
 function nightlyWithRetry(name, fn) {
   const attempt = (n) => {
     const scheduleRetry = (why) => {
       if (n >= NIGHTLY_RETRIES) {
+        activeNightlyLadders.delete(name);
         console.error(`[${name}] still failing after ${n + 1} attempts (${why}) — giving up until the next scheduled night. The nightly-sync-stale alert will flag the data once it passes 26 hours old.`);
         return;
       }
@@ -434,6 +444,7 @@ function nightlyWithRetry(name, fn) {
     recordJob(name, fn, null, { successCheck: nightlySummaryOk })
       .then((result) => {
         if (nightlySummaryOk(result)) {
+          activeNightlyLadders.delete(name);
           if (n > 0) console.log(`[${name}] retry ${n} of ${NIGHTLY_RETRIES} succeeded — data is current again.`);
           return;
         }
@@ -445,7 +456,9 @@ function nightlyWithRetry(name, fn) {
         scheduleRetry(err.message);
       });
   };
-  return () => attempt(0);
+  // Mark the ladder active BEFORE the first attempt so a catch-up firing moments
+  // later sees it. Cleared on terminal success or when retries are exhausted.
+  return () => { activeNightlyLadders.add(name); attempt(0); };
 }
 
 export function startSchedulers() {
@@ -544,9 +557,22 @@ export function startSchedulers() {
         ['creditors-sync', creditorsRunner],
         ['debtors-sync', debtorsRunner],
       ];
-      const t = setTimeout(() => {
+      // Re-run any nightly Sage sync whose last SUCCESS is older than 24h, through
+      // the same retry ladder. Driven from BOTH the boot one-shot (machine off at
+      // 4am) AND the hourly daytime cron below — a sync that failed its 4am window
+      // keeps retrying through the day until it succeeds, instead of staying stale
+      // until the next night or a reboot. No-op once today's run has succeeded.
+      const runNightlyCatchUp = (trigger) => {
         for (const [name, runner] of NIGHTLY_CATCH_UP) {
           try {
+            // Skip if this job's retry ladder is already running or waiting
+            // between retries — relaunching runner() would start a SECOND ladder
+            // alongside the first, overlapping the Sage pulls and duplicating the
+            // delete/refresh passes. The 4am cron's ladder marks itself active.
+            if (activeNightlyLadders.has(name)) {
+              console.log(`[${trigger}] ${name} already has a retry ladder in flight — skipping to avoid a second overlapping run.`);
+              continue;
+            }
             const last = db.prepare(`
               SELECT started_at FROM job_runs
               WHERE name = ? AND status = 'succeeded'
@@ -560,15 +586,46 @@ export function startSchedulers() {
             }
             const ageHours = last ? (Date.now() - new Date(last.started_at).getTime()) / 3_600_000 : null;
             if (last && ageHours <= 24) continue;
-            console.warn(`[nightly-catch-up] ${name} last succeeded ${last ? `${ageHours.toFixed(1)}h ago` : 'never'} — running it now instead of waiting for tonight's 4am window.`);
+            console.warn(`[${trigger}] ${name} last succeeded ${last ? `${ageHours.toFixed(1)}h ago` : 'never'} — running it now instead of waiting for tonight's 4am window.`);
             runner();
           } catch (err) {
-            console.error(`[nightly-catch-up] ${name} staleness check failed: ${err.message} — leaving it to tonight's scheduled run.`);
+            console.error(`[${trigger}] ${name} staleness check failed: ${err.message} — leaving it to the next attempt.`);
           }
         }
-      }, 90_000);
+      };
+      // Boot catch-up — covers the machine-off-at-4am case. 90s delay so boot-time
+      // Sage pool init + the BAT cache refresh (15s one-shot) aren't competing.
+      const t = setTimeout(() => runNightlyCatchUp('nightly-catch-up'), 90_000);
       if (typeof t.unref === 'function') t.unref();
       registerJob({ name: 'nightly-catch-up', type: 'one-shot', delayMs: 90_000, mode: 'site', description: 'Boot catch-up — immediately run any nightly Sage sync whose last success is >24h old (covers the machine-off-at-4am case)' });
+      // Daytime catch-up — hourly 05:00–23:00. A nightly sync that FAILED its 4am
+      // window (Sage briefly down, network glitch) used to stay stale until the
+      // next night; now it's re-attempted every hour through the day until it
+      // succeeds. No-op once today's run has succeeded (last success <= 24h).
+      const dc = cron.schedule('0 5-23 * * *', () => runNightlyCatchUp('daytime-catch-up'));
+      cronTasks.push(dc);
+      registerJob({ name: 'daytime-catch-up', type: 'cron', cronExpression: '0 5-23 * * *', taskRef: dc, mode: 'site', description: 'Hourly (05:00–23:00) retry of any nightly Sage sync whose last success is >24h old — recovers a failed 4am window without waiting for the next night' });
+    }
+
+    // item->vendor boot self-heal. v106 creates item_vendor EMPTY and only the
+    // sales sync fills it (via syncItemVendors). The >24h catch-up above won't
+    // re-run a recently-synced site, so a fresh upgrade leaves Sales-by-Vendor
+    // showing "(No vendor)" until 4am. If the map is empty, fill it now — cheap
+    // (~2.4k rows, one Sage query). Runs after the catch-up so we don't double up.
+    {
+      const t = setTimeout(async () => {
+        try {
+          const n = db.prepare('SELECT COUNT(*) AS c FROM item_vendor').get().c;
+          if (n > 0) return;
+          console.warn('[item-vendor-boot-fill] item_vendor is empty — populating the item->vendor map now so Sales-by-Vendor is not blank.');
+          const r = await syncItemVendors();
+          console.log(`[item-vendor-boot-fill] populated ${r.synced} item->vendor rows.`);
+        } catch (err) {
+          console.error('[item-vendor-boot-fill] failed:', err.message);
+        }
+      }, 110_000);
+      if (typeof t.unref === 'function') t.unref();
+      registerJob({ name: 'item-vendor-boot-fill', type: 'one-shot', delayMs: 110_000, mode: 'site', description: 'On boot, populate the item->vendor map (Sage ICITMV) if empty — fresh-upgrade self-heal so Sales-by-Vendor is not blank' });
     }
   }
 

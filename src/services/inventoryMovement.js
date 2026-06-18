@@ -3,6 +3,7 @@ import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { resolveSageQuery } from './sage/queryRegistry.js';
 import { trackOp } from '../lib/mainThreadWatch.js';
+import { logError } from '../lib/errorLog.js';
 
 function toYyyymmdd(d) {
   const y = d.getFullYear();
@@ -217,7 +218,12 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   {
     const done = trackOp('inventory-sales-sync:item-vendors');
     try { itemVendors = (await syncItemVendors()).synced; }
-    catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+    catch (e) {
+      console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message);
+      // Surface it, don't just log to console — Sales-by-Vendor shows "(No vendor)"
+      // for everything when this fails, and that should be diagnosable.
+      try { logError('inventory.item_vendor_sync', e, { note: 'Sales-by-Vendor vendor map not refreshed' }); } catch { /* never fail the sales sync */ }
+    }
     finally { done(); }
   }
   return { synced: aggRows.length, transactions: txnRows.length, itemVendors };

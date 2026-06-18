@@ -112,7 +112,7 @@ function MonthVendorBlock({ v, months, compare }) {
           {compare && <span> · vs <span className="tabular-nums">R {fmtR(v.subtotal_py_total_ex)}</span> PY</span>}
         </div>
       </div>
-      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 150 : 90) + (compare ? 90 : 0) }}>
+      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 215 : 90) + (compare ? 90 : 0) }}>
         <thead>
           <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-1.5 text-left font-medium">Item</th>
@@ -121,6 +121,7 @@ function MonthVendorBlock({ v, months, compare }) {
               <Fragment key={m}>
                 <th className="px-3 py-1.5 text-right font-medium border-l border-border">{mlabel(m)}</th>
                 {compare && <th className="px-3 py-1.5 text-right font-medium text-muted-subtle">{mlabel(pyMonth(m))}</th>}
+                {compare && <th className="px-3 py-1.5 text-right font-medium">Δ</th>}
               </Fragment>
             ))}
             <th className="px-3 py-1.5 text-right font-medium border-l border-border">Total</th>
@@ -137,6 +138,7 @@ function MonthVendorBlock({ v, months, compare }) {
                 <Fragment key={m}>
                   <td className="px-3 py-1.5 text-right tabular-nums border-l border-border/40">{cell(it.cells[m])}</td>
                   {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(it.py_cells[m])}</td>}
+                  {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.cells[m] || 0} py={it.py_cells[m] || 0} /></td>}
                 </Fragment>
               ))}
               <td className="px-3 py-1.5 text-right tabular-nums border-l border-border font-medium"><span className="text-muted-subtle">R </span>{fmtR(it.total_ex)}</td>
@@ -152,6 +154,7 @@ function MonthVendorBlock({ v, months, compare }) {
               <Fragment key={m}>
                 <td className="px-3 py-1.5 text-right tabular-nums border-l border-border">{cell(v.subtotal_cells[m])}</td>
                 {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(v.subtotal_py_cells[m])}</td>}
+                {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_cells[m] || 0} py={v.subtotal_py_cells[m] || 0} /></td>}
               </Fragment>
             ))}
             <td className="px-3 py-1.5 text-right tabular-nums border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(v.subtotal_total_ex)}</td>
@@ -223,9 +226,9 @@ export default function SalesByVendor() {
 
   const exportCsv = () => {
     if (bm) {
-      const monthCols = months.flatMap((m) => (cmp ? [m, pyMonth(m)] : [m]));
+      const monthCols = months.flatMap((m) => (cmp ? [m, pyMonth(m), `${m} YoY%`] : [m]));
       const header = [...(isHub ? ['Site'] : []), 'Vendor', 'Item', 'Description', ...monthCols, 'Total', ...(cmp ? ['PY Total', 'YoY %'] : [])];
-      const vals = (cells, py) => months.flatMap((m) => (cmp ? [(cells[m] || 0).toFixed(2), (py[m] || 0).toFixed(2)] : [(cells[m] || 0).toFixed(2)]));
+      const vals = (cells, py) => months.flatMap((m) => (cmp ? [(cells[m] || 0).toFixed(2), (py[m] || 0).toFixed(2), yoyText(cells[m] || 0, py[m] || 0)] : [(cells[m] || 0).toFixed(2)]));
       const totCols = (tot, pyTot) => [(tot || 0).toFixed(2), ...(cmp ? [(pyTot || 0).toFixed(2), yoyText(tot, pyTot)] : [])];
       const rows = [];
       for (const g of fGroups) {
@@ -322,6 +325,15 @@ export default function SalesByVendor() {
       {bm && data?.partial && (
         <div className="report-print-hide mb-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
           {data.partial_note || `Stored sales data starts ${data.data_from}; earlier months are blank.`}
+        </div>
+      )}
+
+      {data && data.vendor_map_rows === 0 && (
+        <div className="report-print-hide mb-4 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2.5 text-xs text-red-200">
+          <span className="font-semibold uppercase tracking-wider">Vendor map empty</span> — every item shows as “(No vendor)” because the item→vendor master (Sage ICITMV) hasn’t loaded.{' '}
+          {isHub
+            ? 'The hub has pulled no item→vendor data from the sites — a site is likely failing reporting auth (401) or isn’t on this version yet.'
+            : 'Run Inventory Movement → Sync to pull it (or this Sage company has no ICITMV item-vendor links configured).'}
         </div>
       )}
 
