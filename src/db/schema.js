@@ -181,6 +181,13 @@ function initSchema(db) {
     // query plans to a full table scan + hash distinct; with it we
     // get an index seek over the non-empty rep set.
     `CREATE INDEX IF NOT EXISTS idx_datarecord_sales_rep ON datarecord (sales_rep) WHERE sales_rep IS NOT NULL AND sales_rep != ''`,
+    // Expression index matching the records-list sort: ORDER BY
+    // datetime(updated_date) DESC, id DESC. The plain (updated_date) index above
+    // can't serve the datetime()-wrapped sort (the wrapper is required because
+    // ~22% of rows store a non-ISO date string), so the list did a full filesort
+    // on every page; this lets the planner walk the index instead. datetime()
+    // with a column argument is deterministic, so it's index-eligible.
+    `CREATE INDEX IF NOT EXISTS idx_datarecord_updated_dt ON datarecord (datetime(updated_date), id)`,
   ];
   for (const sql of optionalIndexes) {
     try { db.exec(sql); } catch { /* column not yet added — migration will handle it */ }
@@ -339,6 +346,7 @@ function initSchema(db) {
       CREATE INDEX IF NOT EXISTS idx_hub_records_customer_number ON hub_records(customer_number);
       CREATE INDEX IF NOT EXISTS idx_hub_records_flag_color ON hub_records(flag_color);
       CREATE INDEX IF NOT EXISTS idx_hub_records_outstanding ON hub_records(site_id, outstanding_balance);
+      CREATE INDEX IF NOT EXISTS idx_hub_records_updated_dt ON hub_records(datetime(updated_date));
       CREATE INDEX IF NOT EXISTS idx_hub_records_sales_rep ON hub_records(sales_rep) WHERE sales_rep IS NOT NULL AND sales_rep != '';
       CREATE INDEX IF NOT EXISTS idx_hub_inventory_site ON hub_inventory(site_id, item_number);
       CREATE INDEX IF NOT EXISTS idx_hub_inventory_search ON hub_inventory(item_description, item_number);
