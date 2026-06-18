@@ -148,13 +148,15 @@ export function pruneOldRows() {
 // when there is meaningful space to reclaim: a DB that hasn't churned much
 // since last month has a near-empty freelist, and rewriting it just to shuffle
 // the same bytes is a pure multi-second freeze with no benefit. We VACUUM when
-// the free pages are ≥ 100 MB OR ≥ 10% of the file, and skip otherwise.
-// Thresholds tunable via VACUUM_MIN_FREE_BYTES / VACUUM_MIN_FREE_FRACTION.
+// the free pages are ≥ 100 MB OR ≥ 10% of the file, OR a real VACUUM hasn't run
+// in VACUUM_MAX_SKIP_DAYS (the fragmentation fallback below); skip otherwise.
+// Thresholds tunable via VACUUM_MIN_FREE_BYTES / VACUUM_MIN_FREE_FRACTION /
+// VACUUM_MAX_SKIP_DAYS.
 //
-// Returns the elapsed time (when it ran) or the skip reason, plus the freelist
-// figures it decided on, so job_runs.context shows what happened and why.
+// Returns the elapsed time (when it ran, with the trigger) or the skip reason,
+// plus the figures it decided on, so job_runs.context shows what happened/why.
 /**
- * @returns {{ elapsed_ms: number, freelist_pages: number, free_mb: number } | { skipped: true, reason: string, freelist_pages: number, free_mb: number, free_fraction: number }}
+ * @returns {{ elapsed_ms: number, trigger: string, freelist_pages: number, free_mb: number, days_since_last_vacuum: number | null } | { skipped: true, reason: string, freelist_pages: number, free_mb: number, free_fraction: number, days_since_last_vacuum: number | null }}
  */
 export function vacuumDb() {
   const freelistPages = Number(db.pragma('freelist_count', { simple: true })) || 0;
@@ -168,13 +170,39 @@ export function vacuumDb() {
   const minFreeFractionRaw = parseFloat(process.env.VACUUM_MIN_FREE_FRACTION ?? '');
   const minFreeFraction = Number.isFinite(minFreeFractionRaw) && minFreeFractionRaw >= 0 ? minFreeFractionRaw : 0.10;
 
-  if (freeBytes < minFreeBytes && freeFraction < minFreeFraction) {
+  // Fragmentation fallback (Codex review on PR #480): freelist_count only counts
+  // COMPLETELY free pages. Sparse, interleaved deletes can leave the freelist
+  // near-empty while many B-tree pages sit only partially filled — bloat a
+  // VACUUM would repack but the freelist gate alone would skip forever. So also
+  // force an unconditional VACUUM when a real one hasn't run in
+  // VACUUM_MAX_SKIP_DAYS (default 90). "Real" excludes prior skips, which are
+  // ALSO recorded status='succeeded' (their context carries "skipped") — so we
+  // must filter those out or the timer would never elapse.
+  const maxSkipDaysRaw = parseInt(process.env.VACUUM_MAX_SKIP_DAYS ?? '', 10);
+  const maxSkipDays = Number.isFinite(maxSkipDaysRaw) && maxSkipDaysRaw >= 0 ? maxSkipDaysRaw : 90;
+  let daysSinceLastVacuum = Infinity;
+  try {
+    const row = db.prepare(`
+      SELECT MAX(ended_at) AS last FROM job_runs
+      WHERE name = 'vacuum-db' AND status = 'succeeded'
+        AND (context IS NULL OR context NOT LIKE '%"skipped"%')
+    `).get();
+    if (row?.last) {
+      const ms = Date.now() - Date.parse(row.last);
+      if (Number.isFinite(ms) && ms >= 0) daysSinceLastVacuum = ms / (1000 * 60 * 60 * 24);
+    }
+  } catch { /* job_runs unavailable → leave Infinity → treat as overdue → VACUUM */ }
+  const overdue = daysSinceLastVacuum >= maxSkipDays;
+  const daysSinceForReport = Number.isFinite(daysSinceLastVacuum) ? Math.round(daysSinceLastVacuum) : null;
+
+  if (!overdue && freeBytes < minFreeBytes && freeFraction < minFreeFraction) {
     return {
       skipped: true,
       reason: 'little_to_reclaim',
       freelist_pages: freelistPages,
       free_mb: Math.round(freeBytes / (1024 * 1024)),
       free_fraction: Number(freeFraction.toFixed(3)),
+      days_since_last_vacuum: daysSinceForReport,
     };
   }
 
@@ -182,7 +210,9 @@ export function vacuumDb() {
   db.exec('VACUUM');
   return {
     elapsed_ms: Date.now() - t0,
+    trigger: overdue ? 'overdue_fragmentation_guard' : 'freelist',
     freelist_pages: freelistPages,
     free_mb: Math.round(freeBytes / (1024 * 1024)),
+    days_since_last_vacuum: daysSinceForReport,
   };
 }
