@@ -142,14 +142,47 @@ export function pruneOldRows() {
 // the 1st) so it doesn't contend with operator activity or the daily
 // backup job at 02:00.
 //
-// Returns the elapsed time so a slow VACUUM (suggesting filesystem
-// fragmentation or unusually heavy DELETE-and-grow churn) is visible
-// in job_runs.context.
+// Because VACUUM holds an EXCLUSIVE lock and rewrites the whole file, every
+// reader AND writer in the app blocks for its entire duration — it is the
+// single longest main-thread freeze the scheduler can cause. So only pay it
+// when there is meaningful space to reclaim: a DB that hasn't churned much
+// since last month has a near-empty freelist, and rewriting it just to shuffle
+// the same bytes is a pure multi-second freeze with no benefit. We VACUUM when
+// the free pages are ≥ 100 MB OR ≥ 10% of the file, and skip otherwise.
+// Thresholds tunable via VACUUM_MIN_FREE_BYTES / VACUUM_MIN_FREE_FRACTION.
+//
+// Returns the elapsed time (when it ran) or the skip reason, plus the freelist
+// figures it decided on, so job_runs.context shows what happened and why.
 /**
- * @returns {{ elapsed_ms: number }}
+ * @returns {{ elapsed_ms: number, freelist_pages: number, free_mb: number } | { skipped: true, reason: string, freelist_pages: number, free_mb: number, free_fraction: number }}
  */
 export function vacuumDb() {
+  const freelistPages = Number(db.pragma('freelist_count', { simple: true })) || 0;
+  const pageCount = Number(db.pragma('page_count', { simple: true })) || 0;
+  const pageSize = Number(db.pragma('page_size', { simple: true })) || 4096;
+  const freeBytes = freelistPages * pageSize;
+  const freeFraction = pageCount > 0 ? freelistPages / pageCount : 0;
+
+  const minFreeBytesRaw = parseInt(process.env.VACUUM_MIN_FREE_BYTES ?? '', 10);
+  const minFreeBytes = Number.isFinite(minFreeBytesRaw) && minFreeBytesRaw >= 0 ? minFreeBytesRaw : 100 * 1024 * 1024;
+  const minFreeFractionRaw = parseFloat(process.env.VACUUM_MIN_FREE_FRACTION ?? '');
+  const minFreeFraction = Number.isFinite(minFreeFractionRaw) && minFreeFractionRaw >= 0 ? minFreeFractionRaw : 0.10;
+
+  if (freeBytes < minFreeBytes && freeFraction < minFreeFraction) {
+    return {
+      skipped: true,
+      reason: 'little_to_reclaim',
+      freelist_pages: freelistPages,
+      free_mb: Math.round(freeBytes / (1024 * 1024)),
+      free_fraction: Number(freeFraction.toFixed(3)),
+    };
+  }
+
   const t0 = Date.now();
   db.exec('VACUUM');
-  return { elapsed_ms: Date.now() - t0 };
+  return {
+    elapsed_ms: Date.now() - t0,
+    freelist_pages: freelistPages,
+    free_mb: Math.round(freeBytes / (1024 * 1024)),
+  };
 }
