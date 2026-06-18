@@ -42,7 +42,7 @@ function YoY({ cur, py }) {
   return <span className={cls}>{p > 0 ? '+' : ''}{p.toFixed(1)}%</span>;
 }
 // ex-VAT cell: blank-ish dot for zero/empty so the matrix isn't a wall of 0.00.
-const cell = (v) => (v ? <><span className="text-muted-subtle">R </span>{fmtR(v)}</> : <span className="text-muted-subtle">·</span>);
+const cell = (v) => (v ? <span className="whitespace-nowrap"><span className="text-muted-subtle">R </span>{fmtR(v)}</span> : <span className="text-muted-subtle">·</span>);
 
 // ── Aggregate (non-by-month) vendor block ──────────────────────────────────
 function VendorBlock({ v, compare }) {
@@ -112,7 +112,7 @@ function MonthVendorBlock({ v, months, compare }) {
           {compare && <span> · vs <span className="tabular-nums">R {fmtR(v.subtotal_py_total_ex)}</span> PY</span>}
         </div>
       </div>
-      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 215 : 90) + (compare ? 90 : 0) }}>
+      <table className="w-full text-sm report-doc-table" style={{ minWidth: 300 + months.length * (compare ? 260 : 100) + (compare ? 110 : 0) }}>
         <thead>
           <tr className="border-b border-border text-[10px] uppercase tracking-wider text-muted-foreground">
             <th className="px-3 py-1.5 text-left font-medium">Item</th>
@@ -141,7 +141,7 @@ function MonthVendorBlock({ v, months, compare }) {
                   {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.cells[m] || 0} py={it.py_cells[m] || 0} /></td>}
                 </Fragment>
               ))}
-              <td className="px-3 py-1.5 text-right tabular-nums border-l border-border font-medium"><span className="text-muted-subtle">R </span>{fmtR(it.total_ex)}</td>
+              <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap border-l border-border font-medium"><span className="text-muted-subtle">R </span>{fmtR(it.total_ex)}</td>
               {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(it.py_total_ex)}</td>}
               {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={it.total_ex} py={it.py_total_ex} /></td>}
             </tr>
@@ -157,7 +157,7 @@ function MonthVendorBlock({ v, months, compare }) {
                 {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_cells[m] || 0} py={v.subtotal_py_cells[m] || 0} /></td>}
               </Fragment>
             ))}
-            <td className="px-3 py-1.5 text-right tabular-nums border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(v.subtotal_total_ex)}</td>
+            <td className="px-3 py-1.5 text-right tabular-nums whitespace-nowrap border-l border-border"><span className="text-muted-subtle">R </span>{fmtR(v.subtotal_total_ex)}</td>
             {compare && <td className="px-3 py-1.5 text-right tabular-nums text-muted-foreground">{cell(v.subtotal_py_total_ex)}</td>}
             {compare && <td className="px-3 py-1.5 text-right tabular-nums text-xs"><YoY cur={v.subtotal_total_ex} py={v.subtotal_py_total_ex} /></td>}
           </tr>
