@@ -2,12 +2,42 @@ import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { resolveSageQuery } from './sage/queryRegistry.js';
+import { trackOp } from '../lib/mainThreadWatch.js';
 
 function toYyyymmdd(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}${m}${day}`;
+}
+
+// Bulk-write rows to SQLite in batches, yielding the event loop between each.
+//
+// better-sqlite3 is synchronous, so ONE transaction over a very large set
+// (3 years of per-line sales = hundreds of thousands / millions of rows) holds
+// the event loop start-to-finish. On high-volume sites that froze the main
+// thread for 15-20s — every API call and page hung, AND node-cron (which ticks
+// on the same loop) was starved through the 04:00 window so the nightly syncs
+// never even fired (they showed "never" in the schedule, the vendor map never
+// filled, and the site looked permanently stale). See lib/mainThreadWatch.js.
+//
+// Batching each write into its own small transaction with a setImmediate yield
+// between keeps every blocking burst sub-second, so the loop and the scheduler
+// keep breathing. Each `trackOp` tags the burst so any residual freeze is
+// attributed instead of "(none registered)". The caller clears the target
+// window BEFORE calling this, so a re-run after a mid-sync crash can't duplicate
+// rows. Trade-off: a concurrent reader can briefly see a partially-rebuilt
+// window during the sync — acceptable for a cache that's rebuilt every night,
+// and far better than freezing the whole app.
+async function writeRowsBatched(label, rows, applyRow, batchSize = 2000) {
+  const writeBatch = db.transaction((batch) => { for (const r of batch) applyRow(r); });
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const done = trackOp(`${label} ${Math.min(i + batchSize, rows.length)}/${rows.length}`);
+    try { writeBatch(rows.slice(i, i + batchSize)); }
+    finally { done(); }
+    // Hand the event loop back so heartbeats, timers and node-cron can run.
+    await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 export async function syncSalesFromSage({ fromDate, toDate } = {}) {
@@ -89,38 +119,46 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   const fromPeriod = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
   const toPeriod = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}`;
 
-  db.transaction(() => {
-    // Reconcile deletions: an item-month whose sales were corrected/returned to
-    // zero drops out of aggRows. Clear the synced period window first so such
-    // item-months don't linger stale in the cache (upsert alone never removes
-    // them). Months outside the window are untouched.
-    db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
-    for (const r of aggRows) {
-      upsertAgg.run(
-        r.item_number,
-        r.period,
-        r.qty_sold || 0,
-        Math.round((r.revenue || 0) * 100) / 100,
-        r.order_count || 0,
-        intToDate(r.last_sale_int),
-        r.item_description || null,
-      );
-    }
-    // Replace transaction rows for the synced window to avoid duplicates.
-    db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?').run(fromDateStr, toDateStr);
-    for (const r of txnRows) {
-      insertTxn.run(
-        r.item_number,
-        intToDate(r.transaction_date_int),
-        r.order_number || null,
-        r.customer_code || null,
-        r.customer_name || null,
-        r.qty_sold || 0,
-        r.unit_price != null ? Math.round(r.unit_price * 100) / 100 : null,
-        r.line_amount != null ? Math.round(r.line_amount * 100) / 100 : null,
-      );
-    }
-  })();
+  // Clear the synced windows first (fast, single indexed deletes), then bulk
+  // insert in yielding batches. This used to be ONE synchronous transaction over
+  // every row, which wedged the main thread for 15-20s on high-volume sites —
+  // freezing the app and starving node-cron so the nightly syncs never ran. The
+  // window is cleared up front so a re-run after a partial write can't duplicate.
+  // Reconcile deletions: item-months whose sales were corrected/returned to zero
+  // drop out of aggRows; clearing the window first removes them (upsert alone
+  // never would). Months/days outside the window are untouched.
+  {
+    const doneClear = trackOp('inventory-sales-sync:clear-windows');
+    try {
+      db.transaction(() => {
+        db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
+        db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?').run(fromDateStr, toDateStr);
+      })();
+    } finally { doneClear(); }
+  }
+  await writeRowsBatched('inventory-sales-sync:agg', aggRows, (r) => {
+    upsertAgg.run(
+      r.item_number,
+      r.period,
+      r.qty_sold || 0,
+      Math.round((r.revenue || 0) * 100) / 100,
+      r.order_count || 0,
+      intToDate(r.last_sale_int),
+      r.item_description || null,
+    );
+  });
+  await writeRowsBatched('inventory-sales-sync:txn', txnRows, (r) => {
+    insertTxn.run(
+      r.item_number,
+      intToDate(r.transaction_date_int),
+      r.order_number || null,
+      r.customer_code || null,
+      r.customer_name || null,
+      r.qty_sold || 0,
+      r.unit_price != null ? Math.round(r.unit_price * 100) / 100 : null,
+      r.line_amount != null ? Math.round(r.line_amount * 100) / 100 : null,
+    );
+  });
 
   updateMeta(aggRows.length);
   // Precompute the monthly item/customer sales rollups the hub pulls, so the
@@ -128,14 +166,25 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   // instead of re-aggregating 24 months on every hub request — that on-demand
   // aggregation froze the site's (synchronous) event loop and timed out the
   // hub's health/KPIs fetches, flip-flopping the site tile Offline.
-  try { rebuildInventorySalesRollups(); }
-  catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+  // The rollup rebuild is a synchronous INSERT...SELECT aggregation over the
+  // sales transactions — trackOp it so if IT (rather than the batched insert
+  // above) is a residual blocker on a site, the freeze forensics name it.
+  {
+    const done = trackOp('inventory-sales-sync:rebuild-rollups');
+    try { rebuildInventorySalesRollups(); }
+    catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+    finally { done(); }
+  }
   // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
   // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
   // — a vendor-map hiccup must not fail the sales sync.
   let itemVendors = 0;
-  try { itemVendors = (await syncItemVendors()).synced; }
-  catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+  {
+    const done = trackOp('inventory-sales-sync:item-vendors');
+    try { itemVendors = (await syncItemVendors()).synced; }
+    catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+    finally { done(); }
+  }
   return { synced: aggRows.length, transactions: txnRows.length, itemVendors };
 }
 
