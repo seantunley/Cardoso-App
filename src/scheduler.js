@@ -1,7 +1,8 @@
 import cron from 'node-cron';
 import path from 'path';
 import { mkdirSync, linkSync, readdirSync as readdirSyncTop, rmSync, copyFileSync } from 'fs';
-import Database from 'better-sqlite3';
+import { Worker } from 'worker_threads';
+import { fileURLToPath } from 'url';
 import db, { dbPath } from './db/index.js';
 import { runConnectionImport } from './services/syncEngine.js';
 // networkDevices service removed (replaced by ntopng integration)
@@ -73,6 +74,32 @@ async function runScheduledSyncCycle() {
   }
 }
 
+// Resolved path to the one-shot worker that runs the read-only backup
+// integrity_check + critical-table counts off the main thread.
+const BACKUP_VERIFY_WORKER = fileURLToPath(new URL('./lib/backupVerifyWorker.js', import.meta.url));
+
+// Spawn the backup-verify worker, await its single result message, and clean
+// up. The worker always posts exactly one message then exits; the exit/error
+// guards mean this rejects (rather than hanging forever) if it dies first.
+function runBackupVerifyWorker(filePath, criticalTables) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn, arg) => { if (!settled) { settled = true; fn(arg); } };
+    let worker;
+    try {
+      worker = new Worker(BACKUP_VERIFY_WORKER, { workerData: { filePath, criticalTables } });
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    worker.once('message', (msg) => { finish(resolve, msg); worker.terminate(); });
+    worker.once('error', (err) => finish(reject, err));
+    worker.once('exit', (code) => {
+      finish(reject, new Error(`backup-verify worker exited (code ${code}) before posting a result`));
+    });
+  });
+}
+
 // --- Backup verification ---
 //
 // Daily backup creation alone is not enough — we've seen backup files
@@ -117,47 +144,43 @@ export async function verifyLatestBackup() {
     return { ok: false, reason: 'stale_latest', ageHours, file: latest.name };
   }
 
-  // Open read-only and run integrity_check + row counts on the tables we'd
-  // need to actually restore. better-sqlite3 readonly mode means we can't
-  // accidentally mutate the backup file.
-  let backupDb;
+  // The heavy part — PRAGMA integrity_check scans the entire file (2.4s on a
+  // 600MB DB, 14-30s on a multi-GB one) plus the critical-table counts — runs
+  // on a worker thread so it can't freeze the event loop / every API request
+  // for its whole duration. The backup is opened strictly read-only there, so
+  // the live DB is never touched or locked. See lib/backupVerifyWorker.js.
+  //
+  // Critical tables: if any is present in the live DB but missing/empty in the
+  // backup, the backup is structurally suspect. The worker wraps each in its
+  // own try so a single missing table (fresh install) doesn't fail the check.
+  const criticalTables = ['datarecord', 'user', 'databaseconnection'];
+  let verifyResult;
   try {
-    backupDb = new Database(latest.full, { readonly: true, fileMustExist: true });
+    verifyResult = await runBackupVerifyWorker(latest.full, criticalTables);
   } catch (err) {
-    console.error(`[backup-verify] Cannot open ${latest.name}: ${err.message}`);
-    return { ok: false, reason: 'cannot_open', file: latest.name, error: err.message };
+    // Worker failed to spawn or died before posting. Surface it as a
+    // verification failure (recordJob's successCheck records the run as failed)
+    // rather than a silent skip — and deliberately NOT a main-thread fallback,
+    // which would reintroduce the very freeze this offload removes.
+    console.error(`[backup-verify] verification worker failed for ${latest.name}: ${err.message}`);
+    return { ok: false, reason: 'verify_worker_error', file: latest.name, error: err.message };
   }
 
-  try {
-    const integrity = backupDb.prepare('PRAGMA integrity_check').all();
-    const passed = integrity.length === 1 && integrity[0].integrity_check === 'ok';
-    if (!passed) {
-      const issues = integrity.map(r => r.integrity_check).slice(0, 5).join('; ');
-      console.error(`[backup-verify] integrity_check FAILED on ${latest.name}: ${issues}`);
-      return { ok: false, reason: 'integrity_check_failed', file: latest.name, issues };
+  if (!verifyResult.ok) {
+    if (verifyResult.reason === 'cannot_open') {
+      console.error(`[backup-verify] Cannot open ${latest.name}: ${verifyResult.error}`);
+      return { ok: false, reason: 'cannot_open', file: latest.name, error: verifyResult.error };
     }
-
-    // Critical tables — if any of these are present in the live DB but
-    // missing/empty in the backup, the backup is structurally suspect.
-    // Wrapped per-table so a single missing table (e.g. fresh install
-    // where bat_reconciliations doesn't exist yet) doesn't fail the whole
-    // verification.
-    const criticalTables = ['datarecord', 'user', 'databaseconnection'];
-    const counts = {};
-    for (const t of criticalTables) {
-      try {
-        const row = backupDb.prepare(`SELECT COUNT(*) AS c FROM "${t}"`).get();
-        counts[t] = row?.c ?? 0;
-      } catch (err) {
-        counts[t] = `error: ${err.message}`;
-      }
+    if (verifyResult.reason === 'integrity_check_failed') {
+      console.error(`[backup-verify] integrity_check FAILED on ${latest.name}: ${verifyResult.issues}`);
+      return { ok: false, reason: 'integrity_check_failed', file: latest.name, issues: verifyResult.issues };
     }
-
-    console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(counts)})`);
-    return { ok: true, file: latest.name, ageHours, counts };
-  } finally {
-    try { backupDb.close(); } catch (e) { console.warn('[scheduler.backup_verify.close]', e.message); }
+    console.error(`[backup-verify] verification failed on ${latest.name}: ${verifyResult.reason} ${verifyResult.error || ''}`.trim());
+    return { ok: false, reason: verifyResult.reason || 'verify_failed', file: latest.name, error: verifyResult.error };
   }
+
+  console.log(`[backup-verify] ${latest.name} OK (${ageHours.toFixed(1)}h old, ${JSON.stringify(verifyResult.counts)})`);
+  return { ok: true, file: latest.name, ageHours, counts: verifyResult.counts };
 }
 
 // --- Local DB backup (site-side, replaces backup.ps1 dependency) ---
