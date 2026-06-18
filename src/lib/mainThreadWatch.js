@@ -195,7 +195,14 @@ export function stopMainThreadWatch() {
 // hang evaporating into "it works again after a restart".
 export function checkPreviousRunFreeze(dbPath, { fireAlert } = {}) {
   const marker = freezeMarkerPath(dbPath);
-  if (!existsSync(marker)) return null;
+  if (!existsSync(marker)) {
+    // The common case: a clean previous run leaves no live marker, so the
+    // post-archive prune below never runs. Cap the archive pile here too,
+    // otherwise a site that froze in the past keeps every old archive forever
+    // across all its ordinary restarts.
+    pruneFreezeArchives(dbPath);
+    return null;
+  }
   let parsed = null;
   try {
     parsed = JSON.parse(readFileSync(marker, 'utf8'));
