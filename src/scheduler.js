@@ -420,10 +420,20 @@ function nightlySummaryOk(result) {
   return !Object.values(result.sources).some((s) => s && s.error);
 }
 
+// Nightly Sage syncs whose retry ladder is currently in flight — RUNNING or
+// WAITING between retries. A pending retry is just a setTimeout with no job_runs
+// row, so the daytime/boot catch-up (runNightlyCatchUp) can't detect it from
+// job_runs; it consults this set instead so it never starts a SECOND ladder for
+// a job whose 4am ladder is still active (which would overlap Sage pulls and
+// duplicate the delete/refresh passes). An entry lives from the first attempt
+// until the ladder terminates — success or retries exhausted.
+const activeNightlyLadders = new Set();
+
 function nightlyWithRetry(name, fn) {
   const attempt = (n) => {
     const scheduleRetry = (why) => {
       if (n >= NIGHTLY_RETRIES) {
+        activeNightlyLadders.delete(name);
         console.error(`[${name}] still failing after ${n + 1} attempts (${why}) — giving up until the next scheduled night. The nightly-sync-stale alert will flag the data once it passes 26 hours old.`);
         return;
       }
@@ -434,6 +444,7 @@ function nightlyWithRetry(name, fn) {
     recordJob(name, fn, null, { successCheck: nightlySummaryOk })
       .then((result) => {
         if (nightlySummaryOk(result)) {
+          activeNightlyLadders.delete(name);
           if (n > 0) console.log(`[${name}] retry ${n} of ${NIGHTLY_RETRIES} succeeded — data is current again.`);
           return;
         }
@@ -445,7 +456,9 @@ function nightlyWithRetry(name, fn) {
         scheduleRetry(err.message);
       });
   };
-  return () => attempt(0);
+  // Mark the ladder active BEFORE the first attempt so a catch-up firing moments
+  // later sees it. Cleared on terminal success or when retries are exhausted.
+  return () => { activeNightlyLadders.add(name); attempt(0); };
 }
 
 export function startSchedulers() {
@@ -552,6 +565,14 @@ export function startSchedulers() {
       const runNightlyCatchUp = (trigger) => {
         for (const [name, runner] of NIGHTLY_CATCH_UP) {
           try {
+            // Skip if this job's retry ladder is already running or waiting
+            // between retries — relaunching runner() would start a SECOND ladder
+            // alongside the first, overlapping the Sage pulls and duplicating the
+            // delete/refresh passes. The 4am cron's ladder marks itself active.
+            if (activeNightlyLadders.has(name)) {
+              console.log(`[${trigger}] ${name} already has a retry ladder in flight — skipping to avoid a second overlapping run.`);
+              continue;
+            }
             const last = db.prepare(`
               SELECT started_at FROM job_runs
               WHERE name = ? AND status = 'succeeded'
