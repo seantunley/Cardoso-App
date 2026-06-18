@@ -316,6 +316,19 @@ function initSchema(db) {
         key TEXT PRIMARY KEY,
         value TEXT
       );
+      -- Per-site / per-dataset ETL change-detection state. The hub stores the
+      -- freshness token it last successfully pulled for each heavy dataset; on
+      -- the next 5-min cycle it re-fetches the site's current token and SKIPS
+      -- the full re-pull of that dataset when the token is byte-identical. The
+      -- token is written only AFTER a stage succeeds, so a failed/partial pull
+      -- never marks a dataset "current" — see services/hubEtl.js (makeEtlGate).
+      CREATE TABLE IF NOT EXISTS hub_site_etl_state (
+        site_id TEXT NOT NULL,
+        dataset TEXT NOT NULL,
+        token TEXT,
+        updated_at TEXT,
+        PRIMARY KEY (site_id, dataset)
+      );
       CREATE TABLE IF NOT EXISTS hub_inventory (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         site_id TEXT NOT NULL,

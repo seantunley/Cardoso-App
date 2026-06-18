@@ -211,6 +211,81 @@ export async function chunkedStageLoad(database, { ddl, clearSql, insertSql, row
 }
 
 // --- ETL function ---
+// ── ETL change-detection gate ─────────────────────────────────────────────
+// The hub re-pulls each site's heavy datasets (inventory + the sales caches)
+// every 5 minutes, but a site's inventory/sales only change ~once a day (after
+// its nightly Sage sync). makeEtlGate lets syncSite skip the full re-pull of a
+// dataset whose freshness token is byte-identical to the one stored from the
+// last SUCCESSFUL pull. Safe by construction:
+//   • A token is committed only AFTER its stage succeeds, so a failed/partial
+//     pull never marks a dataset "current".
+//   • shouldRun() refreshes unless BOTH a freshly-fetched token AND a stored
+//     token exist and are equal — so a missing endpoint (old site version), an
+//     errored/absent token, or a first-ever pull all refresh.
+//   • Killable with HUB_ETL_CHANGE_GATE=0 (or off/false/no) → always refresh.
+const ETL_GATE_ENABLED = !['0', 'off', 'false', 'no'].includes(
+  String(process.env.HUB_ETL_CHANGE_GATE ?? '').trim().toLowerCase(),
+);
+
+// Fetch a site's per-dataset freshness tokens. Returns {} on ANY failure
+// (timeout, old-site 404, bad JSON) so the caller refreshes everything — the
+// gate must never skip on uncertainty.
+async function fetchEtlFreshness(site, headers) {
+  if (!ETL_GATE_ENABLED) return {};
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 10000);
+  try {
+    const res = await fetch(`${site.url}/api/reporting/etl-freshness`, { headers, signal: ctrl.signal });
+    if (!res.ok) return {};
+    const data = await res.json();
+    return (data && typeof data.tokens === 'object' && data.tokens) ? data.tokens : {};
+  } catch {
+    return {};
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+// freshTokens: the dataset→token map fetched from the site this cycle ({} if the
+// fetch failed → every shouldRun() returns true). storageKey lets stages that
+// share one source token (the three sales stages all key off 'inventory_sales')
+// still be skipped/committed independently, so one stage failing doesn't mark
+// the others current.
+function makeEtlGate(database, siteId, freshTokens) {
+  const stored = {};
+  try {
+    for (const row of database.prepare('SELECT dataset, token FROM hub_site_etl_state WHERE site_id = ?').all(siteId)) {
+      stored[row.dataset] = row.token;
+    }
+  } catch { /* table absent on a partial schema → no stored tokens → refresh all */ }
+
+  const commitStmt = database.prepare(`
+    INSERT INTO hub_site_etl_state (site_id, dataset, token, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(site_id, dataset) DO UPDATE SET token = excluded.token, updated_at = excluded.updated_at
+  `);
+
+  return {
+    shouldRun(storageKey, tokenName) {
+      if (!ETL_GATE_ENABLED) return true;
+      const fresh = freshTokens[tokenName];
+      if (fresh == null || fresh === '') return true;     // token unknown → refresh
+      const prev = stored[storageKey];
+      if (prev == null || prev === '') return true;       // never pulled → refresh
+      return prev !== fresh;                               // changed → refresh
+    },
+    commit(storageKey, tokenName) {
+      const fresh = freshTokens[tokenName];
+      if (fresh == null || fresh === '') return;          // nothing reliable to store
+      try { commitStmt.run(siteId, storageKey, fresh, new Date().toISOString()); }
+      catch (e) { console.warn(`[hub-etl] ${siteId} could not store ETL token ${storageKey}: ${e.message}`); }
+    },
+    logSkip(label, tokenName) {
+      console.log(`[hub-etl] ${siteId} ${label}: unchanged (token ${freshTokens[tokenName]}) — skipped full refresh`);
+    },
+  };
+}
+
 async function syncSite(site) {
   const startedAt = new Date().toISOString();
   let recordsFetched = 0;
@@ -245,6 +320,13 @@ async function syncSite(site) {
     clearTimeout(timeout);
     if (!healthRes.ok) throw new Error(`Health check failed: ${healthRes.status}`);
     reachable = true; // reporting endpoint answered — failures below are data-pull, not reachability
+
+    // ETL change-detection — pull the site's current dataset tokens so the
+    // heavy inventory/sales stages below can skip a full re-pull when nothing
+    // changed since the last successful cycle. Any failure yields {} so those
+    // stages refresh exactly as before (fail-safe — never a stale skip).
+    const freshTokens = await fetchEtlFreshness(site, headers);
+    const etlGate = makeEtlGate(db, site.id, freshTokens);
 
     // KPIs
     const ctrl2 = new AbortController();
@@ -387,7 +469,9 @@ async function syncSite(site) {
       if (!nextRecordsPromise) break;
     }
 
-    // Inventory — full refresh
+    // Inventory — full refresh (skipped when the site reports unchanged inventory)
+    inventoryStage: {
+    if (!etlGate.shouldRun('inventory', 'inventory')) { etlGate.logSkip('inventory', 'inventory'); break inventoryStage; }
     const upsertInv = db.prepare(`
       INSERT INTO hub_inventory (site_id, item_number, item_description, qty_on_hand, last_cost, price_list, price, stocking_uom, commodity, inventory_value, synced_at)
       VALUES (@site_id, @item_number, @item_description, @qty_on_hand, @last_cost, @price_list, @price, @stocking_uom, @commodity, @inventory_value, @synced_at)
@@ -468,6 +552,8 @@ async function syncSite(site) {
     }
     // Prune hub_inventory rows no longer in the site's query (upsert-then-prune)
     pruneHubInventory(db, site.id, syncedItemNumbers);
+    etlGate.commit('inventory', 'inventory');
+    } // end inventoryStage
 
     // AR document summary (per-branch "Sales Figures") — tiny payload (one row
     // per month over the current+prior FY), single fetch. Clear-and-reload the
@@ -512,6 +598,8 @@ async function syncSite(site) {
     // runs in a single transaction. This prevents a partial replace if
     // a later page fetch fails — the old data stays intact until a
     // fully successful sync completes.
+    movementStage: {
+    if (!etlGate.shouldRun('inv_sales_movement', 'inventory_sales')) { etlGate.logSkip('inventory movement', 'inventory_sales'); break movementStage; }
     try {
       const fetchMovPage = async (pageOffset) => {
         const ctrl = new AbortController();
@@ -559,12 +647,16 @@ async function syncSite(site) {
           upsertMov.run(site.id, r.item_number, r.period, r.qty_sold || 0, r.revenue || 0, r.order_count || 0, r.last_sale_date || null);
         }
       })();
+      etlGate.commit('inv_sales_movement', 'inventory_sales');
     } catch (movErr) {
       recordStageFailure('Inventory movement', movErr);
     }
+    } // end movementStage
 
     // Inventory item sales (inter-branch transfers excluded) → for the dashboard
     // Top Items + Dead Stock tiles. Same paginate → stage → atomic-swap pattern.
+    itemSalesStage: {
+    if (!etlGate.shouldRun('inv_sales_item', 'inventory_sales')) { etlGate.logSkip('inventory item-sales', 'inventory_sales'); break itemSalesStage; }
     try {
       const fetchItemPage = async (pageOffset) => {
         const ctrl = new AbortController();
@@ -605,9 +697,11 @@ async function syncSite(site) {
           upsertItem.run(site.id, r.item_number, r.item_description || null, r.period, r.qty_sold || 0, r.revenue || 0);
         }
       })();
+      etlGate.commit('inv_sales_item', 'inventory_sales');
     } catch (itemErr) {
       recordStageFailure('Inventory item-sales', itemErr);
     }
+    } // end itemSalesStage
 
     // Item -> vendor master (ICITMV-backed) → vendor attribution for the hub
     // Sales-by-Vendor report. Small (~2.4k rows): single fetch, clear + insert.
@@ -638,6 +732,8 @@ async function syncSite(site) {
 
     // Inventory customer sales (inter-branch transfers excluded) → for the
     // dashboard Top Customers tile (summed over the selected timeline).
+    custSalesStage: {
+    if (!etlGate.shouldRun('inv_sales_customer', 'inventory_sales')) { etlGate.logSkip('inventory customer-sales', 'inventory_sales'); break custSalesStage; }
     try {
       const fetchCustPage = async (pageOffset) => {
         const ctrl = new AbortController();
@@ -678,9 +774,11 @@ async function syncSite(site) {
           upsertCust.run(site.id, r.customer_code, r.customer_name || null, r.period, r.revenue || 0, r.qty || 0);
         }
       })();
+      etlGate.commit('inv_sales_customer', 'inventory_sales');
     } catch (custErr) {
       recordStageFailure('Inventory customer-sales', custErr);
     }
+    } // end custSalesStage
 
     // Debtor AR open items → hub_debtor_ar_invoice, so Aged Debtors ages
     // per-document at the hub. Paginate → stage → atomic full-refresh per site.
