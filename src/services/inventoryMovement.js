@@ -39,11 +39,11 @@ async function writeRowsBatched(label, rows, applyRow, batchSize = 2000) {
   }
 }
 
-// Per-process guard for the sales sync. The sync ingests into shared TEMP
+// Per-process guard for the sales sync. The sync ingests into shared scratch
 // staging tables and then swaps them into the live tables (see below). Two
 // concurrent runs — e.g. the manual /api/inventory-movement/sync route firing
 // while the nightly/boot catch-up runner is mid-flight — would clobber each
-// other's staging (a single better-sqlite3 connection shares TEMP tables) and
+// other's staging (both use the same staging tables in the one shared DB) and
 // could interleave the swap, leaving garbled/duplicated rows in the
 // constraint-free inventory_sales_transactions so rollups/forecasts mis-count.
 // Coalesce concurrent callers onto the single in-flight run instead. (Every
@@ -109,15 +109,21 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   };
 
   // Stage-then-atomic-swap (see the swap block below). The slow per-row
-  // transform+insert runs against TEMP staging tables so it never touches the
-  // live tables until the swap. stage_sales_agg carries a PK so a stray duplicate
-  // (item, period) from Sage collapses here, last-wins, as the old upsert did;
-  // stage_sales_txn has no key (transaction lines are not unique).
+  // transform+insert runs against scratch staging tables so it never touches the
+  // live tables until the swap. These are MAIN-DB (file-backed) tables, NOT TEMP:
+  // db/index.js sets PRAGMA temp_store=MEMORY, so TEMP staging would hold the
+  // whole multi-year set in RAM — on top of the already fully-materialized
+  // txnRows — and could OOM a high-volume site before the swap. File-backed
+  // staging spills to disk instead, so the rebuild no longer depends on enough
+  // RAM for the entire sales history. stage_sales_agg carries a PK so a stray
+  // duplicate (item, period) from Sage collapses here, last-wins, as the old
+  // upsert did; stage_sales_txn has no key (transaction lines are not unique).
+  // DROP up front clears any table a prior crash left behind.
   db.exec(`
     DROP TABLE IF EXISTS stage_sales_agg;
     DROP TABLE IF EXISTS stage_sales_txn;
-    CREATE TEMP TABLE stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description, PRIMARY KEY (item_number, period));
-    CREATE TEMP TABLE stage_sales_txn (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount);
+    CREATE TABLE stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description, PRIMARY KEY (item_number, period));
+    CREATE TABLE stage_sales_txn (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount);
   `);
   const stageAgg = db.prepare(`
     INSERT OR REPLACE INTO stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
