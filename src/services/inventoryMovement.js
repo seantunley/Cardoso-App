@@ -2,6 +2,7 @@ import sql from 'mssql';
 import db from '../db/index.js';
 import { getSagePool } from './batReconciliation.js';
 import { resolveSageQuery } from './sage/queryRegistry.js';
+import { trackOp } from '../lib/mainThreadWatch.js';
 
 function toYyyymmdd(d) {
   const y = d.getFullYear();
@@ -10,7 +11,52 @@ function toYyyymmdd(d) {
   return `${y}${m}${day}`;
 }
 
-export async function syncSalesFromSage({ fromDate, toDate } = {}) {
+// Bulk-write rows to SQLite in batches, yielding the event loop between each.
+//
+// better-sqlite3 is synchronous, so ONE transaction over a very large set
+// (3 years of per-line sales = hundreds of thousands / millions of rows) holds
+// the event loop start-to-finish. On high-volume sites that froze the main
+// thread for 15-20s — every API call and page hung, AND node-cron (which ticks
+// on the same loop) was starved through the 04:00 window so the nightly syncs
+// never even fired (they showed "never" in the schedule, the vendor map never
+// filled, and the site looked permanently stale). See lib/mainThreadWatch.js.
+//
+// Batching each write into its own small transaction with a setImmediate yield
+// between keeps every blocking burst sub-second, so the loop and the scheduler
+// keep breathing. Each `trackOp` tags the burst so any residual freeze is
+// attributed instead of "(none registered)". Callers ingest into a scratch
+// staging table and then swap it into the live table in one transaction (see
+// syncSalesFromSage), so a partial or failed batch run is never exposed to a
+// reader and the window replace stays atomic.
+async function writeRowsBatched(label, rows, applyRow, batchSize = 2000) {
+  const writeBatch = db.transaction((batch) => { for (const r of batch) applyRow(r); });
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const done = trackOp(`${label} ${Math.min(i + batchSize, rows.length)}/${rows.length}`);
+    try { writeBatch(rows.slice(i, i + batchSize)); }
+    finally { done(); }
+    // Hand the event loop back so heartbeats, timers and node-cron can run.
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+// Per-process guard for the sales sync. The sync ingests into shared scratch
+// staging tables and then swaps them into the live tables (see below). Two
+// concurrent runs — e.g. the manual /api/inventory-movement/sync route firing
+// while the nightly/boot catch-up runner is mid-flight — would clobber each
+// other's staging (both use the same staging tables in the one shared DB) and
+// could interleave the swap, leaving garbled/duplicated rows in the
+// constraint-free inventory_sales_transactions so rollups/forecasts mis-count.
+// Coalesce concurrent callers onto the single in-flight run instead. (Every
+// caller uses the default window; a future custom-window caller must not run
+// concurrently — it would receive this run's result.)
+let inFlightSalesSync = null;
+export function syncSalesFromSage(opts = {}) {
+  if (inFlightSalesSync) return inFlightSalesSync;
+  inFlightSalesSync = _syncSalesFromSage(opts).finally(() => { inFlightSalesSync = null; });
+  return inFlightSalesSync;
+}
+
+async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   const pool = await getSagePool();
   const now = new Date();
   const to = toDate || now;
@@ -62,25 +108,29 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
     }
   };
 
-  // Monthly aggregates → inventory_sales_cache (upsert)
-  const upsertAgg = db.prepare(`
-    INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(item_number, period) DO UPDATE SET
-      qty_sold = excluded.qty_sold,
-      revenue = excluded.revenue,
-      order_count = excluded.order_count,
-      item_description = excluded.item_description,
-      last_sale_date = CASE
-        WHEN excluded.last_sale_date > inventory_sales_cache.last_sale_date
-          THEN excluded.last_sale_date
-        ELSE inventory_sales_cache.last_sale_date
-      END
+  // Stage-then-atomic-swap (see the swap block below). The slow per-row
+  // transform+insert runs against scratch staging tables so it never touches the
+  // live tables until the swap. These are MAIN-DB (file-backed) tables, NOT TEMP:
+  // db/index.js sets PRAGMA temp_store=MEMORY, so TEMP staging would hold the
+  // whole multi-year set in RAM — on top of the already fully-materialized
+  // txnRows — and could OOM a high-volume site before the swap. File-backed
+  // staging spills to disk instead, so the rebuild no longer depends on enough
+  // RAM for the entire sales history. stage_sales_agg carries a PK so a stray
+  // duplicate (item, period) from Sage collapses here, last-wins, as the old
+  // upsert did; stage_sales_txn has no key (transaction lines are not unique).
+  // DROP up front clears any table a prior crash left behind.
+  db.exec(`
+    DROP TABLE IF EXISTS stage_sales_agg;
+    DROP TABLE IF EXISTS stage_sales_txn;
+    CREATE TABLE stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description, PRIMARY KEY (item_number, period));
+    CREATE TABLE stage_sales_txn (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount);
   `);
-
-  // Per-transaction rows → inventory_sales_transactions (replace window)
-  const insertTxn = db.prepare(`
-    INSERT INTO inventory_sales_transactions
+  const stageAgg = db.prepare(`
+    INSERT OR REPLACE INTO stage_sales_agg (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const stageTxn = db.prepare(`
+    INSERT INTO stage_sales_txn
       (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
@@ -89,14 +139,13 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   const fromPeriod = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}`;
   const toPeriod = `${to.getFullYear()}-${String(to.getMonth() + 1).padStart(2, '0')}`;
 
-  db.transaction(() => {
-    // Reconcile deletions: an item-month whose sales were corrected/returned to
-    // zero drops out of aggRows. Clear the synced period window first so such
-    // item-months don't linger stale in the cache (upsert alone never removes
-    // them). Months outside the window are untouched.
-    db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
-    for (const r of aggRows) {
-      upsertAgg.run(
+  try {
+    // Ingest into the staging tables in yielding batches — the slow part, kept off
+    // the live tables and out of a single blocking transaction. A NOT NULL
+    // violation from an odd Sage row, or a crash here, fails BEFORE the swap and
+    // leaves the live window untouched.
+    await writeRowsBatched('inventory-sales-sync:stage-agg', aggRows, (r) => {
+      stageAgg.run(
         r.item_number,
         r.period,
         r.qty_sold || 0,
@@ -105,11 +154,9 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
         intToDate(r.last_sale_int),
         r.item_description || null,
       );
-    }
-    // Replace transaction rows for the synced window to avoid duplicates.
-    db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?').run(fromDateStr, toDateStr);
-    for (const r of txnRows) {
-      insertTxn.run(
+    });
+    await writeRowsBatched('inventory-sales-sync:stage-txn', txnRows, (r) => {
+      stageTxn.run(
         r.item_number,
         intToDate(r.transaction_date_int),
         r.order_number || null,
@@ -119,8 +166,34 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
         r.unit_price != null ? Math.round(r.unit_price * 100) / 100 : null,
         r.line_amount != null ? Math.round(r.line_amount * 100) / 100 : null,
       );
-    }
-  })();
+    });
+
+    // Atomic swap: clear each window and copy the fully-staged rows into the live
+    // tables in ONE transaction (a C-level INSERT...SELECT, far cheaper than the
+    // per-row JS loop). Both tables swap together so cache and transaction detail
+    // can never be read inconsistently, and the replace is all-or-nothing — if
+    // anything above failed, the live window was never touched. Reconcile
+    // deletions: item-months/days that dropped out of the staged set are removed
+    // by the window clear; rows outside the window are untouched.
+    const doneSwap = trackOp('inventory-sales-sync:swap');
+    try {
+      db.transaction(() => {
+        db.prepare('DELETE FROM inventory_sales_cache WHERE period >= ? AND period <= ?').run(fromPeriod, toPeriod);
+        db.prepare(`INSERT INTO inventory_sales_cache (item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description)
+                    SELECT item_number, period, qty_sold, revenue, order_count, last_sale_date, item_description FROM stage_sales_agg`).run();
+        db.prepare('DELETE FROM inventory_sales_transactions WHERE transaction_date >= ? AND transaction_date <= ?').run(fromDateStr, toDateStr);
+        db.prepare(`INSERT INTO inventory_sales_transactions (item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount)
+                    SELECT item_number, transaction_date, order_number, customer_code, customer_name, qty_sold, unit_price, line_amount FROM stage_sales_txn`).run();
+      })();
+    } finally { doneSwap(); }
+  } finally {
+    // Always drop the file-backed scratch tables — even if staging or the swap
+    // threw (e.g. an unexpected null item/date from Sage) — so a full multi-year
+    // duplicate of the sales window can't linger in the live DB (and its backups)
+    // until the next sync. The up-front DROP also clears anything a hard crash
+    // left behind that bypassed this finally.
+    db.exec('DROP TABLE IF EXISTS stage_sales_agg; DROP TABLE IF EXISTS stage_sales_txn;');
+  }
 
   updateMeta(aggRows.length);
   // Precompute the monthly item/customer sales rollups the hub pulls, so the
@@ -128,14 +201,25 @@ export async function syncSalesFromSage({ fromDate, toDate } = {}) {
   // instead of re-aggregating 24 months on every hub request — that on-demand
   // aggregation froze the site's (synchronous) event loop and timed out the
   // hub's health/KPIs fetches, flip-flopping the site tile Offline.
-  try { rebuildInventorySalesRollups(); }
-  catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+  // The rollup rebuild is a synchronous INSERT...SELECT aggregation over the
+  // sales transactions — trackOp it so if IT (rather than the batched insert
+  // above) is a residual blocker on a site, the freeze forensics name it.
+  {
+    const done = trackOp('inventory-sales-sync:rebuild-rollups');
+    try { rebuildInventorySalesRollups(); }
+    catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+    finally { done(); }
+  }
   // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
   // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
   // — a vendor-map hiccup must not fail the sales sync.
   let itemVendors = 0;
-  try { itemVendors = (await syncItemVendors()).synced; }
-  catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+  {
+    const done = trackOp('inventory-sales-sync:item-vendors');
+    try { itemVendors = (await syncItemVendors()).synced; }
+    catch (e) { console.error('[inventory.item_vendor] sync failed — vendor attribution will be stale:', e.message); }
+    finally { done(); }
+  }
   return { synced: aggRows.length, transactions: txnRows.length, itemVendors };
 }
 
