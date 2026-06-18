@@ -15,6 +15,7 @@ import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES 
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
+import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
 import { getSqlBackupHealth, getMachineHealthSummary } from '../services/hub/hubHealth.js';
@@ -320,7 +321,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   router.get('/api/hub/sites', (req, res) => {
     const tokenHeader = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
-    const authedByToken = expectedToken && tokenHeader === expectedToken;
+    const authedByToken = expectedToken && safeTokenEqual(tokenHeader, expectedToken);
     if (!authedByToken && !req.session?.userId) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
@@ -3260,7 +3261,7 @@ export function createReceiveUsersRouter() {
   router.post('/api/hub/receive-users', async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken || !safeTokenEqual(token, expectedToken)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3427,7 +3428,7 @@ export function createReceiveUsersRouter() {
   router.post('/api/hub/receive-rules', (req, res) => {
     const token = req.headers['x-hub-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken || !safeTokenEqual(token, expectedToken)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3479,7 +3480,7 @@ export function createReceiveUsersRouter() {
   router.post('/api/hub/trigger-accpac-sync', async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken || !safeTokenEqual(token, expectedToken)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -3555,7 +3556,7 @@ export function createReceiveUsersRouter() {
   router.post('/api/hub/restore', async (req, res) => {
     const token = req.headers['x-reporting-token'];
     const expectedToken = process.env.REPORTING_TOKEN;
-    if (!expectedToken || token !== expectedToken) {
+    if (!expectedToken || !safeTokenEqual(token, expectedToken)) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
