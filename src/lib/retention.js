@@ -182,11 +182,11 @@ export function vacuumDb() {
   const maxSkipDays = Number.isFinite(maxSkipDaysRaw) && maxSkipDaysRaw >= 0 ? maxSkipDaysRaw : 90;
   let daysSinceLastVacuum = Infinity;
   try {
-    const row = db.prepare(`
+    const row = /** @type {{ last: string | null } | undefined} */ (db.prepare(`
       SELECT MAX(ended_at) AS last FROM job_runs
       WHERE name = 'vacuum-db' AND status = 'succeeded'
         AND (context IS NULL OR context NOT LIKE '%"skipped"%')
-    `).get();
+    `).get());
     if (row?.last) {
       const ms = Date.now() - Date.parse(row.last);
       if (Number.isFinite(ms) && ms >= 0) daysSinceLastVacuum = ms / (1000 * 60 * 60 * 24);
