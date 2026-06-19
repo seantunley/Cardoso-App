@@ -13,6 +13,91 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-18': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '18 June 2026',
+    slug: '18-June-2026',
+    intro:
+      "This update centres on the Sales by Vendor report. The former CSV export " +
+      "has been replaced with a full Excel workbook: a year-over-year Dashboard " +
+      "tab highlighting the top movers, per-month quantities, prior-year comparison " +
+      "figures, and all amounts in Rand — ready to pivot and chart without any " +
+      "manual setup. Head-office users receive the same data broken out by branch. " +
+      "Accompanying accuracy improvements sharpen the year-over-year rankings, and " +
+      "under-the-hood fixes make inventory syncing more resilient and self-healing.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Excel export with year-over-year dashboard for Sales by Vendor',
+            body:
+              "The Sales by Vendor export is now a formatted Excel workbook instead " +
+              "of a plain CSV. It includes a Dashboard tab with the Top-10 year-over-" +
+              "year movers by value, a long-format Data sheet with Year and Month as " +
+              "separate columns ready for pivot charting, prior-year quantities " +
+              "alongside current figures, and all amounts in Rand.",
+          },
+          {
+            title: 'Per-branch breakdown at head office',
+            body:
+              "When viewed from the hub, the Sales by Vendor Excel export splits the " +
+              "data by branch, giving head-office users a complete per-depot picture " +
+              "in a single workbook.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Year-over-year figures shown per month',
+            body:
+              "On the Sales by Vendor report, year-over-year comparisons are now " +
+              "broken down by month, making seasonal patterns and monthly swings " +
+              "easier to read.",
+          },
+          {
+            title: 'Same-day recovery for failed nightly syncs',
+            body:
+              "The scheduled data sync now runs an hourly catch-up during the day, " +
+              "so a branch whose nightly sync failed no longer has to wait until the " +
+              "following night to get current figures.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'Top-10 year-over-year movers show only true comparisons',
+            body:
+              "Items that had no sales in the prior year are no longer included in " +
+              "the Top-10 movers list. The ranking now compares only items with sales " +
+              "in both years, giving a meaningful year-over-year view.",
+          },
+          {
+            title: 'Money amounts stay on one line in the by-month matrix',
+            body:
+              "Large Rand amounts in the Sales by Vendor by-month view no longer " +
+              "wrap onto a second line.",
+          },
+          {
+            title: 'Inventory sync is more robust',
+            body:
+              "The inventory sync now stages data before committing it, so a sync " +
+              "that fails partway through cannot publish a half-built result. " +
+              "Concurrent syncs no longer produce duplicate rows, and the sync no " +
+              "longer stalls other parts of the application while running.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
