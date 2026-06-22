@@ -195,6 +195,13 @@ scripts/probe-hub-backup.mjs
 # Generated release-note PDFs (the .md source IS tracked).
 docs/release-notes/*.pdf
 
+# Confidential AR exports — write-off candidate reports contain customer
+# names + outstanding balances. Generated locally, never committed. The
+# script writes here; the docs/ pattern is a belt-and-braces guard in
+# case anyone points an output back at docs/.
+exports/
+docs/write-off-candidates-*.pdf
+
 # Playwright e2e artifacts + scratch DB
 test-results/
 playwright-report/
