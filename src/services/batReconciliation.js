@@ -40,10 +40,22 @@ extractionEvents.setMaxListeners(50); // multiple browser tabs can subscribe
 // always lands even if it arrives mid-throttle window.
 const EMIT_THROTTLE_MS = 250;
 const _emitState = new Map(); // reconId -> { lastFiredAt, pending }
+const EMIT_STATE_CAP = 256; // only the actively-emitting recon(s) matter; bound the map
 function emitExtractionUpdate(reconId) {
   if (!reconId) return;
   const now = Date.now();
-  const state = _emitState.get(reconId) || { lastFiredAt: 0, pending: null };
+  let state = _emitState.get(reconId);
+  if (!state) {
+    // Evict the oldest entry (clearing any pending timer) so a long-lived
+    // process never accumulates one _emitState entry per recon forever.
+    if (_emitState.size >= EMIT_STATE_CAP) {
+      const oldestKey = _emitState.keys().next().value;
+      const oldest = _emitState.get(oldestKey);
+      if (oldest?.pending) clearTimeout(oldest.pending);
+      _emitState.delete(oldestKey);
+    }
+    state = { lastFiredAt: 0, pending: null };
+  }
   const sinceLast = now - state.lastFiredAt;
   if (sinceLast >= EMIT_THROTTLE_MS) {
     state.lastFiredAt = now;
@@ -1227,7 +1239,7 @@ export function getReconciliation(id) {
         // failing→failing-with-different-checks. All worth a log
         // entry. passing→passing produces no log (the entry is
         // marked OK in the map and no write happens).
-        _integrityLastState.set(id, failedKey);
+        rememberIntegrityState(id, failedKey);
         if (failedKey !== null) {
           try {
             logError(
@@ -1271,7 +1283,7 @@ export function getReconciliation(id) {
     // doesn't write a log entry per page refresh.
     const crashKey = `__crash__:${err?.message || 'unknown'}`;
     if (_integrityLastState.get(id) !== crashKey) {
-      _integrityLastState.set(id, crashKey);
+      rememberIntegrityState(id, crashKey);
       try { logError('bat.integrity.crash', err, { reconciliation_id: id }); } catch {} // eslint-disable-line no-empty -- logError wrapper; crash recorded as integrity_check_crashed above
     }
   }
@@ -1287,6 +1299,16 @@ export function getReconciliation(id) {
 // on process restart — that's intentional; boot is "first sight" of
 // every recon, so failing recons rightly produce a fresh log entry.
 const _integrityLastState = new Map();
+const INTEGRITY_STATE_CAP = 2000;
+// Bound _integrityLastState so a long-lived hub process doesn't accumulate one
+// dedup-state entry per reconciliation forever. Evicting the oldest just means a
+// re-checked recon logs one 'first_seen' again — harmless.
+function rememberIntegrityState(id, val) {
+  _integrityLastState.set(id, val);
+  if (_integrityLastState.size > INTEGRITY_STATE_CAP) {
+    _integrityLastState.delete(_integrityLastState.keys().next().value);
+  }
+}
 
 export function listReconciliations() {
   // LEFT JOIN the Sage week cache so the per-week tile can show live Sage totals

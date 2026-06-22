@@ -33,7 +33,7 @@
 //    try { ...synchronous heavy work... } finally { done(); }
 //
 import { Worker } from 'worker_threads';
-import { writeFileSync, readFileSync, renameSync, existsSync } from 'fs';
+import { writeFileSync, readFileSync, renameSync, existsSync, readdirSync, statSync, unlinkSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logError } from './errorLog.js';
@@ -87,6 +87,22 @@ export function getActiveOps() {
 // ── Marker file paths ────────────────────────────────────────────────────
 export function freezeMarkerPath(dbPath) {
   return path.join(path.dirname(path.resolve(dbPath)), '.main-thread-freeze.json');
+}
+
+// Archived freeze markers (.main-thread-freeze.<stamp>.archived.json) were never
+// cleaned up — a site that freezes repeatedly accumulates them forever next to
+// the DB. Keep only the most recent `keep`. Best-effort; never throws.
+function pruneFreezeArchives(dbPath, keep = 20) {
+  try {
+    const dir = path.dirname(path.resolve(dbPath));
+    const archives = readdirSync(dir)
+      .filter((f) => /^\.main-thread-freeze\..+\.archived\.json$/.test(f))
+      .map((f) => { const full = path.join(dir, f); return { full, mtime: statSync(full).mtimeMs }; })
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const stale of archives.slice(keep)) {
+      try { unlinkSync(stale.full); } catch { /* best-effort */ }
+    }
+  } catch { /* never let pruning break boot/recovery */ }
 }
 
 // ── Detector 1: soft stalls (main thread notices its own late tick) ─────
@@ -157,6 +173,7 @@ export function startMainThreadWatch(dbPath) {
         const marker = freezeMarkerPath(dbPath);
         const stamp = (p.detected_at || new Date().toISOString()).replace(/[:.]/g, '-');
         if (existsSync(marker)) renameSync(marker, marker.replace(/\.json$/, `.${stamp}.archived.json`));
+        pruneFreezeArchives(dbPath);
       } catch { /* boot check copes with a leftover recovered marker */ }
     });
     workerRef.unref(); // must not keep the process alive on shutdown
@@ -178,7 +195,14 @@ export function stopMainThreadWatch() {
 // hang evaporating into "it works again after a restart".
 export function checkPreviousRunFreeze(dbPath, { fireAlert } = {}) {
   const marker = freezeMarkerPath(dbPath);
-  if (!existsSync(marker)) return null;
+  if (!existsSync(marker)) {
+    // The common case: a clean previous run leaves no live marker, so the
+    // post-archive prune below never runs. Cap the archive pile here too,
+    // otherwise a site that froze in the past keeps every old archive forever
+    // across all its ordinary restarts.
+    pruneFreezeArchives(dbPath);
+    return null;
+  }
   let parsed = null;
   try {
     parsed = JSON.parse(readFileSync(marker, 'utf8'));
@@ -219,6 +243,7 @@ export function checkPreviousRunFreeze(dbPath, { fireAlert } = {}) {
   } catch {
     // If archive fails we'd re-report on every boot — better than never.
   }
+  pruneFreezeArchives(dbPath);
   return parsed;
 }
 
