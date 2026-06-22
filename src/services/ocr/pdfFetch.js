@@ -119,13 +119,41 @@ export async function downloadPdf(pdfUrl, opts = {}) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
+    // Follow redirects MANUALLY, re-running the SSRF/private-host guard on every
+    // hop's target. fetch's default redirect:'follow' only vets the original
+    // URL, so an allowed/public host could 30x us to a private/LAN/metadata
+    // address (169.254.169.254, internal services) and we'd fetch it before the
+    // %PDF body check ever runs. redirect:'manual' returns the 3xx so we can
+    // validate Location ourselves first.
     let response;
-    try {
-      response = await fetch(pdfUrl, { signal: ctrl.signal });
-    } catch (err) {
-      const e = new Error(`Download failed: ${err.message}`);
-      e.code = 'DOWNLOAD_FAILED';
-      throw e;
+    let currentUrl = pdfUrl;
+    for (let hop = 0; ; hop++) {
+      try {
+        response = await fetch(currentUrl, { signal: ctrl.signal, redirect: 'manual' });
+      } catch (err) {
+        const e = new Error(`Download failed: ${err.message}`);
+        e.code = 'DOWNLOAD_FAILED';
+        throw e;
+      }
+      const isRedirect = response.status >= 300 && response.status < 400 && response.headers.get('location');
+      if (!isRedirect) break;
+      if (hop >= 5) {
+        const e = new Error('Too many redirects downloading PDF');
+        e.code = 'TOO_MANY_REDIRECTS';
+        throw e;
+      }
+      let next;
+      try { next = new URL(response.headers.get('location'), currentUrl).toString(); }
+      catch { const e = new Error('PDF redirect to a malformed URL'); e.code = 'URL_REJECTED'; throw e; }
+      const recheck = isAllowedPdfUrl(next, allowedHostsEnv);
+      if (!recheck.ok) {
+        const e = new Error(`PDF redirect rejected: ${recheck.reason}`);
+        e.code = 'URL_REJECTED';
+        throw e;
+      }
+      // Drain the redirect response body before reusing the connection.
+      try { await response.body?.cancel(); } catch { /* best effort */ }
+      currentUrl = next;
     }
     if (!response.ok) {
       const e = new Error(`HTTP ${response.status} downloading PDF`);

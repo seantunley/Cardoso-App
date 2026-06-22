@@ -132,10 +132,15 @@ async function renderAllPages(buffer, id) {
       continue;
     }
     try {
-      // rotate(90) = 90° clockwise ("right"). Applied before resize so the width
-      // cap lands on the final, upright orientation. Must match the OCR-worker
-      // page-1 and render-queue page-2..N pipelines so every page looks the same.
-      const jpeg = await sharp(img).rotate(90).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
+      // Orientation: only rotate a page that renders LANDSCAPE (wider than tall)
+      // — a portrait POD scanned sideways — 90° clockwise upright. Pages already
+      // portrait are left as rendered (a blanket rotate turned those sideways).
+      // Same heuristic as the OCR-worker page-1 + render-queue pipelines. Rotate
+      // before resize so the width cap lands on the final orientation.
+      const meta = await sharp(img).metadata();
+      let pipe = sharp(img);
+      if (meta.width && meta.height && meta.width > meta.height) pipe = pipe.rotate(90);
+      const jpeg = await pipe.resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
       const full = path.join(dir, previewFileName(id, p));
       const tmp = `${full}.tmp`;
       await fsp.writeFile(tmp, jpeg);
@@ -152,12 +157,18 @@ async function renderAllPages(buffer, id) {
   return rendered;
 }
 
-// Permanent failures won't recover — a 4xx (dead/forbidden/missing POD URL), a
-// rejected URL, or a non-PDF body. Everything else (timeout/abort, network drop,
-// 5xx) is transient and worth retrying with backoff.
+// Permanent failures won't recover — a rejected URL, a non-PDF body, or a 4xx
+// that means the document is genuinely gone/forbidden (403/404/410, etc.).
+// Everything else is transient and worth retrying: timeouts/aborts, network
+// drops, 5xx, AND throttling responses (429 Too Many Requests, 408 Request
+// Timeout, 425 Too Early) — the bulk SharePoint/Azure backfill WILL get
+// throttled, and treating that as permanent would mark whole weeks skipped.
+const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429]);
 function isPermanentDownloadError(err) {
   if (err?.code === 'URL_REJECTED' || err?.code === 'INVALID_PDF') return true;
-  if (err?.code === 'HTTP_ERROR' && err.status >= 400 && err.status < 500) return true;
+  if (err?.code === 'HTTP_ERROR' && err.status >= 400 && err.status < 500) {
+    return !TRANSIENT_HTTP_STATUSES.has(err.status);
+  }
   return false;
 }
 
