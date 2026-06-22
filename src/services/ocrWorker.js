@@ -288,7 +288,11 @@ const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _en
 // Remove cached preview pages from a previous extraction of this row so a
 // re-extraction of a now-shorter PDF can't leave orphan `<id>-N.jpg` pages
 // that the viewer would still list.
-async function removeExistingPreviews(dir, extractionId) {
+// Remove cached preview pages for a row from `fromPage` onward (1-based). Used
+// to prune stale higher pages from a prior, longer render AFTER the new page 1
+// is safely written — never before, or a failed render would strand a row that
+// already had a working preview.
+async function removeStalePreviewPages(dir, extractionId, fromPage = 1) {
   let files;
   try {
     files = await fsp.readdir(dir);
@@ -296,7 +300,8 @@ async function removeExistingPreviews(dir, extractionId) {
     if (e.code !== 'ENOENT') console.warn('[ocrWorker.preview.readdir]', e.message);
     return;
   }
-  for (const { filename } of listPreviewPagesFromFiles(files, extractionId)) {
+  for (const { page, filename } of listPreviewPagesFromFiles(files, extractionId)) {
+    if (page < fromPage) continue;
     try {
       await fsp.unlink(path.join(dir, filename));
     } catch (e) {
@@ -322,14 +327,23 @@ async function preparePreview(buffer, extractionId, imageBuffer, pdfPageCount, m
   let pagesPending = 0;
   try {
     const sharp = await getSharp();
-    await removeExistingPreviews(previewDir, extractionId);
-
+    // Do NOT delete the existing preview up front. If the render/encode/write
+    // below fails, this function returns previewPath:null and the parent keeps
+    // the old DB value via COALESCE(?, preview_path) — so wiping first and then
+    // failing would 404 the viewer against files we just removed. Page 1 is
+    // written atomically (tmp+rename), replaced only on success; stale higher
+    // pages are pruned AFTER page 1 lands (below).
     const page1Src = imageBuffer || await pdfPageToImage(buffer, 1, 2.0);
-    // rotate(90) = 90° clockwise ("right"). Applied before resize so the width
-    // cap lands on the final orientation. Page 2..N (previewRenderQueue) and the
-    // backfill apply the same rotation so every preview page is consistent. This
-    // is the human PREVIEW only — the OCR render pipeline below is untouched.
-    const jpeg = await sharp(page1Src).rotate(90).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
+    // Orientation: PODs are portrait. A page that renders LANDSCAPE (wider than
+    // tall) is almost always a sideways scan → rotate 90° clockwise upright;
+    // pages already portrait are left as rendered (a blanket rotate turned those
+    // sideways). Same heuristic in previewRenderQueue (2..N) + the backfill so
+    // every page matches. Rotate before resize so the width cap lands on the
+    // final orientation. This is the human PREVIEW only — OCR render untouched.
+    const meta = await sharp(page1Src).metadata();
+    let pipe = sharp(page1Src);
+    if (meta.width && meta.height && meta.width > meta.height) pipe = pipe.rotate(90);
+    const jpeg = await pipe.resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
     const full = path.join(previewDir, previewFileName(extractionId, 1));
     // Atomic write (sibling .tmp + rename): a re-extraction would otherwise
     // truncate the inode in-place, mutating the daily backup's hardlink
@@ -339,6 +353,10 @@ async function preparePreview(buffer, extractionId, imageBuffer, pdfPageCount, m
     await fsp.writeFile(tmp, jpeg);
     await fsp.rename(tmp, full);
     previewPath = `/api/bat/preview/${previewFileName(extractionId, 1)}`;
+    // Page 1 is safely in place — now prune stale pages 2..N from a prior,
+    // possibly longer render (the background renderer re-creates the current
+    // set). Deferred to here so a failed render above never strands the row.
+    await removeStalePreviewPages(previewDir, extractionId, 2);
 
     // Page count — captured during the text pass; fall back to a count-only
     // load, then to 1 (we always have page 1).

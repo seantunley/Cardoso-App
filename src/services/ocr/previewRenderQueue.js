@@ -143,10 +143,15 @@ async function renderJob(extractionId) {
       continue;
     }
     try {
-      // rotate(90) = 90° clockwise ("right"), before resize so the width cap
-      // lands on the final orientation. Matches the OCR-worker page-1 + backfill
-      // pipelines so every preview page is oriented the same.
-      const jpeg = await sharp(img).rotate(90).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
+      // Orientation: only rotate a page that renders LANDSCAPE (wider than tall)
+      // — a portrait POD scanned sideways — 90° clockwise upright. Pages already
+      // portrait are left as rendered (a blanket rotate turned those sideways).
+      // Same heuristic as preparePreview (page 1) + the backfill so every page
+      // matches. Rotate before resize so the width cap lands on the final shape.
+      const meta = await sharp(img).metadata();
+      let pipe = sharp(img);
+      if (meta.width && meta.height && meta.width > meta.height) pipe = pipe.rotate(90);
+      const jpeg = await pipe.resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
       const full = path.join(dir, previewFileName(extractionId, p));
       // Atomic write (sibling .tmp + rename) — same reason as the worker's
       // page 1: the daily backup hardlinks each preview, so the source inode
