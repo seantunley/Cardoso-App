@@ -3494,11 +3494,19 @@ async function processQueue(reconId) {
             catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
           }
           // Stamp the preview page count so the one-time backfill skips this row.
-          // previewPath set → page 1 rendered (pagesPending>1 → that many pages);
-          // render failed / not a PDF → 0 (attempted, won't be retried).
-          try {
-            setPreviewPages.run(previewPath ? (result?.pagesPending > 1 ? result.pagesPending : 1) : 0, next.id);
-          } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
+          // CRITICAL (finding): for a MULTI-PAGE POD, pages 2..N are rendered
+          // asynchronously by previewRenderQueue AFTER this point. We must NOT
+          // stamp the full count here — that would mark the row "done" before
+          // those pages exist, so a later render/save failure would strand it
+          // (backfill skips non-NULL rows). Leave it NULL; the render queue
+          // stamps the true count only once it confirms the pages were written
+          // (and leaves NULL/retryable on failure). Single-page (1) and
+          // not-a-PDF/failed (0) have no async work, so stamp them now.
+          if (!(result?.pagesPending > 1)) {
+            try {
+              setPreviewPages.run(previewPath ? 1 : 0, next.id);
+            } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
+          }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
           // an operator answer "which engine produced this number" when

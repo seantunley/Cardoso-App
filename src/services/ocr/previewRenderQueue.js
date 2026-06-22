@@ -20,6 +20,25 @@ import { promises as fsp } from 'fs';
 import { renderPdfInChild } from './spawnRenderChild.js';
 import { previewFileName, listPreviewPagesFromFiles } from './previewPages.js';
 import { logError } from '../../lib/errorLog.js';
+import db from '../../db/index.js';
+
+// Stamp the confirmed rendered page count for a row. The OCR worker deliberately
+// leaves preview_pages NULL for multi-page PODs so this — the only place that
+// KNOWS the pages were actually written — marks the row done. On a render/save
+// failure we don't call this, so the row stays NULL and the backfill can finish
+// it (rather than being marked done with pages missing). Lazy-prepared because
+// the preview_pages column only exists after migration v108 has run; best-effort.
+let _setPreviewPagesStmt = null;
+function stampPreviewPages(extractionId, count) {
+  try {
+    if (!_setPreviewPagesStmt) {
+      _setPreviewPagesStmt = db.prepare('UPDATE bat_invoice_extractions SET preview_pages = ? WHERE id = ?');
+    }
+    _setPreviewPagesStmt.run(count, extractionId);
+  } catch (e) {
+    console.warn('[previewRenderQueue.stamp]', extractionId, e.message);
+  }
+}
 
 // Match the OCR worker's page-1 preview encoding so every page looks the same.
 const PREVIEW_WIDTH = 1200;
@@ -159,6 +178,8 @@ async function renderJob(extractionId) {
   await fsp.mkdir(dir, { recursive: true });
   const caps = renderCaps();
   let lastPage = 1; // page 1 is written by the OCR worker; we render 2..N
+  let anyPageFailed = false; // a page render/save that failed → leave the row
+                             // unstamped (retryable) instead of marking it done
 
   // Render pages 2..N until the renderer says the page is out of range (or the
   // safety cap). Page 1 was already written by the OCR worker, so we start at 2.
@@ -180,7 +201,9 @@ async function renderJob(extractionId) {
     } catch (err) {
       if (err?.code === 'PAGE_OUT_OF_RANGE') break; // past the last page — done
       // A single page failing (e.g. PAGE_TOO_LARGE on one banner-format page)
-      // must not abort the rest — log it and keep going.
+      // must not abort the rest — log it and keep going, but remember the gap so
+      // we don't stamp the row "complete" (the backfill can finish it later).
+      anyPageFailed = true;
       try { logError('bat.ocr.preview_page', err, { extraction_id: extractionId, page: p }); }
       catch { console.warn('[previewRenderQueue.page]', extractionId, p, err.message); }
       continue;
@@ -204,6 +227,7 @@ async function renderJob(extractionId) {
       await fsp.rename(tmp, full);
       lastPage = p;
     } catch (err) {
+      anyPageFailed = true;
       try { logError('bat.ocr.preview_page_save', err, { extraction_id: extractionId, page: p }); }
       catch { console.warn('[previewRenderQueue.save]', extractionId, p, err.message); }
     }
@@ -221,6 +245,11 @@ async function renderJob(extractionId) {
       // render of this row left behind, then drop the cached PDF.
       await removeStalePages(dir, extractionId, lastPage);
       await fsp.unlink(pdfPath);
+      // Confirmed: pages 1..lastPage are on disk and this is the current
+      // generation. Stamp the count NOW (the OCR worker left it NULL for
+      // multi-page rows). If any page failed we leave it NULL so the backfill
+      // finishes the row instead of it being marked done with pages missing.
+      if (!anyPageFailed) stampPreviewPages(extractionId, lastPage);
       return false;
     }
     return true; // replaced by a newer generation → needs a fresh render
