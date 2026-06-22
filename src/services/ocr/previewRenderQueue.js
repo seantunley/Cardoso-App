@@ -18,7 +18,7 @@
 import path from 'path';
 import { promises as fsp } from 'fs';
 import { renderPdfInChild } from './spawnRenderChild.js';
-import { previewFileName } from './previewPages.js';
+import { previewFileName, listPreviewPagesFromFiles } from './previewPages.js';
 import { logError } from '../../lib/errorLog.js';
 
 // Match the OCR worker's page-1 preview encoding so every page looks the same.
@@ -105,6 +105,38 @@ async function drain() {
   }
 }
 
+// Render caps/timeout from the same env vars the OCR worker's page-1 render
+// honours. Pages here used renderPdfInChild's smaller defaults, so a site that
+// raised the caps for big/slow PODs rendered page 1 fine but hit
+// PAGE_TOO_LARGE/RENDER_TIMEOUT on pages 2..N. Unset env → {} → child defaults.
+function renderCaps() {
+  const caps = {};
+  const w = parseInt(process.env.OCR_MAX_RENDER_WIDTH ?? '', 10);
+  const h = parseInt(process.env.OCR_MAX_RENDER_HEIGHT ?? '', 10);
+  const px = parseInt(process.env.OCR_MAX_RENDER_PIXELS ?? '', 10);
+  const t = parseInt(process.env.OCR_RENDER_CHILD_TIMEOUT_MS ?? '', 10);
+  if (Number.isFinite(w) && w > 0) caps.maxWidth = Math.max(800, w);
+  if (Number.isFinite(h) && h > 0) caps.maxHeight = Math.max(800, h);
+  if (Number.isFinite(px) && px > 0) caps.maxPixels = Math.max(640000, px);
+  if (Number.isFinite(t) && t >= 1000) caps.timeoutMs = t;
+  return caps;
+}
+
+// Remove cached pages above `keepThrough` for a row — clears stale higher pages
+// a prior, LONGER render left behind when this row is re-extracted into fewer
+// pages (an 8-page POD replaced by a 3-page one). Without it the viewer lists
+// orphan pages from the previous document.
+async function removeStalePages(dir, extractionId, keepThrough) {
+  let files;
+  try { files = await fsp.readdir(dir); }
+  catch (e) { if (e.code !== 'ENOENT') console.warn('[previewRenderQueue.readdir]', e.message); return; }
+  for (const { page, filename } of listPreviewPagesFromFiles(files, extractionId)) {
+    if (page <= keepThrough) continue;
+    try { await fsp.unlink(path.join(dir, filename)); }
+    catch (e) { if (e.code !== 'ENOENT') console.warn('[previewRenderQueue.unlink]', { filename }, e.message); }
+  }
+}
+
 // Returns true when the cached PDF was replaced by a newer generation mid-render
 // (so the caller should re-enqueue it); false otherwise.
 async function renderJob(extractionId) {
@@ -125,15 +157,26 @@ async function renderJob(extractionId) {
   const sharp = await getSharp();
   const dir = previewDir();
   await fsp.mkdir(dir, { recursive: true });
+  const caps = renderCaps();
+  let lastPage = 1; // page 1 is written by the OCR worker; we render 2..N
 
   // Render pages 2..N until the renderer says the page is out of range (or the
   // safety cap). Page 1 was already written by the OCR worker, so we start at 2.
   // Looping on PAGE_OUT_OF_RANGE means we don't need the page count threaded in
   // — which also makes crash-recovery (recoverPendingPreviewRenders) trivial.
   for (let p = 2; p <= MAX_PAGES; p++) {
+    // Generation guard: if a re-extraction replaced the cached PDF mid-render,
+    // STOP — continuing would write stale pages from the old buffer that a
+    // shorter new generation might never overwrite. The cleanup below detects
+    // the replacement and re-enqueues the new generation, whose run prunes any
+    // stale higher pages.
+    try {
+      const s = await fsp.stat(pdfPath);
+      if (s.mtimeMs !== readStat.mtimeMs || s.size !== readStat.size) break;
+    } catch { /* gone — the cleanup ENOENT path handles it */ }
     let img;
     try {
-      img = await renderPdfInChild(buffer, { pageNum: p, requestedScale: PREVIEW_SCALE });
+      img = await renderPdfInChild(buffer, { pageNum: p, requestedScale: PREVIEW_SCALE, ...caps });
     } catch (err) {
       if (err?.code === 'PAGE_OUT_OF_RANGE') break; // past the last page — done
       // A single page failing (e.g. PAGE_TOO_LARGE on one banner-format page)
@@ -159,6 +202,7 @@ async function renderJob(extractionId) {
       const tmp = `${full}.tmp`;
       await fsp.writeFile(tmp, jpeg);
       await fsp.rename(tmp, full);
+      lastPage = p;
     } catch (err) {
       try { logError('bat.ocr.preview_page_save', err, { extraction_id: extractionId, page: p }); }
       catch { console.warn('[previewRenderQueue.save]', extractionId, p, err.message); }
@@ -173,6 +217,9 @@ async function renderJob(extractionId) {
   try {
     const nowStat = await fsp.stat(pdfPath);
     if (nowStat.mtimeMs === readStat.mtimeMs && nowStat.size === readStat.size) {
+      // Our generation is current — prune any stale higher pages a prior, longer
+      // render of this row left behind, then drop the cached PDF.
+      await removeStalePages(dir, extractionId, lastPage);
       await fsp.unlink(pdfPath);
       return false;
     }
