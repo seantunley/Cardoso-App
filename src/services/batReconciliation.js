@@ -1809,7 +1809,12 @@ export function getRecentBatReconciliations(limit = 20) {
           SUM(CASE WHEN extraction_status = 'found'     THEN 1 ELSE 0 END) AS rows_found,
           SUM(CASE WHEN extraction_status = 'pending'   THEN 1 ELSE 0 END) AS rows_pending,
           SUM(CASE WHEN extraction_status = 'not_found' THEN 1 ELSE 0 END) AS rows_not_found,
-          SUM(CASE WHEN extraction_status = 'failed'    THEN 1 ELSE 0 END) AS rows_failed
+          SUM(CASE WHEN extraction_status = 'failed'    THEN 1 ELSE 0 END) AS rows_failed,
+          -- Rows whose POD still needs a multi-page preview rendered: has a PDF
+          -- but no rendered-page count yet (same predicate as the backfill's
+          -- "needs backfill" set). Surfaced as a column on the Recent
+          -- reconciliations table so an operator sees which weeks are behind.
+          SUM(CASE WHEN pdf_url IS NOT NULL AND preview_pages IS NULL THEN 1 ELSE 0 END) AS rows_needs_backfill
         FROM bat_invoice_extractions
         WHERE reconciliation_id IN (SELECT id FROM lim_recons)
         GROUP BY reconciliation_id
@@ -1840,6 +1845,7 @@ export function getRecentBatReconciliations(limit = 20) {
         COALESCE(sc.rows_pending,       0) AS rows_pending,
         COALESCE(sc.rows_not_found,     0) AS rows_not_found,
         COALESCE(sc.rows_failed,        0) AS rows_failed,
+        COALESCE(sc.rows_needs_backfill, 0) AS rows_needs_backfill,
         COALESCE(dc.rows_duplicates,    0) AS rows_duplicates,
         COALESCE(dc.duplicate_invoices, 0) AS duplicate_invoices
       FROM lim_recons r

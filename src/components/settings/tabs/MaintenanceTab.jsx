@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 // UI
@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 
 // Icons
-import { RefreshCw, AlertCircle, CheckCircle2, Save, Database, ShieldAlert, Images } from "lucide-react";
+import { RefreshCw, AlertCircle, CheckCircle2, Save, Database, ShieldAlert } from "lucide-react";
 
 // ─── Update Tab ─────────────────────────────────────────────────────────────
 export default function MaintenanceTab() {
@@ -37,11 +37,6 @@ export default function MaintenanceTab() {
   // orphans. The safe fix for a drifting week is to re-upload its spreadsheet.)
   const [integrity, setIntegrity] = useState(null);
   const [integrityLoading, setIntegrityLoading] = useState(false);
-
-  // Multi-page preview backfill — renders all pages for PODs OCR'd before the
-  // feature existed (downloads each PDF once, no re-OCR). Operator-controlled.
-  const [backfill, setBackfill] = useState(null);
-  const [backfillBusy, setBackfillBusy] = useState(false);
 
   // Backup-now state. Mirrors the compact-database / clear-imported
   // pattern: password-confirmed, modal-gated, sticky result panel
@@ -250,57 +245,6 @@ export default function MaintenanceTab() {
       toast.error(e.message || 'Integrity report failed');
     } finally {
       setIntegrityLoading(false);
-    }
-  };
-
-  // ── Preview backfill ──────────────────────────────────────────────────────
-  const fetchBackfill = useCallback(async () => {
-    try {
-      const r = await fetch('/api/bat/preview-backfill/status', { credentials: 'include' });
-      const d = await r.json().catch(() => ({}));
-      if (r.ok) setBackfill(d);
-      return d;
-    } catch { return null; }
-  }, []);
-
-  // Fetch once on mount; poll only while a run is active (no need to hammer the
-  // status COUNT when idle).
-  useEffect(() => { fetchBackfill(); }, [fetchBackfill]);
-  useEffect(() => {
-    if (!backfill?.running) return undefined;
-    const id = setInterval(fetchBackfill, 2500);
-    return () => clearInterval(id);
-  }, [backfill?.running, fetchBackfill]);
-
-  const handleBackfillStart = async () => {
-    setBackfillBusy(true);
-    try {
-      const r = await fetch('/api/bat/preview-backfill/start', { method: 'POST', credentials: 'include' });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Failed to start backfill');
-      setBackfill(d);
-      toast.success(d.totalAtStart > 0
-        ? `Backfill started — ${d.totalAtStart} POD(s) to process.`
-        : 'Nothing to backfill — all PODs already have previews.');
-    } catch (e) {
-      toast.error(e.message || 'Failed to start backfill');
-    } finally {
-      setBackfillBusy(false);
-    }
-  };
-
-  const handleBackfillStop = async () => {
-    setBackfillBusy(true);
-    try {
-      const r = await fetch('/api/bat/preview-backfill/stop', { method: 'POST', credentials: 'include' });
-      const d = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(d.error || 'Failed to stop backfill');
-      setBackfill(d);
-      toast.success('Backfill will stop after the current POD.');
-    } catch (e) {
-      toast.error(e.message || 'Failed to stop backfill');
-    } finally {
-      setBackfillBusy(false);
     }
   };
 
@@ -643,80 +587,8 @@ export default function MaintenanceTab() {
         </div>
       </div>
 
-      {/* Backfill multi-page POD previews for history reconciled before the feature. */}
-      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
-        <div>
-          <h4 className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-            <Images className="h-4 w-4 text-muted-foreground" /> Backfill multi-page POD previews
-          </h4>
-          <p className="text-xs text-muted-foreground mt-1">
-            PODs reconciled before multi-page previews existed only have their first page cached.
-            This downloads each PDF <strong className="text-foreground">once</strong>, renders every page,
-            and caches them — <strong className="text-foreground">without re-running OCR</strong>, so detected
-            invoice numbers are never touched. It runs in the background, throttled to spare the POD host,
-            and is safe to stop and resume (it picks up where it left off).
-          </p>
-        </div>
-        {backfill && (
-          <div className="rounded-md border border-border bg-muted/20 p-3 text-xs space-y-1">
-            <div className="flex flex-wrap gap-x-4 gap-y-1">
-              <span>
-                <span className="text-muted-foreground">Still need previews:</span>{' '}
-                <span className="font-medium text-foreground tabular-nums">{backfill.remaining ?? '—'}</span>
-              </span>
-              {backfill.running && (
-                <span>
-                  <span className="text-muted-foreground">Done this run:</span>{' '}
-                  <span className="text-emerald-400 tabular-nums">{backfill.processed}</span>
-                </span>
-              )}
-              {backfill.running && backfill.failed > 0 && (
-                <span>
-                  <span className="text-muted-foreground">Failed:</span>{' '}
-                  <span className="text-rose-400 tabular-nums">{backfill.failed}</span>
-                </span>
-              )}
-              {backfill.running && backfill.currentId && (
-                <span>
-                  <span className="text-muted-foreground">Current:</span>{' '}
-                  <span className="font-mono">#{backfill.currentId}</span>
-                </span>
-              )}
-            </div>
-            {backfill.running ? (
-              <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-300 font-medium pt-0.5">
-                <RefreshCw className="h-3 w-3 animate-spin" /> Running… (throttled, {backfill.delayMs}ms between PODs)
-              </div>
-            ) : backfill.remaining === 0 ? (
-              <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-300">
-                <CheckCircle2 className="h-3.5 w-3.5" /> All PODs have multi-page previews.
-              </div>
-            ) : null}
-            {backfill.lastError && (
-              <div className="text-amber-700 dark:text-amber-400 text-[11px]">Last issue: {backfill.lastError}</div>
-            )}
-          </div>
-        )}
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={handleBackfillStart}
-            disabled={backfillBusy || backfill?.running || backfill?.remaining === 0}
-          >
-            <Images className="h-3.5 w-3.5 mr-1.5" />
-            {backfill?.running ? 'Running…' : 'Start backfill'}
-          </Button>
-          <Button
-            size="sm"
-            variant="destructive"
-            onClick={handleBackfillStop}
-            disabled={backfillBusy || !backfill?.running}
-          >
-            Stop
-          </Button>
-        </div>
-      </div>
+      {/* Multi-page POD preview backfill moved to Operations → OCR panel
+          (alongside the recent-reconciliations log + per-week "Backfill" count). */}
 
       <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>
         <DialogContent className="sm:max-w-md">
