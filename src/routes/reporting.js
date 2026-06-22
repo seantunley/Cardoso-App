@@ -3449,6 +3449,43 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
     }
   });
 
+  // ETL change-detection: cheap per-dataset freshness tokens the hub compares
+  // against what it last pulled, so its 5-minute cycle can SKIP re-pulling
+  // unchanged datasets (see services/hubEtl.js makeEtlGate). Each token is
+  // built from signals that PROVABLY advance whenever the dataset changes — the
+  // nightly sync's last_synced_at stamp plus row counts — so an unchanged token
+  // genuinely means unchanged data. Computed per-dataset in its own try: a
+  // missing table (fresh install) or any error just omits that token, which the
+  // hub treats as "unknown" and refreshes anyway (fail-safe — never a stale skip).
+  router.get('/api/reporting/etl-freshness', reportingRateLimiter, requireReportingToken, (_req, res) => {
+    const tokens = {};
+    const safe = (key, fn) => {
+      try { const v = fn(); if (v != null && v !== '') tokens[key] = String(v); }
+      catch { /* omit → hub refreshes this dataset */ }
+    };
+
+    // Inventory master — served by /api/reporting/inventory from inventoryrecord
+    // (full table, no filter), so COUNT + MAX(updated_date) captures any change.
+    safe('inventory', () => {
+      const r = prep('SELECT COUNT(*) AS c, MAX(updated_date) AS m FROM inventoryrecord').get();
+      return `${r?.c ?? 0}:${r?.m ?? ''}`;
+    });
+
+    // Inventory sales caches (movement + item rollup + customer rollup) — all
+    // rebuilt together by the nightly inventory-sales-sync, which stamps
+    // inventory_sales_sync_meta. The three served-table counts also catch the
+    // one-time post-upgrade rollup warm-up that doesn't advance the meta stamp.
+    safe('inventory_sales', () => {
+      const meta = prep('SELECT last_synced_at, rows_synced FROM inventory_sales_sync_meta WHERE id = 1').get();
+      const sc = prep('SELECT COUNT(*) AS c FROM inventory_sales_cache').get()?.c ?? 0;
+      const ir = prep('SELECT COUNT(*) AS c FROM inventory_item_sales_rollup').get()?.c ?? 0;
+      const cr = prep('SELECT COUNT(*) AS c FROM inventory_customer_sales_rollup').get()?.c ?? 0;
+      return `${meta?.last_synced_at ?? ''}:${meta?.rows_synced ?? 0}:${sc}:${ir}:${cr}`;
+    });
+
+    res.json({ site_id: SITE_ID, site_slug: SITE_SLUG, tokens });
+  });
+
   router.get('/api/reporting/inventory', reportingRateLimiter, requireReportingToken, (req, res) => {
     const { limit, offset } = pagination(req, { defaultLimit: 1000, maxLimit: 1000 });
     const rows = prep(
