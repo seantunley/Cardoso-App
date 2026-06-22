@@ -278,6 +278,20 @@ const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _en
   ? _envRenderChildTimeoutMs
   : DEFAULT_RENDER_CHILD_TIMEOUT_MS;
 
+// Hard cap on the BEST-EFFORT preview render that runs on the text-layer-hit
+// path (where page 1 isn't rendered during detection, so preparePreview must
+// rasterise it fresh). This render sits inside the 90s extract_total budget, so
+// without a cap a slow page — or a site that raised OCR_RENDER_CHILD_TIMEOUT_MS
+// — could blow extract_total and discard an already-CONFIRMED invoice number.
+// Deliberately independent of (and smaller than) RENDER_CHILD_TIMEOUT_MS: if the
+// preview can't be made quickly we skip it (the backfill renders it later)
+// rather than risk a good match. Tunable via OCR_TEXT_PREVIEW_BUDGET_MS.
+const DEFAULT_TEXT_PREVIEW_BUDGET_MS = 20_000;
+const _envTextPreviewBudgetMs = parseInt(process.env.OCR_TEXT_PREVIEW_BUDGET_MS ?? '', 10);
+const TEXT_PREVIEW_BUDGET_MS = Number.isFinite(_envTextPreviewBudgetMs) && _envTextPreviewBudgetMs >= 1000
+  ? _envTextPreviewBudgetMs
+  : DEFAULT_TEXT_PREVIEW_BUDGET_MS;
+
 // pdfPageToImage now hosts pdfjs+node-canvas in a short-lived child
 // process. The render either completes within the wall-clock timeout
 // or the parent SIGKILLs it — a wedge inside native code can't take
@@ -723,7 +737,26 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
       // pages 2..N via the background renderer, exactly like the OCR path. null
       // page-1 image because this path never rendered one (preparePreview will
       // render page 1 itself).
-      const { previewPath, pagesPending } = await preparePreview(buffer, extractionId, null, pdfPageCount, msgId);
+      //
+      // Preview generation is BEST-EFFORT and must NEVER cost us this confirmed
+      // text-layer match. preparePreview rasterises page 1 here (up to
+      // OCR_RENDER_CHILD_TIMEOUT_MS, which a site may raise), still inside the
+      // 90s extract_total. Cap it: a slow render skips the preview (the backfill
+      // renders it later) instead of timing out the whole extract and discarding
+      // a good invoice number.
+      let previewPath = null;
+      let pagesPending = 0;
+      try {
+        const prev = await withTimeout(
+          preparePreview(buffer, extractionId, null, pdfPageCount, msgId),
+          TEXT_PREVIEW_BUDGET_MS,
+          'pdf_text_preview',
+        );
+        previewPath = prev?.previewPath ?? null;
+        pagesPending = prev?.pagesPending ?? 0;
+      } catch (e) {
+        console.warn('[ocrWorker.pdf_text.preview_skipped]', { extractionId }, e?.message || e);
+      }
       return { invoice: result.invoice, previewPath, pagesPending, source: 'pdf_text', engine: 'pdfium', angle: 0 };
     }
   } catch (err) {
