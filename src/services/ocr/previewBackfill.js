@@ -108,11 +108,30 @@ async function removeStalePages(dir, id, keepThrough) {
 }
 
 // Render pages 1..N from the in-memory PDF, cache one JPEG each. Returns the
+// Render caps/timeout from the same env vars the OCR worker's page-1 render
+// honours (OCR_MAX_RENDER_WIDTH/HEIGHT/PIXELS, OCR_RENDER_CHILD_TIMEOUT_MS).
+// Without these, pages here fall back to renderPdfInChild's smaller defaults, so
+// a site that raised the caps for big/slow PODs renders page 1 fine but hits
+// PAGE_TOO_LARGE/RENDER_TIMEOUT on the rest. Unset env → {} → child defaults.
+function renderCaps() {
+  const caps = {};
+  const w = parseInt(process.env.OCR_MAX_RENDER_WIDTH ?? '', 10);
+  const h = parseInt(process.env.OCR_MAX_RENDER_HEIGHT ?? '', 10);
+  const px = parseInt(process.env.OCR_MAX_RENDER_PIXELS ?? '', 10);
+  const t = parseInt(process.env.OCR_RENDER_CHILD_TIMEOUT_MS ?? '', 10);
+  if (Number.isFinite(w) && w > 0) caps.maxWidth = Math.max(800, w);
+  if (Number.isFinite(h) && h > 0) caps.maxHeight = Math.max(800, h);
+  if (Number.isFinite(px) && px > 0) caps.maxPixels = Math.max(640000, px);
+  if (Number.isFinite(t) && t >= 1000) caps.timeoutMs = t;
+  return caps;
+}
+
 // count rendered. Loops until the renderer reports the page is out of range.
 async function renderAllPages(buffer, id) {
   const sharp = await getSharp();
   const dir = previewDir();
   await fsp.mkdir(dir, { recursive: true });
+  const caps = renderCaps();
   // NOTE: do NOT delete existing previews up front. Each page is written
   // atomically (tmp+rename), so page 1 (<id>.jpg) is replaced in place only when
   // its render succeeds; stale higher pages from a prior partial backfill are
@@ -123,7 +142,7 @@ async function renderAllPages(buffer, id) {
   for (let p = 1; p <= MAX_PAGES; p++) {
     let img;
     try {
-      img = await renderPdfInChild(buffer, { pageNum: p, requestedScale: PREVIEW_SCALE });
+      img = await renderPdfInChild(buffer, { pageNum: p, requestedScale: PREVIEW_SCALE, ...caps });
     } catch (err) {
       if (err?.code === 'PAGE_OUT_OF_RANGE') break; // no more pages
       // A single bad page (e.g. PAGE_TOO_LARGE) shouldn't abort the row.
@@ -165,7 +184,10 @@ async function renderAllPages(buffer, id) {
 // throttled, and treating that as permanent would mark whole weeks skipped.
 const TRANSIENT_HTTP_STATUSES = new Set([408, 425, 429]);
 function isPermanentDownloadError(err) {
-  if (err?.code === 'URL_REJECTED' || err?.code === 'INVALID_PDF') return true;
+  // PDF_TOO_LARGE: an oversized PDF won't shrink on retry — mark the row done so
+  // we don't re-download the same too-big file every run (the remaining count
+  // would otherwise never drain for that row).
+  if (err?.code === 'URL_REJECTED' || err?.code === 'INVALID_PDF' || err?.code === 'PDF_TOO_LARGE') return true;
   if (err?.code === 'HTTP_ERROR' && err.status >= 400 && err.status < 500) {
     return !TRANSIENT_HTTP_STATUSES.has(err.status);
   }

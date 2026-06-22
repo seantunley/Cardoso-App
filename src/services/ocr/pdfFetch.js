@@ -30,6 +30,13 @@ function _isPrivateOrLoopbackHost(hostname) {
     return _PRIVATE_IPV4.some((re) => re.test(lower));
   }
   if (lower.includes(':')) {
+    if (lower === '::' || lower === '::0') return true; // unspecified — binds to all
+    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1): new URL() normalises a mapped
+    // loopback/LAN literal to this form and fetch will still connect to the
+    // embedded IPv4, so the bare prefix check (::1/fc/fd/fe80) misses it. Pull
+    // out the trailing dotted-quad and run it through the IPv4 private check.
+    const mapped = lower.match(/:((?:\d{1,3}\.){3}\d{1,3})$/);
+    if (mapped) return _PRIVATE_IPV4.some((re) => re.test(mapped[1]));
     return _PRIVATE_IPV6_PREFIXES.some((p) => lower.startsWith(p));
   }
   return false;
@@ -60,14 +67,23 @@ export function isAllowedPdfUrl(pdfUrl, allowedHostsEnv) {
   return { ok: true };
 }
 
+// An oversized PDF won't get smaller on retry — tag the error so callers can
+// treat it as PERMANENT (the backfill marks the row done instead of
+// re-downloading the same too-big file on every run forever).
+function tooLargeError(msg) {
+  const e = new Error(msg);
+  e.code = 'PDF_TOO_LARGE';
+  return e;
+}
+
 async function fetchBoundedBuffer(response, maxBytes) {
   const reportedLen = parseInt(response.headers.get('content-length') || '', 10);
   if (Number.isFinite(reportedLen) && reportedLen > maxBytes) {
-    throw new Error(`PDF size ${reportedLen} exceeds limit ${maxBytes}`);
+    throw tooLargeError(`PDF size ${reportedLen} exceeds limit ${maxBytes}`);
   }
   if (!response.body) {
     const buf = Buffer.from(await response.arrayBuffer());
-    if (buf.length > maxBytes) throw new Error(`PDF size ${buf.length} exceeds limit ${maxBytes}`);
+    if (buf.length > maxBytes) throw tooLargeError(`PDF size ${buf.length} exceeds limit ${maxBytes}`);
     return buf;
   }
   const reader = response.body.getReader();
@@ -80,7 +96,7 @@ async function fetchBoundedBuffer(response, maxBytes) {
       total += value.byteLength;
       if (total > maxBytes) {
         try { await reader.cancel(); } catch { /* best effort */ }
-        throw new Error(`PDF size exceeds limit ${maxBytes} (cancelled at ${total} bytes)`);
+        throw tooLargeError(`PDF size exceeds limit ${maxBytes} (cancelled at ${total} bytes)`);
       }
       chunks.push(value);
     }
