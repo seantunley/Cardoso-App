@@ -21,6 +21,23 @@ const _PRIVATE_IPV4 = [
 ];
 const _PRIVATE_IPV6_PREFIXES = ['::1', 'fc', 'fd', 'fe80'];
 
+// Extract the embedded IPv4 ('a.b.c.d') from an IPv4-mapped IPv6 literal, or
+// null if `s` isn't one. Critically, new URL() normalises [::ffff:127.0.0.1] to
+// the HEX form ::ffff:7f00:1 (and ::ffff:c0a8:1, ::ffff:808:808), so we must
+// decode the two trailing 16-bit hex groups — matching only a dotted quad would
+// miss every real normalised case.
+function _ipv4FromMappedIpv6(s) {
+  const idx = s.indexOf('::ffff:');
+  if (idx !== 0) return null; // only the canonical mapped prefix
+  const tail = s.slice(7);
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(tail)) return tail; // dotted form
+  const m = tail.match(/^([0-9a-f]{1,4}):([0-9a-f]{1,4})$/); // hex form 7f00:1
+  if (!m) return null;
+  const hi = parseInt(m[1], 16);
+  const lo = parseInt(m[2], 16);
+  return `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+}
+
 function _isPrivateOrLoopbackHost(hostname) {
   let lower = hostname.toLowerCase();
   if (lower.startsWith('[') && lower.endsWith(']')) lower = lower.slice(1, -1);
@@ -31,12 +48,13 @@ function _isPrivateOrLoopbackHost(hostname) {
   }
   if (lower.includes(':')) {
     if (lower === '::' || lower === '::0') return true; // unspecified — binds to all
-    // IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1): new URL() normalises a mapped
-    // loopback/LAN literal to this form and fetch will still connect to the
-    // embedded IPv4, so the bare prefix check (::1/fc/fd/fe80) misses it. Pull
-    // out the trailing dotted-quad and run it through the IPv4 private check.
-    const mapped = lower.match(/:((?:\d{1,3}\.){3}\d{1,3})$/);
-    if (mapped) return _PRIVATE_IPV4.some((re) => re.test(mapped[1]));
+    // IPv4-mapped IPv6: fetch reaches the embedded IPv4, so the bare prefix
+    // check (::1/fc/fd/fe80) misses ::ffff:7f00:1 etc. Decode + IPv4 private
+    // check; reject any ::ffff: literal we can't decode (fail-closed for SSRF).
+    if (lower.startsWith('::ffff:')) {
+      const v4 = _ipv4FromMappedIpv6(lower);
+      return v4 ? _PRIVATE_IPV4.some((re) => re.test(v4)) : true;
+    }
     return _PRIVATE_IPV6_PREFIXES.some((p) => lower.startsWith(p));
   }
   return false;
