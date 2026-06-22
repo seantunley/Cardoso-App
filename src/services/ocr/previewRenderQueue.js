@@ -80,14 +80,19 @@ async function drain() {
   try {
     while (_pending.length) {
       const id = _pending.shift();
+      let replaced = false;
       try {
-        await renderJob(id);
+        replaced = await renderJob(id);
       } catch (e) {
         try { logError('bat.ocr.preview_render', e, { extraction_id: id }); }
         catch { console.error('[previewRenderQueue]', id, e.message); }
       } finally {
         _queued.delete(id);
       }
+      // The cached PDF was swapped for a newer generation mid-render; its own
+      // enqueue was deduped while this job held the id, so re-enqueue now that
+      // the id is free again.
+      if (replaced) enqueuePreviewRender(id);
     }
   } finally {
     _running = false;
@@ -100,13 +105,20 @@ async function drain() {
   }
 }
 
+// Returns true when the cached PDF was replaced by a newer generation mid-render
+// (so the caller should re-enqueue it); false otherwise.
 async function renderJob(extractionId) {
   const pdfPath = cachedPdfPath(extractionId);
   let buffer;
+  let readStat;
   try {
+    // Capture the exact file version we render from. A reset/re-run can replace
+    // this cached PDF with a NEW generation's PDF while we're mid-render; we must
+    // not delete that newer file at cleanup, and we must let it be re-rendered.
+    readStat = await fsp.stat(pdfPath);
     buffer = await fsp.readFile(pdfPath);
   } catch (e) {
-    if (e.code === 'ENOENT') return; // nothing cached (already done / never multi-page)
+    if (e.code === 'ENOENT') return false; // nothing cached (already done / never multi-page)
     throw e;
   }
 
@@ -145,10 +157,23 @@ async function renderJob(extractionId) {
     }
   }
 
-  // Done (or as far as we could get) — drop the cached PDF so the route stops
-  // reporting "pending" and disk doesn't accumulate POD copies.
-  try { await fsp.unlink(pdfPath); }
-  catch (e) { if (e.code !== 'ENOENT') console.warn('[previewRenderQueue.cleanup]', extractionId, e.message); }
+  // Done (or as far as we could get). Only drop the cached PDF if it is STILL
+  // the exact version we rendered from. If a reset/re-run replaced it with a
+  // newer generation mid-render, leave that file in place and tell the caller to
+  // re-render it — the dedupe set blocked the new generation's own enqueue while
+  // this job held the id. mtime+size is a sufficient generation fingerprint.
+  try {
+    const nowStat = await fsp.stat(pdfPath);
+    if (nowStat.mtimeMs === readStat.mtimeMs && nowStat.size === readStat.size) {
+      await fsp.unlink(pdfPath);
+      return false;
+    }
+    return true; // replaced by a newer generation → needs a fresh render
+  } catch (e) {
+    if (e.code === 'ENOENT') return false; // already gone — nothing to clean up
+    console.warn('[previewRenderQueue.cleanup]', extractionId, e.message);
+    return false;
+  }
 }
 
 /**
