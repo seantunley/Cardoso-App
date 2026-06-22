@@ -24,8 +24,14 @@ import { promises as fsp } from 'fs';
 import path from 'path';
 import { Buffer } from 'buffer';
 import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
+import { listPreviewPagesFromFiles, previewFileName } from './ocr/previewPages.js';
 
 const { previewDir } = workerData || {};
+
+// Sibling of previewDir (uploads/bat-previews) — where the OCR worker stashes
+// the already-downloaded PDF for multi-page PODs so the background renderer can
+// produce pages 2..N without re-fetching the URL. See previewRenderQueue.js.
+const PDF_CACHE_DIRNAME = 'bat-pdf-cache';
 
 // Per-network-call timeout. Without this, a hung S3/CDN connection or a
 // stalled OCR-engine response would await forever inside the worker — the
@@ -272,6 +278,20 @@ const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _en
   ? _envRenderChildTimeoutMs
   : DEFAULT_RENDER_CHILD_TIMEOUT_MS;
 
+// Hard cap on the BEST-EFFORT preview render that runs on the text-layer-hit
+// path (where page 1 isn't rendered during detection, so preparePreview must
+// rasterise it fresh). This render sits inside the 90s extract_total budget, so
+// without a cap a slow page — or a site that raised OCR_RENDER_CHILD_TIMEOUT_MS
+// — could blow extract_total and discard an already-CONFIRMED invoice number.
+// Deliberately independent of (and smaller than) RENDER_CHILD_TIMEOUT_MS: if the
+// preview can't be made quickly we skip it (the backfill renders it later)
+// rather than risk a good match. Tunable via OCR_TEXT_PREVIEW_BUDGET_MS.
+const DEFAULT_TEXT_PREVIEW_BUDGET_MS = 20_000;
+const _envTextPreviewBudgetMs = parseInt(process.env.OCR_TEXT_PREVIEW_BUDGET_MS ?? '', 10);
+const TEXT_PREVIEW_BUDGET_MS = Number.isFinite(_envTextPreviewBudgetMs) && _envTextPreviewBudgetMs >= 1000
+  ? _envTextPreviewBudgetMs
+  : DEFAULT_TEXT_PREVIEW_BUDGET_MS;
+
 // pdfPageToImage now hosts pdfjs+node-canvas in a short-lived child
 // process. The render either completes within the wall-clock timeout
 // or the parent SIGKILLs it — a wedge inside native code can't take
@@ -279,6 +299,118 @@ const RENDER_CHILD_TIMEOUT_MS = Number.isFinite(_envRenderChildTimeoutMs) && _en
 // across renders because each render gets a fresh process. See
 // docs/plans/pdf-engine-migration.md (Phase 1) for the architectural
 // rationale and src/services/ocr/spawnRenderChild.js for the wrapper.
+// Remove cached preview pages from a previous extraction of this row so a
+// re-extraction of a now-shorter PDF can't leave orphan `<id>-N.jpg` pages
+// that the viewer would still list.
+// Remove cached preview pages for a row from `fromPage` onward (1-based). Used
+// to prune stale higher pages from a prior, longer render AFTER the new page 1
+// is safely written — never before, or a failed render would strand a row that
+// already had a working preview.
+async function removeStalePreviewPages(dir, extractionId, fromPage = 1) {
+  let files;
+  try {
+    files = await fsp.readdir(dir);
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.warn('[ocrWorker.preview.readdir]', e.message);
+    return;
+  }
+  for (const { page, filename } of listPreviewPagesFromFiles(files, extractionId)) {
+    if (page < fromPage) continue;
+    try {
+      await fsp.unlink(path.join(dir, filename));
+    } catch (e) {
+      if (e.code !== 'ENOENT') console.warn('[ocrWorker.preview.unlink]', { filename }, e.message);
+    }
+  }
+}
+
+// Build the preview artefact for a row, on EVERY detection path (text-layer
+// hit, OCR match, or no match). Page 1 is cached immediately — reusing the OCR
+// page-1 render when we have it (single-page PODs and the OCR path pay zero
+// extra render), otherwise rendering page 1 (text-layer hits never rasterised
+// anything during detection). For a multi-page POD the already-downloaded PDF
+// is stashed to disk so the background renderer (previewRenderQueue) can
+// produce pages 2..N WITHOUT re-fetching the URL and WITHOUT eating into this
+// row's 90s OCR budget.
+//
+// Best-effort: any failure is logged (never silent) and never aborts the row —
+// at worst there's no preview. Returns { previewPath, pagesPending }; a
+// pagesPending > 0 tells the parent to enqueue a background render.
+async function preparePreview(buffer, extractionId, imageBuffer, pdfPageCount, msgId) {
+  let previewPath = null;
+  let pagesPending = 0;
+  try {
+    const sharp = await getSharp();
+    // Do NOT delete the existing preview up front. If the render/encode/write
+    // below fails, this function returns previewPath:null and the parent keeps
+    // the old DB value via COALESCE(?, preview_path) — so wiping first and then
+    // failing would 404 the viewer against files we just removed. Page 1 is
+    // written atomically (tmp+rename), replaced only on success; stale higher
+    // pages are pruned AFTER page 1 lands (below).
+    const page1Src = imageBuffer || await pdfPageToImage(buffer, 1, 2.0);
+    // Orientation: PODs are portrait. A page that renders LANDSCAPE (wider than
+    // tall) is almost always a sideways scan → rotate 90° clockwise upright;
+    // pages already portrait are left as rendered (a blanket rotate turned those
+    // sideways). Same heuristic in previewRenderQueue (2..N) + the backfill so
+    // every page matches. Rotate before resize so the width cap lands on the
+    // final orientation. This is the human PREVIEW only — OCR render untouched.
+    const meta = await sharp(page1Src).metadata();
+    let pipe = sharp(page1Src);
+    if (meta.width && meta.height && meta.width > meta.height) pipe = pipe.rotate(90);
+    const jpeg = await pipe.resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
+    const full = path.join(previewDir, previewFileName(extractionId, 1));
+    // Atomic write (sibling .tmp + rename): a re-extraction would otherwise
+    // truncate the inode in-place, mutating the daily backup's hardlink
+    // snapshot of <id>.jpg. rename makes a new inode; old hardlinks keep their
+    // bytes.
+    const tmp = `${full}.tmp`;
+    await fsp.writeFile(tmp, jpeg);
+    await fsp.rename(tmp, full);
+    previewPath = `/api/bat/preview/${previewFileName(extractionId, 1)}`;
+    // Page 1 is safely in place — now prune stale pages 2..N from a prior,
+    // possibly longer render (the background renderer re-creates the current
+    // set). Deferred to here so a failed render above never strands the row.
+    await removeStalePreviewPages(previewDir, extractionId, 2);
+
+    // Page count — captured during the text pass; fall back to a count-only
+    // load, then to 1 (we always have page 1).
+    let totalPages = pdfPageCount;
+    if (!Number.isInteger(totalPages) || totalPages < 1) {
+      try {
+        const lib = await getPdfium();
+        const doc = await lib.loadDocument(buffer);
+        try { totalPages = doc.getPageCount(); }
+        finally { try { doc.destroy(); } catch (e) { console.warn('[ocrWorker.preview.count_destroy]', e.message); } }
+      } catch (e) {
+        console.warn('[ocrWorker.preview.count_failed]', e.message);
+        totalPages = 1;
+      }
+    }
+
+    // Multi-page → stash the PDF we already downloaded for the background pass.
+    if (totalPages > 1) {
+      try {
+        const cdir = path.join(path.dirname(previewDir), PDF_CACHE_DIRNAME);
+        await fsp.mkdir(cdir, { recursive: true });
+        const pdfPath = path.join(cdir, `${extractionId}.pdf`);
+        const pdfTmp = `${pdfPath}.tmp`;
+        await fsp.writeFile(pdfTmp, buffer);
+        await fsp.rename(pdfTmp, pdfPath);
+        pagesPending = totalPages;
+      } catch (e) {
+        try {
+          parentPort.postMessage({ type: 'engine_error', id: msgId, engine: 'preview_cache', angle: 0, stage: 'preview_cache', message: String(e?.message || e).slice(0, 500), tierError: false });
+        } catch (e2) { console.warn('[ocrWorker.preview_cache.post]', { msgId }, e2.message); }
+      }
+    }
+  } catch (err) {
+    try {
+      parentPort.postMessage({ type: 'engine_error', id: msgId, engine: 'preview_save', angle: 0, stage: 'preview_save', message: String(err?.message || err).slice(0, 500), tierError: false });
+    } catch (e) { console.warn('[ocrWorker.preview_save.post_engine_error]', { msgId }, e.message); }
+  }
+  return { previewPath, pagesPending };
+}
+
 async function pdfPageToImage(buffer, pageNum, requestedScale = 2.0) {
   const { renderPdfInChild } = await import('./ocr/spawnRenderChild.js');
   return renderPdfInChild(buffer, {
@@ -550,10 +682,13 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   const buffer = await fetchBoundedBuffer(response, _MAX_PDF_BYTES);
 
   if (buffer.length < 100 || !buffer.subarray(0, 5).toString().startsWith('%PDF')) {
-    return { invoice: null, previewPath: null, source: 'invalid_pdf' };
+    return { invoice: null, previewPath: null, pagesPending: 0, source: 'invalid_pdf' };
   }
 
   const isLarge = buffer.length > 2 * 1024 * 1024;
+  // Captured during the text-layer pass below and reused by preparePreview so
+  // it doesn't have to re-load the PDF just to count pages.
+  let pdfPageCount = null;
 
   // Step 1: PDFium text layer (no OCR needed). 20s hard cap — corrupt /
   // encrypted PDFs can hang loadDocument(). On error we forward the
@@ -577,7 +712,8 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
       const lib = await getPdfium();
       const doc = await lib.loadDocument(buffer);
       try {
-        const pages = Math.min(doc.getPageCount(), 3);
+        pdfPageCount = doc.getPageCount();
+        const pages = Math.min(pdfPageCount, 3);
         for (let p = 0; p < pages; p++) {
           const page = doc.getPage(p);
           const pageText = String(await page.getText() || '');
@@ -592,17 +728,36 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
       }
     })(), 20_000, 'pdf_text');
     if (result?.invoice) {
-      // pdf_text-layer hit (no rasterisation, no OCR engine). Recorded
-      // with source='pdf_text' so audit / forensics can distinguish
-      // text-layer matches from OCR-cascade matches — the former is
-      // ~free and ~always correct; the latter is OCR'd text and worth
-      // a human glance.
-      // engine='pdfium' reflects the actual library used for the text
-      // extraction (Phase 3). Operators previously saw 'pdfjs' here for
-      // the text-layer hit; the rename is a one-time audit-trail shift,
-      // not a behaviour change. source='pdf_text' is unchanged so any
-      // dashboard / log-filter keyed on that string keeps working.
-      return { invoice: result.invoice, previewPath: null, source: 'pdf_text', engine: 'pdfium', angle: 0 };
+      // pdf_text-layer hit (no rasterisation during detection). source='pdf_text'
+      // and engine='pdfium' keep the audit semantics (text-layer match is ~free
+      // and ~always correct vs an OCR'd number worth a human glance).
+      //
+      // Previously this returned previewPath:null — digital PODs had NO preview
+      // at all. Now we build the FULL preview here too: page 1 immediately and
+      // pages 2..N via the background renderer, exactly like the OCR path. null
+      // page-1 image because this path never rendered one (preparePreview will
+      // render page 1 itself).
+      //
+      // Preview generation is BEST-EFFORT and must NEVER cost us this confirmed
+      // text-layer match. preparePreview rasterises page 1 here (up to
+      // OCR_RENDER_CHILD_TIMEOUT_MS, which a site may raise), still inside the
+      // 90s extract_total. Cap it: a slow render skips the preview (the backfill
+      // renders it later) instead of timing out the whole extract and discarding
+      // a good invoice number.
+      let previewPath = null;
+      let pagesPending = 0;
+      try {
+        const prev = await withTimeout(
+          preparePreview(buffer, extractionId, null, pdfPageCount, msgId),
+          TEXT_PREVIEW_BUDGET_MS,
+          'pdf_text_preview',
+        );
+        previewPath = prev?.previewPath ?? null;
+        pagesPending = prev?.pagesPending ?? 0;
+      } catch (e) {
+        console.warn('[ocrWorker.pdf_text.preview_skipped]', { extractionId }, e?.message || e);
+      }
+      return { invoice: result.invoice, previewPath, pagesPending, source: 'pdf_text', engine: 'pdfium', angle: 0 };
     }
   } catch (err) {
     // Forward to parent — visible in System Log, doesn't abort the row
@@ -687,6 +842,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
     return {
       invoice: null,
       previewPath: null,
+      pagesPending: 0,
       source: 'render_failed',
       error: `Render of PDF page 1 failed in the OCR worker. URL: ${pdfUrl}. ${detail}`,
     };
@@ -694,40 +850,15 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
 
   const sharp = await getSharp();
 
-  // Save preview JPEG (best-effort — never aborts the row, but failures
-  // are now logged. Without this, a permission-denied or disk-full on
-  // previewDir broke every preview thumbnail and the operator thought
-  // it was a UI bug rather than a filesystem one).
+  // Build the preview here, before the OCR cascade, reusing the page-1 image we
+  // just rendered for OCR (so single-page PODs cost nothing extra). For a
+  // multi-page POD this also stashes the downloaded PDF; `pagesPending` flows
+  // out in the result so the parent enqueues the background render of pages
+  // 2..N. Best-effort — preparePreview never throws out.
   emitProgress(msgId, 'preview_save');
-  let previewPath = null;
-  try {
-    const previewJpeg = await sharp(imageBuffer).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
-    const filename = `${extractionId}.jpg`;
-    const fullPath = path.join(previewDir, filename);
-    // Atomic write: a re-extraction of the same row would otherwise truncate
-    // the existing inode in-place, silently mutating any hardlink snapshots
-    // (the daily local backup at scheduler.runLocalBackup hardlinks each
-    // preview into <db>.previews/, and only stays a valid point-in-time
-    // snapshot if the source inode is never modified after creation). Write
-    // to a sibling .tmp, then rename — rename creates a new inode and unlinks
-    // the old one; existing hardlinks keep pointing at the original bytes.
-    const tmpPath = `${fullPath}.tmp`;
-    await fsp.writeFile(tmpPath, previewJpeg);
-    await fsp.rename(tmpPath, fullPath);
-    previewPath = `/api/bat/preview/${filename}`;
-  } catch (err) {
-    try {
-      parentPort.postMessage({
-        type: 'engine_error',
-        id: msgId,
-        engine: 'preview_save',
-        angle: 0,
-        stage: 'preview_save',
-        message: String(err?.message || err).slice(0, 500),
-        tierError: false,
-      });
-    } catch (e) { console.warn('[ocrWorker.preview_save.post_engine_error]', { msgId }, e.message); }
-  }
+  const { previewPath, pagesPending } = await preparePreview(
+    buffer, extractionId, imageBuffer, pdfPageCount, msgId,
+  );
 
   // Step 3: multi-engine OCR pipeline
   //
@@ -869,7 +1000,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
           // OCR-cascade hit. Engine + angle let the operator audit
           // "which path produced this number" — useful when a row's
           // invoice is later disputed in BAT reconciliation.
-          return { invoice, previewPath, source: 'ocr_cascade', engine: engine.name, angle };
+          return { invoice, previewPath, pagesPending, source: 'ocr_cascade', engine: engine.name, angle };
         }
         // Text was returned but findInvoiceNumber couldn't parse an invoice
         // number out of it. This is the most-likely cause of "everything
@@ -949,6 +1080,7 @@ async function extractInvoiceFromPdf(pdfUrl, extractionId, googleVisionKey, ocrS
   return {
     invoice: null,
     previewPath,
+    pagesPending,
     source: sawReadableText ? 'cascade_exhausted' : 'all_engines_failed',
     error: tierError,
   };

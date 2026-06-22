@@ -14,6 +14,7 @@ import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/m
 import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
 import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
 import { checkReconciliationIntegrity } from './bat/integrity.js';
+import { enqueuePreviewRender, cachedPdfPath } from './ocr/previewRenderQueue.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
@@ -3474,6 +3475,14 @@ async function processQueue(reconId) {
           );
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
+          // Multi-page POD: the worker stashed the downloaded PDF, so kick the
+          // background renderer to produce pages 2..N — no re-download, and off
+          // the 90s OCR budget. Runs regardless of found/not-found (the preview
+          // exists either way).
+          if (result?.pagesPending > 1) {
+            try { enqueuePreviewRender(next.id); }
+            catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
+          }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
           // an operator answer "which engine produced this number" when
@@ -3587,6 +3596,16 @@ async function processQueue(reconId) {
               const candidate = path.join(previewDir, `${next.id}.jpg`);
               if (fs.existsSync(candidate)) salvagedPreview = `/api/bat/preview/${next.id}.jpg`;
             } catch (e) { console.warn('[bat.ocr.salvage_preview_check]', { rowId: next.id }, e.message); }
+            // Multi-page POD whose OCR cascade ERRORED after the worker had
+            // already stashed the PDF: the cached PDF sits on disk, so
+            // /api/bat/preview-pages reports pending=true and the viewer polls
+            // forever because nothing renders pages 2..N. The success path
+            // enqueues the background renderer; do the same on this failure path
+            // so failed rows still get their multi-page preview. No-op when no
+            // PDF was cached (renderer self-guards on ENOENT regardless).
+            try {
+              if (fs.existsSync(cachedPdfPath(next.id))) enqueuePreviewRender(next.id);
+            } catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
             try {
               updateExtraction.run(null, 'failed', salvagedPreview, String(err.message || 'Unknown error').slice(0, 1000), next.id);
             } catch (writeErr) {

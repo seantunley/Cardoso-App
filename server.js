@@ -40,6 +40,7 @@ import { createDepotProfileRouter } from './src/routes/depotProfile.js';
 import { createCommissionRouter } from './src/routes/commission.js';
 import { resumeExtractionWorker } from './src/services/batReconciliation.js';
 import { autoHealSessionSecretIfNeeded, validateEncryptionKey, migrateUnencryptedPasswords, recoverAbandonedSyncs, ensureSeedUsers, createGetUserById } from './src/startup.js';
+import { recoverPendingPreviewRenders } from './src/services/ocr/previewRenderQueue.js';
 import { isShuttingDown, startSchedulers, startHubSchedulers, setServer, gracefulShutdown } from './src/scheduler.js';
 import { initHubStorageRuntime } from './src/hub/storage/runtime.js';
 import { validateEnvOrExit } from './src/config/env.js';
@@ -316,6 +317,9 @@ if (IS_PRODUCTION) {
 
 startSchedulers();
 recoverAbandonedSyncs();
+// Re-render any multi-page POD previews whose background job was interrupted by
+// a restart (cached PDFs left in uploads/bat-pdf-cache/). Best-effort, async.
+recoverPendingPreviewRenders().catch((e) => console.error('[startup] preview recovery failed:', e.message));
 ['SIGINT', 'SIGTERM'].forEach(sig => process.on(sig, (...args) => {
   try { logError('system.shutdown', new Error(`Received ${sig} — shutting down`), { signal: sig }, 'info'); } catch {} // eslint-disable-line no-empty -- logError wrapper; shutdown continues regardless
   gracefulShutdown(...args);
