@@ -175,7 +175,7 @@ export default function PreviewModal({ extractionId, open, onOpenChange, pdfUrl,
             <img
               src={pages[clampedIdx]?.url}
               alt={`Page ${clampedIdx + 1}`}
-              className="max-w-full max-h-[68vh] h-auto"
+              className="max-w-full h-auto"
               style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 150ms ease' }}
             />
           )}
