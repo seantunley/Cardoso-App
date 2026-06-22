@@ -20,7 +20,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import {
   Activity, AlertTriangle, AlertCircle, CheckCircle2, Pause, Play,
-  RefreshCw, Zap, ZapOff, Clock, Skull, FileSearch, ScanLine, Loader2,
+  RefreshCw, Zap, ZapOff, Clock, Skull, FileSearch, ScanLine, Loader2, Images,
 } from "lucide-react";
 
 const fmtZA = (dt) => {
@@ -185,6 +185,43 @@ export default function OcrPanel() {
       qc.invalidateQueries({ queryKey: ['ocr-snapshot'] });
       qc.invalidateQueries({ queryKey: ['ocr-recent-runs'] });
     },
+  });
+
+  // ── Multi-page POD preview backfill ──────────────────────────────────────
+  // Moved here from Settings → Maintenance so every OCR/POD-preview operation
+  // lives in one place. Status polls only while a run is active.
+  const backfill = useQuery({
+    queryKey: ['preview-backfill'],
+    queryFn: async () => {
+      const r = await fetch('/api/bat/preview-backfill/status', { credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed to load backfill status');
+      return d;
+    },
+    refetchInterval: (query) => (query.state.data?.running ? 2500 : false),
+  });
+  const bf = backfill.data;
+  const startBackfill = useMutation({
+    mutationFn: async () => {
+      const r = await fetch('/api/bat/preview-backfill/start', { method: 'POST', credentials: 'include' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Failed to start backfill');
+      return d;
+    },
+    onSuccess: (d) => {
+      qc.setQueryData(['preview-backfill'], d);
+      qc.invalidateQueries({ queryKey: ['preview-backfill'] });
+      qc.invalidateQueries({ queryKey: ['ocr-recent-runs'] });
+    },
+  });
+  const stopBackfill = useMutation({
+    mutationFn: async () => {
+      const r = await fetch('/api/bat/preview-backfill/stop', { method: 'POST', credentials: 'include' });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Failed to stop backfill');
+      return d;
+    },
+    onSuccess: (d) => { qc.setQueryData(['preview-backfill'], d); },
   });
 
   // Extract-invoices trigger — fires the OCR worker for a specific recon
@@ -460,6 +497,77 @@ export default function OcrPanel() {
         )}
       </div>
 
+      {/* ── Multi-page POD preview backfill ───────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+            <Images className="w-4 h-4 text-sky-400" /> Multi-page POD preview backfill
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Still need previews:{' '}
+            <span className="font-medium text-foreground tabular-nums">{bf?.remaining ?? '—'}</span>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          PODs reconciled before multi-page previews existed only have their first page cached. This
+          downloads each PDF <strong className="text-foreground">once</strong>, renders every page, and
+          caches them — <strong className="text-foreground">without re-running OCR</strong>, so detected
+          invoice numbers are never touched. Runs in the background, throttled, and is safe to stop and
+          resume. The per-week breakdown is in the “Backfill” column below.
+        </p>
+        {bf && (bf.running || bf.failed > 0 || bf.remaining === 0) && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+            {bf.running && (
+              <span><span className="text-muted-foreground">Done this run:</span>{' '}
+                <span className="text-emerald-400 tabular-nums">{bf.processed}</span></span>
+            )}
+            {bf.failed > 0 && (
+              <span><span className="text-muted-foreground">Failed/retryable:</span>{' '}
+                <span className="text-rose-400 tabular-nums">{bf.failed}</span></span>
+            )}
+            {bf.running && bf.currentId && (
+              <span><span className="text-muted-foreground">Current:</span>{' '}
+                <span className="font-mono">#{bf.currentId}</span></span>
+            )}
+            {bf.running ? (
+              <span className="flex items-center gap-1.5 text-emerald-300 font-medium">
+                <RefreshCw className="h-3 w-3 animate-spin" /> Running… ({bf.delayMs}ms between PODs)
+              </span>
+            ) : bf.remaining === 0 ? (
+              <span className="flex items-center gap-1.5 text-emerald-300">
+                <CheckCircle2 className="h-3.5 w-3.5" /> All PODs have multi-page previews.
+              </span>
+            ) : null}
+          </div>
+        )}
+        {bf?.lastError && (
+          <div className="text-amber-400 text-[11px]">Last issue: {bf.lastError}</div>
+        )}
+        {(startBackfill.isError || stopBackfill.isError) && (
+          <div className="text-rose-400 text-[11px]">{(startBackfill.error || stopBackfill.error)?.message}</div>
+        )}
+        <div className="flex gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => startBackfill.mutate()}
+            disabled={startBackfill.isPending || bf?.running || bf?.remaining === 0}
+            className="border-border text-xs"
+          >
+            <Images className="h-3.5 w-3.5 mr-1.5" /> {bf?.running ? 'Running…' : 'Start backfill'}
+          </Button>
+          <Button
+            size="sm"
+            variant="destructive"
+            onClick={() => stopBackfill.mutate()}
+            disabled={stopBackfill.isPending || !bf?.running}
+            className="text-xs"
+          >
+            Stop
+          </Button>
+        </div>
+      </div>
+
       {/* ── Recent reconciliations ────────────────────────────────────── */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         <div className="flex items-center justify-between px-4 py-2.5 border-b border-border bg-muted/30">
@@ -487,6 +595,10 @@ export default function OcrPanel() {
                 <th className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase">Failed</th>
                 <th
                   className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase"
+                  title="PODs in this week that still need a multi-page preview rendered (have a PDF but no rendered pages yet). Use the Backfill control above to render them."
+                >Backfill</th>
+                <th
+                  className="px-4 py-2 text-right text-[10px] font-medium text-muted-foreground uppercase"
                   title="Found rows whose extracted invoice number appears 2+ times in the same recon. High counts often mean a recurring OCR misread or a letterhead/header-number artefact — the Reset → Reset duplicates flow in the per-recon panel wipes them so a fresh OCR pass can split the cluster."
                 >Dups</th>
                 <th className="px-4 py-2 text-left text-[10px] font-medium text-muted-foreground uppercase">Last error</th>
@@ -495,9 +607,9 @@ export default function OcrPanel() {
             </thead>
             <tbody>
               {recentRuns.isLoading ? (
-                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
+                <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">Loading…</td></tr>
               ) : (recentRuns.data?.rows?.length ?? 0) === 0 ? (
-                <tr><td colSpan={11} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
+                <tr><td colSpan={12} className="px-4 py-6 text-center text-muted-foreground">No reconciliations yet.</td></tr>
               ) : (
                 recentRuns.data.rows.map(row => {
                   // Action-button states:
@@ -529,6 +641,10 @@ export default function OcrPanel() {
                       <td className={`px-4 py-2 text-right font-mono ${row.rows_pending > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}>{row.rows_pending}</td>
                       <td className="px-4 py-2 text-right font-mono text-muted-foreground">{row.rows_not_found}</td>
                       <td className={`px-4 py-2 text-right font-mono ${row.rows_failed > 0 ? 'text-rose-400' : 'text-muted-foreground'}`}>{row.rows_failed}</td>
+                      <td
+                        className={`px-4 py-2 text-right font-mono ${row.rows_needs_backfill > 0 ? 'text-sky-400' : 'text-muted-foreground'}`}
+                        title={row.rows_needs_backfill > 0 ? `${row.rows_needs_backfill} POD(s) still need a multi-page preview` : 'All PODs in this week have previews'}
+                      >{row.rows_needs_backfill || 0}</td>
                       <td
                         className={`px-4 py-2 text-right font-mono ${row.rows_duplicates > 0 ? 'text-amber-400' : 'text-muted-foreground'}`}
                         title={

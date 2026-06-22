@@ -587,6 +587,9 @@ export default function MaintenanceTab() {
         </div>
       </div>
 
+      {/* Multi-page POD preview backfill moved to Operations → OCR panel
+          (alongside the recent-reconciliations log + per-week "Backfill" count). */}
+
       <Dialog open={backupOpen} onOpenChange={(open) => { setBackupOpen(open); if (!open) { setBackupPassword(''); setBackupPasswordError(''); } }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>

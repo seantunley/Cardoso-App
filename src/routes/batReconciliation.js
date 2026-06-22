@@ -14,6 +14,7 @@ import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
 import { logError } from '../lib/errorLog.js';
 import { listPreviewPagesFromFiles } from '../services/ocr/previewPages.js';
+import { startPreviewBackfill, stopPreviewBackfill, status as previewBackfillStatus } from '../services/ocr/previewBackfill.js';
 import { isoYear as toIsoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { parseSupplierSpreadsheet, parseCardosoSpreadsheet, SpreadsheetValidationError } from '../services/bat/parser.js';
 import { checkReconciliationIntegrity } from '../services/bat/integrity.js';
@@ -170,6 +171,35 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     let pending = false;
     try { await fs.promises.access(path.join(pdfCacheDir, `${id}.pdf`)); pending = true; } catch { pending = false; }
     res.json({ pages, pending });
+  });
+
+  // ── Preview backfill (admin) ──────────────────────────────────────────────
+  // Renders multi-page previews for PODs OCR'd before the feature existed:
+  // downloads each PDF once, renders all pages, NO re-OCR. Operator-controlled
+  // (start/stop), resumable, throttled. Status drives the Maintenance-tab card.
+  router.get('/api/bat/preview-backfill/status', ...gate, requireAdmin, (req, res) => {
+    res.json(previewBackfillStatus());
+  });
+  router.post('/api/bat/preview-backfill/start', ...gate, requireAdmin, (req, res) => {
+    const before = previewBackfillStatus();
+    const s = startPreviewBackfill();
+    if (!before.running && s.running) {
+      logAudit({
+        req, action: 'bat_preview_backfill_start', resourceType: 'system',
+        resourceName: 'BAT preview backfill',
+        details: `Started multi-page preview backfill for ${s.totalAtStart} POD(s) needing previews.`,
+      });
+    }
+    res.json(s);
+  });
+  router.post('/api/bat/preview-backfill/stop', ...gate, requireAdmin, (req, res) => {
+    const s = stopPreviewBackfill();
+    logAudit({
+      req, action: 'bat_preview_backfill_stop', resourceType: 'system',
+      resourceName: 'BAT preview backfill',
+      details: `Requested stop. Processed ${s.processed}, failed ${s.failed}, ${s.remaining ?? '?'} remaining.`,
+    });
+    res.json(s);
   });
 
   // Per-file processing flow shared with the batch endpoint, see

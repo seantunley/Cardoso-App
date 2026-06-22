@@ -1809,7 +1809,12 @@ export function getRecentBatReconciliations(limit = 20) {
           SUM(CASE WHEN extraction_status = 'found'     THEN 1 ELSE 0 END) AS rows_found,
           SUM(CASE WHEN extraction_status = 'pending'   THEN 1 ELSE 0 END) AS rows_pending,
           SUM(CASE WHEN extraction_status = 'not_found' THEN 1 ELSE 0 END) AS rows_not_found,
-          SUM(CASE WHEN extraction_status = 'failed'    THEN 1 ELSE 0 END) AS rows_failed
+          SUM(CASE WHEN extraction_status = 'failed'    THEN 1 ELSE 0 END) AS rows_failed,
+          -- Rows whose POD still needs a multi-page preview rendered: has a PDF
+          -- but no rendered-page count yet (same predicate as the backfill's
+          -- "needs backfill" set). Surfaced as a column on the Recent
+          -- reconciliations table so an operator sees which weeks are behind.
+          SUM(CASE WHEN pdf_url IS NOT NULL AND preview_pages IS NULL THEN 1 ELSE 0 END) AS rows_needs_backfill
         FROM bat_invoice_extractions
         WHERE reconciliation_id IN (SELECT id FROM lim_recons)
         GROUP BY reconciliation_id
@@ -1840,6 +1845,7 @@ export function getRecentBatReconciliations(limit = 20) {
         COALESCE(sc.rows_pending,       0) AS rows_pending,
         COALESCE(sc.rows_not_found,     0) AS rows_not_found,
         COALESCE(sc.rows_failed,        0) AS rows_failed,
+        COALESCE(sc.rows_needs_backfill, 0) AS rows_needs_backfill,
         COALESCE(dc.rows_duplicates,    0) AS rows_duplicates,
         COALESCE(dc.duplicate_invoices, 0) AS duplicate_invoices
       FROM lim_recons r
@@ -2862,6 +2868,10 @@ async function processQueue(reconId) {
         extraction_attempts = extraction_attempts + 1, extraction_error = ?
     WHERE id = ?
   `);
+  // Stamp how many preview pages a row has so the one-time preview backfill
+  // (services/ocr/previewBackfill.js) skips rows the live OCR path already
+  // handled. Separate statement to avoid changing updateExtraction's shape.
+  const setPreviewPages = db.prepare('UPDATE bat_invoice_extractions SET preview_pages = ? WHERE id = ?');
   // Pull the next pending row that ISN'T already being processed by another
   // lane. The in-memory `inFlight` Set is the source of truth for "claimed by
   // a lane this run". Backed by idx_bat_extractions_recon_status (migration v50).
@@ -3482,6 +3492,20 @@ async function processQueue(reconId) {
           if (result?.pagesPending > 1) {
             try { enqueuePreviewRender(next.id); }
             catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
+          }
+          // Stamp the preview page count so the one-time backfill skips this row.
+          // CRITICAL (finding): for a MULTI-PAGE POD, pages 2..N are rendered
+          // asynchronously by previewRenderQueue AFTER this point. We must NOT
+          // stamp the full count here — that would mark the row "done" before
+          // those pages exist, so a later render/save failure would strand it
+          // (backfill skips non-NULL rows). Leave it NULL; the render queue
+          // stamps the true count only once it confirms the pages were written
+          // (and leaves NULL/retryable on failure). Single-page (1) and
+          // not-a-PDF/failed (0) have no async work, so stamp them now.
+          if (!(result?.pagesPending > 1)) {
+            try {
+              setPreviewPages.run(previewPath ? 1 : 0, next.id);
+            } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
           }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
