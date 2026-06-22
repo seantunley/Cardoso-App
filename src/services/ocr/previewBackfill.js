@@ -33,6 +33,19 @@ const DELAY_MS = (() => {
   const n = parseInt(process.env.OCR_BACKFILL_DELAY_MS ?? '', 10);
   return Number.isFinite(n) && n >= 0 ? n : 300;
 })();
+// POD downloads run on the MAIN thread here (unlike OCR, which downloads inside
+// its worker), so they compete with the event loop and a single 60s shot was
+// timing out ("operation aborted") on slow SharePoint/Azure blobs. Retry
+// transient failures with linear backoff; both are env-tunable.
+const DOWNLOAD_TIMEOUT_MS = (() => {
+  const n = parseInt(process.env.OCR_BACKFILL_DOWNLOAD_TIMEOUT_MS ?? '', 10);
+  return Number.isFinite(n) && n >= 1000 ? n : 90_000;
+})();
+const DOWNLOAD_ATTEMPTS = (() => {
+  const n = parseInt(process.env.OCR_BACKFILL_DOWNLOAD_ATTEMPTS ?? '', 10);
+  return Number.isFinite(n) && n >= 1 ? n : 3;
+})();
+const DOWNLOAD_RETRY_BASE_MS = 1500;
 
 const previewDir = () => path.join(process.cwd(), 'uploads', 'bat-previews');
 
@@ -52,7 +65,11 @@ function stmts() {
     const where = "pdf_url IS NOT NULL AND preview_pages IS NULL AND COALESCE(extraction_status,'') <> 'pending'";
     _stmts = {
       count: db.prepare(`SELECT COUNT(*) AS n FROM bat_invoice_extractions WHERE ${where}`),
-      nextRows: db.prepare(`SELECT id, pdf_url, preview_path FROM bat_invoice_extractions WHERE ${where} ORDER BY id LIMIT ?`),
+      // id-cursor paging: a transient-fail row is deliberately left
+      // preview_pages IS NULL so a LATER run retries it, but it must not be
+      // re-pulled within THIS run (which would loop forever). `id > ?` walks
+      // strictly forward.
+      nextRows: db.prepare(`SELECT id, pdf_url, preview_path FROM bat_invoice_extractions WHERE ${where} AND id > ? ORDER BY id LIMIT ?`),
       mark: db.prepare('UPDATE bat_invoice_extractions SET preview_pages = ?, preview_path = COALESCE(preview_path, ?) WHERE id = ?'),
     };
   }
@@ -72,13 +89,19 @@ const state = {
 
 const sleep = (ms) => new Promise((r) => { setTimeout(r, ms); });
 
-// Drop any cached pages from a prior (possibly partial) backfill of this row so
-// a re-render can't leave orphan higher pages.
-async function removeExisting(dir, id) {
+// After a SUCCESSFUL (re-)render, drop any stale higher pages left by a prior,
+// longer backfill of this row (e.g. it produced 5 pages then, only 3 now) so no
+// orphan pages linger. Runs AFTER rendering and only for pages beyond what we
+// just produced — so page 1 (rewritten in place atomically) and pages 2..N we
+// just wrote are kept, and a FAILED render never deletes the row's existing
+// preview (the bug this replaces: removeExisting() used to wipe everything up
+// front, so a render that then failed stranded the row with no preview).
+async function removeStalePages(dir, id, keepThrough) {
   let files;
   try { files = await fsp.readdir(dir); }
   catch (e) { if (e.code !== 'ENOENT') console.warn('[previewBackfill.readdir]', e.message); return; }
-  for (const { filename } of listPreviewPagesFromFiles(files, id)) {
+  for (const { page, filename } of listPreviewPagesFromFiles(files, id)) {
+    if (page <= keepThrough) continue; // keep the pages we just rendered
     try { await fsp.unlink(path.join(dir, filename)); }
     catch (e) { if (e.code !== 'ENOENT') console.warn('[previewBackfill.unlink]', { filename }, e.message); }
   }
@@ -90,7 +113,11 @@ async function renderAllPages(buffer, id) {
   const sharp = await getSharp();
   const dir = previewDir();
   await fsp.mkdir(dir, { recursive: true });
-  await removeExisting(dir, id);
+  // NOTE: do NOT delete existing previews up front. Each page is written
+  // atomically (tmp+rename), so page 1 (<id>.jpg) is replaced in place only when
+  // its render succeeds; stale higher pages from a prior partial backfill are
+  // pruned AFTER a successful render (below). Deleting first and then failing
+  // would strand a row that already had a working preview.
 
   let rendered = 0;
   for (let p = 1; p <= MAX_PAGES; p++) {
@@ -105,7 +132,10 @@ async function renderAllPages(buffer, id) {
       continue;
     }
     try {
-      const jpeg = await sharp(img).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
+      // rotate(90) = 90° clockwise ("right"). Applied before resize so the width
+      // cap lands on the final, upright orientation. Must match the OCR-worker
+      // page-1 and render-queue page-2..N pipelines so every page looks the same.
+      const jpeg = await sharp(img).rotate(90).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
       const full = path.join(dir, previewFileName(id, p));
       const tmp = `${full}.tmp`;
       await fsp.writeFile(tmp, jpeg);
@@ -116,20 +146,54 @@ async function renderAllPages(buffer, id) {
       catch { console.warn('[previewBackfill.save]', id, p, err.message); }
     }
   }
+  // Prune stale higher pages ONLY on success — never on a 0-page render, so a
+  // row that fails to render keeps whatever preview it already had.
+  if (rendered >= 1) await removeStalePages(dir, id, rendered);
   return rendered;
+}
+
+// Permanent failures won't recover — a 4xx (dead/forbidden/missing POD URL), a
+// rejected URL, or a non-PDF body. Everything else (timeout/abort, network drop,
+// 5xx) is transient and worth retrying with backoff.
+function isPermanentDownloadError(err) {
+  if (err?.code === 'URL_REJECTED' || err?.code === 'INVALID_PDF') return true;
+  if (err?.code === 'HTTP_ERROR' && err.status >= 400 && err.status < 500) return true;
+  return false;
+}
+
+async function downloadWithRetry(url, id) {
+  let lastErr;
+  for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
+    try {
+      return await downloadPdf(url, { timeoutMs: DOWNLOAD_TIMEOUT_MS });
+    } catch (err) {
+      lastErr = err;
+      if (isPermanentDownloadError(err)) throw err; // a dead URL won't heal
+      if (attempt < DOWNLOAD_ATTEMPTS) {
+        console.warn(`[previewBackfill.download] #${id} attempt ${attempt}/${DOWNLOAD_ATTEMPTS} failed (${err.message}) — retrying`);
+        await sleep(DOWNLOAD_RETRY_BASE_MS * attempt);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 async function processRow(row) {
   let buffer;
   try {
-    buffer = await downloadPdf(row.pdf_url);
+    buffer = await downloadWithRetry(row.pdf_url, row.id);
   } catch (err) {
-    // Mark attempted (0) so we don't re-download a dead URL on every re-run.
-    try { stmts().mark.run(0, null, row.id); } catch { /* mark is best-effort */ }
     state.failed += 1;
     state.lastError = `#${row.id}: ${err.message}`;
-    try { logError('bat.ocr.backfill_download', err, { extraction_id: row.id, pdf_url: row.pdf_url }); }
+    const permanent = isPermanentDownloadError(err);
+    try { logError('bat.ocr.backfill_download', err, { extraction_id: row.id, pdf_url: row.pdf_url, permanent }); }
     catch { console.warn('[previewBackfill.download]', row.id, err.message); }
+    // Permanent (dead URL / not a PDF): mark 0 so we never re-hammer it.
+    // Transient (timeout/network, retries exhausted): leave preview_pages NULL so
+    // a LATER backfill run retries it — drain's id-cursor stops it looping now.
+    if (permanent) {
+      try { stmts().mark.run(0, null, row.id); } catch { /* mark is best-effort */ }
+    }
     return;
   }
 
@@ -158,14 +222,17 @@ async function processRow(row) {
 }
 
 async function drain() {
+  // Walk strictly forward by id. Rows that succeed or permanently fail get
+  // marked (drop out of the WHERE set); rows that fail transiently stay NULL for
+  // a later run, and the cursor ensures we don't re-pull them this run.
+  let cursor = 0;
   try {
-    // Pull in small batches; the WHERE clause shrinks as rows get marked, so
-    // this naturally walks the whole set and is safe to resume.
     while (!state.stopRequested) {
-      const rows = stmts().nextRows.all(25);
+      const rows = stmts().nextRows.all(cursor, 25);
       if (rows.length === 0) break;
       for (const row of rows) {
         if (state.stopRequested) break;
+        cursor = row.id; // advance past this row regardless of outcome
         state.currentId = row.id;
         await processRow(row);
         if (DELAY_MS > 0) await sleep(DELAY_MS);
