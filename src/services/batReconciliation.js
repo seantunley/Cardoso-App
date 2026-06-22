@@ -2862,6 +2862,10 @@ async function processQueue(reconId) {
         extraction_attempts = extraction_attempts + 1, extraction_error = ?
     WHERE id = ?
   `);
+  // Stamp how many preview pages a row has so the one-time preview backfill
+  // (services/ocr/previewBackfill.js) skips rows the live OCR path already
+  // handled. Separate statement to avoid changing updateExtraction's shape.
+  const setPreviewPages = db.prepare('UPDATE bat_invoice_extractions SET preview_pages = ? WHERE id = ?');
   // Pull the next pending row that ISN'T already being processed by another
   // lane. The in-memory `inFlight` Set is the source of truth for "claimed by
   // a lane this run". Backed by idx_bat_extractions_recon_status (migration v50).
@@ -3483,6 +3487,12 @@ async function processQueue(reconId) {
             try { enqueuePreviewRender(next.id); }
             catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
           }
+          // Stamp the preview page count so the one-time backfill skips this row.
+          // previewPath set → page 1 rendered (pagesPending>1 → that many pages);
+          // render failed / not a PDF → 0 (attempted, won't be retried).
+          try {
+            setPreviewPages.run(previewPath ? (result?.pagesPending > 1 ? result.pagesPending : 1) : 0, next.id);
+          } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
           // an operator answer "which engine produced this number" when
