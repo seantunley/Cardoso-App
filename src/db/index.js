@@ -46,13 +46,23 @@ function errorMessage(value) {
 // busy_timeout = 5000
 //   When a writer is mid-checkpoint, readers can momentarily collide.
 //   Wait up to 5s instead of immediately throwing SQLITE_BUSY.
+//
+// journal_size_limit = 64 MB
+//   By default (-1) SQLite never truncates the -wal file: once a long-running
+//   reader holds a checkpoint off and the WAL balloons, it stays that large on
+//   disk for the life of the connection. On a multi-GB DB that is real wasted
+//   disk and a larger file to mmap/checkpoint. This caps the post-checkpoint
+//   WAL size so it shrinks back down. Tunable via SQLITE_WAL_SIZE_LIMIT_BYTES.
 const mmapBytes = parseInt(process.env.SQLITE_MMAP_BYTES ?? '', 10);
+const walSizeLimit = parseInt(process.env.SQLITE_WAL_SIZE_LIMIT_BYTES ?? '', 10);
 const PRAGMAS = [
   ['journal_mode', 'WAL'],
   ['synchronous', 'NORMAL'],
   ['temp_store', 'MEMORY'],
   ['mmap_size', Number.isFinite(mmapBytes) ? mmapBytes : 268435456],
   ['busy_timeout', 5000],
+  // Must come after journal_mode=WAL — it only applies to WAL/journal files.
+  ['journal_size_limit', Number.isFinite(walSizeLimit) ? walSizeLimit : 67108864],
 ];
 for (const [key, val] of PRAGMAS) {
   try {

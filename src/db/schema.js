@@ -149,6 +149,14 @@ function initSchema(db) {
       status TEXT CHECK(status IN ('running', 'completed', 'failed', 'abandoned')) NOT NULL,
       message TEXT
     );
+
+    -- Durable record of when the monthly VACUUM last actually ran. job_runs is
+    -- pruned to 30 days, so it can't enforce VACUUM's >30-day skip window — this
+    -- single-row table survives the prune (and a restore travels with the .db).
+    CREATE TABLE IF NOT EXISTS db_maintenance_meta (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      last_vacuum_at TEXT
+    );
   `);
 
   // ==================== INDEXES ====================

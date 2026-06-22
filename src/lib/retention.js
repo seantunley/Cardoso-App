@@ -142,14 +142,86 @@ export function pruneOldRows() {
 // the 1st) so it doesn't contend with operator activity or the daily
 // backup job at 02:00.
 //
-// Returns the elapsed time so a slow VACUUM (suggesting filesystem
-// fragmentation or unusually heavy DELETE-and-grow churn) is visible
-// in job_runs.context.
+// Because VACUUM holds an EXCLUSIVE lock and rewrites the whole file, every
+// reader AND writer in the app blocks for its entire duration — it is the
+// single longest main-thread freeze the scheduler can cause. So only pay it
+// when there is meaningful space to reclaim: a DB that hasn't churned much
+// since last month has a near-empty freelist, and rewriting it just to shuffle
+// the same bytes is a pure multi-second freeze with no benefit. We VACUUM when
+// the free pages are ≥ 100 MB OR ≥ 10% of the file, OR a real VACUUM hasn't run
+// in VACUUM_MAX_SKIP_DAYS (the fragmentation fallback below); skip otherwise.
+// Thresholds tunable via VACUUM_MIN_FREE_BYTES / VACUUM_MIN_FREE_FRACTION /
+// VACUUM_MAX_SKIP_DAYS.
+//
+// Returns the elapsed time (when it ran, with the trigger) or the skip reason,
+// plus the figures it decided on, so job_runs.context shows what happened/why.
 /**
- * @returns {{ elapsed_ms: number }}
+ * @returns {{ elapsed_ms: number, trigger: string, freelist_pages: number, free_mb: number, days_since_last_vacuum: number | null } | { skipped: true, reason: string, freelist_pages: number, free_mb: number, free_fraction: number, days_since_last_vacuum: number | null }}
  */
 export function vacuumDb() {
+  const freelistPages = Number(db.pragma('freelist_count', { simple: true })) || 0;
+  const pageCount = Number(db.pragma('page_count', { simple: true })) || 0;
+  const pageSize = Number(db.pragma('page_size', { simple: true })) || 4096;
+  const freeBytes = freelistPages * pageSize;
+  const freeFraction = pageCount > 0 ? freelistPages / pageCount : 0;
+
+  const minFreeBytesRaw = parseInt(process.env.VACUUM_MIN_FREE_BYTES ?? '', 10);
+  const minFreeBytes = Number.isFinite(minFreeBytesRaw) && minFreeBytesRaw >= 0 ? minFreeBytesRaw : 100 * 1024 * 1024;
+  const minFreeFractionRaw = parseFloat(process.env.VACUUM_MIN_FREE_FRACTION ?? '');
+  const minFreeFraction = Number.isFinite(minFreeFractionRaw) && minFreeFractionRaw >= 0 ? minFreeFractionRaw : 0.10;
+
+  // Fragmentation fallback (Codex review on PR #480): freelist_count only counts
+  // COMPLETELY free pages. Sparse, interleaved deletes can leave the freelist
+  // near-empty while many B-tree pages sit only partially filled — bloat a
+  // VACUUM would repack but the freelist gate alone would skip forever. So also
+  // force an unconditional VACUUM when a real one hasn't run in
+  // VACUUM_MAX_SKIP_DAYS (default 90). The last-real-VACUUM timestamp is kept in
+  // db_maintenance_meta (written only on an actual VACUUM below), NOT job_runs:
+  // job_runs is pruned to 30 days, so it could never evidence a >30-day skip
+  // window and the timer would fire monthly anyway (Codex follow-up on #480).
+  const maxSkipDaysRaw = parseInt(process.env.VACUUM_MAX_SKIP_DAYS ?? '', 10);
+  const maxSkipDays = Number.isFinite(maxSkipDaysRaw) && maxSkipDaysRaw >= 0 ? maxSkipDaysRaw : 90;
+  let daysSinceLastVacuum = Infinity;
+  try {
+    const row = /** @type {{ last_vacuum_at: string | null } | undefined} */ (
+      db.prepare('SELECT last_vacuum_at FROM db_maintenance_meta WHERE id = 1').get()
+    );
+    if (row?.last_vacuum_at) {
+      const ms = Date.now() - Date.parse(row.last_vacuum_at);
+      if (Number.isFinite(ms) && ms >= 0) daysSinceLastVacuum = ms / (1000 * 60 * 60 * 24);
+    }
+  } catch { /* table missing (pre-initSchema) → leave Infinity → treat as overdue → VACUUM */ }
+  const overdue = daysSinceLastVacuum >= maxSkipDays;
+  const daysSinceForReport = Number.isFinite(daysSinceLastVacuum) ? Math.round(daysSinceLastVacuum) : null;
+
+  if (!overdue && freeBytes < minFreeBytes && freeFraction < minFreeFraction) {
+    return {
+      skipped: true,
+      reason: 'little_to_reclaim',
+      freelist_pages: freelistPages,
+      free_mb: Math.round(freeBytes / (1024 * 1024)),
+      free_fraction: Number(freeFraction.toFixed(3)),
+      days_since_last_vacuum: daysSinceForReport,
+    };
+  }
+
   const t0 = Date.now();
   db.exec('VACUUM');
-  return { elapsed_ms: Date.now() - t0 };
+  // Record the real VACUUM so the skip-window timer above is durable across the
+  // 30-day job_runs prune. Best-effort: a write failure must not fail the job.
+  try {
+    db.prepare(`
+      INSERT INTO db_maintenance_meta (id, last_vacuum_at) VALUES (1, ?)
+      ON CONFLICT(id) DO UPDATE SET last_vacuum_at = excluded.last_vacuum_at
+    `).run(new Date().toISOString());
+  } catch (e) {
+    console.warn('[vacuum-db] could not record last_vacuum_at:', e instanceof Error ? e.message : String(e));
+  }
+  return {
+    elapsed_ms: Date.now() - t0,
+    trigger: overdue ? 'overdue_fragmentation_guard' : 'freelist',
+    freelist_pages: freelistPages,
+    free_mb: Math.round(freeBytes / (1024 * 1024)),
+    days_since_last_vacuum: daysSinceForReport,
+  };
 }
