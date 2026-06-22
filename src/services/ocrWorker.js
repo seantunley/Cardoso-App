@@ -325,7 +325,11 @@ async function preparePreview(buffer, extractionId, imageBuffer, pdfPageCount, m
     await removeExistingPreviews(previewDir, extractionId);
 
     const page1Src = imageBuffer || await pdfPageToImage(buffer, 1, 2.0);
-    const jpeg = await sharp(page1Src).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
+    // rotate(90) = 90° clockwise ("right"). Applied before resize so the width
+    // cap lands on the final orientation. Page 2..N (previewRenderQueue) and the
+    // backfill apply the same rotation so every preview page is consistent. This
+    // is the human PREVIEW only — the OCR render pipeline below is untouched.
+    const jpeg = await sharp(page1Src).rotate(90).resize({ width: 1200 }).jpeg({ quality: 70 }).toBuffer();
     const full = path.join(previewDir, previewFileName(extractionId, 1));
     // Atomic write (sibling .tmp + rename): a re-extraction would otherwise
     // truncate the inode in-place, mutating the daily backup's hardlink

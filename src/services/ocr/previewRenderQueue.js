@@ -143,7 +143,10 @@ async function renderJob(extractionId) {
       continue;
     }
     try {
-      const jpeg = await sharp(img).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
+      // rotate(90) = 90° clockwise ("right"), before resize so the width cap
+      // lands on the final orientation. Matches the OCR-worker page-1 + backfill
+      // pipelines so every preview page is oriented the same.
+      const jpeg = await sharp(img).rotate(90).resize({ width: PREVIEW_WIDTH }).jpeg({ quality: PREVIEW_QUALITY }).toBuffer();
       const full = path.join(dir, previewFileName(extractionId, p));
       // Atomic write (sibling .tmp + rename) — same reason as the worker's
       // page 1: the daily backup hardlinks each preview, so the source inode
