@@ -3489,24 +3489,26 @@ async function processQueue(reconId) {
           // background renderer to produce pages 2..N — no re-download, and off
           // the 90s OCR budget. Runs regardless of found/not-found (the preview
           // exists either way).
-          if (result?.pagesPending > 1) {
+          const isMultiPage = result?.pagesPending > 1;
+          if (isMultiPage) {
             try { enqueuePreviewRender(next.id); }
             catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
           }
           // Stamp the preview page count so the one-time backfill skips this row.
-          // CRITICAL (finding): for a MULTI-PAGE POD, pages 2..N are rendered
-          // asynchronously by previewRenderQueue AFTER this point. We must NOT
-          // stamp the full count here — that would mark the row "done" before
-          // those pages exist, so a later render/save failure would strand it
-          // (backfill skips non-NULL rows). Leave it NULL; the render queue
-          // stamps the true count only once it confirms the pages were written
-          // (and leaves NULL/retryable on failure). Single-page (1) and
-          // not-a-PDF/failed (0) have no async work, so stamp them now.
-          if (!(result?.pagesPending > 1)) {
-            try {
-              setPreviewPages.run(previewPath ? 1 : 0, next.id);
-            } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
-          }
+          // For a MULTI-PAGE POD, pages 2..N are rendered asynchronously by
+          // previewRenderQueue AFTER this point, so we must NOT stamp the full
+          // count here — that would mark the row "done" before those pages exist,
+          // and a later render/save failure would strand it (backfill skips
+          // non-NULL rows). Instead:
+          //   • multi-page → set preview_pages = NULL. NULL (not "leave as-is")
+          //     matters on a RE-OCR of an already-stamped row: it clears the stale
+          //     prior count so the row stays recoverable while the new pages 2..N
+          //     render. The render queue stamps the true count once it confirms
+          //     the pages were written (NULL/retryable on failure).
+          //   • single-page (1) / not-a-PDF / failed (0) → no async work, stamp now.
+          try {
+            setPreviewPages.run(isMultiPage ? null : (previewPath ? 1 : 0), next.id);
+          } catch (e) { try { logError('bat.ocr.preview_pages_mark', e, { extraction_id: next.id }); } catch { /* non-fatal */ } }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
           // an operator answer "which engine produced this number" when

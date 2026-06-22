@@ -68,7 +68,19 @@ export function cachedPdfPath(extractionId) {
 
 let _sharp = null;
 async function getSharp() {
-  if (!_sharp) _sharp = (await import('sharp')).default;
+  if (!_sharp) {
+    _sharp = (await import('sharp')).default;
+    // This renderer runs in the MAIN process, so its CPU competes with the
+    // event loop that serves every API request AND this job's own POD
+    // downloads. libvips defaults to a thread pool of one-per-core and would
+    // grab every core for a single resize, starving the loop for seconds at a
+    // time (observed: 12-15s "main thread frozen" stalls during a backfill,
+    // which also made the concurrent download time out and retry). Pin libvips
+    // to a single thread and disable its cache so a preview render stays a
+    // light, background-friendly operation.
+    try { _sharp.concurrency(1); } catch (e) { console.warn('[previewRenderQueue.sharp_concurrency]', e.message); }
+    try { _sharp.cache(false); } catch (e) { console.warn('[previewRenderQueue.sharp_cache]', e.message); }
+  }
   return _sharp;
 }
 
@@ -231,6 +243,9 @@ async function renderJob(extractionId) {
       try { logError('bat.ocr.preview_page_save', err, { extraction_id: extractionId, page: p }); }
       catch { console.warn('[previewRenderQueue.save]', extractionId, p, err.message); }
     }
+    // Yield a full event-loop tick between pages so a many-page POD can't hold
+    // the loop back-to-back — keeps the app responsive + lets I/O progress.
+    await new Promise((r) => setImmediate(r));
   }
 
   // Done (or as far as we could get). Only drop the cached PDF if it is STILL
