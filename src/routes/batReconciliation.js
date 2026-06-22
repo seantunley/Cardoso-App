@@ -12,6 +12,8 @@ import fs from 'fs';
 import bcrypt from 'bcryptjs';
 import db from '../db/index.js';
 import { logAudit } from '../lib/audit.js';
+import { logError } from '../lib/errorLog.js';
+import { listPreviewPagesFromFiles } from '../services/ocr/previewPages.js';
 import { isoYear as toIsoYear, currentIsoWeek } from '../lib/isoWeek.js';
 import { parseSupplierSpreadsheet, parseCardosoSpreadsheet, SpreadsheetValidationError } from '../services/bat/parser.js';
 import { checkReconciliationIntegrity } from '../services/bat/integrity.js';
@@ -141,6 +143,33 @@ export function createBatReconciliationRouter({ requireAuth, requireAdmin, requi
     const filePath = path.join(previewDir, filename);
     if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Preview not found' });
     res.type('image/jpeg').sendFile(filePath);
+  });
+
+  // List the cached preview page images for one extraction — powers the
+  // multi-page in-app POD viewer. Directory-derived via the shared filename
+  // contract (previewPages.js), so legacy single-page rows work unchanged.
+  // `pending` is true while the background renderer is still producing pages
+  // 2..N (the cached PDF is its in-progress marker); the viewer polls on it.
+  const pdfCacheDir = path.join(process.cwd(), 'uploads', 'bat-pdf-cache');
+  router.get('/api/bat/preview-pages/:id', ...gate, async (req, res) => {
+    const id = String(req.params.id);
+    if (!/^\d+$/.test(id)) return res.status(400).json({ error: 'Invalid extraction id' });
+    let files = [];
+    try {
+      files = await fs.promises.readdir(previewDir);
+    } catch (err) {
+      if (err.code !== 'ENOENT') {
+        try { logError('bat.preview_pages.readdir', err, { id }); } catch { /* logging must never break the response */ }
+        return res.status(500).json({ error: 'Failed to read previews' });
+      }
+    }
+    const pages = listPreviewPagesFromFiles(files, id).map(({ page, filename }) => ({
+      page,
+      url: `/api/bat/preview/${filename}`,
+    }));
+    let pending = false;
+    try { await fs.promises.access(path.join(pdfCacheDir, `${id}.pdf`)); pending = true; } catch { pending = false; }
+    res.json({ pages, pending });
   });
 
   // Per-file processing flow shared with the batch endpoint, see

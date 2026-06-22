@@ -14,6 +14,7 @@ import { matchCardosoToSupplier as matchCardosoToSupplierService } from './bat/m
 import { buildGlobalDuplicateIndex as buildGlobalDuplicateIndexService } from './bat/duplicates.js';
 import { findInvoiceNumber, HARDCODED_POISON_INVOICES } from './bat/findInvoiceNumber.js';
 import { checkReconciliationIntegrity } from './bat/integrity.js';
+import { enqueuePreviewRender } from './ocr/previewRenderQueue.js';
 
 // Back-compat shim — see src/services/bat/matching.js. Existing callers
 // pass a positional reconId; the new module takes `{ db, reconId }` so
@@ -3474,6 +3475,14 @@ async function processQueue(reconId) {
           );
           const invoiceNumber = result?.invoice ?? null;
           const previewPath = result?.previewPath ?? null;
+          // Multi-page POD: the worker stashed the downloaded PDF, so kick the
+          // background renderer to produce pages 2..N — no re-download, and off
+          // the 90s OCR budget. Runs regardless of found/not-found (the preview
+          // exists either way).
+          if (result?.pagesPending > 1) {
+            try { enqueuePreviewRender(next.id); }
+            catch (e) { try { logError('bat.ocr.preview_enqueue', e, { extraction_id: next.id }); } catch { /* a queue hiccup must never break the row */ } }
+          }
           const engineError = result?.error ?? null;
           // Trace artifact added in the OCR observability batch — lets
           // an operator answer "which engine produced this number" when

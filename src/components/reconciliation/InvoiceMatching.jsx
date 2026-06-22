@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useEffect, useCallback, useRef } from 'react';
-import { Search, ExternalLink, Save, RotateCcw, RefreshCw, Printer } from 'lucide-react';
+import { Search, ExternalLink, Eye, Save, RotateCcw, RefreshCw, Printer } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { humanizeApiError } from '@/lib/humanizeApiError';
 import ReconResetModal from './ReconResetModal';
+import PreviewModal from './PreviewModal';
 import BatTabPrintable from './BatTabPrintable';
 import { BAT_TAB_PRINT_STYLE } from './batTabPrintStyle';
 
@@ -159,6 +160,7 @@ function OcrBadge({ status }) {
 function ManualInvoiceInput({ extraction, onSaved }) {
   const [value, setValue] = useState(extraction.extracted_invoice || '');
   const [saving, setSaving] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const attention = needsAttention(extraction);
 
   const handleSave = async () => {
@@ -194,19 +196,43 @@ function ManualInvoiceInput({ extraction, onSaved }) {
 
   return (
     <div className="flex items-center gap-1.5">
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <a
-            href={extraction.preview_path || extraction.pdf_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex-shrink-0 p-1 text-muted-foreground hover:text-accent transition-colors"
-          >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </a>
-        </TooltipTrigger>
-        <TooltipContent>{extraction.preview_path ? 'Open preview (JPEG)' : 'Open PDF'}</TooltipContent>
-      </Tooltip>
+      {extraction.preview_path ? (
+        <>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setPreviewOpen(true)}
+                className="flex-shrink-0 p-1 text-muted-foreground hover:text-accent transition-colors"
+              >
+                <Eye className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>View POD pages</TooltipContent>
+          </Tooltip>
+          <PreviewModal
+            extractionId={extraction.id}
+            open={previewOpen}
+            onOpenChange={setPreviewOpen}
+            pdfUrl={extraction.pdf_url}
+            title={[extraction.store_name, extraction.order_number].filter(Boolean).join(' · ') || `POD #${extraction.id}`}
+          />
+        </>
+      ) : extraction.pdf_url ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <a
+              href={extraction.pdf_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 p-1 text-muted-foreground hover:text-accent transition-colors"
+            >
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </TooltipTrigger>
+          <TooltipContent>Open original PDF</TooltipContent>
+        </Tooltip>
+      ) : null}
       <input
         value={value}
         onChange={(e) => setValue(e.target.value.toUpperCase())}
