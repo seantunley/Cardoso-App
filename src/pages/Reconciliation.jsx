@@ -531,12 +531,23 @@ export default function Reconciliation() {
       },
     );
     fire(`sage:${selected.sage_error}`, selected.sage_error && `Sage: ${selected.sage_error}`);
-    for (const ext of selected.extractions || []) {
-      if (ext.extraction_error) {
-        fire(`ext:${ext.id}:${ext.extraction_error}`, `OCR id ${ext.id}: ${ext.extraction_error}`);
+    // Per-row OCR errors only surface while an extraction is actually running,
+    // so a passive open of a finished recon stays silent. Historical per-row
+    // failures (e.g. a slow POD that hit the 90s extract_total cap) remain
+    // visible in the matching table, the OCR Operations panel, and the System
+    // Log — but per-row errors have NO Dismiss, so otherwise they re-toast on
+    // every visit to a long-since-reconciled week. Recon-level + Sage errors
+    // above still toast on open (those have a Dismiss / are recon-wide).
+    const extractionActive = extracting
+      || (selected.extractions || []).some((e) => e.extraction_status === 'pending');
+    if (extractionActive) {
+      for (const ext of selected.extractions || []) {
+        if (ext.extraction_error) {
+          fire(`ext:${ext.id}:${ext.extraction_error}`, `OCR id ${ext.id}: ${ext.extraction_error}`);
+        }
       }
     }
-  }, [selected]);
+  }, [selected, extracting]);
 
   useEffect(() => {
     if (view !== 'detail') return;
