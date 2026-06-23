@@ -51,7 +51,15 @@ const previewDir = () => path.join(process.cwd(), 'uploads', 'bat-previews');
 
 let _sharp = null;
 async function getSharp() {
-  if (!_sharp) _sharp = (await import('sharp')).default;
+  if (!_sharp) {
+    _sharp = (await import('sharp')).default;
+    // Runs in the MAIN process — pin libvips to one thread + disable its cache
+    // so a backfill render stays light and doesn't starve the event loop (and
+    // the loop-bound POD downloads) the way an all-cores resize did. See the
+    // matching note in previewRenderQueue.js.
+    try { _sharp.concurrency(1); } catch (e) { console.warn('[previewBackfill.sharp_concurrency]', e.message); }
+    try { _sharp.cache(false); } catch (e) { console.warn('[previewBackfill.sharp_cache]', e.message); }
+  }
   return _sharp;
 }
 
@@ -169,6 +177,9 @@ async function renderAllPages(buffer, id) {
       try { logError('bat.ocr.backfill_page_save', err, { extraction_id: id, page: p }); }
       catch { console.warn('[previewBackfill.save]', id, p, err.message); }
     }
+    // Yield a full event-loop tick between pages so a many-page POD can't hold
+    // the loop back-to-back (the inter-ROW DELAY_MS doesn't cover within-row).
+    await new Promise((r) => setImmediate(r));
   }
   // Prune stale higher pages ONLY on success — never on a 0-page render, so a
   // row that fails to render keeps whatever preview it already had.
