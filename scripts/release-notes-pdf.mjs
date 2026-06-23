@@ -13,6 +13,93 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-22': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '22 June 2026',
+    slug: '22-June-2026',
+    intro:
+      "This update centres on the proof-of-delivery (POD) viewer in BAT " +
+      "reconciliation. You can now page through every page of a multi-page " +
+      "POD document directly in the app, rotate pages to any orientation, " +
+      "and see previews for historical deliveries — right back to your " +
+      "earliest records. Sideways pages are straightened automatically, " +
+      "existing previews are preserved if a new render fails, and the " +
+      "viewer no longer clips tall documents. The app also stays responsive " +
+      "while previews are being generated in the background.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Multi-page POD document viewer',
+            body:
+              "Proof-of-delivery documents with more than one page can now " +
+              "be paged through directly in the app — no need to download " +
+              "the file. Use the forward and back controls to step through " +
+              "each page of a delivery document.",
+          },
+          {
+            title: 'Rotate documents in the POD viewer',
+            body:
+              "Left and right 90° rotation buttons let you correct the " +
+              "orientation of a sideways or inverted document without " +
+              "leaving the reconciliation screen.",
+          },
+          {
+            title: 'Historical POD previews',
+            body:
+              "Deliveries processed before the preview feature was " +
+              "introduced now show their POD previews too. The Operations " +
+              "OCR panel displays backfill progress week by week, so you " +
+              "can track how much of your history has been filled in.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'Sideways pages auto-straightened',
+            body:
+              "When a POD document contains pages that were scanned or " +
+              "photographed sideways, those pages are now automatically " +
+              "rotated upright for comfortable reading.",
+          },
+          {
+            title: 'Existing preview preserved on render failure',
+            body:
+              "If a new render attempt encounters a problem, the previously " +
+              "confirmed preview is kept in place rather than being replaced " +
+              "with an error, so a working view is never lost.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'POD preview no longer shrinks',
+            body:
+              "A stray height limit in the viewer was compressing tall " +
+              "documents. It has been removed — previews now display at " +
+              "their full size.",
+          },
+          {
+            title: 'App stays responsive while previews generate',
+            body:
+              "Background preview generation previously competed with the " +
+              "interface for processing time, causing occasional " +
+              "sluggishness. The work is now properly offloaded so the app " +
+              "stays fast while previews are being built.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
