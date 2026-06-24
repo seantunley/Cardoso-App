@@ -13,6 +13,46 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-23': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '23 June 2026',
+    slug: '23-June-2026',
+    intro:
+      "This update (v2026.5.10) adds a write-off candidate picker that exports a " +
+      "formatted PDF of items flagged for write-off, and resolves a performance " +
+      "issue in BAT reconciliation where preview rendering could slow the interface " +
+      "and re-OCR'd rows were not always shown correctly.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Write-off candidate picker with PDF export',
+            body:
+              "A new tool identifies inventory items flagged as write-off candidates " +
+              "and exports the list as a formatted PDF, ready to review with management " +
+              "or file for audit purposes.",
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'BAT reconciliation preview no longer slows the interface',
+            body:
+              "Loading a BAT reconciliation preview could make the interface sluggish " +
+              "or briefly unresponsive. Preview rendering now yields correctly so the " +
+              "interface stays smooth. Rows that have been re-processed by OCR are also " +
+              "displayed accurately after the update.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
