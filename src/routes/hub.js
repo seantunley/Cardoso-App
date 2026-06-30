@@ -14,6 +14,7 @@ import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
+import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -313,6 +314,23 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     } catch (err) {
       console.error('[hub-backup-status] error:', err.message);
       res.json({ sites: [] });
+    }
+  });
+
+  // GET /api/hub/kopia-status
+  // Off-site (Kopia) backup status per site, read live from the hub's Kopia
+  // repository. Distinct from /hub-backup-status (which reports the .db that
+  // the hub PULLS): this reports what each site's Kopia AGENT has PUSHED.
+  // Read-only and async (kopia is shelled off the main thread).
+  router.get('/api/hub/kopia-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      let knownSites = [];
+      try { knownSites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
+      const status = await getKopiaStatus({ knownSites });
+      res.json(status);
+    } catch (err) {
+      console.error('[hub-kopia-status] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), ok: false, repo: null, sites: [], error: err.message, stale_hours: null });
     }
   });
 

@@ -15,6 +15,7 @@ import db from '../db/index.js';
 import { fireAlert, resolveAlerts } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
+import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
 
 // Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
 // the rule loop (evaluateAllRules, runs every minute) doesn't re-allocate
@@ -243,11 +244,101 @@ async function ruleNightlySyncStale() {
   }
 }
 
+// ── Rule: Kopia off-site backup stale / missing (hub-only) ───────────────
+//
+// The hub runs the Kopia repository server; every site agent pushes snapshots
+// to it (see docs/kopia-backups.md). This rule reads that repo and fires when a
+// site's newest off-site snapshot is older than the threshold, has NEVER
+// arrived, or the repo/binary is unreachable — so the push model's "a site
+// silently stopped backing up" blind spot is loud on the hub.
+//
+// Hub-only and gated on KOPIA_ENABLED. Site lists come from the hub storage
+// runtime (hub_sites lives there, not in the local app db); alerts fire/resolve
+// through the normal engine (the alerts table is in the local app db).
+async function ruleKopiaSiteStale() {
+  if (process.env.HUB_MODE !== 'true') return; // hub-only
+
+  const clearAll = () => {
+    resolveAlerts('kopia-repo-error', 'auto');
+    try {
+      const actives = _prep('activeKopiaSiteStale', `
+        SELECT dedup_key FROM alerts
+        WHERE resolved_at IS NULL AND dedup_key LIKE 'kopia-site-stale:%'
+      `).all();
+      for (const a of actives) resolveAlerts(a.dedup_key, 'auto');
+    } catch (err) {
+      if (!/no such table/i.test(err.message)) throw err;
+    }
+  };
+
+  if (!isKopiaEnabled()) { clearAll(); return; } // feature off → don't nag
+
+  let knownSites = [];
+  try {
+    const { getHubStorageRuntime } = await import('../hub/storage/runtime.js');
+    knownSites = getHubStorageRuntime().repository.listSitesForBackup() || [];
+  } catch (err) {
+    console.error(`[alertRules] kopia: could not list hub sites: ${err.message}`);
+  }
+
+  const status = await getKopiaStatus({ knownSites });
+
+  // Repo / binary unreachable → one critical; skip per-site churn on top.
+  if (status.error) {
+    fireAlert({
+      ruleName: 'kopia-repo-error',
+      severity: 'critical',
+      message: `Kopia off-site repository is unreachable on the hub: ${status.error}`,
+      context: { error: status.error },
+      dedupKey: 'kopia-repo-error',
+    });
+    return;
+  }
+  resolveAlerts('kopia-repo-error', 'auto');
+
+  const stale = status.sites.filter((s) => s.status === 'critical');
+  const staleKeys = new Set();
+  for (const s of stale) {
+    const key = `kopia-site-stale:${s.site_id || s.site}`;
+    staleKeys.add(key);
+    const label = s.site_name || s.site;
+    const detail = s.reason === 'never'
+      ? 'no off-site snapshot has ever reached the hub'
+      : `the last off-site snapshot is ${s.age_hours != null ? `${s.age_hours.toFixed(1)}h old` : 'of unknown age'} (threshold ${status.stale_hours}h)`;
+    fireAlert({
+      ruleName: 'kopia-site-stale',
+      severity: 'critical',
+      message: `Off-site backup for '${label}' is not current — ${detail}.`,
+      context: {
+        site: s.site, site_id: s.site_id || null, reason: s.reason,
+        age_hours: s.age_hours, last_snapshot_at: s.last_snapshot_at, count: s.count,
+      },
+      dedupKey: key,
+    });
+  }
+
+  // Resolve previously-stale sites that are healthy again.
+  let actives;
+  try {
+    actives = _prep('activeKopiaSiteStale', `
+      SELECT dedup_key FROM alerts
+      WHERE resolved_at IS NULL AND dedup_key LIKE 'kopia-site-stale:%'
+    `).all();
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return;
+    throw err;
+  }
+  for (const a of actives) {
+    if (!staleKeys.has(a.dedup_key)) resolveAlerts(a.dedup_key, 'auto');
+  }
+}
+
 const RULES = [
   { name: 'sage-down', fn: ruleSageDown },
   { name: 'backup-verify-failed', fn: ruleBackupVerifyFailed },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
+  { name: 'kopia-site-stale', fn: ruleKopiaSiteStale },
   // Security signals — brute-force, flood, scanner detection. Rule
   // owner lives next to the metric collection in src/lib/securitySignals.js
   // so adding a new threshold is one file edit.
