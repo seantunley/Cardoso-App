@@ -197,7 +197,25 @@ export async function runLocalBackup() {
 
     // better-sqlite3 async backup — safe with live writes
     await db.backup(destPath);
-    console.log(`[backup] Saved to ${destPath}`);
+
+    // Sanity-check the artifact actually landed. db.backup() resolving is
+    // not proof a usable file exists — a disk-full / AV-quarantine / perms
+    // edge can leave a missing or 0-byte file. Treat either as a HARD
+    // failure so the run goes red instead of logging "Saved" for nothing.
+    // (This is part of the same fix as the rethrow below: the old code
+    // swallowed every error here, which is how a 12-day backup outage still
+    // reported green.)
+    const { statSync: statBackup } = await import('fs');
+    let backupSize = 0;
+    try {
+      backupSize = statBackup(destPath).size;
+    } catch (statErr) {
+      throw new Error(`backup file missing after db.backup(): ${statErr.message}`);
+    }
+    if (!(backupSize > 0)) {
+      throw new Error(`backup file is ${backupSize} bytes after db.backup() — unusable`);
+    }
+    console.log(`[backup] Saved to ${destPath} (${backupSize} bytes)`);
 
     // BAT preview snapshot. The .db backup above only restores OCR text
     // (extracted_invoice, status, etc.) — the actual JPEG previews live
@@ -302,11 +320,32 @@ export async function runLocalBackup() {
       const siblingPreviews = path.join(backupDir, f.name.replace(/\.db$/, '.previews'));
       try { rmSync(siblingPreviews, { recursive: true, force: true }); } catch (e) { console.warn('[scheduler.backup.prune_previews]', { siblingPreviews }, e.message); }
     });
-    if (files.length > keep) {
-      console.log(`[backup] Pruned ${files.length - keep} old backup(s) and sibling preview snapshots, keeping ${keep}`);
+    const prunedCount = files.length > keep ? files.length - keep : 0;
+    if (prunedCount > 0) {
+      console.log(`[backup] Pruned ${prunedCount} old backup(s) and sibling preview snapshots, keeping ${keep}`);
     }
+
+    // Return a summary so recordJob attaches it as the run's context — the
+    // Job Runs panel and backup health can read "what was made" without a
+    // log scrape.
+    return {
+      ok: true,
+      file: path.basename(destPath),
+      bytes: backupSize,
+      previews_linked: linkedCount,
+      previews_skipped: skippedCount,
+      pruned: prunedCount,
+      kept: keep,
+    };
   } catch (err) {
     console.error('[backup] Failed:', err.message);
+    try { logError('backup.local', err, { dbPath }); }
+    catch (logErr) { console.error('[backup] logError failed (local):', logErr.message, '— original:', err.message); }
+    // Rethrow so recordJob persists this run as 'failed' (it was previously
+    // swallowed here, which is exactly why a 12-day backup outage still
+    // reported green — the job ledger never saw a failure). track() mirrors
+    // the throw to the System Log; node-cron tolerates the rejected promise.
+    throw err;
   }
 }
 

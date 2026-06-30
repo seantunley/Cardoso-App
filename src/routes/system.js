@@ -763,13 +763,37 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         activeAlerts = 0;
       }
 
+      // Backup health — computed at REQUEST time from the backup files on
+      // disk, deliberately NOT from the in-process scheduler. The scheduler
+      // writes the backup-verify job_runs rows; when it dies (event-loop
+      // freeze / un-rearmed restart) those rows freeze on their last green
+      // value and the dashboard would otherwise keep reporting "all good"
+      // through a real outage (the June 2026 incident). Reading the artifacts
+      // here means a frozen scheduler can't hide a missing/stale backup, since
+      // this code runs in the Express handler whenever the operator's browser
+      // polls. Site installs only — the hub has no local backups and monitors
+      // sites via the HubBackups page.
+      let backup = null;
+      if (process.env.HUB_MODE !== 'true') {
+        try {
+          const { computeBackupHealth } = await import('../lib/backupHealth.js');
+          backup = computeBackupHealth();
+        } catch (e) {
+          // A failure to even compute health is itself worth surfacing — never
+          // let it silently fall through as "no backup info" (which reads as OK).
+          backup = { status: 'critical', reason: 'health_error', message: `Could not compute backup health: ${e.message}` };
+        }
+      }
+
       // Roll up an overall status. Critical wins over warn wins over ok.
       const anyStale = sources.some((s) => s.stale);
       const sageDown = sage.ok === false;
+      const backupCritical = backup?.status === 'critical';
+      const backupWarn = backup?.status === 'warn';
       let status = 'ok';
-      if ((sageDown && sage.downForMinutes > 5) || criticalAlerts > 0) {
+      if ((sageDown && sage.downForMinutes > 5) || criticalAlerts > 0 || backupCritical) {
         status = 'critical';
-      } else if (sageDown || anyStale || jobFailures24h > 0 || errors24h > 0 || activeAlerts > 0) {
+      } else if (sageDown || anyStale || jobFailures24h > 0 || errors24h > 0 || activeAlerts > 0 || backupWarn) {
         status = 'warn';
       }
 
@@ -784,6 +808,7 @@ export function createSystemRouter({ requireAuth, requireAdmin }) {
         jobFailures24h,
         activeAlerts,
         criticalAlerts,
+        backup,
       });
     } catch (err) {
       console.error('[system.sage-health] failed:', err.message);

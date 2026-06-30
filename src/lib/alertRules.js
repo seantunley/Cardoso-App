@@ -15,6 +15,7 @@ import db from '../db/index.js';
 import { fireAlert, resolveAlerts } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
+import { computeBackupHealth } from './backupHealth.js';
 
 // Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
 // the rule loop (evaluateAllRules, runs every minute) doesn't re-allocate
@@ -103,6 +104,80 @@ async function ruleBackupVerifyFailed() {
     });
   } else if (row.status === 'succeeded') {
     resolveAlerts('backup-verify-failed', 'auto');
+  }
+}
+
+// ── Rule: backup artifact missing / stale (filesystem-based) ─────────────
+//
+// ruleBackupVerifyFailed above reads job_runs — which is written by the SAME
+// in-process scheduler that creates the backups. The June 2026 incident showed
+// the failure mode that misses: when the scheduler froze, backup creation AND
+// the backup-verify job stopped together, so the last backup-verify row stayed
+// 'succeeded' and NO job_runs-based rule could ever notice the 12-day outage.
+//
+// This rule closes that blind spot by reading the actual backup FILES off disk
+// (via computeBackupHealth) instead of the job ledger. It fires on the
+// freshness/existence failure modes a frozen ledger can't reveal:
+//   - no_backups            (none on disk at all)
+//   - stale / stale_critical (newest file older than the daily threshold)
+//   - latest_empty          (newest file is 0 bytes)
+//   - backup_dir_unreadable (perms / disk problem)
+//   - health_error          (the check itself blew up)
+// Integrity-verification failures stay owned by ruleBackupVerifyFailed so the
+// two don't double-alert on the same condition.
+//
+// NOTE: like every rule, this still runs inside the scheduler's once-a-minute
+// evaluateAllRules() loop — so a TOTALLY dead event loop won't fire it either.
+// The cron-independent guarantee lives in the request-time dashboard path
+// (computeBackupHealth() called from GET /api/system/sage-health). This rule is
+// the second layer: it catches "scheduler alive but backups not landing" (disk
+// full, backup throwing, dir deleted) truthfully, because it trusts the disk.
+const BACKUP_ARTIFACT_REASONS = new Set([
+  'no_backups',
+  'stale',
+  'stale_critical',
+  'latest_empty',
+  'backup_dir_unreadable',
+  'health_error',
+]);
+
+async function ruleBackupArtifactStale() {
+  // Hub installs have no local backup job; they monitor sites via HubBackups.
+  if (process.env.HUB_MODE === 'true') return;
+
+  let health;
+  try {
+    health = computeBackupHealth();
+  } catch (err) {
+    // A thrown health check shouldn't silence the alert — surface it loudly.
+    fireAlert({
+      ruleName: 'backup-artifact-stale',
+      severity: 'critical',
+      message: `Backup health check itself failed: ${err.message}`,
+      context: { error: err.message },
+      dedupKey: 'backup-artifact-stale',
+    });
+    return;
+  }
+
+  if (BACKUP_ARTIFACT_REASONS.has(health.reason)) {
+    fireAlert({
+      ruleName: 'backup-artifact-stale',
+      severity: 'critical',
+      message: health.message,
+      context: {
+        reason: health.reason,
+        last_backup_at: health.last_backup_at,
+        age_hours: health.age_hours,
+        file: health.file,
+        total_backups: health.total_backups,
+      },
+      dedupKey: 'backup-artifact-stale',
+    });
+  } else {
+    // ok, warn (unverified), or verify_failed (owned by the other rule) →
+    // the artifact itself is present and fresh, so clear this alert.
+    resolveAlerts('backup-artifact-stale', 'auto');
   }
 }
 
@@ -246,6 +321,7 @@ async function ruleNightlySyncStale() {
 const RULES = [
   { name: 'sage-down', fn: ruleSageDown },
   { name: 'backup-verify-failed', fn: ruleBackupVerifyFailed },
+  { name: 'backup-artifact-stale', fn: ruleBackupArtifactStale },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
   // Security signals — brute-force, flood, scanner detection. Rule

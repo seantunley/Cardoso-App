@@ -136,6 +136,20 @@ export default function SageHealthPanel() {
               title="Background job failures in the last 24 hours (syncs, backups, archives). Click for detail."
             />
 
+            {/* Backup health — read live from the backup files on disk, so a
+                frozen scheduler can't mask a missing/stale backup. Only present
+                on site installs (the hub omits it). */}
+            {data?.backup ? (
+              <Chip
+                tone={data.backup.status === "critical" ? "critical" : data.backup.status === "warn" ? "warn" : "ok"}
+                label="Backup"
+                sub={data.backup.age_hours != null ? humanizeHours(data.backup.age_hours) : "none"}
+                active={openKey === "backup"}
+                onClick={() => toggle("backup")}
+                title="Most recent local database backup, checked live on disk (not via the scheduler). Red if missing, stale, empty, or its integrity verification failed."
+              />
+            ) : null}
+
             {/* Active alerts */}
             <Chip
               tone={data?.criticalAlerts > 0 ? "critical" : data?.activeAlerts > 0 ? "warn" : "ok"}
@@ -197,6 +211,43 @@ export default function SageHealthPanel() {
                     ? `${data.jobFailures24h} background job failure(s) in the last 24 hours — see Operations → Job Runs.`
                     : "No background job failures in the last 24 hours."}
                 </p>
+              )}
+              {openKey === "backup" && data.backup && (
+                <div className="space-y-1 text-muted-foreground">
+                  <p
+                    className={
+                      data.backup.status === "critical"
+                        ? "text-red-600 dark:text-red-400"
+                        : data.backup.status === "warn"
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-foreground"
+                    }
+                  >
+                    {data.backup.message}
+                  </p>
+                  {data.backup.last_backup_at && (
+                    <p>
+                      Latest: <span className="text-foreground">{data.backup.file}</span> ({humanizeHours(data.backup.age_hours)})
+                    </p>
+                  )}
+                  {data.backup.total_backups > 0 && (
+                    <p>
+                      {data.backup.total_backups} backup{data.backup.total_backups === 1 ? "" : "s"} on disk
+                      {typeof data.backup.total_bytes === "number"
+                        ? ` · ${(data.backup.total_bytes / 1e9).toFixed(2)} GB total`
+                        : ""}
+                    </p>
+                  )}
+                  {data.backup.verify?.status && (
+                    <p>
+                      Last verification: <span className="text-foreground">{data.backup.verify.status}</span>
+                      {data.backup.verify.age_hours != null ? ` (${humanizeHours(data.backup.verify.age_hours)})` : ""}
+                      {data.backup.verify.status === "failed" && data.backup.verify.error ? (
+                        <span className="text-red-600 dark:text-red-400"> — {data.backup.verify.error}</span>
+                      ) : null}
+                    </p>
+                  )}
+                </div>
               )}
               {openKey === "alerts" && (
                 <p className="text-muted-foreground">
