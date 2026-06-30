@@ -19,6 +19,11 @@
 #   .\kopia-agent-setup.ps1 -HubUrl https://hub.tail1234.ts.net:51515 `
 #       -CertFingerprint a1b2c3... -SiteName Ermelo -ServerPassword '<secret>'
 
+# Passwords are plaintext String by necessity: the kopia CLI (`--password`) and
+# Register-ScheduledTask (`-Password`) both take plaintext, and this is a manual
+# one-time operator script. Suppress the analyzer's SecureString preference.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
 param(
   [Parameter(Mandatory = $true)][string]$HubUrl,           # https://<hub>:51515
   [Parameter(Mandatory = $true)][string]$CertFingerprint,  # SHA256 from `kopia server start`
@@ -28,7 +33,8 @@ param(
   [string]$AppDir   = 'C:\Cardoso Customer App',
   [string]$KopiaExe = 'C:\Cardoso Customer App\kopia\kopia.exe',
   [string]$SnapshotTime = '02:30',
-  [string]$TaskUser = 'SYSTEM'
+  [string]$TaskUser = 'SYSTEM',
+  [string]$TaskUserPassword   # required only when TaskUser is a regular (non-service) account
 )
 
 $ErrorActionPreference = 'Stop'
@@ -74,13 +80,31 @@ $snapScript = Join-Path $AppDir 'scripts\kopia-snapshot.ps1'
 if (-not (Test-Path $snapScript)) { throw "snapshot script missing at $snapScript" }
 
 $arg = "-NonInteractive -ExecutionPolicy Bypass -File `"$snapScript`" -AppDir `"$AppDir`" -KopiaExe `"$KopiaExe`""
-$action    = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
-$trigger   = New-ScheduledTaskTrigger -Daily -At $SnapshotTime
-$principal = New-ScheduledTaskPrincipal -UserId $TaskUser -RunLevel Highest -LogonType ServiceAccount
-$settings  = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+$action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
+$trigger  = New-ScheduledTaskTrigger -Daily -At $SnapshotTime
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 4)
 
-Register-ScheduledTask -TaskName 'CardosoKopiaAgent' -Action $action -Trigger $trigger `
-  -Principal $principal -Settings $settings -Force | Out-Null
+# Logon type depends on the account. `ServiceAccount` is only valid for the
+# built-in service accounts (SYSTEM / LOCAL SERVICE / NETWORK SERVICE). For a
+# regular local/domain account the task must be registered with a password
+# (Password logon) or it fails to register / can't run — and then the kopia
+# connection cached for that account is never used.
+$builtin = @('SYSTEM', 'LOCALSYSTEM', 'NT AUTHORITY\SYSTEM',
+             'LOCAL SERVICE', 'NT AUTHORITY\LOCAL SERVICE',
+             'NETWORK SERVICE', 'NT AUTHORITY\NETWORK SERVICE')
+$isBuiltin = $builtin -contains $TaskUser.ToUpperInvariant()
+
+if ($isBuiltin) {
+  $principal = New-ScheduledTaskPrincipal -UserId $TaskUser -RunLevel Highest -LogonType ServiceAccount
+  Register-ScheduledTask -TaskName 'CardosoKopiaAgent' -Action $action -Trigger $trigger `
+    -Principal $principal -Settings $settings -Force | Out-Null
+} else {
+  if (-not $TaskUserPassword) {
+    throw "TaskUser '$TaskUser' is not a built-in service account. Pass -TaskUserPassword so the task can run as that account (and use the kopia connection cached in its profile). IMPORTANT: run THIS script as $TaskUser too, so the connection from step 2 is created in that account's profile."
+  }
+  Register-ScheduledTask -TaskName 'CardosoKopiaAgent' -Action $action -Trigger $trigger `
+    -Settings $settings -User $TaskUser -Password $TaskUserPassword -RunLevel Highest -Force | Out-Null
+}
 Write-Host "Registered Scheduled Task 'CardosoKopiaAgent' (daily $SnapshotTime as $TaskUser)"
 
 Write-Host ""
