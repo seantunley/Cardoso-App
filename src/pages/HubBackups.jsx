@@ -5,7 +5,7 @@ import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Database, RefreshCw, Download, CheckCircle2,
-  AlertTriangle, XCircle, Clock, CloudOff, Power, CloudDownload, ShieldCheck, Upload,
+  AlertTriangle, XCircle, Clock, CloudOff, Power, CloudDownload, ShieldCheck, Upload, Cloud,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -71,6 +71,19 @@ const INTEGRITY_META = {
   corrupt: { label: "Corrupt", cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
 };
 
+// Off-site (Kopia) per-site status. The hub reads its own Kopia repo and
+// reports each site's newest snapshot freshness — see docs/kopia-backups.md.
+const KOPIA_STATUS_META = {
+  ok:       { label: "Off-site OK",   icon: Cloud,    cls: "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400" },
+  critical: { label: "Off-site Stale", icon: CloudOff, cls: "bg-red-500/10 border border-red-500/30 text-red-400" },
+};
+function kopiaLabel(k) {
+  if (!k) return "Off-site —";
+  if (k.status === "ok") return "Off-site OK";
+  if (k.reason === "never") return "Off-site None";
+  return "Off-site Stale";
+}
+
 async function fetchBackupSettings() {
   const res = await fetch("/api/hub/backup-settings", { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -85,6 +98,12 @@ async function fetchBackupStatus() {
 
 async function fetchHubBackupStatus() {
   const res = await fetch("/api/hub/hub-backup-status", { credentials: "include" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchKopiaStatus() {
+  const res = await fetch("/api/hub/kopia-status", { credentials: "include" });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -109,11 +128,13 @@ function Stat({ label, value, sub }) {
 // site cards rendered. Same merge-loss class as the SettingsPanel
 // compact-state issue fixed in the same commit, and the v62 /
 // auditlog / backup.js / SiteCard chain from earlier this week.
-function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, downloadingConfig, onRestore, view = 'app' }) {
+function SiteCard({ site, hubData, kopia, kopiaEnabled, onDownload, downloading, onDownloadConfig, downloadingConfig, onRestore, view = 'app' }) {
   const meta = STATUS_META[site.status] || STATUS_META.unknown;
   const Icon = meta.icon;
   const lb = site.last_backup;
   const integrityMeta = hubData?.integrity ? INTEGRITY_META[hubData.integrity] : null;
+  const kopiaMeta = kopia ? (KOPIA_STATUS_META[kopia.status] || KOPIA_STATUS_META.critical) : null;
+  const KopiaIcon = kopiaMeta?.icon || Cloud;
   const sqlHealth = site.sql_backup?.health || { status: "unavailable", last_success_at: null };
   const sqlMeta = SQL_STATUS_META[sqlHealth.status] || SQL_STATUS_META.unavailable;
   const SqlIcon = sqlMeta.icon;
@@ -174,6 +195,22 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 <TooltipContent>{integrityMeta.label === "OK" ? "Hub backup copy is intact" : "Hub backup copy may be corrupt — re-pull recommended"}</TooltipContent>
               </Tooltip>
             )}
+            {kopiaEnabled && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold cursor-default ${kopiaMeta?.cls || "bg-slate-500/10 border border-slate-500/30 text-slate-400"}`}>
+                    <KopiaIcon className="h-3.5 w-3.5" />
+                    {kopiaLabel(kopia)}
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{
+                  !kopia ? "No off-site (Kopia) snapshot info for this site yet" :
+                  kopia.status === "ok" ? `Off-site backup current — last snapshot ${fmtRelative(kopia.last_snapshot_at)} (${kopia.count ?? 0} on the hub repo)` :
+                  kopia.reason === "never" ? "No off-site snapshot has ever reached the hub for this site" :
+                  `Off-site backup is stale — last snapshot ${fmtRelative(kopia.last_snapshot_at)}`
+                }</TooltipContent>
+              </Tooltip>
+            )}
           </div>
         </div>
 
@@ -215,6 +252,8 @@ function SiteCard({ site, hubData, onDownload, downloading, onDownloadConfig, do
                 <Stat label="On Hub" value={hubData?.hub_backup_count ?? "0"} sub={hubData?.hub_last_backup ? fmtRelative(hubData.hub_last_backup) : ""} />
                 <Stat label="Hub Latest" value={fmtBytes(hubData?.hub_last_size)} />
                 <Stat label="Hub Time" value={hubData?.hub_last_backup ? fmtDate(hubData.hub_last_backup) : "—"} />
+                {kopiaEnabled && <Stat label="Off-site Snaps" value={kopia?.count ?? "0"} />}
+                {kopiaEnabled && <Stat label="Off-site Latest" value={kopia?.last_snapshot_at ? fmtRelative(kopia.last_snapshot_at) : "Never"} sub={kopia?.last_snapshot_at ? fmtDate(kopia.last_snapshot_at) : ""} />}
               </div>
 
               <div className="mt-4 flex gap-2 border-t border-border/50 pt-4 flex-wrap">
@@ -458,6 +497,15 @@ export default function HubBackups() {
     refetchInterval: 60_000,
   });
 
+  // Off-site (Kopia) status. Returns { enabled:false } when the feature is off,
+  // in which case the off-site chip/stats stay hidden. Errors are non-fatal —
+  // the page still renders pull + SQL status without the off-site column.
+  const { data: kopiaData } = useQuery({
+    queryKey: ["hub-kopia-status"],
+    queryFn: fetchKopiaStatus,
+    refetchInterval: 60_000,
+  });
+
   const handlePullNow = useCallback(async () => {
     setPullingNow(true);
     try {
@@ -509,6 +557,11 @@ export default function HubBackups() {
   const hubBackupMap = useMemo(
     () => Object.fromEntries((hubBackupData?.sites || []).map((s) => [s.site_id, s])),
     [hubBackupData?.sites],
+  );
+  const kopiaEnabled = !!kopiaData?.enabled;
+  const kopiaMap = useMemo(
+    () => Object.fromEntries((kopiaData?.sites || []).filter((s) => s.site_id).map((s) => [s.site_id, s])),
+    [kopiaData?.sites],
   );
 
   const handleDownload = useCallback(async (site) => {
@@ -647,6 +700,8 @@ export default function HubBackups() {
                           key={site.site_id}
                           site={site}
                           hubData={hubBackupMap[site.site_id]}
+                          kopia={kopiaMap[site.site_id]}
+                          kopiaEnabled={kopiaEnabled}
                           onDownload={handleDownload}
                           downloading={downloading}
                           onDownloadConfig={handleDownloadConfig}
@@ -664,6 +719,8 @@ export default function HubBackups() {
                           key={site.site_id}
                           site={site}
                           hubData={hubBackupMap[site.site_id]}
+                          kopia={kopiaMap[site.site_id]}
+                          kopiaEnabled={kopiaEnabled}
                           onDownload={handleDownload}
                           downloading={downloading}
                           onDownloadConfig={handleDownloadConfig}
