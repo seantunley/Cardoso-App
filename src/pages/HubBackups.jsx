@@ -655,6 +655,20 @@ export default function HubBackups() {
           </div>
         </div>
 
+        {/* Off-site (Kopia) repository globally unreachable — surface the
+            failure the endpoint already detected, instead of letting every
+            site render a grey "Off-site —" chip that reads as "no data". */}
+        {kopiaData?.enabled && kopiaData?.error && (
+          <div className="mb-6 flex items-start gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            <CloudOff className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <div className="font-semibold">Off-site (Kopia) backups are not reachable</div>
+              <div className="mt-0.5 text-xs text-red-300/80">{kopiaData.error}</div>
+              <div className="mt-0.5 text-xs text-red-300/60">Per-site off-site status is unavailable until the hub Kopia repository/binary is reachable again.</div>
+            </div>
+          </div>
+        )}
+
         {isLoading && (
           <div className="flex items-center gap-3 text-slate-400 py-12 justify-center">
             <RefreshCw className="w-5 h-5 animate-spin" />
