@@ -549,6 +549,65 @@ function nightlyWithRetry(name, fn) {
   return () => { activeNightlyLadders.add(name); attempt(0); };
 }
 
+// ── Local backup retry ladder + catch-up ─────────────────────────────────
+//
+// The daily 02:00 local backup used to be a single fire-and-forget cron: a
+// transient failure (disk busy, AV lock, brief I/O hiccup) waited a FULL DAY
+// for the next attempt — and you'd only discover the stale backup the moment
+// you needed to restore. Now a failed attempt retries NIGHTLY_RETRIES more
+// times, NIGHTLY_RETRY_DELAY_MS apart, and runBackupCatchUp re-runs it on the
+// DATA signal (newest backup file age) so a fully-missed night self-heals
+// within the day. Reuses activeNightlyLadders so a catch-up never starts a
+// second ladder over a run that's still retrying.
+function backupWithRetry() {
+  const name = 'local-backup';
+  const attempt = (n) => {
+    const scheduleRetry = (why) => {
+      if (n >= NIGHTLY_RETRIES) {
+        activeNightlyLadders.delete(name);
+        console.error(`[local-backup] still failing after ${n + 1} attempts (${why}) — the daytime catch-up will keep retrying; backup-artifact-stale flags it once past 26h.`);
+        return;
+      }
+      console.warn(`[local-backup] attempt ${n + 1} failed (${why}) — retrying in ${NIGHTLY_RETRY_DELAY_MS / 60_000} minutes (retry ${n + 1} of ${NIGHTLY_RETRIES}).`);
+      const t = setTimeout(() => attempt(n + 1), NIGHTLY_RETRY_DELAY_MS);
+      if (typeof t.unref === 'function') t.unref();
+    };
+    // runLocalBackup resolves with a summary on success and THROWS on failure,
+    // so recordJob's rethrow (the .catch) is the failure signal — no successCheck.
+    recordJob(name, withFreezeTracking(name, runLocalBackup), (r) => r)
+      .then(() => {
+        activeNightlyLadders.delete(name);
+        if (n > 0) console.log(`[local-backup] retry ${n} of ${NIGHTLY_RETRIES} succeeded — a fresh backup exists again.`);
+      })
+      .catch((err) => {
+        console.error('[local-backup] failed:', err.message);
+        try { logError('scheduler.local-backup', err); } catch {} // eslint-disable-line no-empty -- already recorded in job_runs by recordJob
+        scheduleRetry(err.message);
+      });
+  };
+  return () => { activeNightlyLadders.add(name); attempt(0); };
+}
+
+// Re-run the local backup when the newest backup FILE is stale/missing — the
+// data-age signal (computeBackupHealth), not the job ledger. So a failed/missed
+// 02:00 run heals within the day instead of waiting for tomorrow.
+async function runBackupCatchUp(trigger) {
+  if (process.env.HUB_MODE === 'true') return;
+  if (activeNightlyLadders.has('local-backup')) return; // a ladder is already in flight
+  let health;
+  try {
+    const { computeBackupHealth } = await import('./lib/backupHealth.js');
+    health = computeBackupHealth();
+  } catch (err) {
+    console.error(`[${trigger}] backup catch-up could not read health: ${err.message}`);
+    return;
+  }
+  const STALE_REASONS = new Set(['no_backups', 'stale', 'stale_critical', 'latest_empty', 'backup_dir_unreadable']);
+  if (!STALE_REASONS.has(health.reason)) return; // fresh enough — nothing to do
+  console.warn(`[${trigger}] newest local backup is ${health.reason} (age=${health.age_hours}h) — running local-backup now.`);
+  backupWithRetry()();
+}
+
 export function startSchedulers() {
   {
     const t = cron.schedule('0,30 6-16 * * 1-5', track('scheduled-sync', runScheduledSyncCycle));
@@ -719,9 +778,24 @@ export function startSchedulers() {
 
   if (process.env.HUB_MODE !== 'true') {
     {
-      const t = cron.schedule('0 2 * * *', track('local-backup', runLocalBackup));
+      // 02:00 daily — with a retry ladder (see backupWithRetry) so a transient
+      // failure self-heals in ~1h instead of waiting a day.
+      const t = cron.schedule('0 2 * * *', backupWithRetry());
       cronTasks.push(t);
-      registerJob({ name: 'local-backup', type: 'cron', cronExpression: '0 2 * * *', taskRef: t, mode: 'site', description: 'Daily SQLite backup' });
+      registerJob({ name: 'local-backup', type: 'cron', cronExpression: '0 2 * * *', taskRef: t, mode: 'site', description: 'Daily SQLite backup (with retry ladder)' });
+    }
+    // Backup catch-up — boot (130s) + hourly daytime — re-runs the backup if the
+    // newest backup file is stale/missing, so a failed/missed 02:00 run heals
+    // within the day. Offset from the Sage daytime catch-up (:00) to :15.
+    {
+      const t = setTimeout(() => runBackupCatchUp('backup-boot-catch-up'), 130_000);
+      if (typeof t.unref === 'function') t.unref();
+      registerJob({ name: 'backup-boot-catch-up', type: 'one-shot', delayMs: 130_000, mode: 'site', description: 'On boot, run the local backup if the newest backup file is stale/missing' });
+    }
+    {
+      const t = cron.schedule('15 5-23 * * *', () => runBackupCatchUp('backup-daytime-catch-up'));
+      cronTasks.push(t);
+      registerJob({ name: 'backup-daytime-catch-up', type: 'cron', cronExpression: '15 5-23 * * *', taskRef: t, mode: 'site', description: 'Hourly (05:15–23:15) re-run of the local backup if the newest backup file is stale/missing' });
     }
     // Daily backup verification at 03:30 — 90 min after the backup, well
     // before the 06:30 morning sync window. Catches corrupt/truncated/stale
