@@ -214,8 +214,19 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         if (!backupResponse.ok) return { ...base, error: `HTTP ${backupResponse.status}`, status: 'error' };
         const data = await backupResponse.json();
 
+        // Prefer the site's artifact-based health verdict when present (sites
+        // running the trustworthy-health build return `health`). It catches a
+        // fresh-but-0-byte backup and a fresh-but-verify_failed backup, which
+        // age-of-newest-file alone reports as 'ok'. Map onto the hub UI's
+        // existing status vocabulary; fall back to age for older sites that
+        // don't yet return `health`. (`data.health` flows through via ...data.)
         let status = 'ok';
-        if (!data.last_backup) {
+        if (data.health && data.health.status) {
+          if (data.health.reason === 'no_backups') status = 'never';
+          else if (data.health.status === 'critical') status = 'stale';
+          else if (data.health.status === 'warn') status = 'warning';
+          else status = 'ok';
+        } else if (!data.last_backup) {
           status = 'never';
         } else {
           const hoursAgo = (Date.now() - new Date(data.last_backup.mtime).getTime()) / 3600000;
