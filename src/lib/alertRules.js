@@ -275,8 +275,13 @@ async function ruleKopiaSiteStale() {
 
   let knownSites = [];
   try {
+    // Query hub_sites directly for slug (needed to match the Kopia host) and to
+    // EXCLUDE retired sites (in_env=0). A site removed from HUB_SITES keeps its
+    // row until an admin forgets it; feeding those in would keep a permanent
+    // kopia-site-stale alert for a branch that intentionally no longer backs up.
     const { getHubStorageRuntime } = await import('../hub/storage/runtime.js');
-    knownSites = getHubStorageRuntime().repository.listSitesForBackup() || [];
+    const { sqliteDb } = getHubStorageRuntime();
+    knownSites = sqliteDb.prepare('SELECT id, slug, name FROM hub_sites WHERE COALESCE(in_env, 1) = 1').all();
   } catch (err) {
     console.error(`[alertRules] kopia: could not list hub sites: ${err.message}`);
   }

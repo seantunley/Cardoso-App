@@ -6,6 +6,7 @@ import {
   summarizeKopiaSnapshots,
   mergeWithKnownSites,
   getKopiaStaleHours,
+  normalizeKopiaHost,
 } from '../src/services/hub/kopiaStatus.js';
 
 const HOUR = 3_600_000;
@@ -53,12 +54,22 @@ describe('summarizeKopiaSnapshots', () => {
   });
 });
 
+describe('normalizeKopiaHost', () => {
+  it('lowercases + sanitises, preferring slug then id', () => {
+    expect(normalizeKopiaHost({ id: 'tok1', slug: 'ermelo' })).toBe('ermelo');
+    expect(normalizeKopiaHost({ id: 'Tok-1' })).toBe('tok-1');
+    expect(normalizeKopiaHost({ id: 'x', slug: 'Cardoso Site' })).toBe('cardoso-site');
+  });
+});
+
 describe('mergeWithKnownSites', () => {
-  it('marks a known site that has NEVER snapshotted as critical/never', () => {
+  it('marks a known site that has NEVER snapshotted as critical/never (matched by normalized host)', () => {
     const now = Date.now();
-    const summary = summarizeKopiaSnapshots([snap('Ermelo', 2, now)], { now, staleHours: 26 });
+    // The agent's --override-hostname is the normalized slug; snapshots arrive
+    // under that host, and the merge matches knownSites by normalizeKopiaHost.
+    const summary = summarizeKopiaSnapshots([snap('ermelo', 2, now)], { now, staleHours: 26 });
     const merged = mergeWithKnownSites(
-      [{ id: 'tok1', name: 'Ermelo' }, { id: 'tok2', name: 'Newcastle' }],
+      [{ id: 'tok1', slug: 'ermelo', name: 'Ermelo' }, { id: 'tok2', slug: 'newcastle', name: 'Newcastle' }],
       summary,
     );
     const ncl = merged.find((r) => r.site_name === 'Newcastle');
@@ -72,9 +83,9 @@ describe('mergeWithKnownSites', () => {
 
   it('surfaces repo snapshots for an unknown host rather than hiding them', () => {
     const now = Date.now();
-    const summary = summarizeKopiaSnapshots([snap('Mystery', 2, now)], { now, staleHours: 26 });
-    const merged = mergeWithKnownSites([{ id: 'tok1', name: 'Ermelo' }], summary);
-    expect(merged.find((r) => r.site === 'Mystery')).toBeDefined();
+    const summary = summarizeKopiaSnapshots([snap('mystery', 2, now)], { now, staleHours: 26 });
+    const merged = mergeWithKnownSites([{ id: 'tok1', slug: 'ermelo', name: 'Ermelo' }], summary);
+    expect(merged.find((r) => r.site === 'mystery')).toBeDefined();
     expect(merged.find((r) => r.site_name === 'Ermelo').reason).toBe('never');
   });
 });

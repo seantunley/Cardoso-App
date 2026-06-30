@@ -325,7 +325,9 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
   router.get('/api/hub/kopia-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
     try {
       let knownSites = [];
-      try { knownSites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
+      // slug for the Kopia host match; exclude retired (in_env=0) sites so a
+      // forgotten branch isn't shown red forever.
+      try { knownSites = db.prepare('SELECT id, name, slug FROM hub_sites WHERE COALESCE(in_env, 1) = 1').all(); } catch { /* table not ready */ }
 
       // Restrict to the user's allowed sites — same rule every other site-keyed
       // handler applies via siteFilterSql. A user with can_access_hub_backups but

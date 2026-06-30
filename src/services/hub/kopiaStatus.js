@@ -82,12 +82,31 @@ export function summarizeKopiaSnapshots(snapshots, { now = Date.now(), staleHour
 }
 
 /**
+ * The Kopia source HOST identity for a site. Kopia's repository server requires
+ * a lowercase `username@hostname`, so a display name like "Cardoso Site" or
+ * "Ermelo" can't be used directly (spaces / uppercase). The agent connects with
+ * `--override-hostname=<this>` and the hub matches snapshots back to sites by
+ * the same value. Prefer slug, then id; lowercase + sanitise.
+ *
+ * @param {{ id?: string, slug?: string }} site
+ * @returns {string}
+ */
+export function normalizeKopiaHost(site) {
+  return String(site?.slug || site?.id || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/**
  * Merge the per-site snapshot summary with the hub's known site list so sites
  * that have NEVER pushed a snapshot show up as critical rather than silently
- * missing. Pure.
+ * missing. Pure. Matches by the normalized Kopia host (slug/id), NOT the display
+ * name — the agent's --override-hostname is that normalized value.
  *
- * @param {Array<{id:string,name?:string}>} knownSites  from hub_sites
- * @param {Array<object>} summary  output of summarizeKopiaSnapshots
+ * @param {Array<{id:string,name?:string,slug?:string}>} knownSites  from hub_sites
+ * @param {Array<object>} summary  output of summarizeKopiaSnapshots (keyed by host)
  * @returns {Array<object>} one row per known site (+ any extra sites in the repo)
  */
 export function mergeWithKnownSites(knownSites, summary) {
@@ -95,14 +114,14 @@ export function mergeWithKnownSites(knownSites, summary) {
   const out = [];
   const seen = new Set();
   for (const ks of knownSites || []) {
-    const key = ks.name || ks.id;
-    seen.add(key);
-    const found = bySite.get(key);
+    const host = normalizeKopiaHost(ks);
+    seen.add(host);
+    const found = bySite.get(host);
     if (found) {
       out.push({ ...found, site_id: ks.id, site_name: ks.name || null });
     } else {
       out.push({
-        site: key, site_id: ks.id, site_name: ks.name || null,
+        site: host, site_id: ks.id, site_name: ks.name || null,
         user: null, count: 0, last_snapshot_at: null, age_hours: null,
         total_bytes: null, status: 'critical', reason: 'never',
       });

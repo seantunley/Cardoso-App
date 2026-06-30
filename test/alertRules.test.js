@@ -56,7 +56,10 @@ vi.mock('../src/services/hub/kopiaStatus.js', () => ({
   isKopiaEnabled: () => _kopiaStatusStub.enabled,
 }));
 vi.mock('../src/hub/storage/runtime.js', () => ({
-  getHubStorageRuntime: () => ({ repository: { listSitesForBackup: () => [] } }),
+  getHubStorageRuntime: () => ({
+    repository: { listSitesForBackup: () => [] },
+    sqliteDb: { prepare: () => ({ all: () => [] }) },
+  }),
 }));
 
 const { evaluateAllRules } = await import('../src/lib/alertRules.js');
