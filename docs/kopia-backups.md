@@ -104,10 +104,11 @@ directly — under WAL it can be captured torn. Instead:
    kopia repository create filesystem --path D:\kopia-repo
    kopia policy set --global --keep-latest=10 --keep-daily=14 --keep-weekly=8 --keep-monthly=12
    ```
-3. **Generate a server TLS cert** and note its fingerprint (sites pin it):
+3. **Generate a server TLS cert** and note its fingerprint (sites pin it).
+   Single line — paths with spaces are quoted (PowerShell splits on the space
+   otherwise; do not use `^`, that's a cmd.exe continuation):
    ```powershell
-   kopia server start --tls-generate-cert --tls-cert-file C:\Cardoso Hub\kopia\server.cert ^
-     --tls-key-file C:\Cardoso Hub\kopia\server.key --address 0.0.0.0:51515
+   kopia server start --tls-generate-cert --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key" --address 0.0.0.0:51515
    # copy the printed SHA256 cert fingerprint — sites need it
    ```
 4. **Add a user per site** (username convention `cardoso@<SiteName>`):
@@ -116,10 +117,7 @@ directly — under WAL it can be captured torn. Instead:
    ```
 5. **Register the server as a service** with the bundled NSSM:
    ```powershell
-   nssm install CardosoKopiaServer "C:\Cardoso Hub\kopia\kopia.exe" ^
-     server start --address 0.0.0.0:51515 ^
-     --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" ^
-     --tls-key-file "C:\Cardoso Hub\kopia\server.key"
+   nssm install CardosoKopiaServer "C:\Cardoso Hub\kopia\kopia.exe" server start --address 0.0.0.0:51515 --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key"
    nssm set CardosoKopiaServer AppEnvironmentExtra KOPIA_PASSWORD=<repo password>
    nssm set CardosoKopiaServer Start SERVICE_AUTO_START
    nssm start CardosoKopiaServer
@@ -141,10 +139,7 @@ config page or `.env`), the site installer:
 1. drops `kopia.exe` and writes the app-root `.kopiaignore` above;
 2. connects to the hub server:
    ```powershell
-   kopia repository connect server --url=https://<hub>:51515 ^
-     --server-cert-fingerprint=<fp> ^
-     --override-username=cardoso --override-hostname=<SiteName> ^
-     --password=<this site's server password>
+   kopia repository connect server --url=https://<hub>:51515 --server-cert-fingerprint=<fp> --override-username=cardoso --override-hostname=<SiteName> --password="<this site's server password>"
    ```
 3. registers a Scheduled Task `CardosoKopiaAgent` (daily ~02:30, after the
    02:00 local backup) running:
@@ -193,8 +188,8 @@ On the hub (or any recovery box with `kopia` + the repo password):
 ```powershell
 $env:KOPIA_PASSWORD="<repo password>"
 kopia repository connect filesystem --path D:\kopia-repo
-kopia snapshot list cardoso@<SiteName>:C:\Cardoso Customer App   # pick a time
-kopia restore <snapshotID> C:\restore                            # full site data tree
+kopia snapshot list "cardoso@<SiteName>:C:\Cardoso Customer App"   # pick a time (quote — path has a space)
+kopia restore <snapshotID> C:\restore                             # full site data tree
 ```
 Then on the site: install the same app version, stop the service, copy the
 restored `database\backups\cardoso-*.db` in as `database\cardoso.db`, restore
