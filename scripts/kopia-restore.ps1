@@ -70,12 +70,18 @@ $target = if ($SnapshotId) {
 }
 if (-not $target) { throw "Snapshot '$SnapshotId' not found for $source" }
 
+# `kopia restore` takes the snapshot ROOT OBJECT id (rootEntry.obj, the `k...`
+# id), NOT the manifest id from `snapshot list`. The manifest id is what we
+# select/display by; the root object is what actually stages the file tree.
+$rootObj = $target.rootEntry.obj
+if (-not $rootObj) { throw "Snapshot $($target.id) has no rootEntry.obj - cannot restore." }
+
 if (-not $Destination) { $Destination = Join-Path 'C:\restore' $SiteName }
 if (-not (Test-Path $Destination)) { New-Item -ItemType Directory -Path $Destination -Force | Out-Null }
 
 Write-Host ""
-Write-Host "Restoring snapshot $($target.id) ($($target.endTime)) -> $Destination" -ForegroundColor Cyan
-& $KopiaExe @cfg restore $target.id "$Destination"
+Write-Host "Restoring snapshot $($target.id) [root $rootObj] ($($target.endTime)) -> $Destination" -ForegroundColor Cyan
+& $KopiaExe @cfg restore $rootObj "$Destination"
 if ($LASTEXITCODE -ne 0) { throw "kopia restore failed ($LASTEXITCODE)" }
 
 Write-Host ""
