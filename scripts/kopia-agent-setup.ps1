@@ -93,7 +93,13 @@ if (-not (Test-Path $snapScript)) { throw "snapshot script missing at $snapScrip
 $arg = "-NonInteractive -ExecutionPolicy Bypass -File `"$snapScript`" -AppDir `"$AppDir`" -KopiaExe `"$KopiaExe`""
 $action   = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arg
 $trigger  = New-ScheduledTaskTrigger -Daily -At $SnapshotTime
-$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd -ExecutionTimeLimit (New-TimeSpan -Hours 4)
+# StartWhenAvailable: run when next available if the machine was off at 02:30.
+# RestartCount/Interval: if a run FAILS (hub unreachable, transient error, or the
+# source-freshness guard tripping while the local backup is still catching up),
+# retry up to 3 times 30 min apart instead of waiting a full day.
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopOnIdleEnd `
+  -ExecutionTimeLimit (New-TimeSpan -Hours 4) `
+  -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 30)
 
 # Logon type depends on the account. `ServiceAccount` is only valid for the
 # built-in service accounts (SYSTEM / LOCAL SERVICE / NETWORK SERVICE). For a
