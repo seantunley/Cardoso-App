@@ -116,4 +116,37 @@ describe('reconcileHubBackupDirs', () => {
     reconcileHubBackupDirs(baseDir, [{ id: 'tok-abc', name: 'Ermelo' }]);
     expect(fs.readFileSync(path.join(baseDir, 'Ermelo-tok-abc', 'dup.db'), 'utf8')).toBe('keep-me');
   });
+
+  // The site-rename orphaning bug: a display-name change moves the canonical
+  // folder; reconcile must migrate the old <oldName>-<id> folder by id suffix.
+  it('migrates an old <oldName>-<id> folder after a site rename', () => {
+    seedDir('Ermelo-tok-abc', ['snap.db']);
+    const r = reconcileHubBackupDirs(baseDir, [{ id: 'tok-abc', name: 'Johannesburg' }]);
+    expect(r.renamed).toBe(1);
+    expect(fs.existsSync(path.join(baseDir, 'Johannesburg-tok-abc', 'snap.db'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'Ermelo-tok-abc'))).toBe(false);
+  });
+
+  it('does not let one site claim another site whose canonical it suffix-matches', () => {
+    // siteA id 'x', siteB id 'a-x'. siteB's canonical 'Foo-a-x' ends with '-x',
+    // but the reserved guard must keep it for siteB, not let siteA grab it.
+    seedDir('Foo-a-x', ['b.db']);
+    const sites = [{ id: 'x', name: 'Aaa' }, { id: 'a-x', name: 'Foo' }];
+    reconcileHubBackupDirs(baseDir, sites, { allSites: sites });
+    // 'Foo-a-x' is siteB's canonical → untouched; siteA created nothing.
+    expect(fs.existsSync(path.join(baseDir, 'Foo-a-x', 'b.db'))).toBe(true);
+    expect(fs.existsSync(path.join(baseDir, 'Aaa-x'))).toBe(false);
+  });
+});
+
+describe('resolveSiteBackupDir — rename window', () => {
+  let baseDir;
+  beforeEach(() => { baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cardoso-resolve2-')); });
+
+  it('finds the old <oldName>-<id> folder before reconcile runs', () => {
+    fs.mkdirSync(path.join(baseDir, 'Ermelo-tok'));
+    // Site was renamed to Johannesburg; canonical folder not created yet.
+    const dir = resolveSiteBackupDir(baseDir, { id: 'tok', name: 'Johannesburg' });
+    expect(dir).toBe(path.join(baseDir, 'Ermelo-tok'));
+  });
 });

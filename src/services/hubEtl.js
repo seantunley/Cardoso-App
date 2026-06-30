@@ -1480,7 +1480,18 @@ async function pullBackupForSite(site) {
     // Folder named by the site's readable name (e.g. "Ermelo"), not the opaque
     // id, so the hub-backups/ tree is legible. The .db filename keeps the id
     // for uniqueness + integrity-record keying.
-    const dir = path.join(process.cwd(), 'database', 'hub-backups', siteBackupDirName(site));
+    //
+    // Reconcile THIS site's folders first (legacy bare-<id>, or an older
+    // <oldName>-<id> after a rename) into the canonical <name>-<id> BEFORE
+    // writing. This must live here, not only in runHubBackupPull, because
+    // POST /api/hub/notify-backup-ready calls pullBackupForSite directly — if
+    // reconcile only ran in the bulk path, a notify-triggered pull would create
+    // the new folder and orphan the legacy snapshots from listing/restore.
+    const hubBackupsBase = path.join(process.cwd(), 'database', 'hub-backups');
+    try {
+      reconcileHubBackupDirs(hubBackupsBase, [site], { allSites: hubRepository.listSitesForBackup() });
+    } catch (e) { console.warn('[HUB BACKUP] per-site reconcile failed:', e.message); }
+    const dir = path.join(hubBackupsBase, siteBackupDirName(site));
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
@@ -1738,11 +1749,9 @@ async function runHubBackupPull() {
     return;
   }
   const sites = hubRepository.listSitesForBackup();
-  // Migrate any legacy token-named folders to the readable name folder before
-  // pulling, so existing backups become identifiable too (idempotent).
-  try {
-    reconcileHubBackupDirs(path.join(process.cwd(), 'database', 'hub-backups'), sites);
-  } catch (e) { console.warn('[HUB BACKUP] folder reconcile pass failed:', e.message); }
+  // Folder reconcile (legacy bare-<id> + post-rename <oldName>-<id> → canonical
+  // <name>-<id>) runs per-site inside pullBackupForSite, so it covers both this
+  // bulk path and the notify-backup-ready path. No separate bulk pass needed.
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   // Bounded concurrency: pull backups in batches of 2
   const CONCURRENCY = 2;

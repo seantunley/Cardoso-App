@@ -46,80 +46,119 @@ export function siteBackupDirName(site) {
 }
 
 /**
+ * Every on-disk folder that belongs to a site: the canonical `<name>-<id>`, the
+ * legacy bare `<id>`, or an older `<oldName>-<id>` left behind by a previous
+ * display name. Matched by the STABLE id suffix so renaming a site (which
+ * changes the readable prefix) does NOT orphan its existing backups.
+ *
+ * `reserved` holds other sites' folder names + ids so that — in the unlikely
+ * case one site's id is a dash-suffix of another's folder — a site can't claim
+ * a folder that is another site's canonical name or exact id.
+ *
+ * @param {string} baseDir
+ * @param {{ id?: string, name?: string, slug?: string }} site
+ * @param {Set<string>} [reserved]
+ * @returns {string[]} matching directory names (not full paths)
+ */
+function existingSiteDirs(baseDir, site, reserved = new Set()) {
+  const safeId = sanitizeId(site?.id);
+  if (!safeId) return [];
+  const canonical = siteBackupDirName(site);
+  let entries;
+  try { entries = fs.readdirSync(baseDir, { withFileTypes: true }); }
+  catch { return []; }
+  return entries
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .filter((n) =>
+      !reserved.has(n) &&
+      (n === canonical || n === safeId || (n.endsWith(`-${safeId}`) && n.length > safeId.length + 1)),
+    );
+}
+
+/**
  * Resolve the ACTUAL on-disk backup folder for a site — the single source of
  * truth every read path (status, snapshot list, restore, DR fetch) must use so
  * reads and writes can never diverge:
- *   - the readable `<name>-<id>` folder if it exists (post-migration / new pulls)
- *   - else the legacy `<id>` folder if it still exists (pre-migration)
- *   - else the readable folder (the path a new pull will create)
+ *   - the canonical `<name>-<id>` folder if it exists (post-migration / new pulls)
+ *   - else any existing folder for this site by stable id suffix (legacy `<id>`,
+ *     or an older `<oldName>-<id>` not yet reconciled after a rename)
+ *   - else the canonical folder (the path a new pull will create)
  *
  * @param {string} baseDir  absolute path to database/hub-backups
  * @param {{ id?: string, name?: string, slug?: string }} site
  * @returns {string} absolute path to the site's backup folder
  */
 export function resolveSiteBackupDir(baseDir, site) {
-  const named = path.join(baseDir, siteBackupDirName(site));
-  if (fs.existsSync(named)) return named;
-  const id = String(site?.id ?? '').trim();
-  if (id) {
-    const legacy = path.join(baseDir, id);
-    if (fs.existsSync(legacy)) return legacy;
-  }
-  return named;
+  const canonical = siteBackupDirName(site);
+  const canonicalDir = path.join(baseDir, canonical);
+  if (fs.existsSync(canonicalDir)) return canonicalDir;
+  const other = existingSiteDirs(baseDir, site).find((n) => n !== canonical);
+  if (other) return path.join(baseDir, other);
+  return canonicalDir;
 }
 
 /**
- * One-time, idempotent migration: rename existing token-named backup folders
- * (database/hub-backups/<site.id>/) to their readable name folder. Best-effort
- * — never throws; logs each action. Safe to call on every pull cycle.
+ * Idempotent migration: bring every folder that belongs to a site under its
+ * current canonical `<name>-<id>`. Handles BOTH the legacy bare-`<id>` folders
+ * AND a rename (older `<oldName>-<id>` → new `<name>-<id>`), matching by the
+ * stable id suffix. Best-effort — never throws; logs each action. Safe to call
+ * on every pull (bulk) and per-site (so the notify-backup-ready path, which
+ * calls pullBackupForSite directly, also migrates).
  *
- *   - target missing            → rename id-dir → name-dir
- *   - target already exists      → move any files from the id-dir into it,
- *                                  then remove the now-empty id-dir
- *   - id-dir missing / id===name → nothing to do
+ *   - canonical missing      → rename the source folder → canonical
+ *   - canonical exists        → move files across (no clobber), drop empty source
  *
  * @param {string} baseDir  absolute path to database/hub-backups
- * @param {Array<{ id: string, name?: string, slug?: string }>} sites
+ * @param {Array<{ id: string, name?: string, slug?: string }>} sites  sites to migrate
+ * @param {{ allSites?: Array }} [opts]  full site list for the cross-site reserved guard
  * @returns {{ renamed: number, merged: number }}
  */
-export function reconcileHubBackupDirs(baseDir, sites) {
+export function reconcileHubBackupDirs(baseDir, sites, { allSites } = {}) {
   let renamed = 0;
   let merged = 0;
-  for (const site of sites || []) {
+  const list = sites || [];
+  const all = allSites || list;
+  for (const site of list) {
     try {
-      const oldName = String(site.id);
-      const newName = siteBackupDirName(site);
-      if (!oldName || newName === oldName) continue;
+      const canonical = siteBackupDirName(site);
+      const canonicalDir = path.join(baseDir, canonical);
 
-      const oldDir = path.join(baseDir, oldName);
-      const newDir = path.join(baseDir, newName);
-      if (!fs.existsSync(oldDir)) continue;
-
-      if (!fs.existsSync(newDir)) {
-        fs.renameSync(oldDir, newDir);
-        renamed += 1;
-        console.log(`[HUB BACKUP] Renamed backup folder ${oldName} → ${newName} (${site.name || 'unnamed'})`);
-        continue;
+      // Other sites' canonical names + ids — never migrate one of those into
+      // this site's folder (guards the dash-suffix-collision edge case).
+      const reserved = new Set();
+      for (const o of all) {
+        if (o === site || (o?.id != null && o.id === site?.id)) continue;
+        reserved.add(siteBackupDirName(o));
+        reserved.add(sanitizeId(o?.id));
       }
 
-      // Target exists already — move files across, then drop the empty old dir.
-      for (const f of fs.readdirSync(oldDir)) {
-        const from = path.join(oldDir, f);
-        const to = path.join(newDir, f);
+      const sources = existingSiteDirs(baseDir, site, reserved).filter((n) => n !== canonical);
+      for (const src of sources) {
+        const oldDir = path.join(baseDir, src);
+        if (!fs.existsSync(canonicalDir)) {
+          fs.renameSync(oldDir, canonicalDir);
+          renamed += 1;
+          console.log(`[HUB BACKUP] Renamed backup folder ${src} -> ${canonical} (${site.name || 'unnamed'})`);
+          continue;
+        }
+        // Canonical exists — move files across, then drop the empty source dir.
+        for (const f of fs.readdirSync(oldDir)) {
+          const to = path.join(canonicalDir, f);
+          try {
+            if (fs.existsSync(to)) continue; // don't clobber an existing backup
+            fs.renameSync(path.join(oldDir, f), to);
+            merged += 1;
+          } catch (e) {
+            console.warn(`[HUB BACKUP] could not merge ${src}/${f} into ${canonical}: ${e.message}`);
+          }
+        }
         try {
-          if (fs.existsSync(to)) continue; // don't clobber an existing backup
-          fs.renameSync(from, to);
-          merged += 1;
+          if (fs.readdirSync(oldDir).length === 0) fs.rmdirSync(oldDir);
         } catch (e) {
-          console.warn(`[HUB BACKUP] could not merge ${oldName}/${f} into ${newName}: ${e.message}`);
+          console.warn(`[HUB BACKUP] could not remove empty folder ${src}: ${e.message}`);
         }
       }
-      try {
-        if (fs.readdirSync(oldDir).length === 0) fs.rmdirSync(oldDir);
-      } catch (e) {
-        console.warn(`[HUB BACKUP] could not remove empty folder ${oldName}: ${e.message}`);
-      }
-      if (merged > 0) console.log(`[HUB BACKUP] Merged backup folder ${oldName} → ${newName} (${site.name || 'unnamed'})`);
     } catch (err) {
       console.warn(`[HUB BACKUP] folder reconcile failed for site ${site?.id}: ${err.message}`);
     }
