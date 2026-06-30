@@ -14,6 +14,7 @@ import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
 import { trackOp } from '../lib/mainThreadWatch.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
+import { siteBackupDirName, reconcileHubBackupDirs } from '../hub/siteBackupDir.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -1367,6 +1368,19 @@ async function syncAllSites() {
 // site, which surfaces it in the operator's toast) can do so.
 async function pullBackupForSite(site) {
   try {
+    // Reconcile THIS site's backup folders FIRST — BEFORE the network fetch.
+    // Earlier this ran only after a 2xx download, so a renamed/offline site
+    // (download fails → early return) never migrated, and because the read
+    // paths resolve canonical → exact legacy <id> only, Hub Backups/DR could
+    // show no snapshots exactly when the renamed site is down. Running it up
+    // front migrates the legacy <id> / older <oldName>-<id> folder to the
+    // canonical <name>-<id> regardless of whether the download below succeeds.
+    // Also covers POST /api/hub/notify-backup-ready, which calls this directly.
+    const hubBackupsBase = path.join(process.cwd(), 'database', 'hub-backups');
+    try {
+      reconcileHubBackupDirs(hubBackupsBase, [site], { allSites: hubRepository.listSitesForBackup() });
+    } catch (e) { console.warn('[HUB BACKUP] per-site reconcile failed:', e.message); }
+
     const controller = new AbortController();
     // 5 min cap — DB snapshots can run several MB over Tailscale; the
     // previous 60 s ceiling routinely killed legitimate transfers.
@@ -1476,7 +1490,11 @@ async function pullBackupForSite(site) {
       } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'http_error_row' }, e.message); }
       return { ok: false, error: friendly };
     }
-    const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+    // Folder named by the site's readable name (e.g. "Ermelo"), not the opaque
+    // id, so the hub-backups/ tree is legible. The .db filename keeps the id
+    // for uniqueness + integrity-record keying. (Reconcile already ran at the
+    // top of this function, before the download.)
+    const dir = path.join(hubBackupsBase, siteBackupDirName(site));
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
@@ -1734,6 +1752,9 @@ async function runHubBackupPull() {
     return;
   }
   const sites = hubRepository.listSitesForBackup();
+  // Folder reconcile (legacy bare-<id> + post-rename <oldName>-<id> → canonical
+  // <name>-<id>) runs per-site inside pullBackupForSite, so it covers both this
+  // bulk path and the notify-backup-ready path. No separate bulk pass needed.
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   // Bounded concurrency: pull backups in batches of 2
   const CONCURRENCY = 2;
