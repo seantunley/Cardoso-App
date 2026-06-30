@@ -15,6 +15,7 @@ import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
 import { getHubStorageRuntime } from '../hub/storage/runtime.js';
+import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
 import { logError } from '../lib/errorLog.js';
 import { safeTokenEqual } from '../lib/safeEqual.js';
 import { logAudit } from '../lib/audit.js';
@@ -326,6 +327,40 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     } catch (err) {
       console.error('[hub-backup-status] error:', err.message);
       res.json({ sites: [] });
+    }
+  });
+
+  // GET /api/hub/kopia-status
+  // Off-site (Kopia) backup status per site, read live from the hub's Kopia
+  // repository. Distinct from /hub-backup-status (which reports the .db that
+  // the hub PULLS): this reports what each site's Kopia AGENT has PUSHED.
+  // Read-only and async (kopia is shelled off the main thread).
+  router.get('/api/hub/kopia-status', requireAuth, requirePermission('can_access_hub_backups'), async (req, res) => {
+    try {
+      let knownSites = [];
+      // slug for the Kopia host match; exclude retired (in_env=0) sites so a
+      // forgotten branch isn't shown red forever.
+      try { knownSites = db.prepare('SELECT id, name, slug FROM hub_sites WHERE COALESCE(in_env, 1) = 1').all(); } catch { /* table not ready */ }
+
+      // Restrict to the user's allowed sites — same rule every other site-keyed
+      // handler applies via siteFilterSql. A user with can_access_hub_backups but
+      // a hub_user_allowed_sites allow-list must not see snapshot counts/times for
+      // sites outside their scope. null = unrestricted (admin / no allow-list).
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null) knownSites = knownSites.filter((s) => allowed.has(s.id));
+
+      const status = await getKopiaStatus({ knownSites });
+
+      if (allowed !== null) {
+        // Drop any repo snapshots for hosts outside the allow-list (these come
+        // through as site_id=null "unknown host" rows from the repo summary).
+        status.sites = (status.sites || []).filter((s) => s.site_id && allowed.has(s.site_id));
+        status.ok = status.sites.length > 0 && status.sites.every((s) => s.status === 'ok');
+      }
+      res.json(status);
+    } catch (err) {
+      console.error('[hub-kopia-status] error:', err.message);
+      res.json({ enabled: isKopiaEnabled(), ok: false, repo: null, sites: [], error: err.message, stale_hours: null });
     }
   });
 

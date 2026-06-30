@@ -3,7 +3,7 @@
 // stub for the Sage health probe to keep batReconciliation.js out of the
 // test bundle.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 
 // In-memory DB seeded with both v60 (job_runs) and v61 (alerts) schemas.
@@ -57,6 +57,20 @@ vi.mock('../src/lib/backupHealth.js', () => ({
   computeBackupHealth: () => _backupHealthStub,
 }));
 
+// Stub the Kopia status reader + hub storage runtime. ruleKopiaSiteStale reads
+// these; default to "disabled" so the rule no-ops in every other rule's test.
+let _kopiaStatusStub = { enabled: false, ok: false, repo: { ok: true }, sites: [], error: null, stale_hours: 26 };
+vi.mock('../src/services/hub/kopiaStatus.js', () => ({
+  getKopiaStatus: async () => _kopiaStatusStub,
+  isKopiaEnabled: () => _kopiaStatusStub.enabled,
+}));
+vi.mock('../src/hub/storage/runtime.js', () => ({
+  getHubStorageRuntime: () => ({
+    repository: { listSitesForBackup: () => [] },
+    sqliteDb: { prepare: () => ({ all: () => [] }) },
+  }),
+}));
+
 const { evaluateAllRules } = await import('../src/lib/alertRules.js');
 
 beforeEach(() => {
@@ -64,6 +78,7 @@ beforeEach(() => {
   memDb.prepare('DELETE FROM alerts').run();
   _sageHealthStub = { ok: null, attention: false, downForMinutes: 0, consecutiveFailures: 0, lastError: null, lastOkAt: null, lastFailAt: null, lastProbeAt: null };
   _backupHealthStub = { status: 'ok', reason: 'ok', message: 'Backup is current.', last_backup_at: new Date().toISOString(), age_hours: 1, file: 'cardoso-site.db', total_backups: 3 };
+  _kopiaStatusStub = { enabled: false, ok: false, repo: { ok: true }, sites: [], error: null, stale_hours: 26 };
 });
 
 // Helper: insert a job_run row with a precise ISO started_at.
@@ -320,5 +335,80 @@ describe('ruleNightlySyncStale', () => {
     } finally {
       if (prev === undefined) delete process.env.HUB_MODE; else process.env.HUB_MODE = prev;
     }
+  });
+});
+
+describe('ruleKopiaSiteStale (hub-only)', () => {
+  let prevHub;
+  beforeEach(() => { prevHub = process.env.HUB_MODE; process.env.HUB_MODE = 'true'; });
+  afterEach(() => { if (prevHub === undefined) delete process.env.HUB_MODE; else process.env.HUB_MODE = prevHub; });
+
+  it('does nothing when Kopia is disabled', async () => {
+    _kopiaStatusStub = { enabled: false, sites: [], error: null, stale_hours: 26 };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts").get().c).toBe(0);
+  });
+
+  it('does nothing on the site (HUB_MODE != true)', async () => {
+    process.env.HUB_MODE = 'false';
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'Ermelo', site_id: 'tok1', site_name: 'Ermelo', status: 'critical', reason: 'stale', age_hours: 40, count: 1 },
+    ] };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'kopia-%'").get().c).toBe(0);
+  });
+
+  it('fires per stale site, leaves healthy sites alone', async () => {
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'Ermelo', site_id: 'tok1', site_name: 'Ermelo', status: 'critical', reason: 'stale', age_hours: 40, last_snapshot_at: '2026-06-28T00:00:00Z', count: 3 },
+      { site: 'JHB', site_id: 'tok2', site_name: 'JHB', status: 'ok', reason: 'ok', age_hours: 2, count: 5 },
+    ] };
+    await evaluateAllRules();
+    const a = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'kopia-site-stale:tok1'").get();
+    expect(a).toBeDefined();
+    expect(a.severity).toBe('critical');
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key='kopia-site-stale:tok2'").get().c).toBe(0);
+  });
+
+  it('reports a never-snapshotted site distinctly', async () => {
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'Newcastle', site_id: 'tok3', site_name: 'Newcastle', status: 'critical', reason: 'never', age_hours: null, count: 0 },
+    ] };
+    await evaluateAllRules();
+    const a = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'kopia-site-stale:tok3'").get();
+    expect(a.message).toMatch(/ever reached the hub/);
+    expect(JSON.parse(a.context).reason).toBe('never');
+  });
+
+  it('auto-resolves a site that becomes healthy again', async () => {
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'Ermelo', site_id: 'tok1', site_name: 'Ermelo', status: 'critical', reason: 'stale', age_hours: 40, count: 1 },
+    ] };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key='kopia-site-stale:tok1'").get().resolved_at).toBeNull();
+
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'Ermelo', site_id: 'tok1', site_name: 'Ermelo', status: 'ok', reason: 'ok', age_hours: 2, count: 2 },
+    ] };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key='kopia-site-stale:tok1'").get().resolved_at).toBeTruthy();
+  });
+
+  it('fires kopia-repo-error when the repo/binary is unreachable', async () => {
+    _kopiaStatusStub = { enabled: true, error: 'kopia snapshot list failed: connection refused', sites: [], stale_hours: 26 };
+    await evaluateAllRules();
+    const a = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'kopia-repo-error'").get();
+    expect(a).toBeDefined();
+    expect(a.severity).toBe('critical');
+  });
+
+  it('does NOT alert on a stale unknown-host row (retired site leftovers)', async () => {
+    // site_id=null = a host in the repo that is no longer a known site (retired).
+    // Its old snapshots aging out must not fire a perpetual alert.
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'oldshop', site_id: null, site_name: null, status: 'critical', reason: 'stale', age_hours: 200, count: 2 },
+    ] };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'kopia-site-stale:%'").get().c).toBe(0);
   });
 });
