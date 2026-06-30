@@ -96,36 +96,48 @@ directly — under WAL it can be captured torn. Instead:
 
 > One-time, on the **hub**. ~15 minutes.
 
+> CRITICAL — shared config file. Kopia stores its repository connection in a
+> per-user config (default `%APPDATA%\kopia\repository.config`). The NSSM
+> service runs as **LOCALSYSTEM**, which has a *different* profile from the
+> operator who runs these commands — so a connection created under your login
+> is invisible to the service and `kopia server start` would fail to open the
+> repo. Avoid this entirely by pointing **every** kopia command (create, policy,
+> user add, server, and the app via `KOPIA_CONFIG_FILE`) at one explicit shared
+> config file with `--config-file`. The steps below do this throughout.
+
 1. **Install Kopia** — `kopia.exe` (Windows AMD64) from
    https://github.com/kopia/kopia/releases → `C:\Cardoso Hub\kopia\kopia.exe`.
 2. **Create the repository** (local filesystem on the hub):
    ```powershell
    $env:KOPIA_PASSWORD="<repo encryption password>"   # vault! lose it = lose backups
-   kopia repository create filesystem --path D:\kopia-repo
-   kopia policy set --global --keep-latest=10 --keep-daily=14 --keep-weekly=8 --keep-monthly=12
+   kopia repository create filesystem --config-file "C:\Cardoso Hub\kopia\repository.config" --path D:\kopia-repo
+   kopia policy set --config-file "C:\Cardoso Hub\kopia\repository.config" --global --keep-latest=10 --keep-daily=14 --keep-weekly=8 --keep-monthly=12
    ```
 3. **Generate a server TLS cert** and note its fingerprint (sites pin it).
    Single line — paths with spaces are quoted (PowerShell splits on the space
    otherwise; do not use `^`, that's a cmd.exe continuation):
    ```powershell
-   kopia server start --tls-generate-cert --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key" --address 0.0.0.0:51515
-   # copy the printed SHA256 cert fingerprint — sites need it
+   kopia server start --config-file "C:\Cardoso Hub\kopia\repository.config" --tls-generate-cert --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key" --address 0.0.0.0:51515
+   # copy the printed SHA256 cert fingerprint — sites need it, then Ctrl-C (the service below runs it for real)
    ```
 4. **Add a user per site** (username convention `cardoso@<SiteName>`):
    ```powershell
-   kopia server user add cardoso@Ermelo            # prompts for that site's password
+   kopia server user add cardoso@Ermelo --config-file "C:\Cardoso Hub\kopia\repository.config"   # prompts for that site's password
    ```
-5. **Register the server as a service** with the bundled NSSM:
+5. **Register the server as a service** with the bundled NSSM. It points at the
+   SAME `--config-file`, so LOCALSYSTEM serves the repo the operator created:
    ```powershell
-   nssm install CardosoKopiaServer "C:\Cardoso Hub\kopia\kopia.exe" server start --address 0.0.0.0:51515 --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key"
+   nssm install CardosoKopiaServer "C:\Cardoso Hub\kopia\kopia.exe" server start --config-file "C:\Cardoso Hub\kopia\repository.config" --address 0.0.0.0:51515 --tls-cert-file "C:\Cardoso Hub\kopia\server.cert" --tls-key-file "C:\Cardoso Hub\kopia\server.key"
    nssm set CardosoKopiaServer AppEnvironmentExtra KOPIA_PASSWORD=<repo password>
    nssm set CardosoKopiaServer Start SERVICE_AUTO_START
    nssm start CardosoKopiaServer
    ```
-6. **Hub `.env`** (so the app can read repo status for the dashboard):
+6. **Hub `.env`** (so the app can read repo status for the dashboard — it passes
+   `KOPIA_CONFIG_FILE` to every `kopia` call it makes):
    ```
    KOPIA_ENABLED=true
    KOPIA_EXE=C:\Cardoso Hub\kopia\kopia.exe
+   KOPIA_CONFIG_FILE=C:\Cardoso Hub\kopia\repository.config
    KOPIA_REPO_PATH=D:\kopia-repo
    KOPIA_PASSWORD=<repo password>
    KOPIA_SITE_STALE_HOURS=26
@@ -169,25 +181,28 @@ hides the column.
 
 ## Part D — Weekly verification (Stage 3)
 
-Scheduled Task `CardosoKopiaVerify` on the hub, weekly:
-`kopia snapshot verify --verify-files-percent=5` — structural + sampled content
-verification of the repo. Result feeds the dashboard.
+Scheduled Task `CardosoKopiaVerify` on the hub, weekly (runs as LOCALSYSTEM, so
+pass the shared config file):
+`kopia snapshot verify --config-file "C:\Cardoso Hub\kopia\repository.config" --verify-files-percent=5`
+— structural + sampled content verification of the repo. Result feeds the dashboard.
 
 ## Part E — Geographic safety against losing the hub (optional, recommended)
 
-Replicate the hub repo to cloud on a schedule (third Scheduled Task):
+Replicate the hub repo to cloud on a schedule (third Scheduled Task — also
+LOCALSYSTEM, so the same `--config-file`):
 ```powershell
-kopia repository sync-to b2 --bucket=<cardoso-hub-repo> --parallel=4
+kopia repository sync-to b2 --config-file "C:\Cardoso Hub\kopia\repository.config" --bucket=<cardoso-hub-repo> --parallel=4
 ```
 Data is client-side encrypted before it leaves the hub. (Backblaze B2 ≈
 $6/TB/mo.) Add once the local repo is trusted.
 
 ## Part F — Restore drill (write it down before you need it)
 
-On the hub (or any recovery box with `kopia` + the repo password):
+On the hub (use the shared `--config-file`; on a clean recovery box, drop
+`--config-file` and it uses the default profile config):
 ```powershell
 $env:KOPIA_PASSWORD="<repo password>"
-kopia repository connect filesystem --path D:\kopia-repo
+kopia repository connect filesystem --config-file "C:\Cardoso Hub\kopia\repository.config" --path D:\kopia-repo
 kopia snapshot list "cardoso@<SiteName>:C:\Cardoso Customer App"   # pick a time (quote — path has a space)
 kopia restore <snapshotID> C:\restore                             # full site data tree
 ```
