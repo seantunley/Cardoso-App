@@ -271,7 +271,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
       // Guard: hub_sites table may not exist on some installs
       let sites = [];
-      try { sites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
+      try { sites = db.prepare('SELECT id, slug, name FROM hub_sites').all(); } catch { /* table not ready */ }
       const results = sites.map((site) => {
         const dir = resolveSiteBackupDir(baseDir, site);
         try {

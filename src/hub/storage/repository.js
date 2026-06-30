@@ -194,7 +194,11 @@ export function createHubRepository(adapter) {
       return enabled;
     },
     listSitesForBackup() {
-      return adapter.queryAll('SELECT id, name, url, token FROM hub_sites');
+      // slug is included so siteBackupDirName() computes the SAME canonical
+      // folder here (Node pull + reconcile) as /api/hub/sites advertises to
+      // hub-pull-backups.ps1 — otherwise a name-less but slugged site would
+      // split between <slug>-<id> (script) and <id> (Node).
+      return adapter.queryAll('SELECT id, slug, name, url, token FROM hub_sites');
     },
   };
 }
