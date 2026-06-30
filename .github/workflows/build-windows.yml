@@ -98,6 +98,35 @@ jobs:
           Write-Host "staged node_modules: $nmCount files"
         shell: powershell
 
+      - name: Vendor Kopia (off-site backup engine)
+        # Bundle kopia.exe into the app so every site has the off-site backup
+        # engine on disk (docs/kopia-backups.md). It lands at
+        # windows/build/app/kopia/kopia.exe → installed to
+        # $INSTDIR\kopia\kopia.exe by the installer's File /r — matching the
+        # default KopiaExe path the agent scripts use. Pinned version; the
+        # download is a zip containing kopia.exe (+ rclone, license). Kopia is a
+        # rarely-changing binary, so — like node_modules / node / nssm — it ships
+        # ONLY in the full installer, NOT the delta app zip.
+        run: |
+          $kopiaVersion = "0.17.0"
+          $url = "https://github.com/kopia/kopia/releases/download/v$kopiaVersion/kopia-$kopiaVersion-windows-x64.zip"
+          $zip = "$env:TEMP\kopia.zip"
+          $tmp = "$env:TEMP\kopia-extract"
+          New-Item -ItemType Directory -Force -Path windows/build/app/kopia | Out-Null
+          [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+          $size = (Get-Item $zip).Length
+          if ($size -lt 5MB) { throw "kopia download too small ($size bytes) at $url - aborting" }
+          if (Test-Path $tmp) { Remove-Item -Recurse -Force $tmp }
+          Expand-Archive -Path $zip -DestinationPath $tmp -Force
+          $exe = Get-ChildItem $tmp -Recurse -Filter kopia.exe | Select-Object -First 1
+          if (-not $exe) { throw "kopia.exe not found in $url archive" }
+          Copy-Item $exe.FullName windows/build/app/kopia/kopia.exe -Force
+          $vendored = (Get-Item windows/build/app/kopia/kopia.exe).Length
+          if ($vendored -lt 5MB) { throw "vendored kopia.exe too small ($vendored bytes)" }
+          Write-Host "Vendored kopia.exe $([math]::Round($vendored/1MB,1)) MB (v$kopiaVersion)"
+        shell: powershell
+
       - name: Install NSIS
         run: |
           $nsisInstaller = "$env:TEMP\nsis-setup.exe"
