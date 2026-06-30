@@ -326,7 +326,22 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     try {
       let knownSites = [];
       try { knownSites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
+
+      // Restrict to the user's allowed sites — same rule every other site-keyed
+      // handler applies via siteFilterSql. A user with can_access_hub_backups but
+      // a hub_user_allowed_sites allow-list must not see snapshot counts/times for
+      // sites outside their scope. null = unrestricted (admin / no allow-list).
+      const allowed = getAllowedSiteIds(req, res);
+      if (allowed !== null) knownSites = knownSites.filter((s) => allowed.has(s.id));
+
       const status = await getKopiaStatus({ knownSites });
+
+      if (allowed !== null) {
+        // Drop any repo snapshots for hosts outside the allow-list (these come
+        // through as site_id=null "unknown host" rows from the repo summary).
+        status.sites = (status.sites || []).filter((s) => s.site_id && allowed.has(s.site_id));
+        status.ok = status.sites.length > 0 && status.sites.every((s) => s.status === 'ok');
+      }
       res.json(status);
     } catch (err) {
       console.error('[hub-kopia-status] error:', err.message);
