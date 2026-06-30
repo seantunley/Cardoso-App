@@ -14,6 +14,7 @@ import { getHubStorageRuntime } from '../hub/storage/runtime.js';
 import { logError } from '../lib/errorLog.js';
 import { trackOp } from '../lib/mainThreadWatch.js';
 import { describeFetchError } from '../lib/errorDescribe.js';
+import { siteBackupDirName, reconcileHubBackupDirs } from '../hub/siteBackupDir.js';
 // ntopng replaces the old PowerShell-based network device sync; no ETL pull needed.
 
 const { sqliteDb: db, repository: hubRepository } = getHubStorageRuntime();
@@ -1476,7 +1477,10 @@ async function pullBackupForSite(site) {
       } catch (e) { console.error('[hubEtl.integrity_log]', { siteId: site.id, phase: 'http_error_row' }, e.message); }
       return { ok: false, error: friendly };
     }
-    const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+    // Folder named by the site's readable name (e.g. "Ermelo"), not the opaque
+    // id, so the hub-backups/ tree is legible. The .db filename keeps the id
+    // for uniqueness + integrity-record keying.
+    const dir = path.join(process.cwd(), 'database', 'hub-backups', siteBackupDirName(site));
     mkdirSync(dir, { recursive: true });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const file = path.join(dir, `cardoso-${site.id}-${ts}.db`);
@@ -1734,6 +1738,11 @@ async function runHubBackupPull() {
     return;
   }
   const sites = hubRepository.listSitesForBackup();
+  // Migrate any legacy token-named folders to the readable name folder before
+  // pulling, so existing backups become identifiable too (idempotent).
+  try {
+    reconcileHubBackupDirs(path.join(process.cwd(), 'database', 'hub-backups'), sites);
+  } catch (e) { console.warn('[HUB BACKUP] folder reconcile pass failed:', e.message); }
   console.log(`[HUB BACKUP] Starting parallel pull for ${sites.length} site(s)`);
   // Bounded concurrency: pull backups in batches of 2
   const CONCURRENCY = 2;

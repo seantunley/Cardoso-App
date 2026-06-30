@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { readdirSync, statSync, fstatSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
+import { siteBackupDirName } from '../hub/siteBackupDir.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
@@ -272,10 +273,14 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       let sites = [];
       try { sites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
       const results = sites.map((site) => {
-        const dir = path.join(baseDir, site.id);
+        // Prefer the readable-name folder; fall back to the legacy id-named
+        // folder if a site hasn't been migrated yet (reconcile runs on pull).
+        const namedDir = path.join(baseDir, siteBackupDirName(site));
+        const legacyDir = path.join(baseDir, site.id);
+        const dir = existsSync(namedDir) ? namedDir : legacyDir;
         try {
           const files = readdirSync(dir).filter((file) => file.endsWith('.db') || file.endsWith('.db.corrupt'));
-          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
+          if (files.length === 0) return { site_id: site.id, site_name: site.name || null, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
           const sorted = files
             .map((file) => {
               const stats = statSync(path.join(dir, file));
@@ -299,6 +304,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
           return {
             site_id: site.id,
+            site_name: site.name || null,
             hub_backup_count: files.length,
             hub_last_backup: new Date(sorted[0].mtime).toISOString(),
             hub_last_size: sorted[0].size,
@@ -306,7 +312,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             integrity,
           };
         } catch {
-          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
+          return { site_id: site.id, site_name: site.name || null, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
         }
       });
       res.json({ sites: results });
