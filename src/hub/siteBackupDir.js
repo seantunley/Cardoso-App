@@ -4,33 +4,68 @@
 // That <dir> used to be site.id — an opaque token — so an operator browsing
 // the hub's disk had no idea which folder belonged to which shop ("I do not
 // know who or what they are"). This module names the folder by the site's
-// operator-facing NAME instead, and migrates the old token-named folders over
-// once so the existing backups become identifiable too.
+// operator-facing NAME, SUFFIXED WITH THE SITE ID so it stays unique, and
+// migrates the old token-named folders over once so existing backups become
+// identifiable too.
+//
+// IMPORTANT — uniqueness: the rest of the hub-backup code is *directory-scoped*
+// per site (pull, prune, status, snapshot list, restore, DR fetch all operate
+// on one folder). A name-only folder is NOT unique — two sites whose names
+// collide after sanitising/truncation ("A/B" and "A_B", or two 64-char names
+// sharing a prefix) would share a folder, letting one site prune or clobber
+// another's snapshots and report the wrong status. So the folder name always
+// includes the unique site id as a suffix; the name is just a readable prefix.
 
 import fs from 'fs';
 import path from 'path';
 
+function sanitizeId(id) {
+  return String(id ?? '').trim().replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+}
+
 /**
- * Folder-safe, human-readable directory name for a site's hub backups.
- * Prefers the operator name ("Ermelo"), falls back to slug, then the opaque
- * id. Sanitised to a filesystem-safe token (same scheme as the JTI / commission
- * archive receivers).
+ * Folder-safe, UNIQUE, human-readable directory name for a site's hub backups:
+ * `<sanitizedName>-<siteId>` (e.g. "Ermelo-a3f9c2d4"), or just the id when no
+ * name/slug is available. The id suffix guarantees uniqueness; the name prefix
+ * keeps the folder identifiable on disk.
  *
  * @param {{ id?: string, name?: string, slug?: string }} site
  * @returns {string}
  */
 export function siteBackupDirName(site) {
-  const raw = site?.name || site?.slug || site?.id || 'unknown';
-  const safe = String(raw)
+  const safeId = sanitizeId(site?.id) || 'unknown';
+  const rawName = site?.name || site?.slug || '';
+  const safeName = String(rawName)
     .trim()
     .replace(/[^A-Za-z0-9 ._-]/g, '_')
     .replace(/\s+/g, '_')
     .replace(/_+/g, '_')
     .replace(/^[_.]+|[_.]+$/g, '')
-    .slice(0, 64);
-  // Never return empty (a name of all-punctuation would sanitise to '') —
-  // fall back to the id so we always have a stable folder.
-  return safe || String(site?.id || 'unknown');
+    .slice(0, 48);
+  return safeName ? `${safeName}-${safeId}` : safeId;
+}
+
+/**
+ * Resolve the ACTUAL on-disk backup folder for a site — the single source of
+ * truth every read path (status, snapshot list, restore, DR fetch) must use so
+ * reads and writes can never diverge:
+ *   - the readable `<name>-<id>` folder if it exists (post-migration / new pulls)
+ *   - else the legacy `<id>` folder if it still exists (pre-migration)
+ *   - else the readable folder (the path a new pull will create)
+ *
+ * @param {string} baseDir  absolute path to database/hub-backups
+ * @param {{ id?: string, name?: string, slug?: string }} site
+ * @returns {string} absolute path to the site's backup folder
+ */
+export function resolveSiteBackupDir(baseDir, site) {
+  const named = path.join(baseDir, siteBackupDirName(site));
+  if (fs.existsSync(named)) return named;
+  const id = String(site?.id ?? '').trim();
+  if (id) {
+    const legacy = path.join(baseDir, id);
+    if (fs.existsSync(legacy)) return legacy;
+  }
+  return named;
 }
 
 /**
