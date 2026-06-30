@@ -17,6 +17,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Validate the source FIRST — before creating <AppDir>\logs. New-Item -Force
+# would auto-create a mistyped/missing -AppDir, making the guard below pass and
+# letting kopia snapshot a brand-new empty directory — a false green with no
+# real backup. So bail (to console; there's no log dir yet) if it's wrong.
+if (-not (Test-Path $KopiaExe)) { Write-Error "kopia not found at $KopiaExe"; exit 1 }
+if (-not (Test-Path $AppDir))   { Write-Error "app dir not found at $AppDir"; exit 1 }
+
 $logDir = Join-Path $AppDir 'logs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 $logFile = Join-Path $logDir 'kopia-agent.log'
@@ -28,9 +35,6 @@ function Write-Log($msg) {
 }
 
 try {
-  if (-not (Test-Path $KopiaExe)) { throw "kopia not found at $KopiaExe" }
-  if (-not (Test-Path $AppDir))   { throw "app dir not found at $AppDir" }
-
   Write-Log "snapshot start -> $AppDir"
   # Quote the source — the path contains a space. The repo connection was
   # established once by kopia-agent-setup.ps1 and is cached in this account's

@@ -27,8 +27,9 @@
 param(
   [Parameter(Mandatory = $true)][string]$HubUrl,           # https://<hub>:51515
   [Parameter(Mandatory = $true)][string]$CertFingerprint,  # SHA256 from `kopia server start`
-  [Parameter(Mandatory = $true)][string]$SiteName,         # becomes the snapshot hostname
+  [Parameter(Mandatory = $true)][string]$SiteName,         # readable label (for messages)
   [Parameter(Mandatory = $true)][string]$ServerPassword,   # this site's server-user password
+  [string]$SiteSlug,            # the site's slug/id — the Kopia host the hub matches on; defaults to SiteName
   [string]$ServerUsername = 'cardoso',
   [string]$AppDir   = 'C:\Cardoso Customer App',
   [string]$KopiaExe = 'C:\Cardoso Customer App\kopia\kopia.exe',
@@ -41,6 +42,16 @@ $ErrorActionPreference = 'Stop'
 
 if (-not (Test-Path $KopiaExe)) { throw "kopia not found at $KopiaExe - install it first (see docs Part A/B)." }
 if (-not (Test-Path $AppDir))   { throw "app dir not found at $AppDir" }
+
+# Kopia's repository server requires a lowercase user@hostname, so the host must
+# be a normalized identifier — NOT the display name ("Cardoso Site"/"Ermelo"
+# have spaces/uppercase that break server auth + the hub's snapshot match. This
+# MUST equal the hub's normalizeKopiaHost(site) = lowercase(slug||id). Pass the
+# site's slug (or id) via -SiteSlug; we defensively normalize it the same way.
+$hostId = ($(if ($SiteSlug) { $SiteSlug } else { $SiteName })).ToLowerInvariant() -replace '[^a-z0-9_-]', '-'
+$hostId = ($hostId -replace '-+', '-').Trim('-')
+if (-not $hostId) { throw "Could not derive a Kopia host id from -SiteSlug/-SiteName '$SiteName'." }
+Write-Host "Kopia host identity: $ServerUsername@$hostId  (site '$SiteName')"
 
 # 1. Write .kopiaignore at the app root. Excludes the reinstallable binaries
 #    (the installer recreates them) and the live WAL database (snapshot the
@@ -70,10 +81,10 @@ Write-Host "Wrote $($AppDir)\.kopiaignore"
   --url=$HubUrl `
   --server-cert-fingerprint=$CertFingerprint `
   --override-username=$ServerUsername `
-  --override-hostname=$SiteName `
+  --override-hostname=$hostId `
   --password=$ServerPassword
 if ($LASTEXITCODE -ne 0) { throw "kopia repository connect failed (exit $LASTEXITCODE)" }
-Write-Host "Connected to $HubUrl as $ServerUsername@$SiteName"
+Write-Host "Connected to $HubUrl as $ServerUsername@$hostId"
 
 # 3. Register the daily snapshot Scheduled Task (replaces any existing one).
 $snapScript = Join-Path $AppDir 'scripts\kopia-snapshot.ps1'
