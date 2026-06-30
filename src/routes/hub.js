@@ -10,6 +10,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { readdirSync, statSync, fstatSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
+import { resolveSiteBackupDir, siteBackupDirName } from '../hub/siteBackupDir.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
@@ -215,8 +216,19 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
         if (!backupResponse.ok) return { ...base, error: `HTTP ${backupResponse.status}`, status: 'error' };
         const data = await backupResponse.json();
 
+        // Prefer the site's artifact-based health verdict when present (sites
+        // running the trustworthy-health build return `health`). It catches a
+        // fresh-but-0-byte backup and a fresh-but-verify_failed backup, which
+        // age-of-newest-file alone reports as 'ok'. Map onto the hub UI's
+        // existing status vocabulary; fall back to age for older sites that
+        // don't yet return `health`. (`data.health` flows through via ...data.)
         let status = 'ok';
-        if (!data.last_backup) {
+        if (data.health && data.health.status) {
+          if (data.health.reason === 'no_backups') status = 'never';
+          else if (data.health.status === 'critical') status = 'stale';
+          else if (data.health.status === 'warn') status = 'warning';
+          else status = 'ok';
+        } else if (!data.last_backup) {
           status = 'never';
         } else {
           const hoursAgo = (Date.now() - new Date(data.last_backup.mtime).getTime()) / 3600000;
@@ -271,12 +283,12 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       const baseDir = path.join(process.cwd(), 'database', 'hub-backups');
       // Guard: hub_sites table may not exist on some installs
       let sites = [];
-      try { sites = db.prepare('SELECT id, name FROM hub_sites').all(); } catch { /* table not ready */ }
+      try { sites = db.prepare('SELECT id, slug, name FROM hub_sites').all(); } catch { /* table not ready */ }
       const results = sites.map((site) => {
-        const dir = path.join(baseDir, site.id);
+        const dir = resolveSiteBackupDir(baseDir, site);
         try {
           const files = readdirSync(dir).filter((file) => file.endsWith('.db') || file.endsWith('.db.corrupt'));
-          if (files.length === 0) return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
+          if (files.length === 0) return { site_id: site.id, site_name: site.name || null, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
           const sorted = files
             .map((file) => {
               const stats = statSync(path.join(dir, file));
@@ -300,6 +312,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
           return {
             site_id: site.id,
+            site_name: site.name || null,
             hub_backup_count: files.length,
             hub_last_backup: new Date(sorted[0].mtime).toISOString(),
             hub_last_size: sorted[0].size,
@@ -307,7 +320,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
             integrity,
           };
         } catch {
-          return { site_id: site.id, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
+          return { site_id: site.id, site_name: site.name || null, hub_backup_count: 0, hub_last_backup: null, hub_last_size: null, integrity: 'unchecked' };
         }
       });
       res.json({ sites: results });
@@ -385,6 +398,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       id: s.id,
       slug: s.slug,
       name: s.name,
+      // Canonical hub-backups folder name, so the legacy hub-pull-backups.ps1
+      // task writes to the SAME readable <name>-<id> folder the Node pull uses
+      // (otherwise it would keep writing the bare <id> folder and those
+      // snapshots would be invisible to the read paths once canonical exists).
+      backup_dir: siteBackupDirName(s),
       url: s.url,
       last_seen: s.last_seen,
       status: s.status,
@@ -2698,7 +2716,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     const site = db.prepare(`SELECT id, slug, name FROM hub_sites WHERE id = ?`).get(siteId);
     if (!site) return res.status(404).json({ error: `Site '${siteId}' not found` });
 
-    const dir = path.join(process.cwd(), 'database', 'hub-backups', siteId);
+    const dir = resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), site);
     if (!existsSync(dir)) {
       return res.json({ site_id: site.id, site_name: site.name, snapshots: [] });
     }
@@ -2811,7 +2829,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!valid) return res.status(401).json({ error: 'Incorrect password.' });
 
     // Validate the snapshot exists on hub disk.
-    const snapDir = path.join(process.cwd(), 'database', 'hub-backups', siteId);
+    const snapDir = resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), site);
     const snapPath = path.join(snapDir, snapshot_filename);
     if (!existsSync(snapPath)) {
       return res.status(404).json({ error: `Snapshot '${snapshot_filename}' not found on hub.` });
@@ -2946,7 +2964,10 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       return res.status(401).json({ error: 'Invalid, expired, or already-consumed restore token' });
     }
 
-    const filePath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    // Resolve the readable `<name>-<id>` folder (or legacy `<id>`); the token is
+    // keyed by siteId but the files live in the resolved per-site dir.
+    const fetchSite = db.prepare('SELECT id, name, slug FROM hub_sites WHERE id = ?').get(siteId) || { id: siteId };
+    const filePath = path.join(resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), fetchSite), filename);
     if (!existsSync(filePath)) return res.status(404).json({ error: 'Snapshot file not found on hub' });
 
     res.setHeader('Content-Type', 'application/octet-stream');
@@ -3026,7 +3047,7 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
 
     const sites = db.prepare(`SELECT id, slug, name, url FROM hub_sites ORDER BY name`).all();
     const result = sites.map((site) => {
-      const dir = path.join(process.cwd(), 'database', 'hub-backups', site.id);
+      const dir = resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), site);
       if (!existsSync(dir)) return { ...site, snapshots: [] };
 
       let allFiles = [];
@@ -3100,7 +3121,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!isSafeBackupFilename(filename) || !filename.endsWith('.db')) {
       return res.status(400).json({ error: 'Invalid filename.' });
     }
-    const snapPath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    const metaSite = db.prepare('SELECT id, name, slug FROM hub_sites WHERE id = ?').get(siteId) || { id: siteId };
+    const snapPath = path.join(resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), metaSite), filename);
     if (!existsSync(snapPath)) {
       return res.status(404).json({ error: 'Snapshot not found on hub.' });
     }
@@ -3188,7 +3210,8 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
     if (!isSafeBackupFilename(filename)) {
       return res.status(400).json({ error: 'Invalid filename.' });
     }
-    const filePath = path.join(process.cwd(), 'database', 'hub-backups', siteId, filename);
+    const drSite = db.prepare('SELECT id, name, slug FROM hub_sites WHERE id = ?').get(siteId) || { id: siteId };
+    const filePath = path.join(resolveSiteBackupDir(path.join(process.cwd(), 'database', 'hub-backups'), drSite), filename);
     if (!existsSync(filePath)) {
       return res.status(404).json({ error: 'File not found on hub.' });
     }

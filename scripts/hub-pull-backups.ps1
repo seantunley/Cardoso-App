@@ -84,7 +84,11 @@ foreach ($site in $sites) {
         continue
     }
 
-    $siteDir = Join-Path $backupDir $siteId
+    # Write to the canonical readable folder the hub computes (<name>-<id>), so
+    # this task and the Node pull share one folder. Fall back to the bare id for
+    # an older hub that doesn't return backup_dir yet.
+    $folder = if ($site.backup_dir) { $site.backup_dir } else { $siteId }
+    $siteDir = Join-Path $backupDir $folder
     New-Item -ItemType Directory -Force -Path $siteDir | Out-Null
 
     $destFile = Join-Path $siteDir "cardoso-$siteId-$stamp.db"
