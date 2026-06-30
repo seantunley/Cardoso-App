@@ -28,6 +28,9 @@ export default function NotificationsBell({ collapsed }) {
   if (data) {
     if (data.sage?.ok === false) issues.push(`Sage connection down (${data.sage.downForMinutes}m)`);
     for (const s of data.sources || []) if (s.stale) issues.push(`${s.label} sync is stale`);
+    if (data.backup && data.backup.status !== "ok") {
+      issues.push(data.backup.status === "critical" ? `Backup problem: ${data.backup.message}` : `Backup unverified`);
+    }
     if (data.criticalAlerts > 0) issues.push(`${data.criticalAlerts} critical alert${data.criticalAlerts === 1 ? "" : "s"}`);
     else if (data.activeAlerts > 0) issues.push(`${data.activeAlerts} active alert${data.activeAlerts === 1 ? "" : "s"}`);
     if (data.jobFailures24h > 0) issues.push(`${data.jobFailures24h} job failure${data.jobFailures24h === 1 ? "" : "s"} (24h)`);

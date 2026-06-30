@@ -48,12 +48,22 @@ vi.mock('../src/services/batReconciliation.js', () => ({
   getSageHealth: () => _sageHealthStub,
 }));
 
+// Stub backupHealth.js — ruleBackupArtifactStale reads the real filesystem via
+// computeBackupHealth(), which would otherwise find no backups dir under the
+// test's cwd and fire a spurious alert in every other rule's test. Default to
+// a healthy verdict; the ruleBackupArtifactStale describe block overrides it.
+let _backupHealthStub = { status: 'ok', reason: 'ok', message: 'Backup is current.', last_backup_at: new Date().toISOString(), age_hours: 1, file: 'cardoso-site.db', total_backups: 3 };
+vi.mock('../src/lib/backupHealth.js', () => ({
+  computeBackupHealth: () => _backupHealthStub,
+}));
+
 const { evaluateAllRules } = await import('../src/lib/alertRules.js');
 
 beforeEach(() => {
   memDb.prepare('DELETE FROM job_runs').run();
   memDb.prepare('DELETE FROM alerts').run();
   _sageHealthStub = { ok: null, attention: false, downForMinutes: 0, consecutiveFailures: 0, lastError: null, lastOkAt: null, lastFailAt: null, lastProbeAt: null };
+  _backupHealthStub = { status: 'ok', reason: 'ok', message: 'Backup is current.', last_backup_at: new Date().toISOString(), age_hours: 1, file: 'cardoso-site.db', total_backups: 3 };
 });
 
 // Helper: insert a job_run row with a precise ISO started_at.
@@ -204,6 +214,58 @@ describe('ruleBackupVerifyFailed', () => {
   it('skips silently when job_runs has no backup-verify rows', async () => {
     await evaluateAllRules();
     expect(memDb.prepare("SELECT COUNT(*) c FROM alerts").get().c).toBe(0);
+  });
+});
+
+describe('ruleBackupArtifactStale', () => {
+  it('fires critical when no backups exist on disk', async () => {
+    _backupHealthStub = { status: 'critical', reason: 'no_backups', message: 'No backup files exist.', last_backup_at: null, age_hours: null, file: null, total_backups: 0 };
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get();
+    expect(alert).toBeDefined();
+    expect(alert.severity).toBe('critical');
+    expect(alert.message).toMatch(/No backup files/);
+  });
+
+  it('fires critical when the newest backup is stale', async () => {
+    _backupHealthStub = { status: 'critical', reason: 'stale', message: 'Newest backup is 30.0h old', last_backup_at: new Date().toISOString(), age_hours: 30, file: 'old.db', total_backups: 4 };
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get();
+    expect(alert).toBeDefined();
+    expect(JSON.parse(alert.context).reason).toBe('stale');
+  });
+
+  it('does NOT fire (and resolves) on a healthy verdict', async () => {
+    // Seed an active alert, then a healthy verdict should auto-resolve it.
+    _backupHealthStub = { status: 'critical', reason: 'no_backups', message: 'gone', total_backups: 0 };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get().resolved_at).toBeNull();
+
+    _backupHealthStub = { status: 'ok', reason: 'ok', message: 'current', age_hours: 1, file: 'x.db', total_backups: 3 };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT resolved_at FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get().resolved_at).toBeTruthy();
+  });
+
+  it('does NOT fire on verify_failed (owned by ruleBackupVerifyFailed) or unverified warn', async () => {
+    _backupHealthStub = { status: 'critical', reason: 'verify_failed', message: 'verify failed', age_hours: 1, file: 'x.db', total_backups: 3 };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get().c).toBe(0);
+
+    _backupHealthStub = { status: 'warn', reason: 'unverified', message: 'unverified', age_hours: 1, file: 'x.db', total_backups: 3 };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get().c).toBe(0);
+  });
+
+  it('skips entirely on the hub', async () => {
+    _backupHealthStub = { status: 'critical', reason: 'no_backups', message: 'gone', total_backups: 0 };
+    const prev = process.env.HUB_MODE;
+    process.env.HUB_MODE = 'true';
+    try {
+      await evaluateAllRules();
+      expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key = 'backup-artifact-stale'").get().c).toBe(0);
+    } finally {
+      if (prev === undefined) delete process.env.HUB_MODE; else process.env.HUB_MODE = prev;
+    }
   });
 });
 

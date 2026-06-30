@@ -277,7 +277,7 @@ export function createBackupRouter() {
   router.use(noStore);
 
   // GET /api/backup/status
-  router.get('/api/backup/status', reportingRateLimiter, requireReportingToken, (req, res) => {
+  router.get('/api/backup/status', reportingRateLimiter, requireReportingToken, async (req, res) => {
     const backupDir = path.resolve(path.dirname(dbPath), 'backups');
 
     let lastBackup = null;
@@ -299,6 +299,17 @@ export function createBackupRouter() {
 
     const dbStat = fs.existsSync(dbPath) ? fs.statSync(path.resolve(dbPath)) : null;
 
+    // Artifact-based health verdict so the hub puller gets a ready ok/warn/
+    // critical decision instead of re-deriving it from last_backup. Computed
+    // from the files on disk at request time (see lib/backupHealth.js).
+    let health = null;
+    try {
+      const { computeBackupHealth } = await import('../lib/backupHealth.js');
+      health = computeBackupHealth();
+    } catch (e) {
+      health = { status: 'critical', reason: 'health_error', message: `Could not compute backup health: ${e.message}` };
+    }
+
     res.json({
       site_id: process.env.SITE_ID || 'unknown',
       site_name: process.env.SITE_NAME || 'Unknown',
@@ -306,6 +317,7 @@ export function createBackupRouter() {
       db_modified: dbStat ? dbStat.mtime.toISOString() : null,
       last_backup: lastBackup,
       backup_dir: backupDir,
+      health,
     });
   });
 
