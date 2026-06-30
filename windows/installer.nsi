@@ -146,6 +146,17 @@ Section "Install" SecInstall
     FileWrite $0 "DB_PATH=./database/cardoso.db$\r$\n"
     FileWrite $0 "SESSION_SECRET=CHANGE_ME_RUN_SETUP$\r$\n"
     FileWrite $0 "ENCRYPTION_KEY=$\r$\n"
+    ; Off-site backups (Kopia). kopia.exe is bundled at $INSTDIR\kopia\kopia.exe.
+    ; Disabled by default - to activate, set KOPIA_ENABLED=true + the hub values,
+    ; then run scripts\kopia-agent-setup.ps1 once (see docs/kopia-backups.md).
+    FileWrite $0 "$\r$\n"
+    FileWrite $0 "# --- Off-site backups (Kopia) - see docs/kopia-backups.md ---$\r$\n"
+    FileWrite $0 "KOPIA_ENABLED=false$\r$\n"
+    FileWrite $0 "KOPIA_EXE=$INSTDIR\kopia\kopia.exe$\r$\n"
+    FileWrite $0 "KOPIA_HUB_URL=$\r$\n"
+    FileWrite $0 "KOPIA_CERT_FINGERPRINT=$\r$\n"
+    FileWrite $0 "KOPIA_SITE_SLUG=$\r$\n"
+    FileWrite $0 "KOPIA_SERVER_PASSWORD=$\r$\n"
     FileClose $0
   env_exists:
 
@@ -200,9 +211,13 @@ Section "Uninstall"
   ExecWait '"$INSTDIR\nssm\nssm.exe" stop ${SERVICE_NAME}' $0
   ExecWait '"$INSTDIR\nssm\nssm.exe" remove ${SERVICE_NAME} confirm' $0
   ExecWait '$SYSDIR\schtasks.exe /delete /tn "CardosoBackup" /f' $0
+  ; Off-site agent task (created by scripts\kopia-agent-setup.ps1 if activated) —
+  ; best-effort removal; harmless if it was never registered.
+  ExecWait '$SYSDIR\schtasks.exe /delete /tn "CardosoKopiaAgent" /f' $0
 
   RMDir /r "$INSTDIR\node"
   RMDir /r "$INSTDIR\nssm"
+  RMDir /r "$INSTDIR\kopia"
   RMDir /r "$INSTDIR\src"
   RMDir /r "$INSTDIR\dist"
   RMDir /r "$INSTDIR\scripts"
