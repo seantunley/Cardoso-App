@@ -10,7 +10,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import { readdirSync, statSync, fstatSync, createReadStream, existsSync } from 'fs';
 import path from 'path';
-import { resolveSiteBackupDir } from '../hub/siteBackupDir.js';
+import { resolveSiteBackupDir, siteBackupDirName } from '../hub/siteBackupDir.js';
 import { boolFromRow, expandDataRecord } from '../helpers.js';
 import { syncAllSites, syncSite, runHubBackupPull, pullBackupForSite, HUB_SITES } from '../services/hubEtl.js';
 import { runConnectionImport } from '../services/syncEngine.js';
@@ -352,6 +352,11 @@ export function createHubRouter({ requireAuth, requireAdmin, requirePermission }
       id: s.id,
       slug: s.slug,
       name: s.name,
+      // Canonical hub-backups folder name, so the legacy hub-pull-backups.ps1
+      // task writes to the SAME readable <name>-<id> folder the Node pull uses
+      // (otherwise it would keep writing the bare <id> folder and those
+      // snapshots would be invisible to the read paths once canonical exists).
+      backup_dir: siteBackupDirName(s),
       url: s.url,
       last_seen: s.last_seen,
       status: s.status,

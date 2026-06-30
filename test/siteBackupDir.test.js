@@ -139,14 +139,21 @@ describe('reconcileHubBackupDirs', () => {
   });
 });
 
-describe('resolveSiteBackupDir — rename window', () => {
+describe('resolveSiteBackupDir — cross-site safety', () => {
   let baseDir;
   beforeEach(() => { baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cardoso-resolve2-')); });
 
-  it('finds the old <oldName>-<id> folder before reconcile runs', () => {
+  it('does NOT claim another site whose canonical ends with this site id', () => {
+    // site B id 'a-x' owns folder 'Foo-a-x' (ends with '-x'); resolving site A
+    // id 'x' must NOT return it — A gets its own canonical instead.
+    fs.mkdirSync(path.join(baseDir, 'Foo-a-x'));
+    expect(resolveSiteBackupDir(baseDir, { id: 'x', name: 'Aaa' })).toBe(path.join(baseDir, 'Aaa-x'));
+  });
+
+  it('after a rename returns the new canonical (reconcile migrates on next pull)', () => {
+    // Only the old-name folder exists; resolve returns the NEW canonical rather
+    // than suffix-grabbing. reconcile renames Ermelo-tok -> Johannesburg-tok.
     fs.mkdirSync(path.join(baseDir, 'Ermelo-tok'));
-    // Site was renamed to Johannesburg; canonical folder not created yet.
-    const dir = resolveSiteBackupDir(baseDir, { id: 'tok', name: 'Johannesburg' });
-    expect(dir).toBe(path.join(baseDir, 'Ermelo-tok'));
+    expect(resolveSiteBackupDir(baseDir, { id: 'tok', name: 'Johannesburg' })).toBe(path.join(baseDir, 'Johannesburg-tok'));
   });
 });

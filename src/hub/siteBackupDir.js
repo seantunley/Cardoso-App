@@ -81,9 +81,14 @@ function existingSiteDirs(baseDir, site, reserved = new Set()) {
  * truth every read path (status, snapshot list, restore, DR fetch) must use so
  * reads and writes can never diverge:
  *   - the canonical `<name>-<id>` folder if it exists (post-migration / new pulls)
- *   - else any existing folder for this site by stable id suffix (legacy `<id>`,
- *     or an older `<oldName>-<id>` not yet reconciled after a rename)
+ *   - else the legacy bare `<id>` folder, matched EXACTLY (pre-migration)
  *   - else the canonical folder (the path a new pull will create)
+ *
+ * Deliberately NO `*-<id>` suffix scan here: without the full site list it could
+ * claim another site whose id is a dash-suffix of this one (ids "x" vs "a-x",
+ * where "Foo-a-x" ends with "-x"), serving another site's backups. Post-RENAME
+ * read continuity is handled by reconcileHubBackupDirs, which runs per-site on
+ * every pull and HAS the cross-site reserved guard.
  *
  * @param {string} baseDir  absolute path to database/hub-backups
  * @param {{ id?: string, name?: string, slug?: string }} site
@@ -93,8 +98,11 @@ export function resolveSiteBackupDir(baseDir, site) {
   const canonical = siteBackupDirName(site);
   const canonicalDir = path.join(baseDir, canonical);
   if (fs.existsSync(canonicalDir)) return canonicalDir;
-  const other = existingSiteDirs(baseDir, site).find((n) => n !== canonical);
-  if (other) return path.join(baseDir, other);
+  const id = String(site?.id ?? '').trim();
+  if (id) {
+    const legacy = path.join(baseDir, id);
+    if (fs.existsSync(legacy)) return legacy;
+  }
   return canonicalDir;
 }
 
