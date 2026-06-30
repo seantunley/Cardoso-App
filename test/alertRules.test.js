@@ -339,4 +339,14 @@ describe('ruleKopiaSiteStale (hub-only)', () => {
     expect(a).toBeDefined();
     expect(a.severity).toBe('critical');
   });
+
+  it('does NOT alert on a stale unknown-host row (retired site leftovers)', async () => {
+    // site_id=null = a host in the repo that is no longer a known site (retired).
+    // Its old snapshots aging out must not fire a perpetual alert.
+    _kopiaStatusStub = { enabled: true, error: null, stale_hours: 26, sites: [
+      { site: 'oldshop', site_id: null, site_name: null, status: 'critical', reason: 'stale', age_hours: 200, count: 2 },
+    ] };
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'kopia-site-stale:%'").get().c).toBe(0);
+  });
 });

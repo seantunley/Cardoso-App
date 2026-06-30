@@ -301,7 +301,13 @@ async function ruleKopiaSiteStale() {
   }
   resolveAlerts('kopia-repo-error', 'auto');
 
-  const stale = status.sites.filter((s) => s.status === 'critical');
+  // Only alert on KNOWN sites (site_id present). A retired site (removed from
+  // HUB_SITES, in_env=0) is excluded from knownSites but its historical
+  // snapshots still sit in the repo, so mergeWithKnownSites surfaces them as
+  // unknown-host rows (site_id=null) for dashboard visibility. Without this
+  // guard, once that last snapshot ages out, the rule would fire
+  // kopia-site-stale forever for a branch that was intentionally retired.
+  const stale = status.sites.filter((s) => s.status === 'critical' && s.site_id);
   const staleKeys = new Set();
   for (const s of stale) {
     const key = `kopia-site-stale:${s.site_id || s.site}`;
