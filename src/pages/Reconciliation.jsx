@@ -497,6 +497,10 @@ export default function Reconciliation() {
 
   // De-dupe toasted errors per reconciliation so polling doesn't spam
   const shownErrorsRef = useRef(new Set());
+  // The recon id whose existing per-row errors we've already seeded. Lets us
+  // suppress historical per-row failures on open while still toasting genuinely
+  // new ones — independent of the extracting/pending timing.
+  const perRowSeededRef = useRef(null);
   useEffect(() => {
     shownErrorsRef.current = new Set();
   }, [selected?.id]);
@@ -531,9 +535,28 @@ export default function Reconciliation() {
       },
     );
     fire(`sage:${selected.sage_error}`, selected.sage_error && `Sage: ${selected.sage_error}`);
-    for (const ext of selected.extractions || []) {
-      if (ext.extraction_error) {
-        fire(`ext:${ext.id}:${ext.extraction_error}`, `OCR id ${ext.id}: ${ext.extraction_error}`);
+    // Per-row OCR errors: the first time this recon's extractions are loaded,
+    // SEED the errors already present so long-standing per-row failures (e.g. a
+    // slow POD that hit the 90s extract_total cap) don't re-toast on every open
+    // — they stay visible in the matching table, the OCR Operations panel, and
+    // the System Log, and per-row toasts have no Dismiss. After seeding, only
+    // errors that appear LATER toast.
+    //
+    // This deliberately does NOT gate on `extracting`/pending: when the last
+    // (or only) pending row fails, handleProgress can clear `extracting` and
+    // drop the pending count before `selected` refreshes with the error, so an
+    // active-state guard would wrongly suppress that final live toast (and the
+    // SSE stream carries only progress; the 5s poll can miss the sub-second
+    // terminal state). A not-yet-seeded key always fires.
+    const exts = selected.extractions;
+    if (Array.isArray(exts)) {
+      const seedingPerRow = perRowSeededRef.current !== selected.id;
+      if (seedingPerRow) perRowSeededRef.current = selected.id;
+      for (const ext of exts) {
+        if (!ext.extraction_error) continue;
+        const key = `ext:${ext.id}:${ext.extraction_error}`;
+        if (seedingPerRow) seen.add(key);                            // historical → suppress
+        else fire(key, `OCR id ${ext.id}: ${ext.extraction_error}`); // appeared after open → toast
       }
     }
   }, [selected]);
