@@ -215,17 +215,28 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   // The rollup rebuild chunks per month with a yield between (see the function),
   // so it no longer freezes the loop; it self-tracks each chunk for the freeze
   // forensics. Best-effort — a rollup hiccup must not fail the whole sales sync.
+  let rollupOk = true;
   try { await rebuildInventorySalesRollups(); }
-  catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
-  // Advance the freshness stamp AFTER the rollups are rebuilt+swapped, never
-  // before. The hub gates its inventory-*-sales delete-and-replace on this stamp
-  // (+ rollup row counts); stamping before the rebuild leaves a window — now
-  // observable because the chunked rebuild yields, whereas the old monolithic
-  // one froze the loop and served no reads — where the stamp says "fresh" while
-  // the rollups are still last-sync's, so the hub would replace its data with
-  // stale rollups. Stamping last means a mid-rebuild reader sees the old stamp
-  // (and skips), and only a post-swap reader sees the new stamp + new rollups.
-  updateMeta(aggRows.length);
+  catch (e) { rollupOk = false; console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+  // Advance the freshness stamp AFTER the rollups are rebuilt+swapped, and ONLY
+  // if the rebuild succeeded. The hub gates its inventory-*-sales delete-and-
+  // replace on this stamp (+ rollup row counts):
+  //  - Stamping BEFORE the rebuild leaves a window — now observable because the
+  //    chunked rebuild yields, whereas the old monolithic one froze the loop and
+  //    served no reads — where the stamp reads "fresh" while the rollups are
+  //    still last-sync's.
+  //  - Stamping after a FAILED rebuild is just as wrong: the rollups are stale
+  //    (the atomic swap never happened) yet the stamp would advertise them as
+  //    the new dataset, so the hub replaces its data from stale rollups.
+  // Holding the stamp back on failure keeps the hub on its prior data and lets
+  // the nightly-sync-stale alert surface that the rollups didn't refresh, rather
+  // than silently shipping stale ones. The transaction data itself is already
+  // committed (staging swap above); only the derived-rollup freshness is held.
+  if (rollupOk) {
+    updateMeta(aggRows.length);
+  } else {
+    console.warn('[inventory.sales] freshness stamp held back — rollup rebuild failed; hub keeps prior data until the next successful sync');
+  }
   // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
   // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
   // — a vendor-map hiccup must not fail the sales sync.
