@@ -466,6 +466,24 @@ describe('ruleJtiExportMissing', () => {
     expect(alert.severity).toBe('warning');
   });
 
+  it('refreshes the reason on an already-active alert as attempts evolve', async () => {
+    memDb.prepare("INSERT INTO connection_role (role, connection_id) VALUES ('jti_export', 7)").run();
+    // First pass: no generation attempt recorded yet → initial reason.
+    await evaluateAllRules();
+    let alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing' AND resolved_at IS NULL").get();
+    expect(alert.message).toMatch(/No generation attempt/);
+    const firstId = alert.id;
+    // Later, the boot catch-up records a pool_unavailable failure.
+    memDb.prepare(`
+      INSERT INTO job_runs (name, status, started_at, ended_at, context)
+      VALUES ('jti-boot-catchup', 'succeeded', '2026-07-15T07:30:00.000Z', '2026-07-15T07:30:01.000Z', ?)
+    `).run(JSON.stringify({ failed: { year: 2026, month: 6, error: 'pool_unavailable: ECONNREFUSED' } }));
+    await evaluateAllRules();
+    alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing' AND resolved_at IS NULL").get();
+    expect(alert.id).toBe(firstId); // same row (deduped), not a new alert
+    expect(alert.message).toMatch(/pool_unavailable: ECONNREFUSED/); // but reason refreshed
+  });
+
   it('surfaces the skip reason from the most recent generation attempt', async () => {
     seedArchive(2026, 5, 'scheduled');
     // A generation attempt that "succeeded" as a job but skipped on pool_unavailable —

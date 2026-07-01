@@ -12,7 +12,7 @@
 // `RULES`. Tests pin each rule's fire/resolve transitions.
 
 import db from '../db/index.js';
-import { fireAlert, resolveAlerts } from './alertEngine.js';
+import { fireAlert, resolveAlerts, updateActiveAlert } from './alertEngine.js';
 import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
 import { computeBackupHealth } from './backupHealth.js';
@@ -433,21 +433,23 @@ async function ruleJtiExportMissing() {
       : `The most recent attempt (${lastRun.name}) completed without producing it — the 02:00 fire may have been dropped by a main-thread freeze, or the JTI Sage pool was unavailable.`;
   }
 
-  fireAlert({
-    ruleName: 'jti-export-missing',
-    severity: 'warning',
-    message: `JTI monthly export for ${period} has not been produced. ${why} It should self-heal within the hour via the generation-retry tick (or on the next restart); if this alert persists, the JTI Sage pool is likely unreachable on this site.`,
-    context: {
-      period,
-      period_year: prevYear,
-      period_month: prevMonth,
-      last_attempt_job: lastRun?.name || null,
-      last_attempt_status: lastRun?.status || null,
-      last_attempt_error: lastRun?.error_message || null,
-      last_attempt_at: lastRun?.started_at || null,
-    },
-    dedupKey,
-  });
+  const message = `JTI monthly export for ${period} has not been produced. ${why} It should self-heal within the hour via the generation-retry tick (or on the next restart); if this alert persists, the JTI Sage pool is likely unreachable on this site.`;
+  const context = {
+    period,
+    period_year: prevYear,
+    period_month: prevMonth,
+    last_attempt_job: lastRun?.name || null,
+    last_attempt_status: lastRun?.status || null,
+    last_attempt_error: lastRun?.error_message || null,
+    last_attempt_at: lastRun?.started_at || null,
+  };
+  const fired = fireAlert({ ruleName: 'jti-export-missing', severity: 'warning', message, context, dedupKey });
+  // The condition can persist across many ticks while the REASON evolves — e.g.
+  // the alert engine's minute-pass fires "No generation attempt" before the 45s
+  // boot catch-up runs, then that catch-up records a pool_unavailable failure.
+  // fireAlert dedups and won't refresh the message, so update the active row to
+  // reflect the latest attempt.
+  if (fired?.deduped) updateActiveAlert(dedupKey, { message, context });
 }
 
 // ── Rule: Kopia off-site backup stale / missing (hub-only) ───────────────
