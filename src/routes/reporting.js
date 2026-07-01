@@ -3533,7 +3533,7 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // (even when the rollup is legitimately empty), and the rebuild fits inside the
   // hub's fetch timeout so the pull still succeeds with real data.
   let salesRollupWarmAttempted = false;
-  const ensureSalesRollupWarm = () => {
+  const ensureSalesRollupWarm = async () => {
     if (salesRollupWarmAttempted) return;
     const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
     const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
@@ -3542,8 +3542,11 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       // returns 500, the hub treats it as a failed pull and SKIPS its
       // delete-and-replace, so it keeps the existing valid hub data instead of
       // wiping it with an empty set. The once-flag is set only after success
-      // (below), so the next hub pull retries the rebuild.
-      rebuildInventorySalesRollups();
+      // (below), so the next hub pull retries the rebuild. Awaited: the rebuild
+      // now chunks + yields (async), and callers must have the rollup fully
+      // built before they read it — and a throw must still reach the route's
+      // catch to 500.
+      await rebuildInventorySalesRollups();
     }
     salesRollupWarmAttempted = true;
   };
@@ -3551,9 +3554,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
   // this for the Top Items + Dead Stock tiles. Description comes from the sales
   // cache (v096) falling back to the item master. Trailing 24 months.
-  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+  router.get('/api/reporting/inventory-item-sales', reportingRateLimiter, requireReportingToken, async (req, res) => {
     try {
-      ensureSalesRollupWarm();
+      await ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand 24-month aggregation,
@@ -3572,9 +3575,9 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
 
   // Per-customer monthly sales with inter-branch transfers EXCLUDED — the hub
   // pulls this for the Top Customers tile (summed over the selected timeline).
-  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, (req, res) => {
+  router.get('/api/reporting/inventory-customer-sales', reportingRateLimiter, requireReportingToken, async (req, res) => {
     try {
-      ensureSalesRollupWarm();
+      await ensureSalesRollupWarm();
       const { limit, offset } = pagination(req, { defaultLimit: 5000, maxLimit: 20000 });
       // Served from the precomputed rollup cache (rebuilt once per inventory-sales
       // sync) — a cheap indexed SELECT, never an on-demand aggregation.

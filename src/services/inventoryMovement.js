@@ -202,15 +202,11 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   // instead of re-aggregating 24 months on every hub request — that on-demand
   // aggregation froze the site's (synchronous) event loop and timed out the
   // hub's health/KPIs fetches, flip-flopping the site tile Offline.
-  // The rollup rebuild is a synchronous INSERT...SELECT aggregation over the
-  // sales transactions — trackOp it so if IT (rather than the batched insert
-  // above) is a residual blocker on a site, the freeze forensics name it.
-  {
-    const done = trackOp('inventory-sales-sync:rebuild-rollups');
-    try { rebuildInventorySalesRollups(); }
-    catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
-    finally { done(); }
-  }
+  // The rollup rebuild chunks per month with a yield between (see the function),
+  // so it no longer freezes the loop; it self-tracks each chunk for the freeze
+  // forensics. Best-effort — a rollup hiccup must not fail the whole sales sync.
+  try { await rebuildInventorySalesRollups(); }
+  catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
   // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
   // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
   // — a vendor-map hiccup must not fail the sales sync.
@@ -264,44 +260,142 @@ const EXCL_INTER_BRANCH = "(LOWER(COALESCE(customer_name,'')) LIKE '%inter branc
 // ranges and a prior-year comparison that shifts back another year, so a shorter
 // rollup would make historical hub totals silently under-report vs the
 // transaction-backed site report.
-export function rebuildInventorySalesRollups() {
-  const d = new Date();
-  const ft = new Date(d.getFullYear() - 3, 0, 1);
-  const from = `${ft.getFullYear()}-${String(ft.getMonth() + 1).padStart(2, '0')}-01`;
-  const rebuild = db.transaction(() => {
-    db.prepare('DELETE FROM inventory_item_sales_rollup').run();
-    db.prepare(`
-      INSERT INTO inventory_item_sales_rollup (item_number, period, qty_sold, revenue, item_description)
-      SELECT TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7),
-             SUM(t.qty_sold), SUM(t.line_amount),
-             COALESCE(MAX(ic.item_description), MAX(ir.item_description))
-      FROM inventory_sales_transactions t
-      LEFT JOIN (
-        SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
-        FROM inventory_sales_cache WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
-        GROUP BY TRIM(item_number)
-      ) ic ON ic.item_number = TRIM(t.item_number)
-      LEFT JOIN (
-        SELECT TRIM(item_number) AS item_number, MAX(item_description) AS item_description
-        FROM inventoryrecord WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
-        GROUP BY TRIM(item_number)
-      ) ir ON ir.item_number = TRIM(t.item_number)
-      WHERE t.transaction_date >= ? AND NOT ${EXCL_INTER_BRANCH}
-      GROUP BY TRIM(t.item_number), SUBSTR(t.transaction_date, 1, 7)
-    `).run(from);
+// Build the ordered list of 'YYYY-MM' periods from Jan of (thisYear-3) through
+// the current month (inclusive) — the same 3-full-years + YTD window the sync
+// and the old single-pass rebuild covered.
+function rollupPeriods(now = new Date()) {
+  const periods = [];
+  let y = now.getFullYear() - 3;
+  let m = 1;
+  const endY = now.getFullYear();
+  const endM = now.getMonth() + 1;
+  while (y < endY || (y === endY && m <= endM)) {
+    periods.push(`${y}-${String(m).padStart(2, '0')}`);
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return periods;
+}
 
-    db.prepare('DELETE FROM inventory_customer_sales_rollup').run();
+// First day of the month AFTER `period` ('YYYY-MM'), as 'YYYY-MM-DD' — the
+// exclusive upper bound for that period's transaction_date range.
+function nextPeriodStart(period) {
+  let [y, m] = period.split('-').map(Number);
+  m += 1;
+  if (m > 12) { m = 1; y += 1; }
+  return `${y}-${String(m).padStart(2, '0')}-01`;
+}
+
+// Coalesce concurrent rebuilds onto a single in-flight run. The rebuild now
+// yields between period chunks (async), so two overlapping callers — the nightly
+// sync and a hub warm-on-read (routes/reporting.js), or two hub requests — would
+// otherwise interleave on the shared stage_* tables and corrupt each other's
+// staging. Every caller wants the same fully-rebuilt rollup, so hand them the
+// one run. Mirrors inFlightSalesSync above.
+let inFlightRollupRebuild = null;
+export function rebuildInventorySalesRollups() {
+  if (inFlightRollupRebuild) return inFlightRollupRebuild;
+  inFlightRollupRebuild = _rebuildInventorySalesRollups().finally(() => { inFlightRollupRebuild = null; });
+  return inFlightRollupRebuild;
+}
+
+async function _rebuildInventorySalesRollups() {
+  // Was ONE monolithic db.transaction (DELETE + INSERT...SELECT aggregating the
+  // whole multi-million-row inventory_sales_transactions) — a single synchronous
+  // 15-20s block that hard-froze the event loop nightly at 02:00, dropping
+  // node-cron ticks (see lib/mainThreadWatch.js markers, and the JTI monthly
+  // export it starved). Now chunked per calendar month into file-backed staging
+  // with a setImmediate yield between periods, so each burst is sub-second and
+  // the loop (heartbeat, timers, node-cron, API) keeps breathing. The live
+  // tables are only touched by the fast final swap of the already-aggregated
+  // rows — the same stage-then-atomic-swap shape syncSalesFromSage uses above.
+  const periods = rollupPeriods();
+
+  db.exec(`
+    DROP TABLE IF EXISTS stage_item_rollup;
+    DROP TABLE IF EXISTS stage_customer_rollup;
+    DROP TABLE IF EXISTS stage_item_desc;
+    CREATE TABLE stage_item_rollup (item_number, period, qty_sold, revenue, item_description);
+    CREATE TABLE stage_customer_rollup (customer_code, period, revenue, qty, customer_name);
+    CREATE TABLE stage_item_desc (item_number PRIMARY KEY, item_description);
+  `);
+  try {
+    // Precompute the item -> description map ONCE (cache preferred, item master
+    // as fallback — matches the old COALESCE(MAX(ic), MAX(ir))). Doing it here,
+    // not per-period, keeps each period's item aggregation a cheap indexed join
+    // instead of re-scanning the cache + item master for all 40+ periods.
     db.prepare(`
-      INSERT INTO inventory_customer_sales_rollup (customer_code, period, revenue, qty, customer_name)
-      SELECT TRIM(customer_code), SUBSTR(transaction_date, 1, 7),
-             SUM(line_amount), SUM(qty_sold), MAX(customer_name)
+      INSERT OR REPLACE INTO stage_item_desc (item_number, item_description)
+      SELECT TRIM(item_number), MAX(item_description)
+      FROM inventory_sales_cache
+      WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+      GROUP BY TRIM(item_number)
+    `).run();
+    // Fill items with no cache description from the item master. INSERT OR IGNORE
+    // keeps the cache-preferred precedence (won't overwrite a cache hit).
+    db.prepare(`
+      INSERT OR IGNORE INTO stage_item_desc (item_number, item_description)
+      SELECT TRIM(item_number), MAX(item_description)
+      FROM inventoryrecord
+      WHERE item_description IS NOT NULL AND TRIM(item_description) <> ''
+      GROUP BY TRIM(item_number)
+    `).run();
+
+    // Per-period aggregations. The transaction_date range uses
+    // idx_inventory_sales_transactions_date (v074), so all periods together scan
+    // the fact table about once — NOT once per period. period is a constant for
+    // the chunk, so GROUP BY is on the entity only.
+    const stageItem = db.prepare(`
+      INSERT INTO stage_item_rollup (item_number, period, qty_sold, revenue, item_description)
+      SELECT TRIM(t.item_number), ?, SUM(t.qty_sold), SUM(t.line_amount), MAX(sd.item_description)
+      FROM inventory_sales_transactions t
+      LEFT JOIN stage_item_desc sd ON sd.item_number = TRIM(t.item_number)
+      WHERE t.transaction_date >= ? AND t.transaction_date < ? AND NOT ${EXCL_INTER_BRANCH}
+      GROUP BY TRIM(t.item_number)
+    `);
+    const stageCustomer = db.prepare(`
+      INSERT INTO stage_customer_rollup (customer_code, period, revenue, qty, customer_name)
+      SELECT TRIM(customer_code), ?, SUM(line_amount), SUM(qty_sold), MAX(customer_name)
       FROM inventory_sales_transactions
-      WHERE transaction_date >= ? AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
+      WHERE transaction_date >= ? AND transaction_date < ?
+        AND customer_code IS NOT NULL AND TRIM(customer_code) <> ''
         AND NOT ${EXCL_INTER_BRANCH}
-      GROUP BY TRIM(customer_code), SUBSTR(transaction_date, 1, 7)
-    `).run(from);
-  });
-  rebuild();
+      GROUP BY TRIM(customer_code)
+    `);
+    const stagePeriod = db.transaction((period, start, end) => {
+      stageItem.run(period, start, end);
+      stageCustomer.run(period, start, end);
+    });
+
+    for (const period of periods) {
+      const done = trackOp(`inventory-sales-sync:rebuild-rollups ${period}`);
+      try { stagePeriod(period, `${period}-01`, nextPeriodStart(period)); }
+      finally { done(); }
+      // Hand the loop back so heartbeats, timers and node-cron can run between
+      // months — this is what stops the nightly freeze.
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    // Atomic swap: the rollup tables are small (aggregated to entity × month),
+    // so clearing and copying the fully-staged rows is a sub-second write — the
+    // only moment the live tables are locked. All-or-nothing, so a reader (or
+    // the hub pull) never sees a half-rebuilt rollup.
+    const doneSwap = trackOp('inventory-sales-sync:rebuild-rollups:swap');
+    try {
+      db.transaction(() => {
+        db.prepare('DELETE FROM inventory_item_sales_rollup').run();
+        db.prepare(`INSERT INTO inventory_item_sales_rollup (item_number, period, qty_sold, revenue, item_description)
+                    SELECT item_number, period, qty_sold, revenue, item_description FROM stage_item_rollup`).run();
+        db.prepare('DELETE FROM inventory_customer_sales_rollup').run();
+        db.prepare(`INSERT INTO inventory_customer_sales_rollup (customer_code, period, revenue, qty, customer_name)
+                    SELECT customer_code, period, revenue, qty, customer_name FROM stage_customer_rollup`).run();
+      })();
+    } finally { doneSwap(); }
+  } finally {
+    // Always drop the scratch tables, even if staging or the swap threw, so a
+    // full aggregated duplicate can't linger in the live DB (and its backups).
+    db.exec('DROP TABLE IF EXISTS stage_item_rollup; DROP TABLE IF EXISTS stage_customer_rollup; DROP TABLE IF EXISTS stage_item_desc;');
+  }
 }
 
 export function getSyncMeta() {
