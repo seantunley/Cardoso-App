@@ -3533,8 +3533,8 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   // (even when the rollup is legitimately empty), and the rebuild fits inside the
   // hub's fetch timeout so the pull still succeeds with real data.
   let salesRollupWarmAttempted = false;
-  const ensureSalesRollupWarm = async () => {
-    if (salesRollupWarmAttempted) return;
+  let salesRollupWarmInFlight = null;
+  const _warmSalesRollupOnce = async () => {
     // If a sales sync is running, wait for it FIRST. Its final step rebuilds the
     // rollups against freshly-swapped transaction data — so afterwards the
     // emptiness check below finds them populated and we don't kick off a second
@@ -3555,6 +3555,20 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
       await rebuildInventorySalesRollups();
     }
     salesRollupWarmAttempted = true;
+  };
+  const ensureSalesRollupWarm = async () => {
+    if (salesRollupWarmAttempted) return;
+    // Coalesce concurrent cold-cache warm-ups onto ONE run. Two reporting pulls
+    // (e.g. overlapping hub/manual resyncs) can both reach here while the once-
+    // flag is still false; without sharing, each would queue its own full
+    // rebuildInventorySalesRollups() — and since the rebuild CHAIN serialises
+    // (not coalesces), the second would run a wholly redundant rebuild after the
+    // first already populated the rollups. Share the in-flight promise so a
+    // failure still reaches every awaiting route's catch (→ 500).
+    if (!salesRollupWarmInFlight) {
+      salesRollupWarmInFlight = _warmSalesRollupOnce().finally(() => { salesRollupWarmInFlight = null; });
+    }
+    await salesRollupWarmInFlight;
   };
 
   // Per-item monthly sales with inter-branch transfers EXCLUDED — the hub pulls
