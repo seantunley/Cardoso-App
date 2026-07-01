@@ -207,7 +207,6 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
     db.exec('DROP TABLE IF EXISTS stage_sales_agg; DROP TABLE IF EXISTS stage_sales_txn;');
   }
 
-  updateMeta(aggRows.length);
   // Precompute the monthly item/customer sales rollups the hub pulls, so the
   // /api/reporting/inventory-*-sales endpoints serve a cheap indexed SELECT
   // instead of re-aggregating 24 months on every hub request — that on-demand
@@ -218,6 +217,15 @@ async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   // forensics. Best-effort — a rollup hiccup must not fail the whole sales sync.
   try { await rebuildInventorySalesRollups(); }
   catch (e) { console.warn('[inventory.sales_rollup] rebuild failed:', e.message); }
+  // Advance the freshness stamp AFTER the rollups are rebuilt+swapped, never
+  // before. The hub gates its inventory-*-sales delete-and-replace on this stamp
+  // (+ rollup row counts); stamping before the rebuild leaves a window — now
+  // observable because the chunked rebuild yields, whereas the old monolithic
+  // one froze the loop and served no reads — where the stamp says "fresh" while
+  // the rollups are still last-sync's, so the hub would replace its data with
+  // stale rollups. Stamping last means a mid-rebuild reader sees the old stamp
+  // (and skips), and only a post-swap reader sees the new stamp + new rollups.
+  updateMeta(aggRows.length);
   // Refresh the item -> vendor master (Sage ICITMV) alongside sales so vendor
   // attribution in Sales-by-Vendor / supplier filters stays current. Best-effort
   // — a vendor-map hiccup must not fail the sales sync.
