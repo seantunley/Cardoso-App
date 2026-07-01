@@ -42,6 +42,8 @@ memDb.exec(`
     source TEXT NOT NULL,
     generated_at TEXT
   );
+
+  CREATE TABLE connection_role (role TEXT PRIMARY KEY, connection_id INTEGER);
 `);
 
 vi.mock('../src/db/index.js', () => ({
@@ -85,6 +87,7 @@ beforeEach(() => {
   memDb.prepare('DELETE FROM job_runs').run();
   memDb.prepare('DELETE FROM alerts').run();
   memDb.prepare('DELETE FROM jti_archive').run();
+  memDb.prepare('DELETE FROM connection_role').run();
   _sageHealthStub = { ok: null, attention: false, downForMinutes: 0, consecutiveFailures: 0, lastError: null, lastOkAt: null, lastFailAt: null, lastProbeAt: null };
   _backupHealthStub = { status: 'ok', reason: 'ok', message: 'Backup is current.', last_backup_at: new Date().toISOString(), age_hours: 1, file: 'cardoso-site.db', total_backups: 3 };
   _kopiaStatusStub = { enabled: false, ok: false, repo: { ok: true }, sites: [], error: null, stale_hours: 26 };
@@ -450,6 +453,17 @@ describe('ruleJtiExportMissing', () => {
     expect(alert.severity).toBe('warning');
     expect(alert.message).toMatch(/2026-06/);
     expect(JSON.parse(alert.context).period).toBe('2026-06');
+  });
+
+  it('fires for a freshly-onboarded JTI site (routing configured) with NO archive yet', async () => {
+    // jti_export routing is assigned but the site has never produced ANY archive
+    // (e.g. its first month-end fire was dropped). Archive history alone would
+    // treat it as a non-JTI site and stay silent — routing must engage the rule.
+    memDb.prepare("INSERT INTO connection_role (role, connection_id) VALUES ('jti_export', 7)").run();
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing' AND resolved_at IS NULL").get();
+    expect(alert).toBeDefined();
+    expect(alert.severity).toBe('warning');
   });
 
   it('surfaces the skip reason from the most recent generation attempt', async () => {

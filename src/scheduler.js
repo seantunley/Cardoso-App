@@ -920,6 +920,16 @@ export function startSchedulers() {
       registerJob({ name: 'jti-monthly-export', type: 'cron', cronExpression: '0 2 1 * *', taskRef: t, mode: 'site', description: 'JTI Sales export — generate + archive last calendar month' });
     }
 
+    // A JTI catch-up "failed" only counts as a JOB failure when it's a real
+    // error (a Sage query threw). pool_unavailable is a normal outcome, NOT a
+    // failure: either JTI isn't routed on this site at all (getJtiSagePool
+    // throws "No connection assigned" on every non-JTI install), or its pool is
+    // briefly down — the hourly retry covers the transient, and a genuinely
+    // missing month is surfaced by the jti-export-missing alert. Without this,
+    // the hourly generation-retry would paint the Operations job panel red every
+    // hour on every non-JTI site. Mirrors how the two crons use successCheck.
+    const jtiCatchUpSucceeded = (r) => !r?.failed || String(r.failed.error || '').startsWith('pool_unavailable');
+
     // JTI boot-time catch-up — backfills up to 12 missed months on
     // app startup. Delayed 45s so migrations + pool init have settled
     // (the catch-up may run dozens of Sage queries back-to-back if
@@ -932,7 +942,7 @@ export function startSchedulers() {
         skipped: result.skipped?.length || 0,
         failed: result.failed || null,
       }),
-      { successCheck: (r) => !r?.failed },
+      { successCheck: jtiCatchUpSucceeded },
     ), 45_000);
     registerJob({ name: 'jti-boot-catchup', type: 'one-shot', delayMs: 45_000, mode: 'site', description: 'JTI catch-up — backfill up to 12 missed months on boot' });
 
@@ -978,7 +988,7 @@ export function startSchedulers() {
         skipped: result.skipped?.length || 0,
         failed: result.failed || null,
       }),
-      { successCheck: (r) => !r?.failed },
+      { successCheck: jtiCatchUpSucceeded },
     ), 60 * 60 * 1000));
     registerJob({ name: 'jti-generation-retry', type: 'interval', intervalMs: 60 * 60 * 1000, mode: 'site', description: 'JTI generation retry — re-attempt missed/failed monthly archives hourly (freeze-proof: an interval fires late after a main-thread freeze, unlike the wall-clock cron which drops the tick)' });
 

@@ -17,6 +17,7 @@ import { getSageHealth } from '../services/batReconciliation.js';
 import { ruleSecuritySignals } from './securitySignals.js';
 import { computeBackupHealth } from './backupHealth.js';
 import { getKopiaStatus, isKopiaEnabled } from '../services/hub/kopiaStatus.js';
+import { getRoleConnectionId } from '../services/connectionRoles.js';
 
 // Lazy-prepared statement cache. Mirrors the pattern in alertEngine.js so
 // the rule loop (evaluateAllRules, runs every minute) doesn't re-allocate
@@ -331,32 +332,39 @@ async function ruleNightlySyncStale() {
 // last month ran or not) and Job Runs (green skips). Operators only found out
 // by manually checking the archive list.
 //
-// This rule alerts on the ARTIFACT, not the run: if this site has ever produced
-// a scheduled JTI archive (i.e. it is a JTI site) but the PREVIOUS calendar
-// month has no scheduled archive, fire one deduped warning. It holds off until
+// This rule alerts on the ARTIFACT, not the run: on a JTI site, if the PREVIOUS
+// calendar month has no archive, fire one deduped warning. It holds off until
 // 10:00 on the 1st so the 02:00 cron + boot catch-up + 09:00 self-heal have all
 // had their shot before it complains. The message carries WHY from the most
 // recent generation attempt (pool down / never fired / threw). Auto-resolves
 // the moment the month lands (the hourly retry, a restart's catch-up, or a
 // manual export).
 //
+// "Is this a JTI site?" is answered by the jti_export connection routing FIRST,
+// then archive history as a fallback. Routing is the authoritative signal and,
+// crucially, catches a freshly-onboarded site whose VERY FIRST month-end fails —
+// archive history alone would have no scheduled row yet and stay silent exactly
+// when the operator most needs the alert.
+//
 // Site-only (HUB_MODE receives archives via push, it doesn't generate them).
 async function ruleJtiExportMissing() {
   if (process.env.HUB_MODE === 'true') return;
 
-  let everScheduled;
-  try {
-    everScheduled = _prep('jtiEverScheduled', `
-      SELECT 1 FROM jti_archive WHERE source = 'scheduled' LIMIT 1
-    `).get();
-  } catch (err) {
-    if (/no such table/i.test(err.message)) return; // JTI module not installed
-    throw err;
+  const jtiRouted = Boolean(getRoleConnectionId('jti_export'));
+  let everScheduled = false;
+  if (!jtiRouted) {
+    try {
+      everScheduled = Boolean(_prep('jtiEverScheduled', `
+        SELECT 1 FROM jti_archive WHERE source = 'scheduled' LIMIT 1
+      `).get());
+    } catch (err) {
+      if (/no such table/i.test(err.message)) return; // JTI module not installed
+      throw err;
+    }
   }
-  // Never produced a scheduled export → not a JTI site, or brand-new before its
-  // first month-end. The archive list / first scheduled run covers that state;
-  // don't nag.
-  if (!everScheduled) { resolveAlerts('jti-export-missing', 'auto'); return; }
+  // Not a JTI site: no jti_export routing configured AND never produced a
+  // scheduled export. Nothing to enforce; clear any stale alert and leave.
+  if (!jtiRouted && !everScheduled) { resolveAlerts('jti-export-missing', 'auto'); return; }
 
   const now = new Date();
   // Hold off until the 1st-of-month heal window (02:00 cron → boot catch-up →
