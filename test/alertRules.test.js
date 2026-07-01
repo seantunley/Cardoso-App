@@ -480,6 +480,19 @@ describe('ruleJtiExportMissing', () => {
     expect(alert.resolved_by).toBe('auto');
   });
 
+  it('treats a MANUAL full-month archive as present (operator fixed it by hand)', async () => {
+    seedArchive(2026, 5, 'scheduled'); // JTI site
+    seedArchive(2026, 6, 'manual');    // operator manually exported June → not missing
+    memDb.prepare(`
+      INSERT INTO alerts (rule_name, severity, message, dedup_key, fired_at)
+      VALUES ('jti-export-missing', 'warning', 'stale', 'jti-export-missing', '2026-07-10T00:00:00.000Z')
+    `).run();
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing'").get();
+    expect(alert.resolved_at).toBeTruthy();
+    expect(alert.resolved_by).toBe('auto');
+  });
+
   it('does NOT fire on a site that has never produced a scheduled archive (not a JTI site)', async () => {
     // jti_archive empty → not a JTI site / brand new. No nagging.
     await evaluateAllRules();

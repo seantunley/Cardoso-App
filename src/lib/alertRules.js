@@ -372,9 +372,15 @@ async function ruleJtiExportMissing() {
 
   let has;
   try {
-    has = _prep('jtiPrevMonthScheduled', `
+    // Count a MANUAL full-month archive as "present" too, not just 'scheduled'.
+    // A jti_archive row is only ever written for a full calendar month (partial
+    // exports stay download-only), so a source='manual' row means the operator
+    // already produced this month by hand — the remediation for this very alert.
+    // Requiring the canonical scheduled row would keep nagging after they've
+    // fixed it, until the automated retry later lands its own copy.
+    has = _prep('jtiPrevMonthArchived', `
       SELECT 1 FROM jti_archive
-      WHERE period_year = ? AND period_month = ? AND source = 'scheduled'
+      WHERE period_year = ? AND period_month = ? AND source IN ('scheduled', 'manual')
       LIMIT 1
     `).get(prevYear, prevMonth);
   } catch (err) {
