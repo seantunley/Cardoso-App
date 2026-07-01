@@ -13,6 +13,95 @@ import { jsPDF } from 'jspdf';
 
 // ---- Content (curated), keyed by ISO date ---------------------------------
 const RELEASES = {
+  '2026-06-30': {
+    product: 'Cardoso App',
+    title: 'Product Update',
+    date: '30 June 2026',
+    slug: '30-June-2026',
+    intro:
+      "This update advances the off-site backup capabilities of the Cardoso App. " +
+      "Head-office users can now see the status of each site's off-site Kopia " +
+      "backup directly on the Hub Backups page, with proactive alerts when a " +
+      "backup is stale or has encountered an error. The Kopia backup agent is now " +
+      "bundled in the Windows installer so it deploys automatically alongside the " +
+      "app. Backup health tracking has been rebuilt to be more accurate and " +
+      "resilient — it no longer depends on the scheduler staying alive, failed " +
+      "backups retry automatically, and the off-site agent guards against " +
+      "uploading outdated data. A fix also eliminates a BAT reconciliation " +
+      "annoyance where historical OCR error notifications re-appeared each time " +
+      "the page was opened.",
+    sections: [
+      {
+        label: 'NEW',
+        heading: 'New Features',
+        items: [
+          {
+            title: 'Off-site backup status on the Hub Backups page',
+            body:
+              "The Hub Backups page now shows the current state of each site's " +
+              "off-site Kopia backup alongside the local backup status. When a " +
+              "backup is stale or the repository reports an error, a proactive " +
+              "alert is raised so nothing slips through unnoticed.",
+            details: [
+              "Per-site off-site backup status (last snapshot time, freshness verdict, any repository error) shown directly on the Hub Backups dashboard.",
+              "A new alert rule fires when a site's off-site backup is overdue — surfaced in the existing Insights / Alerts feed.",
+              "Status is scoped to the sites each head-office user is permitted to see.",
+            ],
+          },
+          {
+            title: 'Kopia backup agent bundled in the Windows installer',
+            body:
+              "The Kopia off-site backup agent is now included in the Windows " +
+              "installer package. New and updated installations receive the " +
+              "backup agent automatically — no separate download or manual " +
+              "setup step required.",
+          },
+        ],
+      },
+      {
+        label: 'IMPROVED',
+        heading: 'Improvements',
+        items: [
+          {
+            title: 'More reliable and accurate backup health reporting',
+            body:
+              "Backup health is now assessed from the actual state of the backup " +
+              "files rather than relying on the Windows Task Scheduler to report " +
+              "success. This means the health indicator stays correct even when " +
+              "the scheduler is stopped or has not yet run.",
+            details: [
+              "A failed local backup now retries automatically on a back-off schedule, catching up on any missed windows.",
+              "A data-age guard stops the off-site snapshot agent from uploading a stale copy — if the local source hasn't been updated recently, the snapshot is deferred until fresh data is available.",
+              "The hub's backup health verdict now reflects the actual backup outcome rather than defaulting to the data age alone.",
+            ],
+          },
+        ],
+      },
+      {
+        label: 'FIXED',
+        heading: 'Fixes',
+        items: [
+          {
+            title: 'BAT reconciliation — old OCR errors no longer re-notify on every open',
+            body:
+              "Historical per-row OCR errors from previous reconciliation runs " +
+              "were re-appearing as notification toasts each time the BAT " +
+              "Reconciliation page was opened. They are now seeded quietly on " +
+              "load and only surface as live notifications when OCR is actively " +
+              "running in the current session.",
+          },
+          {
+            title: 'Hub Backups page surfaces Kopia repository errors',
+            body:
+              "When the off-site backup agent encounters a repository problem — " +
+              "such as a connectivity failure or a corrupt snapshot — the error " +
+              "is now shown on the Hub Backups page rather than the site " +
+              "appearing healthy.",
+          },
+        ],
+      },
+    ],
+  },
   '2026-06-15': {
     product: 'Cardoso App',
     title: 'Product Update',
