@@ -8,7 +8,7 @@ import { createRequire } from 'module';
 const _require = createRequire(import.meta.url);
 const { version: APP_VERSION } = _require('../../package.json');
 import db from '../db/index.js';
-import { rebuildInventorySalesRollups } from '../services/inventoryMovement.js';
+import { rebuildInventorySalesRollups, awaitInFlightSalesSync } from '../services/inventoryMovement.js';
 import { reportingRateLimiter } from '../middleware/rateLimit.js';
 import { logError } from '../lib/errorLog.js';
 import { isoYear, currentIsoWeek, weeksInIsoYear } from '../lib/isoWeek.js';
@@ -3535,6 +3535,12 @@ export function createReportingRouter({ requireAuth, requirePermission }) {
   let salesRollupWarmAttempted = false;
   const ensureSalesRollupWarm = async () => {
     if (salesRollupWarmAttempted) return;
+    // If a sales sync is running, wait for it FIRST. Its final step rebuilds the
+    // rollups against freshly-swapped transaction data — so afterwards the
+    // emptiness check below finds them populated and we don't kick off a second
+    // rebuild that would read pre/mid-swap data and let the hub delete-and-
+    // replace from stale rollups. (Swallows a sync failure; we re-check below.)
+    await awaitInFlightSalesSync();
     const itemEmpty = !prep('SELECT 1 FROM inventory_item_sales_rollup LIMIT 1').get();
     const custEmpty = !prep('SELECT 1 FROM inventory_customer_sales_rollup LIMIT 1').get();
     if (itemEmpty && custEmpty && prep('SELECT 1 FROM inventory_sales_transactions LIMIT 1').get()) {

@@ -57,6 +57,17 @@ export function syncSalesFromSage(opts = {}) {
   return inFlightSalesSync;
 }
 
+// Resolve once any in-flight sales sync has fully completed — INCLUDING its
+// final post-swap rollup rebuild. Used by the reporting warm-on-read path so it
+// never races a running sync: rather than kick off its own rebuild against
+// pre/mid-swap transaction data, it waits for the sync (which rebuilds the
+// rollups against the freshly-swapped data as its last step) and then finds the
+// rollups already populated. Swallows a sync failure — the warm path re-checks
+// emptiness and can still rebuild if the sync left the rollups empty.
+export function awaitInFlightSalesSync() {
+  return (inFlightSalesSync || Promise.resolve()).catch(() => {});
+}
+
 async function _syncSalesFromSage({ fromDate, toDate } = {}) {
   const pool = await getSagePool();
   const now = new Date();

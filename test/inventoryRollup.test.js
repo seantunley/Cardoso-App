@@ -33,7 +33,7 @@ vi.mock('../src/services/batReconciliation.js', () => ({ getSagePool: async () =
 vi.mock('../src/services/sage/queryRegistry.js', () => ({ resolveSageQuery: () => '' }));
 vi.mock('../src/lib/errorLog.js', () => ({ logError: () => {} }));
 
-const { rebuildInventorySalesRollups } = await import('../src/services/inventoryMovement.js');
+const { rebuildInventorySalesRollups, awaitInFlightSalesSync } = await import('../src/services/inventoryMovement.js');
 
 // Two recent, in-window periods (current month + previous month).
 const now = new Date();
@@ -126,6 +126,12 @@ describe('rebuildInventorySalesRollups (chunked stage-and-swap)', () => {
     expect(memDb.prepare("SELECT COUNT(*) c FROM inventory_item_sales_rollup WHERE item_number = 'OLD'").get().c).toBe(0);
     expect(memDb.prepare("SELECT COUNT(*) c FROM inventory_customer_sales_rollup WHERE customer_code = 'OLD'").get().c).toBe(0);
     expect(memDb.prepare("SELECT COUNT(*) c FROM inventory_item_sales_rollup").get().c).toBe(1);
+  });
+
+  it('awaitInFlightSalesSync resolves immediately when no sync is running', async () => {
+    // The warm-on-read path awaits this before deciding to rebuild; with no sync
+    // in flight it must resolve (and never reject) so the caller proceeds.
+    await expect(awaitInFlightSalesSync()).resolves.toBeUndefined();
   });
 
   it('serialises concurrent rebuilds via the chain (no staging clash)', async () => {
