@@ -128,10 +128,11 @@ describe('rebuildInventorySalesRollups (chunked stage-and-swap)', () => {
     expect(memDb.prepare("SELECT COUNT(*) c FROM inventory_item_sales_rollup").get().c).toBe(1);
   });
 
-  it('coalesces concurrent rebuilds onto one in-flight run (no staging clash)', async () => {
+  it('serialises concurrent rebuilds via the chain (no staging clash)', async () => {
     txn({ item: 'ITM1', cust: 'C1', date: `${P1}-05`, qty: 2, amount: 100 });
-    // Fire two overlapping rebuilds — the in-flight guard must serialise them so
-    // they don't corrupt the shared stage_* tables.
+    // Fire two overlapping rebuilds — the chain must run them one-after-another
+    // so they don't corrupt the shared stage_* tables (and the second runs a
+    // fresh rebuild against current data, not a coalesced pre-swap one).
     await Promise.all([rebuildInventorySalesRollups(), rebuildInventorySalesRollups()]);
     const rows = memDb.prepare('SELECT item_number, period, qty_sold, revenue FROM inventory_item_sales_rollup').all();
     expect(rows).toEqual([{ item_number: 'ITM1', period: P1, qty_sold: 2, revenue: 100 }]);

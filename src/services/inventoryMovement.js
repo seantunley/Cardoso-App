@@ -286,17 +286,25 @@ function nextPeriodStart(period) {
   return `${y}-${String(m).padStart(2, '0')}-01`;
 }
 
-// Coalesce concurrent rebuilds onto a single in-flight run. The rebuild now
-// yields between period chunks (async), so two overlapping callers — the nightly
-// sync and a hub warm-on-read (routes/reporting.js), or two hub requests — would
-// otherwise interleave on the shared stage_* tables and corrupt each other's
-// staging. Every caller wants the same fully-rebuilt rollup, so hand them the
-// one run. Mirrors inFlightSalesSync above.
-let inFlightRollupRebuild = null;
+// Serialize rebuilds by CHAINING each call after the previous one settles, then
+// running its OWN fresh _rebuild. The rebuild now yields between period chunks
+// (async), so two overlapping callers — the nightly sync and a hub warm-on-read
+// (routes/reporting.js), or two hub requests — would otherwise interleave on the
+// shared stage_* tables and corrupt each other's staging.
+//
+// Chaining, NOT coalescing: coalescing onto one in-flight run would let the
+// rebuild the nightly sync kicks off AFTER its atomic swap simply await an
+// EARLIER rebuild that began pre-swap — leaving the rollups computed from stale/
+// pre-swap transaction data, with no fresh rebuild until the next nightly sync.
+// Chaining guarantees the sync's post-swap call runs its own rebuild against the
+// swapped data. Each caller gets its own run's promise, so a failure still
+// reaches the reporting route's catch → 500.
+let rollupRebuildTail = Promise.resolve();
 export function rebuildInventorySalesRollups() {
-  if (inFlightRollupRebuild) return inFlightRollupRebuild;
-  inFlightRollupRebuild = _rebuildInventorySalesRollups().finally(() => { inFlightRollupRebuild = null; });
-  return inFlightRollupRebuild;
+  const run = () => _rebuildInventorySalesRollups();
+  const mine = rollupRebuildTail.then(run, run);
+  rollupRebuildTail = mine.catch(() => {}); // keep the chain alive past a failure
+  return mine;
 }
 
 async function _rebuildInventorySalesRollups() {
