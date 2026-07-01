@@ -350,6 +350,21 @@ async function ruleNightlySyncStale() {
 async function ruleJtiExportMissing() {
   if (process.env.HUB_MODE === 'true') return;
 
+  // Per-period dedup key so each missing month is its own alert. A single fixed
+  // key would let a NEWER month's success resolve an OLDER month's still-valid
+  // alert (June missing, alert fires in July; a normal July archive on Aug 1
+  // must NOT clear the June alert).
+  const keyFor = (yr, mn) => `jti-export-missing:${yr}-${String(mn).padStart(2, '0')}`;
+
+  const listActiveMissing = () => {
+    try {
+      return _prep('activeJtiMissing', `
+        SELECT dedup_key FROM alerts
+        WHERE resolved_at IS NULL AND dedup_key LIKE 'jti-export-missing:%'
+      `).all();
+    } catch { return []; }
+  };
+
   const jtiRouted = Boolean(getRoleConnectionId('jti_export'));
   let everScheduled = false;
   if (!jtiRouted) {
@@ -363,8 +378,37 @@ async function ruleJtiExportMissing() {
     }
   }
   // Not a JTI site: no jti_export routing configured AND never produced a
-  // scheduled export. Nothing to enforce; clear any stale alert and leave.
-  if (!jtiRouted && !everScheduled) { resolveAlerts('jti-export-missing', 'auto'); return; }
+  // scheduled export. Nothing to enforce; clear any stale per-period alerts.
+  if (!jtiRouted && !everScheduled) {
+    for (const a of listActiveMissing()) resolveAlerts(a.dedup_key, 'auto');
+    return;
+  }
+
+  // A jti_archive row is only ever written for a full calendar month (partial
+  // exports stay download-only), so a source='manual' row means the operator
+  // produced that month by hand — the remediation for this very alert. Count it
+  // as present alongside 'scheduled'.
+  const periodArchived = (yr, mn) => {
+    try {
+      return Boolean(_prep('jtiPeriodArchived', `
+        SELECT 1 FROM jti_archive
+        WHERE period_year = ? AND period_month = ? AND source IN ('scheduled', 'manual')
+        LIMIT 1
+      `).get(yr, mn));
+    } catch (err) {
+      if (/no such table/i.test(err.message)) return false;
+      throw err;
+    }
+  };
+
+  // Heal any active per-period alert whose month has SINCE been archived (a late
+  // boot catch-up / retry / manual export finally produced it) — independent of
+  // the grace window and of which month we check below. Each key carries its own
+  // period, so this only ever clears the month that was actually produced.
+  for (const a of listActiveMissing()) {
+    const m = /^jti-export-missing:(\d{4})-(\d{2})$/.exec(a.dedup_key);
+    if (m && periodArchived(Number(m[1]), Number(m[2]))) resolveAlerts(a.dedup_key, 'auto');
+  }
 
   const now = new Date();
   // Hold off until the 1st-of-month heal window (02:00 cron → boot catch-up →
@@ -377,27 +421,11 @@ async function ruleJtiExportMissing() {
   const mo = now.getMonth() + 1; // 1..12
   const prevYear = mo === 1 ? y - 1 : y;
   const prevMonth = mo === 1 ? 12 : mo - 1;
+  const dedupKey = keyFor(prevYear, prevMonth);
 
-  let has;
-  try {
-    // Count a MANUAL full-month archive as "present" too, not just 'scheduled'.
-    // A jti_archive row is only ever written for a full calendar month (partial
-    // exports stay download-only), so a source='manual' row means the operator
-    // already produced this month by hand — the remediation for this very alert.
-    // Requiring the canonical scheduled row would keep nagging after they've
-    // fixed it, until the automated retry later lands its own copy.
-    has = _prep('jtiPrevMonthArchived', `
-      SELECT 1 FROM jti_archive
-      WHERE period_year = ? AND period_month = ? AND source IN ('scheduled', 'manual')
-      LIMIT 1
-    `).get(prevYear, prevMonth);
-  } catch (err) {
-    if (/no such table/i.test(err.message)) return;
-    throw err;
-  }
-
-  const dedupKey = 'jti-export-missing';
-  if (has) { resolveAlerts(dedupKey, 'auto'); return; }
+  // Previous month present (scheduled or manual) → nothing to fire; the heal
+  // loop above already cleared any active alert for it.
+  if (periodArchived(prevYear, prevMonth)) return;
 
   // Missing. Pull the most recent attempt across all JTI generation jobs so the
   // message can say WHY it didn't land — the whole point is that a silent skip
