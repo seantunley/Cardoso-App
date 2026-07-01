@@ -955,6 +955,33 @@ export function startSchedulers() {
       registerJob({ name: 'jti-daily-ensure', type: 'cron', cronExpression: '0 9 * * *', taskRef: t, mode: 'site', description: 'JTI self-heal — ensure last month is archived if the 1st-of-month run was missed' });
     }
 
+    // JTI generation retry — every 60 minutes, re-run a short catch-up
+    // (previous + the month before). This is the reliability net the two
+    // CRON paths above can't be: node-cron matches a wall-clock minute, but
+    // this app reliably freezes the main thread for ~15-20s at 02:00 nightly
+    // (synchronous inventory rollup rebuild + the 02:00 SQLite backup of a
+    // large DB — see the .main-thread-freeze markers next to the database).
+    // The jti-monthly-export cron fires at 02:00-on-the-1st, dead centre of
+    // that freeze, so its tick is silently dropped on sites whose freeze
+    // straddles the minute boundary — the app is fully up, but the fire is
+    // lost and node-cron never replays it. A setInterval can't be dropped
+    // that way: a freeze only makes it fire LATE (on the next free loop
+    // turn), never never. So a missed month heals within the hour regardless
+    // of when the loop was blocked. hasScheduledArchive makes this a cheap DB
+    // no-op once the period is archived; only a genuinely missing month
+    // re-hits Sage. Mirrors commission-generation-retry.
+    intervals.push(setInterval(track(
+      'jti-generation-retry',
+      () => runBootCatchUp({ db, getSagePool: getJtiSagePool, monthsBack: 2 }),
+      (result) => ({
+        archived: result.archived?.length || 0,
+        skipped: result.skipped?.length || 0,
+        failed: result.failed || null,
+      }),
+      { successCheck: (r) => !r?.failed },
+    ), 60 * 60 * 1000));
+    registerJob({ name: 'jti-generation-retry', type: 'interval', intervalMs: 60 * 60 * 1000, mode: 'site', description: 'JTI generation retry — re-attempt missed/failed monthly archives hourly (freeze-proof: an interval fires late after a main-thread freeze, unlike the wall-clock cron which drops the tick)' });
+
     // JTI hub-push retry tick — every 15 minutes, scan for archives
     // in pending/failed state and try to send them. The post-archive
     // push trigger in handleExport / generateAndArchivePeriod handles

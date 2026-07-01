@@ -319,6 +319,123 @@ async function ruleNightlySyncStale() {
   }
 }
 
+// ── Rule: JTI monthly export missing ─────────────────────────────────────
+//
+// The JTI Sales export is generated on the 1st at 02:00 (jti-monthly-export),
+// with a boot catch-up, a 09:00 daily self-heal, and an hourly generation
+// retry as safety nets. Every one of those paths records a skip
+// (pool_unavailable, or a fire dropped because the main thread was frozen at
+// the scheduled minute) as a SUCCESSFUL job run, and node-cron never replays a
+// missed fire — so a month that genuinely never got produced is invisible on
+// both the schedule panel (which only shows the NEXT fire, identical whether
+// last month ran or not) and Job Runs (green skips). Operators only found out
+// by manually checking the archive list.
+//
+// This rule alerts on the ARTIFACT, not the run: if this site has ever produced
+// a scheduled JTI archive (i.e. it is a JTI site) but the PREVIOUS calendar
+// month has no scheduled archive, fire one deduped warning. It holds off until
+// 10:00 on the 1st so the 02:00 cron + boot catch-up + 09:00 self-heal have all
+// had their shot before it complains. The message carries WHY from the most
+// recent generation attempt (pool down / never fired / threw). Auto-resolves
+// the moment the month lands (the hourly retry, a restart's catch-up, or a
+// manual export).
+//
+// Site-only (HUB_MODE receives archives via push, it doesn't generate them).
+async function ruleJtiExportMissing() {
+  if (process.env.HUB_MODE === 'true') return;
+
+  let everScheduled;
+  try {
+    everScheduled = _prep('jtiEverScheduled', `
+      SELECT 1 FROM jti_archive WHERE source = 'scheduled' LIMIT 1
+    `).get();
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return; // JTI module not installed
+    throw err;
+  }
+  // Never produced a scheduled export → not a JTI site, or brand-new before its
+  // first month-end. The archive list / first scheduled run covers that state;
+  // don't nag.
+  if (!everScheduled) { resolveAlerts('jti-export-missing', 'auto'); return; }
+
+  const now = new Date();
+  // Hold off until the 1st-of-month heal window (02:00 cron → boot catch-up →
+  // 09:00 daily-ensure) has fully passed, so we never fire during the few hours
+  // a fresh month is legitimately still being generated. Uses server-local time
+  // to match the crons (which are also server-local).
+  if (now.getDate() === 1 && now.getHours() < 10) return;
+
+  const y = now.getFullYear();
+  const mo = now.getMonth() + 1; // 1..12
+  const prevYear = mo === 1 ? y - 1 : y;
+  const prevMonth = mo === 1 ? 12 : mo - 1;
+
+  let has;
+  try {
+    has = _prep('jtiPrevMonthScheduled', `
+      SELECT 1 FROM jti_archive
+      WHERE period_year = ? AND period_month = ? AND source = 'scheduled'
+      LIMIT 1
+    `).get(prevYear, prevMonth);
+  } catch (err) {
+    if (/no such table/i.test(err.message)) return;
+    throw err;
+  }
+
+  const dedupKey = 'jti-export-missing';
+  if (has) { resolveAlerts(dedupKey, 'auto'); return; }
+
+  // Missing. Pull the most recent attempt across all JTI generation jobs so the
+  // message can say WHY it didn't land — the whole point is that a silent skip
+  // (recorded as job success) stops being invisible.
+  let lastRun = null;
+  try {
+    lastRun = _prep('jtiLastGenAttempt', `
+      SELECT name, status, error_message, context, started_at
+      FROM job_runs
+      WHERE name IN ('jti-monthly-export', 'jti-daily-ensure', 'jti-boot-catchup', 'jti-generation-retry')
+      ORDER BY started_at DESC LIMIT 1
+    `).get();
+  } catch (err) {
+    if (!/no such table/i.test(err.message)) throw err;
+  }
+
+  const period = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+  let why;
+  if (!lastRun) {
+    why = 'No generation attempt has run at all yet.';
+  } else if (lastRun.status === 'failed') {
+    why = `The most recent attempt (${lastRun.name}) failed: ${lastRun.error_message || 'unknown error'}.`;
+  } else {
+    // Succeeded-but-didn't-produce: the skip reason (pool_unavailable etc.)
+    // rides in the run context — dig it out so the operator sees the cause.
+    let reason = '';
+    try {
+      const ctx = JSON.parse(lastRun.context || '{}');
+      reason = ctx?.failed?.error || ctx?.reason || '';
+    } catch { /* context not JSON — leave reason blank */ }
+    why = reason
+      ? `The most recent attempt (${lastRun.name}) skipped it: ${reason}.`
+      : `The most recent attempt (${lastRun.name}) completed without producing it — the 02:00 fire may have been dropped by a main-thread freeze, or the JTI Sage pool was unavailable.`;
+  }
+
+  fireAlert({
+    ruleName: 'jti-export-missing',
+    severity: 'warning',
+    message: `JTI monthly export for ${period} has not been produced. ${why} It should self-heal within the hour via the generation-retry tick (or on the next restart); if this alert persists, the JTI Sage pool is likely unreachable on this site.`,
+    context: {
+      period,
+      period_year: prevYear,
+      period_month: prevMonth,
+      last_attempt_job: lastRun?.name || null,
+      last_attempt_status: lastRun?.status || null,
+      last_attempt_error: lastRun?.error_message || null,
+      last_attempt_at: lastRun?.started_at || null,
+    },
+    dedupKey,
+  });
+}
+
 // ── Rule: Kopia off-site backup stale / missing (hub-only) ───────────────
 //
 // The hub runs the Kopia repository server; every site agent pushes snapshots
@@ -425,6 +542,7 @@ const RULES = [
   { name: 'backup-artifact-stale', fn: ruleBackupArtifactStale },
   { name: 'job-failure-spike', fn: ruleJobFailureSpike },
   { name: 'nightly-sync-stale', fn: ruleNightlySyncStale },
+  { name: 'jti-export-missing', fn: ruleJtiExportMissing },
   { name: 'kopia-site-stale', fn: ruleKopiaSiteStale },
   // Security signals — brute-force, flood, scanner detection. Rule
   // owner lives next to the metric collection in src/lib/securitySignals.js

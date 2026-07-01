@@ -34,6 +34,14 @@ memDb.exec(`
     resolved_by TEXT
   );
   CREATE INDEX idx_alerts_active_dedup ON alerts(dedup_key) WHERE resolved_at IS NULL;
+
+  CREATE TABLE jti_archive (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    period_year INTEGER NOT NULL,
+    period_month INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    generated_at TEXT
+  );
 `);
 
 vi.mock('../src/db/index.js', () => ({
@@ -76,6 +84,7 @@ const { evaluateAllRules } = await import('../src/lib/alertRules.js');
 beforeEach(() => {
   memDb.prepare('DELETE FROM job_runs').run();
   memDb.prepare('DELETE FROM alerts').run();
+  memDb.prepare('DELETE FROM jti_archive').run();
   _sageHealthStub = { ok: null, attention: false, downForMinutes: 0, consecutiveFailures: 0, lastError: null, lastOkAt: null, lastFailAt: null, lastProbeAt: null };
   _backupHealthStub = { status: 'ok', reason: 'ok', message: 'Backup is current.', last_backup_at: new Date().toISOString(), age_hours: 1, file: 'cardoso-site.db', total_backups: 3 };
   _kopiaStatusStub = { enabled: false, ok: false, repo: { ok: true }, sites: [], error: null, stale_hours: 26 };
@@ -410,5 +419,77 @@ describe('ruleKopiaSiteStale (hub-only)', () => {
     ] };
     await evaluateAllRules();
     expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key LIKE 'kopia-site-stale:%'").get().c).toBe(0);
+  });
+});
+
+describe('ruleJtiExportMissing', () => {
+  // Pin the clock so previousMonth is deterministic (June 2026) and we're past
+  // the 1st-of-month heal window. Mid-month 08:00 local.
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T08:00:00'));
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Seed a jti_archive row. generated_at is a fixed past timestamp; only
+  // (period_year, period_month, source) matter to the rule.
+  function seedArchive(year, month, source = 'scheduled') {
+    memDb.prepare(
+      "INSERT INTO jti_archive (period_year, period_month, source, generated_at) VALUES (?, ?, ?, '2026-01-01 00:00:00')",
+    ).run(year, month, source);
+  }
+
+  it('fires a warning when the previous month has no scheduled archive on a JTI site', async () => {
+    // Site IS a JTI site (has produced scheduled archives before) but June is missing.
+    seedArchive(2026, 5, 'scheduled'); // May present → proves this is a JTI site
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing' AND resolved_at IS NULL").get();
+    expect(alert).toBeDefined();
+    expect(alert.severity).toBe('warning');
+    expect(alert.message).toMatch(/2026-06/);
+    expect(JSON.parse(alert.context).period).toBe('2026-06');
+  });
+
+  it('surfaces the skip reason from the most recent generation attempt', async () => {
+    seedArchive(2026, 5, 'scheduled');
+    // A generation attempt that "succeeded" as a job but skipped on pool_unavailable —
+    // the reason rides in the run context. This is the silent-skip the rule exists to unmask.
+    memDb.prepare(`
+      INSERT INTO job_runs (name, status, started_at, ended_at, context)
+      VALUES ('jti-generation-retry', 'succeeded', '2026-07-15T07:00:00.000Z', '2026-07-15T07:00:01.000Z', ?)
+    `).run(JSON.stringify({ failed: { year: 2026, month: 6, error: 'pool_unavailable: ECONNREFUSED' } }));
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing' AND resolved_at IS NULL").get();
+    expect(alert).toBeDefined();
+    expect(alert.message).toMatch(/pool_unavailable: ECONNREFUSED/);
+  });
+
+  it('does NOT fire (and auto-resolves) when the previous month IS archived', async () => {
+    seedArchive(2026, 5, 'scheduled');
+    seedArchive(2026, 6, 'scheduled'); // June present
+    // Pre-existing active alert to prove auto-resolve.
+    memDb.prepare(`
+      INSERT INTO alerts (rule_name, severity, message, dedup_key, fired_at)
+      VALUES ('jti-export-missing', 'warning', 'stale', 'jti-export-missing', '2026-07-10T00:00:00.000Z')
+    `).run();
+    await evaluateAllRules();
+    const alert = memDb.prepare("SELECT * FROM alerts WHERE dedup_key = 'jti-export-missing'").get();
+    expect(alert.resolved_at).toBeTruthy();
+    expect(alert.resolved_by).toBe('auto');
+  });
+
+  it('does NOT fire on a site that has never produced a scheduled archive (not a JTI site)', async () => {
+    // jti_archive empty → not a JTI site / brand new. No nagging.
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key = 'jti-export-missing'").get().c).toBe(0);
+  });
+
+  it('holds off during the 1st-of-month heal window (before 10:00 on the 1st)', async () => {
+    vi.setSystemTime(new Date('2026-07-01T08:00:00')); // 1st, pre-heal-window
+    seedArchive(2026, 5, 'scheduled'); // June (prev month) genuinely missing, but too early to complain
+    await evaluateAllRules();
+    expect(memDb.prepare("SELECT COUNT(*) c FROM alerts WHERE dedup_key = 'jti-export-missing'").get().c).toBe(0);
   });
 });
