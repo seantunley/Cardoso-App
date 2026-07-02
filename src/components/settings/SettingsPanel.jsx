@@ -7,7 +7,6 @@ import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/api/apiClient";
 import { cn } from "@/lib/utils";
-import { hasPermission } from "@/lib/permissions";
 import DisasterRecoveryWizard from "@/components/settings/DisasterRecoveryWizard";
 
 // UI
@@ -27,6 +26,7 @@ import AccountingTab from "@/components/settings/tabs/AccountingTab";
 import ReconciliationSettingsTab from "@/components/settings/tabs/ReconciliationSettingsTab";
 import NtopngTab from "@/components/settings/tabs/NtopngTab";
 import TlsTab from "@/components/settings/tabs/TlsTab";
+import { buildSettingsTabGroups } from "@/components/settings/settingsTabs";
 import UsersTabContent from "@/components/settings/tabs/UsersTabContent";
 import SageCorrectionsTab from "@/components/settings/tabs/SageCorrectionsTab";
 import ForecastSettingsTab from "@/components/settings/tabs/ForecastSettingsTab";
@@ -61,71 +61,11 @@ export function Row({ label, value, mono }) {
 
 export default function SettingsPanel({ open, onClose, hubMode, initialTab }) {
   const { data: currentUser } = useQuery({ queryKey: ["currentUser"], queryFn: () => api.auth.me() });
-  const isAdmin = currentUser?.role === "admin";
-  const canManageUsers = hasPermission(currentUser, "can_manage_users") || isAdmin;
-  const canManageRules = hasPermission(currentUser, "can_manage_rules") || isAdmin;
 
-  // Tabs are grouped by purpose. Groups render with a small visual
-  // divider between them so the operator can see Access vs Customer
-  // settings vs Modules at a glance. System Log + Updates live on the
-  // Operations page (PR #185), not here. The hub-side "Maintenance" is
-  // labelled "Hub Maintenance" so the two never appear with identical text.
-  const tabGroups = [
-    {
-      name: "Access",
-      tabs: [
-        canManageUsers && { id: "users", label: "Users" },
-      ],
-    },
-    {
-      name: "Company",
-      tabs: [
-        isAdmin && { id: "depot", label: "Depot Details" },
-      ],
-    },
-    {
-      name: "Customer",
-      tabs: [
-        canManageRules && { id: "creditlogic", label: "Credit Logic" },
-        { id: "autoflag", label: "Auto-Flag Rules" },
-        { id: "fields", label: "Fields" },
-      ],
-    },
-    {
-      name: "Data",
-      tabs: [
-        !hubMode && { id: "connections", label: "Connections" },
-        !hubMode && isAdmin && { id: "sagecorrections", label: "Sage Corrections" },
-        !hubMode && isAdmin && { id: "sagequeries", label: "Sage Queries" },
-        hubMode && { id: "synclog", label: "Sync Log" },
-      ],
-    },
-    {
-      name: "Modules",
-      tabs: [
-        isAdmin && { id: "reconciliation", label: "Reconciliation" },
-        !hubMode && isAdmin && { id: "forecast", label: "Forecast" },
-        !hubMode && isAdmin && { id: "pricelist", label: "Price List" },
-        !hubMode && isAdmin && { id: "commission", label: "Commission" },
-        !hubMode && isAdmin && { id: "creditors", label: "Creditors" },
-        !hubMode && isAdmin && { id: "debtors", label: "Debtors" },
-      ],
-    },
-    {
-      name: "System",
-      tabs: [
-        isAdmin && { id: "accounting", label: "Accounting" },
-        !hubMode && isAdmin && { id: "audit", label: "Audit Log" },
-        !hubMode && isAdmin && { id: "maintenance", label: "Maintenance" },
-        !hubMode && isAdmin && { id: "dr", label: "Disaster Recovery" },
-        hubMode && isAdmin && { id: "hubmaintenance", label: "Hub Maintenance" },
-        hubMode && isAdmin && { id: "network", label: "Network" },
-        isAdmin && { id: "tls", label: "TLS" },
-      ],
-    },
-  ]
-    .map(g => ({ ...g, tabs: g.tabs.filter(Boolean) }))
-    .filter(g => g.tabs.length > 0);
+  // Tab list, grouping, and per-tab visibility live in settingsTabs.js —
+  // shared with the command palette's "Settings →" deep links so the panel
+  // and the palette can never disagree about who sees which tab.
+  const tabGroups = buildSettingsTabGroups({ currentUser, hubMode });
 
   const tabs = tabGroups.flatMap(g => g.tabs);
 

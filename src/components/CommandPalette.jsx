@@ -2,12 +2,17 @@
 // Mounted by Layout, which passes the already-permission-filtered nav items so
 // the palette never offers a destination the user can't open. Built on the
 // shared cmdk primitive (src/components/ui/command.jsx).
+//
+// Besides page navigation (`items`), Layout can pass `sections` — extra
+// command groups (quick actions, settings-tab deep links) where each item
+// carries its own `run` closure. The palette stays dumb: it renders what it's
+// given and closes; all gating and behaviour live with the caller.
 import { useEffect, useMemo } from "react";
 import {
   CommandDialog, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem,
 } from "@/components/ui/command";
 
-export default function CommandPalette({ open, onOpenChange, items, onSelect }) {
+export default function CommandPalette({ open, onOpenChange, items, onSelect, sections = [] }) {
   // Cmd/Ctrl-K toggles the palette anywhere in the app. Ignored while typing
   // in an input/textarea/contenteditable so it doesn't hijack those.
   useEffect(() => {
@@ -39,9 +44,27 @@ export default function CommandPalette({ open, onOpenChange, items, onSelect }) 
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Jump to a page or report…" />
+      <CommandInput placeholder="Jump to a page, setting, or action…" />
       <CommandList>
         <CommandEmpty>No matches.</CommandEmpty>
+        {/* Caller-supplied sections first: quick actions + settings deep
+            links are what the operator reaches for most once they know the
+            pages — and page names still win the fuzzy match when typed. */}
+        {sections.map((sec) => (
+          <CommandGroup key={sec.heading} heading={sec.heading}>
+            {sec.items.map((it) => (
+              <CommandItem
+                key={it.id}
+                value={`${it.name} ${it.keywords || ""}`}
+                onSelect={() => { it.run(); onOpenChange(false); }}
+              >
+                {it.icon && <it.icon className="mr-2 h-4 w-4" />}
+                <span>{it.name}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{sec.heading}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        ))}
         {grouped.map(([group, groupItems]) => (
           <CommandGroup key={group} heading={group}>
             {groupItems.map((it) => (
