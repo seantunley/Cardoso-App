@@ -75,7 +75,7 @@ export default function ConnectionCard({ connection, onSync, onEdit, onDelete, i
             </Button>
           )}
           {typeof onDelete === "function" && (
-            <Button variant="outline" size="icon" className="h-9 w-9 text-destructive hover:border-[hsl(var(--destructive))] hover:bg-[hsl(var(--status-critical) / 0.18)]" onClick={() => onDelete(connection)}>
+            <Button variant="outline" size="icon" className="h-9 w-9 text-destructive hover:border-[hsl(var(--destructive))] hover:bg-status-critical/[0.18]" onClick={() => onDelete(connection)}>
               <Trash2 className="w-4 h-4" />
             </Button>
           )}

@@ -34,7 +34,7 @@ const buttonVariants = cva(
         default:
           "border border-[var(--phosphor)] bg-[hsla(33,95%,55%,0.10)] text-[var(--phosphor)] hover:bg-[hsla(33,95%,55%,0.20)] hover:shadow-[0_0_12px_hsla(33,95%,55%,0.35)]",
         destructive:
-          "border border-[hsl(var(--destructive))] bg-[hsl(var(--status-critical) / 0.10)] text-[hsl(var(--destructive))] hover:bg-[hsl(var(--status-critical) / 0.20)] hover:shadow-[0_0_12px_hsl(var(--status-critical) / 0.35)]",
+          "border border-[hsl(var(--destructive))] bg-status-critical/10 text-[hsl(var(--destructive))] hover:bg-status-critical/20 hover:shadow-[0_0_12px_hsl(var(--status-critical)/0.35)]",
         outline:
           "border border-border bg-transparent text-foreground hover:border-[var(--phosphor)] hover:text-[var(--phosphor)] hover:bg-[hsla(33,95%,55%,0.06)]",
         secondary:

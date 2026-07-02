@@ -2219,7 +2219,7 @@ export default function Reconciliation() {
                       toast.info('Cancellation requested…');
                     } catch (e) { toast.error(humanizeApiError(e, "cancel generation")); }
                   }}
-                  className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-[hsl(var(--status-critical) / 0.18)] hover:shadow-[0_0_12px_hsl(var(--status-critical) / 0.35)] transition-colors"
+                  className="px-4 py-2 border border-destructive bg-transparent text-destructive font-mono text-[10px] uppercase tracking-[0.2em] hover:bg-status-critical/[0.18] hover:shadow-[0_0_12px_hsl(var(--status-critical)/0.35)] transition-colors"
                   style={{ borderRadius: '12px' }}
                 >
                   Cancel
