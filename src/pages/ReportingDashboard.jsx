@@ -17,20 +17,20 @@ import PageHeader from "@/components/PageHeader";
 // AR (debtors) age weekly by document date; keys match the aging engine's
 // AR_SCHEME (current/1-7/8-14/15-21/over-21).
 const BUCKET_META = [
-  { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
+  { key: "current", label: "Current", color: "hsl(var(--status-ok))" },
   { key: "1-7", label: "1–7d", color: "hsl(80 60% 45%)" },
-  { key: "8-14", label: "8–14d", color: "hsl(50 90% 55%)" },
+  { key: "8-14", label: "8–14d", color: "hsl(var(--status-warn))" },
   { key: "15-21", label: "15–21d", color: "hsl(33 95% 55%)" },
-  { key: "over-21", label: "Over 21d", color: "hsl(0 72% 50%)" },
+  { key: "over-21", label: "Over 21d", color: "hsl(var(--status-critical))" },
 ];
 
 // AP (creditors) age monthly by due date (Sage Aged Payables periods).
 const AP_BUCKET_META = [
-  { key: "current", label: "Current", color: "hsl(145 55% 45%)" },
+  { key: "current", label: "Current", color: "hsl(var(--status-ok))" },
   { key: "1-30", label: "1–30d", color: "hsl(80 60% 45%)" },
-  { key: "31-60", label: "31–60d", color: "hsl(50 90% 55%)" },
+  { key: "31-60", label: "31–60d", color: "hsl(var(--status-warn))" },
   { key: "61-90", label: "61–90d", color: "hsl(33 95% 55%)" },
-  { key: "over-90", label: "Over 90d", color: "hsl(0 72% 50%)" },
+  { key: "over-90", label: "Over 90d", color: "hsl(var(--status-critical))" },
 ];
 
 // A card that wraps a report summary with a header + deep-link.
@@ -238,7 +238,7 @@ function InventoryValueCard({ site }) {
   });
   const s = data?.summary;
   return (
-    <ReportCard icon={Boxes} title="Inventory Value" accent="hsl(145 55% 45%)" to="/Reports" query="inv-value">
+    <ReportCard icon={Boxes} title="Inventory Value" accent="hsl(var(--status-ok))" to="/Reports" query="inv-value">
       {error ? (
         <CardError error={error} onRetry={refetch} />
       ) : isLoading ? (
@@ -361,7 +361,7 @@ function TopItemsMtdCard({ site }) {
     queryFn: () => apiGet(withSite("/api/reports/dashboard/top-items-mtd", site)),
     staleTime: 60_000,
   });
-  const accent = "hsl(145 55% 45%)";
+  const accent = "hsl(var(--status-ok))";
   const rows = (data?.rows || []).map((r) => ({
     key: r.item_number,
     label: r.item_description ? `${r.item_number} · ${r.item_description}` : r.item_number,
@@ -386,7 +386,7 @@ function DeadStockItemsCard({ site }) {
     queryFn: () => apiGet(withSite("/api/reports/dashboard/dead-stock-items", site)),
     staleTime: 60_000,
   });
-  const accent = "hsl(0 72% 50%)";
+  const accent = "hsl(var(--status-critical))";
   const rows = (data?.rows || []).map((r, i) => ({
     key: `${r.site_name || ""}-${r.item_number}-${i}`,
     label: `${r.site_name && site === "all" ? r.site_name + " · " : ""}${r.item_description || r.item_number}`,
@@ -465,9 +465,9 @@ export default function ReportingDashboard() {
       {/* KPI tiles */}
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
         <SummaryTile label="Customers" value={(kpis?.total_records ?? 0).toLocaleString("en-ZA")} accent="var(--phosphor)" title="Total customer records synced from Sage." />
-        <SummaryTile label="Red flags" value={(flags.red ?? 0).toLocaleString("en-ZA")} accent="hsl(0 72% 50%)" title="Customers auto-flagged red (highest credit risk)." />
+        <SummaryTile label="Red flags" value={(flags.red ?? 0).toLocaleString("en-ZA")} accent="hsl(var(--status-critical))" title="Customers auto-flagged red (highest credit risk)." />
         <SummaryTile label="Orange flags" value={(flags.orange ?? 0).toLocaleString("en-ZA")} accent="hsl(33 95% 55%)" title="Customers auto-flagged orange (watch)." />
-        <SummaryTile label="Green flags" value={(flags.green ?? 0).toLocaleString("en-ZA")} accent="hsl(145 55% 45%)" title="Customers flagged green (in good standing)." />
+        <SummaryTile label="Green flags" value={(flags.green ?? 0).toLocaleString("en-ZA")} accent="hsl(var(--status-ok))" title="Customers flagged green (in good standing)." />
       </div>
 
       {/* Report summary cards */}

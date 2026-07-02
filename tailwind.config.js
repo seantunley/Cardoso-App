@@ -47,6 +47,15 @@ module.exports = {
   			border: 'hsl(var(--border))',
   			input: 'hsl(var(--input))',
   			ring: 'hsl(var(--ring))',
+  			// Semantic status (see index.css). The `<alpha-value>` form (unlike
+  			// the plain hsl(var()) colors above) lets tint call sites keep their
+  			// opacity modifiers: bg-status-ok/10, border-status-critical/30.
+  			status: {
+  				ok: 'hsl(var(--status-ok) / <alpha-value>)',
+  				warn: 'hsl(var(--status-warn) / <alpha-value>)',
+  				critical: 'hsl(var(--status-critical) / <alpha-value>)',
+  				stale: 'hsl(var(--status-stale) / <alpha-value>)'
+  			},
   			chart: {
   				'1': 'hsl(var(--chart-1))',
   				'2': 'hsl(var(--chart-2))',

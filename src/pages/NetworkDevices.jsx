@@ -363,11 +363,11 @@ export default function NetworkDevices() {
                   <div className="font-display text-4xl leading-none text-foreground tabular-nums">{fmtNum(totalFlows)}</div>
                 </div>
                 <div className="relative bg-card border border-border p-5 overflow-hidden" style={{ borderRadius: "14px", boxShadow: "0 1px 2px rgba(0,0,0,0.25)" }}>
-                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: ntopngOk ? "hsl(145 55% 45%)" : "hsl(var(--destructive))" }} />
+                  <div className="absolute left-0 right-0 bottom-0 h-[2px]" style={{ background: ntopngOk ? "hsl(var(--status-ok))" : "hsl(var(--destructive))" }} />
                   <div className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground mb-3">
                     <Server className="h-3 w-3" strokeWidth={1.5} /> ntopng
                   </div>
-                  <div className={`font-display text-2xl leading-none ${ntopngOk ? "text-[hsl(145_55%_45%)]" : "text-destructive"}`}>
+                  <div className={`font-display text-2xl leading-none ${ntopngOk ? "text-status-ok" : "text-destructive"}`}>
                     {ntopngOk ? "Online" : "Offline"}
                   </div>
                 </div>

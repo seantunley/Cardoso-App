@@ -55,8 +55,8 @@ function direction(label) {
   return "neutral";
 }
 const DIR_STYLE = {
-  in: { color: "hsl(145 60% 42%)", bg: "hsl(145 60% 42% / 0.12)", Icon: ArrowDownLeft },
-  out: { color: "hsl(0 72% 55%)", bg: "hsl(0 72% 55% / 0.12)", Icon: ArrowUpRight },
+  in: { color: "hsl(var(--status-ok))", bg: "hsl(var(--status-ok) / 0.12)", Icon: ArrowDownLeft },
+  out: { color: "hsl(var(--status-critical))", bg: "hsl(var(--status-critical) / 0.12)", Icon: ArrowUpRight },
   neutral: { color: "hsl(var(--muted-foreground))", bg: "hsl(var(--muted) / 0.4)", Icon: null },
 };
 
@@ -195,7 +195,7 @@ export default function MovementHistoryView() {
             // A failed sync must be visible here, not only in a transition
             // toast: a sync that dies before the first poll (e.g. Sage down)
             // never shows `running`, so the toast never fires.
-            <span className="inline-flex items-center gap-2 text-[hsl(0_72%_55%)]">
+            <span className="inline-flex items-center gap-2 text-status-critical">
               <AlertTriangle className="h-3.5 w-3.5" />
               Last movement sync failed: {meta.last_error} — fix the Sage connection and run it again.
             </span>
@@ -316,7 +316,7 @@ export default function MovementHistoryView() {
               label="Current on hand"
               value={fmtQty(ledger.on_hand)}
               sub={ledger.reconciles ? "Anchored to on-hand ✓" : `Internal variance ${fmtQty(ledger.reconcile_variance)}`}
-              accent={ledger.reconciles ? "hsl(145 60% 42%)" : "hsl(0 72% 55%)"}
+              accent={ledger.reconciles ? "hsl(var(--status-ok))" : "hsl(var(--status-critical))"}
               icon={ledger.reconciles ? CheckCircle2 : AlertTriangle}
             />
           </div>
@@ -361,8 +361,8 @@ export default function MovementHistoryView() {
                         <span className="ml-1.5 text-[10px] text-muted-subtle">{m.app}/{m.transtype}</span>
                       </td>
                       <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{m.doc_number || "—"}</td>
-                      <td className="px-4 py-2 text-right tabular-nums font-medium" style={{ color: q > 0 ? "hsl(145 60% 42%)" : undefined }}>{q > 0 ? fmtQty(q) : ""}</td>
-                      <td className="px-4 py-2 text-right tabular-nums font-medium" style={{ color: q < 0 ? "hsl(0 72% 55%)" : undefined }}>{q < 0 ? fmtQty(-q) : ""}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-medium" style={{ color: q > 0 ? "hsl(var(--status-ok))" : undefined }}>{q > 0 ? fmtQty(q) : ""}</td>
+                      <td className="px-4 py-2 text-right tabular-nums font-medium" style={{ color: q < 0 ? "hsl(var(--status-critical))" : undefined }}>{q < 0 ? fmtQty(-q) : ""}</td>
                       <td className="border-l border-border px-4 py-2 text-right font-semibold tabular-nums">{fmtQty(m.balance)}</td>
                       <td className="px-4 py-2 text-right tabular-nums text-xs text-muted-foreground">{fmtR(m.cost)}</td>
                     </tr>
@@ -375,8 +375,8 @@ export default function MovementHistoryView() {
                   <td className="px-4 py-2 font-semibold" colSpan={5}>
                     Closing balance — as at {to}
                     {ledger.reconciles
-                      ? <span className="ml-1 text-[hsl(145_60%_42%)]">· anchored to on hand ✓</span>
-                      : <span className="ml-1 text-[hsl(0_72%_55%)]">· internal variance {fmtQty(ledger.reconcile_variance)}</span>}
+                      ? <span className="ml-1 text-status-ok">· anchored to on hand ✓</span>
+                      : <span className="ml-1 text-status-critical">· internal variance {fmtQty(ledger.reconcile_variance)}</span>}
                   </td>
                   <td className="border-l border-border px-4 py-2 text-right font-semibold tabular-nums">{fmtQty(ledger.closing_balance)}</td>
                   <td />

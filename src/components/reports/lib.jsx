@@ -37,9 +37,9 @@ export const fmtCount = (v) => Number(v || 0).toLocaleString('en-ZA');
 // ── Themed colour palette for charts ──────────────────────────────────────
 export const REPORT_COLORS = {
   primary:   'hsl(33 95% 55%)',       // phosphor amber
-  secondary: 'hsl(145 55% 45%)',      // green
-  danger:    'hsl(0 72% 50%)',
-  warning:   'hsl(50 90% 55%)',
+  secondary: 'hsl(var(--status-ok))',      // green
+  danger:    'hsl(var(--status-critical))',
+  warning:   'hsl(var(--status-warn))',
   info:      'hsl(200 80% 55%)',
   purple:    'hsl(280 70% 65%)',
   muted:     'hsl(220 8% 50%)',
@@ -48,11 +48,11 @@ export const REPORT_COLORS = {
 // Cycle palette for grouped bars / multi-series
 export const PALETTE = [
   'hsl(33 95% 55%)',
-  'hsl(145 55% 45%)',
+  'hsl(var(--status-ok))',
   'hsl(200 80% 55%)',
   'hsl(280 70% 65%)',
-  'hsl(50 90% 55%)',
-  'hsl(0 72% 50%)',
+  'hsl(var(--status-warn))',
+  'hsl(var(--status-critical))',
   'hsl(170 60% 45%)',
   'hsl(310 70% 60%)',
 ];

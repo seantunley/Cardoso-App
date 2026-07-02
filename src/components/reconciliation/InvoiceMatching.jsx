@@ -120,7 +120,7 @@ function useColumnWidths(containerRef) {
 }
 
 const ocrMeta = (status) => {
-  if (status === 'found')     return { label: 'Found',     color: 'hsl(145 55% 45%)' };
+  if (status === 'found')     return { label: 'Found',     color: 'hsl(var(--status-ok))' };
   if (status === 'not_found') return { label: 'Not found', color: 'var(--phosphor)' };
   if (status === 'failed')    return { label: 'Failed',    color: 'hsl(var(--destructive))' };
   return                             { label: 'Pending',   color: 'hsl(var(--muted-foreground))' };
@@ -252,7 +252,7 @@ function ManualInvoiceInput({ extraction, onSaved }) {
             onClick={handleSave}
             disabled={saving || !value.trim()}
             className="flex-shrink-0 p-1 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ color: 'hsl(145 55% 45%)' }}
+            style={{ color: 'hsl(var(--status-ok))' }}
           >
             <Save className="h-3.5 w-3.5" />
           </button>
@@ -487,7 +487,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
   const fmtR = (v) => `R ${Math.abs(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const tabs = [
-    { id: 'paid', label: 'Paid Invoices', count: paid.length, total: tabTotal(paid), color: 'hsl(145 55% 45%)' },
+    { id: 'paid', label: 'Paid Invoices', count: paid.length, total: tabTotal(paid), color: 'hsl(var(--status-ok))' },
     { id: 'nonCompliant', label: 'Non-Compliant', count: nonCompliant.length, total: tabTotal(nonCompliant), color: 'hsl(var(--destructive))' },
     { id: 'exceptions', label: 'Exceptions', count: exceptions.length, total: tabTotal(exceptions), color: 'var(--phosphor)' },
     { id: 'missingPods', label: 'Missing PODs', count: missingPodRows.length, total: tabTotal(missingPodRows), color: 'hsl(33 70% 60%)' },
@@ -794,7 +794,7 @@ export default function InvoiceMatching({ extractions, stats, reconciliationId, 
                         <TooltipTrigger asChild>
                           <span
                             className="font-mono text-[9px] uppercase tracking-[0.15em] px-1 py-0.5 cursor-help"
-                            style={{ color: 'hsl(var(--destructive))', background: 'hsla(0, 72%, 50%, 0.12)', border: '1px solid hsla(0, 72%, 50%, 0.4)', borderRadius: '12px' }}
+                            style={{ color: 'hsl(var(--destructive))', background: 'hsl(var(--status-critical) / 0.12)', border: '1px solid hsl(var(--status-critical) / 0.4)', borderRadius: '12px' }}
                           >
                             ×{e.duplicate_count} dup
                           </span>

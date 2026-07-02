@@ -27,7 +27,7 @@ const REPORTS = [
     items: [
       { id: 'aged-debtors', name: 'Aged Debtors',       icon: Wallet,       accent: 'hsl(33 95% 55%)',  component: AgedDebtors,       ready: true },
       { id: 'rep-exposure', name: 'Sales Rep Exposure', icon: Users,        accent: 'hsl(200 80% 55%)', component: SalesRepExposure,  ready: true },
-      { id: 'daily-sales',  name: 'Daily Sales Figures', icon: CalendarDays, accent: 'hsl(145 55% 45%)', component: DailySalesFigures, ready: true },
+      { id: 'daily-sales',  name: 'Daily Sales Figures', icon: CalendarDays, accent: 'hsl(var(--status-ok))', component: DailySalesFigures, ready: true },
     ],
   },
   {
@@ -43,22 +43,22 @@ const REPORTS = [
     items: [
       { id: 'bat-weekly',     name: 'Weekly Reconciliation', icon: BarChart3,     accent: 'hsl(33 95% 55%)',  component: BatWeekly,     ready: true },
       { id: 'bat-ytd',        name: 'YTD Fee Breakdown',     icon: PieChart,      accent: 'hsl(280 70% 65%)', component: BatYtd,        ready: true },
-      { id: 'bat-exceptions', name: 'Exceptions Summary',    icon: AlertTriangle, accent: 'hsl(0 72% 50%)',   component: BatExceptions, ready: true },
-      { id: 'bat-exceptions-weekly', name: 'Exceptions by Week', icon: FileWarning, accent: 'hsl(0 72% 50%)', component: BatExceptionsWeekly, ready: true },
+      { id: 'bat-exceptions', name: 'Exceptions Summary',    icon: AlertTriangle, accent: 'hsl(var(--status-critical))',   component: BatExceptions, ready: true },
+      { id: 'bat-exceptions-weekly', name: 'Exceptions by Week', icon: FileWarning, accent: 'hsl(var(--status-critical))', component: BatExceptionsWeekly, ready: true },
     ],
   },
   {
     group: 'Sales',
-    accent: 'hsl(145 55% 45%)',
+    accent: 'hsl(var(--status-ok))',
     items: [
-      { id: 'sales-by-vendor', name: 'Sales by Vendor', icon: Truck, accent: 'hsl(145 55% 45%)', component: SalesByVendor, ready: true },
+      { id: 'sales-by-vendor', name: 'Sales by Vendor', icon: Truck, accent: 'hsl(var(--status-ok))', component: SalesByVendor, ready: true },
     ],
   },
   {
     group: 'Inventory',
-    accent: 'hsl(145 55% 45%)',
+    accent: 'hsl(var(--status-ok))',
     items: [
-      { id: 'inv-value', name: 'Value & Composition', icon: Boxes, accent: 'hsl(145 55% 45%)', component: InventoryValue, ready: true },
+      { id: 'inv-value', name: 'Value & Composition', icon: Boxes, accent: 'hsl(var(--status-ok))', component: InventoryValue, ready: true },
     ],
   },
 ];

@@ -157,15 +157,15 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                 <div className="font-mono text-xs uppercase tracking-[0.15em] text-muted-foreground mb-1">
                   {results.length} match{results.length === 1 ? "" : "es"} · sorted by closest first
                   {results.some(m => m.match_type === "exact") && (
-                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[hsl(145_55%_75%)]" style={{ background: "hsla(145, 55%, 45%, 0.15)", border: "1px solid hsla(145, 55%, 45%, 0.5)", borderRadius: "12px" }}>
+                    <span className="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-status-ok" style={{ background: "hsl(var(--status-ok) / 0.15)", border: "1px solid hsl(var(--status-ok) / 0.5)", borderRadius: "12px" }}>
                       ● exact match found
                     </span>
                   )}
                 </div>
                 {results.map((m, i) => {
                   const exact = m.match_type === "exact";
-                  const stripColour = exact ? "hsl(145 55% 45%)" : "var(--phosphor)";
-                  const diffColour = exact ? "text-[hsl(145_55%_75%)]" : Math.abs(m.diff) < 0.10 ? "text-[var(--phosphor)]" : "text-muted-foreground";
+                  const stripColour = exact ? "hsl(var(--status-ok))" : "var(--phosphor)";
+                  const diffColour = exact ? "text-status-ok" : Math.abs(m.diff) < 0.10 ? "text-[var(--phosphor)]" : "text-muted-foreground";
                   return (
                     <button
                       key={`${m.customer_number}-${m.invoice_number}-${i}`}
@@ -174,21 +174,21 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                       style={{
                         borderRadius: "12px",
                         ...(exact && {
-                          background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
-                          border: "1px solid hsl(145 55% 45%)",
-                          boxShadow: "0 0 14px hsla(145, 55%, 45%, 0.35)",
+                          background: "linear-gradient(90deg, hsl(var(--status-ok) / 0.18) 0%, hsl(var(--status-ok) / 0.06) 100%)",
+                          border: "1px solid hsl(var(--status-ok))",
+                          boxShadow: "0 0 14px hsl(var(--status-ok) / 0.35)",
                         }),
                       }}
                     >
                       <div className="absolute left-0 top-0 bottom-0" style={{ width: exact ? "3px" : "2px", background: stripColour, boxShadow: `0 0 ${exact ? 12 : 8}px ${stripColour}80` }} />
                       {exact && (
-                        <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-[hsl(24_8%_6%)]" style={{ background: "hsl(145 55% 45%)", borderRadius: "12px", boxShadow: "0 0 10px hsla(145,55%,45%,0.5)" }}>
+                        <span className="absolute -top-2 right-3 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] font-semibold text-[hsl(24_8%_6%)]" style={{ background: "hsl(var(--status-ok))", borderRadius: "12px", boxShadow: "0 0 10px hsl(var(--status-ok) / 0.5)" }}>
                           Exact match
                         </span>
                       )}
                       <div className="pl-2 grid grid-cols-[1fr_auto] gap-3 items-baseline">
                         <div className="min-w-0">
-                          <div className={`font-display text-lg truncate ${exact ? "text-[hsl(145_55%_85%)]" : "text-foreground"}`}>{m.customer_name || "—"}</div>
+                          <div className={`font-display text-lg truncate ${exact ? "text-status-ok" : "text-foreground"}`}>{m.customer_name || "—"}</div>
                           <div className="font-mono text-sm uppercase tracking-[0.12em] text-muted-foreground mt-0.5">
                             {m.customer_number || "—"}
                             {m.invoice_number ? ` · ${m.invoice_number}` : ""}
@@ -204,7 +204,7 @@ function AmountLookupModal({ open, onClose, onPickCustomer }) {
                           </div>
                         </div>
                         <div className="text-right">
-                          <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
+                          <div className={`font-mono text-base tabular-nums ${exact ? "text-status-ok font-semibold" : "text-foreground"}`}>
                             <span className="text-muted-subtle mr-1">R</span>{fmtR(m.invoice_amount)}
                           </div>
                           <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${diffColour}`}>
@@ -456,7 +456,7 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
               </div>
               {results.map((m, i) => {
                 const exact = m.match_type === "exact";
-                const stripColour = exact ? "hsl(145 55% 45%)" : "hsl(200 80% 55%)";
+                const stripColour = exact ? "hsl(var(--status-ok))" : "hsl(200 80% 55%)";
                 return (
                   <button
                     key={`sage-${m.customer_number}-${m.invoice_number}-${i}`}
@@ -465,9 +465,9 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                     style={{
                       borderRadius: "12px",
                       ...(exact && {
-                        background: "linear-gradient(90deg, hsla(145, 55%, 45%, 0.18) 0%, hsla(145, 55%, 45%, 0.06) 100%)",
-                        border: "1px solid hsl(145 55% 45%)",
-                        boxShadow: "0 0 14px hsla(145, 55%, 45%, 0.35)",
+                        background: "linear-gradient(90deg, hsl(var(--status-ok) / 0.18) 0%, hsl(var(--status-ok) / 0.06) 100%)",
+                        border: "1px solid hsl(var(--status-ok))",
+                        boxShadow: "0 0 14px hsl(var(--status-ok) / 0.35)",
                       }),
                     }}
                   >
@@ -476,13 +476,13 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                       Sage
                     </span>
                     {m.paid && (
-                      <span className="absolute top-3 right-12 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: m.paid === "paid" ? "hsl(145 55% 75%)" : "hsl(33 95% 75%)", background: m.paid === "paid" ? "hsla(145, 55%, 45%, 0.12)" : "hsla(33, 95%, 55%, 0.12)", border: `1px solid ${m.paid === "paid" ? "hsla(145, 55%, 45%, 0.4)" : "hsla(33, 95%, 55%, 0.4)"}`, borderRadius: "12px" }}>
+                      <span className="absolute top-3 right-12 px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em]" style={{ color: m.paid === "paid" ? "hsl(var(--status-ok))" : "hsl(var(--accent))", background: m.paid === "paid" ? "hsl(var(--status-ok) / 0.12)" : "hsla(33, 95%, 55%, 0.12)", border: `1px solid ${m.paid === "paid" ? "hsl(var(--status-ok) / 0.4)" : "hsla(33, 95%, 55%, 0.4)"}`, borderRadius: "12px" }}>
                         {m.paid}
                       </span>
                     )}
                     <div className="pl-2 grid grid-cols-[1fr_auto] gap-3 items-baseline">
                       <div className="min-w-0">
-                        <div className={`font-display text-lg truncate ${exact ? "text-[hsl(145_55%_85%)]" : "text-foreground"}`}>{m.customer_name || "—"}</div>
+                        <div className={`font-display text-lg truncate ${exact ? "text-status-ok" : "text-foreground"}`}>{m.customer_name || "—"}</div>
                         <div className="font-mono text-sm uppercase tracking-[0.12em] text-muted-foreground mt-0.5">
                           {m.customer_number || "—"}
                           {m.invoice_number ? ` · ${m.invoice_number}` : ""}
@@ -490,11 +490,11 @@ function SageFallbackPanel({ enabled, searching, error, results, onSearch, onPic
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className={`font-mono text-base tabular-nums ${exact ? "text-[hsl(145_55%_85%)] font-semibold" : "text-foreground"}`}>
+                        <div className={`font-mono text-base tabular-nums ${exact ? "text-status-ok font-semibold" : "text-foreground"}`}>
                           <span className="text-muted-subtle mr-1">R</span>{fmtR(m.invoice_amount)}
                         </div>
                         {variant === "amount" && typeof m.diff === "number" && (
-                          <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${exact ? "text-[hsl(145_55%_75%)]" : "text-muted-foreground"}`}>
+                          <div className={`font-mono text-sm tabular-nums uppercase tracking-[0.12em] mt-0.5 ${exact ? "text-status-ok" : "text-muted-foreground"}`}>
                             {exact ? "● exact" : `${m.diff > 0 ? "+" : ""}${m.diff.toFixed(2)}`}
                           </div>
                         )}
@@ -607,9 +607,9 @@ export default function CustomerSearch() {
   // FlaggedCustomersModal fetches its own records server-side
 
   const FLAG_TILES = [
-    { key: "red",    label: "Critical",  sub: "red flagged",    count: redCount,    hue: "hsl(0 72% 50%)",   glow: "hsla(0, 72%, 50%, 0.35)",   icon: Flag },
+    { key: "red",    label: "Critical",  sub: "red flagged",    count: redCount,    hue: "hsl(var(--status-critical))",   glow: "hsl(var(--status-critical) / 0.35)",   icon: Flag },
     { key: "orange", label: "Attention", sub: "orange flagged", count: orangeCount, hue: "var(--phosphor)", glow: "hsla(33, 95%, 55%, 0.35)", icon: AlertCircle },
-    { key: "green",  label: "Approved",  sub: "green flagged",  count: greenCount,  hue: "hsl(145 55% 45%)", glow: "hsla(145, 55%, 45%, 0.25)", icon: CheckCircle },
+    { key: "green",  label: "Approved",  sub: "green flagged",  count: greenCount,  hue: "hsl(var(--status-ok))", glow: "hsl(var(--status-ok) / 0.25)", icon: CheckCircle },
   ];
 
   return (
@@ -794,12 +794,12 @@ export default function CustomerSearch() {
           <div className="border border-border bg-card relative overflow-hidden px-5 py-3" style={{ borderRadius: "12px" }}>
             <div
               className="absolute left-0 top-0 bottom-0 w-[2px]"
-              style={{ background: "hsl(145 55% 45%)", boxShadow: "0 0 12px hsla(145,55%,45%,0.3)" }}
+              style={{ background: "hsl(var(--status-ok))", boxShadow: "0 0 12px hsl(var(--status-ok) / 0.3)" }}
             />
             <div className="flex items-start gap-3 pl-2">
-              <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "hsl(145 55% 45%)" }} strokeWidth={1.5} />
+              <Database className="w-4 h-4 mt-0.5 shrink-0" style={{ color: "hsl(var(--status-ok))" }} strokeWidth={1.5} />
               <div className="flex-1">
-                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: "hsl(145 55% 45%)" }}>Connected</h3>
+                <h3 className="font-mono text-[10px] uppercase tracking-[0.2em] mb-1" style={{ color: "hsl(var(--status-ok))" }}>Connected</h3>
                 <p className="text-xs text-muted-foreground font-mono">
                   {activeConnections[0].name} · {activeConnections[0].database_name}
                 </p>

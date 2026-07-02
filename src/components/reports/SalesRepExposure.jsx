@@ -169,9 +169,9 @@ export default function SalesRepExposure() {
                 <tr className="border-b border-border">
                   <th className="px-2 py-2 text-left font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Sales Rep</th>
                   <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">Cust</th>
-                  <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: 'hsl(0 72% 50%)' }}>Red</th>
+                  <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: 'hsl(var(--status-critical))' }}>Red</th>
                   <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: 'hsl(33 95% 55%)' }}>Orange</th>
-                  <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: 'hsl(145 55% 45%)' }}>Green</th>
+                  <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground" style={{ color: 'hsl(var(--status-ok))' }}>Green</th>
                   <th className="px-2 py-2 text-right font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground td-right">Outstanding</th>
                 </tr>
               </thead>
@@ -192,9 +192,9 @@ export default function SalesRepExposure() {
                           {r.sales_rep}
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground">{fmtCount(r.customer_count)}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.red ? 'hsl(0 72% 50%)' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.red || '—'}</td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.red ? 'hsl(var(--status-critical))' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.red || '—'}</td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.orange ? 'hsl(33 95% 55%)' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.orange || '—'}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.green ? 'hsl(145 55% 45%)' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.green || '—'}</td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums" style={{ color: r.flag_counts.green ? 'hsl(var(--status-ok))' : 'hsl(var(--muted-foreground))' }}>{r.flag_counts.green || '—'}</td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-foreground td-right">
                           <span className="text-muted-subtle mr-1">R</span>{fmtR(r.total_outstanding)}
                         </td>
@@ -228,7 +228,7 @@ export default function SalesRepExposure() {
                   <tr className="border-t-2 border-border bg-muted/30 font-semibold">
                     <td className="px-2 py-2 text-foreground">Total</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums">{fmtCount(summary.total_customers)}</td>
-                    <td className="px-2 py-2 text-right font-mono tabular-nums" style={{ color: 'hsl(0 72% 50%)' }}>{summary.total_red}</td>
+                    <td className="px-2 py-2 text-right font-mono tabular-nums" style={{ color: 'hsl(var(--status-critical))' }}>{summary.total_red}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums" style={{ color: 'hsl(33 95% 55%)' }}>{summary.total_orange}</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums">—</td>
                     <td className="px-2 py-2 text-right font-mono tabular-nums text-foreground td-right">
