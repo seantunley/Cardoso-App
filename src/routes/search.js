@@ -18,6 +18,8 @@
 // sites into one row with a `sites` count.
 
 import { Router } from 'express';
+import { hasPermission } from '../lib/permissions.js';
+import { siteIdFilter } from '../lib/hubSiteScope.js';
 
 function isHub() { return process.env.HUB_MODE === 'true'; }
 
@@ -30,20 +32,19 @@ function likeEscape(s) {
   return s.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
-function can(user, ...keys) {
-  if (!user) return false;
-  if (user.role === 'admin') return true;
-  return keys.some((k) => Boolean(user[k]));
-}
-
 /**
  * Pure search core — exported for tests.
  *
  * @param {import('better-sqlite3').Database} db
- * @param {{ q: string, wantCustomers: boolean, wantVendors: boolean, hub: boolean }} args
+ * @param {{ q: string, wantCustomers: boolean, wantVendors: boolean, hub: boolean,
+ *           siteFilter?: { sql: string, params: unknown[] } }} args
+ *   siteFilter: hub-only per-user site allow-list fragment from
+ *   hubSiteScope.siteIdFilter — ANDed into both hub queries so a
+ *   site-restricted hub user can't discover customers/vendors of sites
+ *   outside their allow-list.
  * @returns {{ customers?: object[], vendors?: object[] }}
  */
-export function searchEntities(db, { q, wantCustomers, wantVendors, hub }) {
+export function searchEntities(db, { q, wantCustomers, wantVendors, hub, siteFilter = { sql: '', params: [] } }) {
   const esc = likeEscape(q);
   const contains = `%${esc}%`;
   const prefix = `${esc}%`;
@@ -55,14 +56,14 @@ export function searchEntities(db, { q, wantCustomers, wantVendors, hub }) {
           SELECT customer_number, customer_name,
                  COUNT(DISTINCT site_id) AS sites
           FROM hub_records
-          WHERE (customer_name LIKE ? ESCAPE '\\' OR customer_number LIKE ? ESCAPE '\\')
+          WHERE (customer_name LIKE ? ESCAPE '\\' OR customer_number LIKE ? ESCAPE '\\')${siteFilter.sql}
           GROUP BY customer_number, customer_name
           ORDER BY CASE WHEN customer_name LIKE ? ESCAPE '\\' THEN 0
                         WHEN customer_number LIKE ? ESCAPE '\\' THEN 1
                         ELSE 2 END,
                    customer_name
           LIMIT ${GROUP_LIMIT}
-        `).all(contains, contains, prefix, prefix)
+        `).all(contains, contains, ...siteFilter.params, prefix, prefix)
       : db.prepare(`
           SELECT customer_number, customer_name, outstanding_balance
           FROM datarecord
@@ -76,18 +77,29 @@ export function searchEntities(db, { q, wantCustomers, wantVendors, hub }) {
   }
 
   if (wantVendors) {
-    const table = hub ? 'hub_creditor' : 'creditor';
-    out.vendors = db.prepare(`
-      SELECT ${hub ? 'DISTINCT ' : ''}vendor_code, vendor_name
-      FROM ${table}
-      WHERE COALESCE(is_active, 1) = 1
-        AND (vendor_name LIKE ? ESCAPE '\\' OR vendor_code LIKE ? ESCAPE '\\')
-      ORDER BY CASE WHEN vendor_name LIKE ? ESCAPE '\\' THEN 0
-                    WHEN vendor_code LIKE ? ESCAPE '\\' THEN 1
-                    ELSE 2 END,
-               vendor_name
-      LIMIT ${GROUP_LIMIT}
-    `).all(contains, contains, prefix, prefix);
+    out.vendors = hub
+      ? db.prepare(`
+          SELECT DISTINCT vendor_code, vendor_name
+          FROM hub_creditor
+          WHERE COALESCE(is_active, 1) = 1
+            AND (vendor_name LIKE ? ESCAPE '\\' OR vendor_code LIKE ? ESCAPE '\\')${siteFilter.sql}
+          ORDER BY CASE WHEN vendor_name LIKE ? ESCAPE '\\' THEN 0
+                        WHEN vendor_code LIKE ? ESCAPE '\\' THEN 1
+                        ELSE 2 END,
+                   vendor_name
+          LIMIT ${GROUP_LIMIT}
+        `).all(contains, contains, ...siteFilter.params, prefix, prefix)
+      : db.prepare(`
+          SELECT vendor_code, vendor_name
+          FROM creditor
+          WHERE COALESCE(is_active, 1) = 1
+            AND (vendor_name LIKE ? ESCAPE '\\' OR vendor_code LIKE ? ESCAPE '\\')
+          ORDER BY CASE WHEN vendor_name LIKE ? ESCAPE '\\' THEN 0
+                        WHEN vendor_code LIKE ? ESCAPE '\\' THEN 1
+                        ELSE 2 END,
+                   vendor_name
+          LIMIT ${GROUP_LIMIT}
+        `).all(contains, contains, prefix, prefix);
   }
 
   return out;
@@ -104,15 +116,26 @@ export function handleEntitySearch({ db }) {
       if (raw.length < 2) return res.json({ q: raw, customers: [], vendors: [] });
       const q = raw.slice(0, MAX_QUERY_LEN);
 
+      // The REAL permission helper, not a local approximation: hasPermission
+      // treats an explicitly-disabled flag as authoritative even for admins
+      // (a BAT-only admin with Creditors toggled off must not get vendors
+      // here when the sidebar hides that module from them).
       const user = req.currentUser;
-      const wantCustomers = can(user, 'can_access_customer_search', 'can_access_customer_balances');
-      const wantVendors = can(user, 'can_access_creditors');
+      const wantCustomers = hasPermission(user, 'can_access_customer_search')
+        || hasPermission(user, 'can_access_customer_balances');
+      const wantVendors = hasPermission(user, 'can_access_creditors');
       if (!wantCustomers && !wantVendors) {
         // Authenticated but no entity-bearing permission — nothing to search.
         return res.json({ q, customers: [], vendors: [] });
       }
 
-      const result = searchEntities(db, { q, wantCustomers, wantVendors, hub: isHub() });
+      const hub = isHub();
+      // Hub installs can restrict a user to specific sites
+      // (hub_user_allowed_sites) — the same filter every hub data route
+      // applies. Without it, a site-restricted hub user could enumerate
+      // customers/vendors of sites they're locked out of.
+      const siteFilter = hub ? siteIdFilter(req, res) : { sql: '', params: [] };
+      const result = searchEntities(db, { q, wantCustomers, wantVendors, hub, siteFilter });
       res.json({ q, customers: result.customers ?? [], vendors: result.vendors ?? [] });
     } catch (err) {
       res.status(500).json({ error: err.message });

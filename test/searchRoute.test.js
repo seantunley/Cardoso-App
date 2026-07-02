@@ -3,8 +3,17 @@
 // (permission gating / query hygiene) directly with an in-memory DB and mock
 // req/res, per the routes/jti.js contract-test pattern.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
+
+// hubSiteScope opens the real app DB at module load (its own import of
+// src/db/index.js) — stub it so this test stays on the in-memory DB. The
+// stub is per-test controllable to exercise the allow-list pass-through.
+let _siteFilterStub = { sql: '', params: [] };
+vi.mock('../src/lib/hubSiteScope.js', () => ({
+  siteIdFilter: () => _siteFilterStub,
+}));
+
 import { searchEntities, handleEntitySearch } from '../src/routes/search.js';
 
 let db;
@@ -43,6 +52,7 @@ beforeEach(() => {
 afterEach(() => {
   db.close();
   delete process.env.HUB_MODE;
+  _siteFilterStub = { sql: '', params: [] };
 });
 
 function mockRes() {
@@ -84,6 +94,22 @@ describe('searchEntities (core)', () => {
     expect(white.sites).toBe(2);
     expect(customers.filter((c) => c.customer_number === 'LIQ001')).toHaveLength(1);
   });
+
+  it('hub site allow-list scopes both matches AND the sites count', () => {
+    const siteFilter = { sql: ' AND site_id IN (?)', params: [2] };
+    const { customers } = searchEntities(db, { q: 'liquor', wantCustomers: true, wantVendors: false, hub: true, siteFilter });
+    // LIQ001 exists on sites 1+2 but the user may only see site 2 → count 1.
+    const white = customers.find((c) => c.customer_number === 'LIQ001');
+    expect(white.sites).toBe(1);
+    // LIQUOR LEGENDS lives only on site 2 → still visible.
+    expect(customers.some((c) => c.customer_number === 'LIQ009')).toBe(true);
+  });
+
+  it('hub empty allow-list (AND 1=0) sees nothing, not everything', () => {
+    const siteFilter = { sql: ' AND 1=0', params: [] };
+    const { customers } = searchEntities(db, { q: 'liquor', wantCustomers: true, wantVendors: false, hub: true, siteFilter });
+    expect(customers).toHaveLength(0);
+  });
 });
 
 describe('handleEntitySearch (gating + hygiene)', () => {
@@ -103,6 +129,14 @@ describe('handleEntitySearch (gating + hygiene)', () => {
     handleEntitySearch({ db })({ query: { q: 'tobacco' }, currentUser: customerOnly }, res);
     expect(res.body.vendors).toHaveLength(0);
     expect(res.body.customers).toHaveLength(0); // no customer named tobacco
+  });
+
+  it('admin with a permission EXPLICITLY disabled loses that group (hasPermission semantics)', () => {
+    const batOnlyAdmin = { role: 'admin', can_access_creditors: 0 };
+    const res = mockRes();
+    handleEntitySearch({ db })({ query: { q: 'tobacco' }, currentUser: batOnlyAdmin }, res);
+    expect(res.body.vendors).toHaveLength(0); // module toggled off — no vendor leak
+    expect(Array.isArray(res.body.customers)).toBe(true); // customers unaffected
   });
 
   it('user with no entity permissions gets the empty shape, not an error', () => {
