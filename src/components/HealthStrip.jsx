@@ -107,8 +107,12 @@ export default function HealthStrip({ collapsed, isAdmin }) {
   return (
     <div
       className={cn(
-        "border-t",
-        collapsed ? "px-1 py-2 flex flex-col items-center gap-2" : "px-3 py-2 flex items-center justify-between gap-1",
+        // 2×2 grid when expanded: four labelled segments need ~280px in a
+        // row but the sidebar is w-60 (240px) — a single flex row overflowed
+        // the aside and bled over the page content. overflow-hidden is the
+        // belt-and-braces for any future fifth segment.
+        "border-t overflow-hidden",
+        collapsed ? "px-1 py-2 flex flex-col items-center gap-2" : "px-3 py-2 grid grid-cols-2 gap-x-3 gap-y-1",
       )}
       style={{ borderColor: "hsl(var(--sidebar-border))" }}
       aria-label="System health"
